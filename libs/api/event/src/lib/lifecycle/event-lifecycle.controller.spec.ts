@@ -1,6 +1,7 @@
 import { Action, EventStatus, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
-import { CHECK_POLICIES_KEY, PoliciesGuard, type AppAbility } from '@bge/permissions';
+import type { AppAbility } from '@bge/permissions';
+import { CHECK_POLICIES_KEY, PoliciesGuard } from '@bge/permissions';
 import { createTestingModuleWithDb, makeEvent } from '@bge/testing';
 import { HTTP_CODE_METADATA } from '@nestjs/common/constants';
 import { Http } from '@status/codes';

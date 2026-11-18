@@ -4,7 +4,8 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { PassThrough, Readable } from 'node:stream';
-import { PluginArtifactUploadStorage, type PluginArtifactUploadedFile } from './plugin-artifact-upload.storage';
+import type { PluginArtifactUploadedFile } from './plugin-artifact-upload.storage';
+import { PluginArtifactUploadStorage } from './plugin-artifact-upload.storage';
 
 const GZIP_HEAD = Buffer.from([0x1f, 0x8b, 0x08, 0x00]);
 

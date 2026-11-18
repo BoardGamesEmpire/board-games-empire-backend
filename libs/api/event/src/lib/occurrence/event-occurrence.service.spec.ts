@@ -1,9 +1,7 @@
+import type { EventAttendee, EventAvailabilityVote, EventOccurrence } from '@bge/database';
 import {
   Action,
   AvailabilityResponse,
-  EventAttendee,
-  EventAvailabilityVote,
-  EventOccurrence,
   EventParticipationStatus,
   EventSchedulingMode,
   liveEventWhere,
@@ -15,6 +13,7 @@ import {
 import { CodedHttpException, t } from '@bge/i18n';
 import { LineupRemovalReason } from '@bge/notifications-service';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
+import type { MockAbilityService, MockDatabaseService } from '@bge/testing';
 import {
   batchTransactionCall,
   createMockAbilityService,
@@ -27,8 +26,6 @@ import {
   paginationQuery,
   rawQueryText,
   unwrapTransaction,
-  type MockAbilityService,
-  type MockDatabaseService,
 } from '@bge/testing';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';

@@ -1,4 +1,5 @@
-import { createServer, type AddressInfo, type Socket } from 'node:net';
+import type { AddressInfo, Socket } from 'node:net';
+import { createServer } from 'node:net';
 import { performance } from 'node:perf_hooks';
 import {
   attemptWithin,

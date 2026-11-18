@@ -9,7 +9,8 @@ import {
 } from '@bge/database';
 import { makeVoterRole } from '@bge/testing';
 import type { VotingPolicy } from '../interfaces/vote.interface';
-import { VoteResolver, type AttendeeStub } from './vote-resolver';
+import type { AttendeeStub } from './vote-resolver';
+import { VoteResolver } from './vote-resolver';
 
 describe('VoteResolver', () => {
   describe('tally', () => {

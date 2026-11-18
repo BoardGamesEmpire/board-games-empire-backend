@@ -1,14 +1,11 @@
-import {
-  constraintIdentity,
-  identifiesConstraint,
-  isPrismaUniqueConstraintError,
-  Prisma,
-  SystemRole,
-} from '@bge/database';
-import { createActors, type Actors } from '@bge/testing-e2e';
+import type { Prisma } from '@bge/database';
+import { constraintIdentity, identifiesConstraint, isPrismaUniqueConstraintError, SystemRole } from '@bge/database';
+import type { Actors } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import { inspect } from 'node:util';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 
 /**
  * Pins the P2002 payload `constraintIdentity` reads, against a real database.

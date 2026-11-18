@@ -2,14 +2,13 @@ import type { DataGateway } from '@bge/database';
 import { Action, AuthType, DataGatewayCapability, Prisma, ResourceType } from '@bge/database';
 import { GatewayConfigEventsService, hashGatewayConfig, VocabularySectionQueue } from '@bge/gateway-registry';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
+import type { MockAbilityService, MockDatabaseService } from '@bge/testing';
 import {
   batchTransactionCall,
   createMockAbilityService,
   createTestingModuleWithDb,
   paginationQuery,
   shippedReadReaches,
-  type MockAbilityService,
-  type MockDatabaseService,
 } from '@bge/testing';
 import { BadRequestException, ForbiddenException, Logger, NotFoundException } from '@nestjs/common';
 import { DataGatewayService } from './data-gateway.service';

@@ -13,7 +13,8 @@ import {
 import { createActors } from '@bge/testing-e2e';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, requireDatabaseUrl, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase, requireDatabaseUrl } from '../support/test-db';
 
 /**
  * The catalog reconciler against a real database (#235).

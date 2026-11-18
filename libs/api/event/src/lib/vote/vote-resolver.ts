@@ -8,7 +8,8 @@ import {
   VoteType,
 } from '@bge/database';
 import type { ResolutionResult, ResolvedStatus, VoteTally, VotingPolicy } from '../interfaces/vote.interface';
-import { countsAsVoter, type VoterGrant } from './vote-grant';
+import type { VoterGrant } from './vote-grant';
+import { countsAsVoter } from './vote-grant';
 
 export class VoteResolver {
   /**

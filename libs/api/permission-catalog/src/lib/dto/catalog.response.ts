@@ -1,17 +1,13 @@
-import {
-  Action,
-  CATALOG_MANIFEST,
-  edgeKey,
-  PermissionOwner,
-  RiskLevel,
-  type EntryProblem,
-  type EntryWarning,
-  type FieldChange,
-  type PermissionSnapshotRow,
-  type Prisma,
-  type RolePermissionSnapshotRow,
-  type RoleSnapshotRow,
+import type {
+  EntryProblem,
+  EntryWarning,
+  FieldChange,
+  PermissionSnapshotRow,
+  Prisma,
+  RolePermissionSnapshotRow,
+  RoleSnapshotRow,
 } from '@bge/database';
+import { Action, CATALOG_MANIFEST, edgeKey, PermissionOwner, RiskLevel } from '@bge/database';
 import { ApiExtraModels, ApiProperty, ApiPropertyOptional, getSchemaPath } from '@nestjs/swagger';
 import { ENTRY_PROBLEM_SCHEMA, PROBLEM_MODEL_LIST } from './catalog-refusal.response';
 

@@ -1,4 +1,5 @@
-import { t, type I18nMessage, type I18nPath } from '@bge/i18n';
+import type { I18nMessage, I18nPath } from '@bge/i18n';
+import { t } from '@bge/i18n';
 import { NotFoundException } from '@nestjs/common';
 
 /**

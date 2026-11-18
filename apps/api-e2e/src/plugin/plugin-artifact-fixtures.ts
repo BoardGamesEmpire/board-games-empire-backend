@@ -1,10 +1,7 @@
-import { buildPluginTarball, type PluginTarballEntry } from '@bge/plugin-artifacts';
-import {
-  buildPluginManifest,
-  resolveLocalizedString,
-  type PluginManifest,
-  type PluginManifestOverrides,
-} from '@boardgamesempire/plugin-manifest';
+import type { PluginTarballEntry } from '@bge/plugin-artifacts';
+import { buildPluginTarball } from '@bge/plugin-artifacts';
+import type { PluginManifest, PluginManifestOverrides } from '@boardgamesempire/plugin-manifest';
+import { buildPluginManifest, resolveLocalizedString } from '@boardgamesempire/plugin-manifest';
 import { createHash, randomBytes } from 'node:crypto';
 import { access } from 'node:fs/promises';
 import request from 'supertest';

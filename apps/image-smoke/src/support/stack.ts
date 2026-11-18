@@ -5,7 +5,8 @@ import { randomBytes } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { promisify } from 'node:util';
-import { parseLogRecords, type LogRecord } from './logs';
+import type { LogRecord } from './logs';
+import { parseLogRecords } from './logs';
 import { smokeProject } from './project';
 
 const execFileAsync = promisify(execFile);

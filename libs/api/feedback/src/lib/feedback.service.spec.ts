@@ -10,14 +10,16 @@ import {
 } from '@bge/database';
 import { uniqueViolationWithoutMeta } from '@bge/database/testing';
 import { DeploymentInfoService } from '@bge/services';
-import { createTestingModuleWithDb, MockDatabaseService } from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { createTestingModuleWithDb } from '@bge/testing';
 import { NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DateTime } from 'luxon';
 import { FeedbackEvents } from './constants/feedback-events.constant';
 import { FEEDBACK_CREATE_PERMISSION_SLUG } from './constants/feedback.constants';
-import { BreadcrumbLogLevel, type BreadcrumbDto } from './dto/breadcrumb.dto';
-import { CreateFeedbackReportDto } from './dto/create-feedback-report.dto';
+import type { BreadcrumbDto } from './dto/breadcrumb.dto';
+import { BreadcrumbLogLevel } from './dto/breadcrumb.dto';
+import type { CreateFeedbackReportDto } from './dto/create-feedback-report.dto';
 import { FeedbackService } from './feedback.service';
 import type {
   FeedbackReportPurgedEvent,

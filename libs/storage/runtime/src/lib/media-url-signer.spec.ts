@@ -1,5 +1,6 @@
 import { SignatureExpiredError, SignatureInvalidError } from '@boardgamesempire/storage-contract';
-import { MediaUrlSigner, type SignaturePayload } from './media-url-signer.js';
+import type { SignaturePayload } from './media-url-signer.js';
+import { MediaUrlSigner } from './media-url-signer.js';
 import type { SigningKeyService } from './signing-key.service.js';
 
 describe('MediaUrlSigner', () => {

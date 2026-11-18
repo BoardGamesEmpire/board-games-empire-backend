@@ -1,6 +1,8 @@
-import { PlatformType, type Prisma } from '@bge/database';
+import type { Prisma } from '@bge/database';
+import { PlatformType } from '@bge/database';
 import { t } from '@bge/i18n';
-import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService } from '@bge/testing';
 import {
   assertPolicyReferencesExist,
   changedPolicyLists,

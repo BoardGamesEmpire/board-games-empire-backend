@@ -1,4 +1,4 @@
-import { Prisma } from '@bge/database';
+import type { Prisma } from '@bge/database';
 
 /**
  * A platform game as the event routes embed it: the game's id, title,

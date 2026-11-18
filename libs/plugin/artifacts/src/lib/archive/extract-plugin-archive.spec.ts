@@ -7,7 +7,8 @@ import { join } from 'node:path';
 import { Writable } from 'node:stream';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { PluginArchiveRefusedError } from '../artifacts.errors';
-import { buildPluginTarball, type PluginTarballEntry } from '../testing/plugin-tarball';
+import type { PluginTarballEntry } from '../testing/plugin-tarball';
+import { buildPluginTarball } from '../testing/plugin-tarball';
 import { allocateIncoming } from '../workspace/incoming';
 import {
   boundedDecompressedLimit,

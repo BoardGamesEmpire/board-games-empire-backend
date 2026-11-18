@@ -1,4 +1,4 @@
-import { AuditContextService } from '@bge/actor-context';
+import type { AuditContextService } from '@bge/actor-context';
 import { JOB_META_KEY } from '@bge/queue-actor-context';
 import type { Queue } from 'bullmq';
 import {

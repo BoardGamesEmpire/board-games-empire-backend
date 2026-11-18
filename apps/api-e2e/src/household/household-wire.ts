@@ -1,5 +1,6 @@
 import type { Household, HouseholdMember, HouseholdSettings } from '@bge/database';
-import { envelopeFailure, isRecord, type HttpResponseLike, type RequestDescription, type Wire } from '../support/wire';
+import type { HttpResponseLike, RequestDescription, Wire } from '../support/wire';
+import { envelopeFailure, isRecord } from '../support/wire';
 
 /**
  * Wire-contract types and fail-loud response parsers shared by the household

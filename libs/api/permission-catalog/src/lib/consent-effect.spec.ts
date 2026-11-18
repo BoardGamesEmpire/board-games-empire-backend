@@ -1,11 +1,9 @@
-import { Action, PluginGrantScope, PluginGrantStatus, ResourceType, RiskLevel, type Prisma } from '@bge/database';
-import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
-import {
-  countConsentDecisionsLost,
-  loadConsentDecisionsInForce,
-  type ConsentDecision,
-  type ConsentEffectColumns,
-} from './consent-effect';
+import type { Prisma } from '@bge/database';
+import { Action, PluginGrantScope, PluginGrantStatus, ResourceType, RiskLevel } from '@bge/database';
+import type { MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService } from '@bge/testing';
+import type { ConsentDecision, ConsentEffectColumns } from './consent-effect';
+import { countConsentDecisionsLost, loadConsentDecisionsInForce } from './consent-effect';
 
 /** A permission on events bound to the consenting household, as a plugin's household consent needs (#591). */
 const householdBound = (overrides: Partial<ConsentEffectColumns> = {}): ConsentEffectColumns => ({

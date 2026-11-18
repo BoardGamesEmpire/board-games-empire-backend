@@ -1,16 +1,25 @@
 import type { DatabaseService, PluginArtifact } from '@bge/database';
+import type {
+  PluginGrantAuthorityService,
+  PluginInstallAssessment,
+  PluginInstallerService,
+  PluginUpdateAssessment,
+  PluginUpdateService,
+} from '@bge/plugin';
 import {
   buildPluginModuleOptions,
   PluginDirectoryLayoutError,
   PluginDirectoryResolverService,
   PluginInstallAuthorityError,
   PluginInstallManifestError,
-  type PluginGrantAuthorityService,
-  type PluginInstallAssessment,
-  type PluginInstallerService,
-  type PluginUpdateAssessment,
-  type PluginUpdateService,
 } from '@bge/plugin';
+import type {
+  DnsResolver,
+  HttpDispatcherFactory,
+  ResolvedAddress,
+  SafeHttpPolicyService,
+  SafeHttpPolicySnapshot,
+} from '@bge/secure-http';
 import {
   DnsResolutionError,
   IpPolicyService,
@@ -19,13 +28,9 @@ import {
   RequestTimeoutError,
   SecureHttpService,
   SsrfRejectionError,
-  type DnsResolver,
-  type HttpDispatcherFactory,
-  type ResolvedAddress,
-  type SafeHttpPolicyService,
-  type SafeHttpPolicySnapshot,
 } from '@bge/secure-http';
-import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService } from '@bge/testing';
 import type { PluginArtifactDirectory } from '@boardgamesempire/plugin-contract';
 import { PLUGIN_ARCHIVE_MAX_COMPRESSED_BYTES } from '@boardgamesempire/plugin-manifest';
 import { Logger } from '@nestjs/common';
@@ -33,7 +38,8 @@ import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { MockAgent, type Dispatcher } from 'undici';
+import type { Dispatcher } from 'undici';
+import { MockAgent } from 'undici';
 import {
   PluginArchiveRefusedError,
   PluginArtifactChecksumMismatchError,
@@ -42,18 +48,16 @@ import {
   PluginArtifactNotFoundError,
   PluginArtifactTooLargeError,
 } from '../artifacts.errors';
-import {
-  PLUGIN_ARTIFACT_TTL_MS,
-  type PluginArtifactStore,
-  type RecordReceivedArtifactInput,
-} from '../store/plugin-artifact.store';
-import { buildPluginTarball, type PluginTarballEntry } from '../testing/plugin-tarball';
+import type { PluginArtifactStore, RecordReceivedArtifactInput } from '../store/plugin-artifact.store';
+import { PLUGIN_ARTIFACT_TTL_MS } from '../store/plugin-artifact.store';
+import type { PluginTarballEntry } from '../testing/plugin-tarball';
+import { buildPluginTarball } from '../testing/plugin-tarball';
 import { allocateIncoming } from '../workspace/incoming';
+import type { PluginArtifactReceipt } from './plugin-artifact.receiver';
 import {
   normalizeExpectedSha256,
   PLUGIN_ARTIFACT_DOWNLOAD_TIMEOUT_MS,
   PluginArtifactReceiver,
-  type PluginArtifactReceipt,
 } from './plugin-artifact.receiver';
 
 const ADMIN = 'admin-1';

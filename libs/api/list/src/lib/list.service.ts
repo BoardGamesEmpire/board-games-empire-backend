@@ -11,7 +11,8 @@ import { PaginatedRows, PaginationQueryDto, pickDefined } from '@bge/shared';
 import { Injectable, Logger } from '@nestjs/common';
 import { CreateListDto, ListDto, ReorderListsDto, UpdateListDto } from './dto';
 import { isSameIdSet, renumber } from './list-order';
-import { LIST_SELECT, type ListRow } from './list-row';
+import type { ListRow } from './list-row';
+import { LIST_SELECT } from './list-row';
 import { LISTS_MAX_PER_USER } from './list.constants';
 import {
   listLimitReached,

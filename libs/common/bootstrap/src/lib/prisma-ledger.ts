@@ -1,9 +1,5 @@
-import {
-  isInsufficientPrivilege,
-  readAppliedMigrations,
-  type AppliedMigrationRow,
-  type PrismaClient,
-} from '@bge/database';
+import type { AppliedMigrationRow, PrismaClient } from '@bge/database';
+import { isInsufficientPrivilege, readAppliedMigrations } from '@bge/database';
 import { DATABASE_URL_VARIABLE } from './migration-credential';
 import type { SchemaLedger } from './ports';
 

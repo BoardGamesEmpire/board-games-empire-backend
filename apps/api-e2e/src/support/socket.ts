@@ -1,5 +1,6 @@
 import type { SessionCredentials } from '@bge/testing-e2e';
-import { io, type Socket } from 'socket.io-client';
+import type { Socket } from 'socket.io-client';
+import { io } from 'socket.io-client';
 
 const EVENT_TIMEOUT_MS = 10_000;
 

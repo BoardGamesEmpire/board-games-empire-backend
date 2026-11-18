@@ -1,4 +1,5 @@
-import { mergeProviderClaims, type MergedProviderClaims, type ProviderProfile } from './provider-claims';
+import type { MergedProviderClaims, ProviderProfile } from './provider-claims';
+import { mergeProviderClaims } from './provider-claims';
 
 const SUB = 'subject-1';
 const EMAIL = 'ada@example.org';

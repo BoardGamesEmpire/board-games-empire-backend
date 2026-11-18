@@ -23,7 +23,8 @@ import { readRoster } from '../invite/household-authority';
 import { HouseholdNotificationListener } from '../listeners/household-notification.listener';
 import { HouseholdMemberService } from '../member/household-member.service';
 import { isBannedWithin } from './household-ban.helpers';
-import { HOUSEHOLD_BAN_SELECT, toHouseholdBanView, type HouseholdBanView } from './household-ban.read-shape';
+import type { HouseholdBanView } from './household-ban.read-shape';
+import { HOUSEHOLD_BAN_SELECT, toHouseholdBanView } from './household-ban.read-shape';
 
 /** The ban routes' actions on a household's bans. */
 type BanAction = typeof Action.create | typeof Action.read | typeof Action.update | typeof Action.delete;

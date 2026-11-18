@@ -13,6 +13,7 @@ import { parseUserOutput } from 'better-auth/db';
 import { generateIdTokenNonce, generateState, getOAuthCallbackPath } from 'better-auth/oauth2';
 import type { BetterAuthPlugin } from 'better-auth/types';
 import * as z from 'zod';
+import type { AppSignInErrorCode } from './app-sign-in-codes';
 import {
   APP_SIGN_IN_CODE_INVALID,
   APP_SIGN_IN_FLOW_INVALID,
@@ -20,13 +21,13 @@ import {
   APP_SIGN_IN_REQUEST_INVALID,
   APP_SIGN_IN_RETURN_ADDRESS_REFUSED,
   APP_SIGN_IN_UNAVAILABLE,
-  type AppSignInErrorCode,
   PROVIDER_NOT_FOUND,
 } from './app-sign-in-codes';
 import { APP_SIGN_IN_FLOW_KEY, handOffAppSignIn } from './app-sign-in-hand-off';
 import { APP_SIGN_IN_PATHS, appSignInReturnPage } from './app-sign-in-paths';
 import { createAppSignInStore } from './app-sign-in-store';
-import { isJsonObject, type JsonObject, parseJsonObject } from './json-object';
+import type { JsonObject } from './json-object';
+import { isJsonObject, parseJsonObject } from './json-object';
 import { isCodeVerifier, isS256Challenge, verifierMatchesChallenge } from './pkce';
 import { appReturnUrl, parseAppReturnAddress } from './return-address';
 

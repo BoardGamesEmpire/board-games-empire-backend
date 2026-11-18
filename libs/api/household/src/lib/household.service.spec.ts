@@ -10,15 +10,16 @@ import {
 } from '@bge/database';
 import { uniqueViolationWithoutMeta } from '@bge/database/testing';
 import { t } from '@bge/i18n';
-import { InviteService, type InviteRevokedEvent } from '@bge/invites';
+import type { InviteRevokedEvent } from '@bge/invites';
+import { InviteService } from '@bge/invites';
 import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
+import type { MockDatabaseService } from '@bge/testing';
 import {
   batchTransactionCall,
   createMockDatabaseService,
   createTestingModuleWithDb,
   paginationQuery,
   unwrapTransaction,
-  type MockDatabaseService,
 } from '@bge/testing';
 import {
   BadRequestException,

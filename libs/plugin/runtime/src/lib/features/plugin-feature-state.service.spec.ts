@@ -1,7 +1,10 @@
 import type { PluginUnit } from '@bge/actor-context';
-import { DatabaseService, PluginGrantScope, PluginGrantStatus, PluginScope, RiskLevel } from '@bge/database';
-import { createMockDatabaseService, UNIT_BOUND_RULES, type MockDatabaseService } from '@bge/testing';
-import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
+import type { DatabaseService } from '@bge/database';
+import { PluginGrantScope, PluginGrantStatus, PluginScope, RiskLevel } from '@bge/database';
+import type { MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService, UNIT_BOUND_RULES } from '@bge/testing';
+import type { PluginManifest } from '@boardgamesempire/plugin-manifest';
+import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
 import { PluginConsentCheckClassifier } from '../consent/plugin-consent-check-classifier.service';
 import { PluginConsentStandingService } from '../consent/plugin-consent-standing.service';

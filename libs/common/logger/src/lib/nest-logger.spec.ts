@@ -1,4 +1,5 @@
-import { nestLoggerFromPino, type PinoLike } from './nest-logger';
+import type { PinoLike } from './nest-logger';
+import { nestLoggerFromPino } from './nest-logger';
 
 // The boot sequence logs through a Nest `Logger` inside its own application
 // context; `main.ts` owns a pino instance. This adapter is the bridge, and

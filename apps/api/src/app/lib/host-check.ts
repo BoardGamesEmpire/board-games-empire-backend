@@ -1,4 +1,5 @@
-import { errorEnvelope, type I18nPath } from '@bge/i18n';
+import type { I18nPath } from '@bge/i18n';
+import { errorEnvelope } from '@bge/i18n';
 import { Logger } from '@nestjs/common';
 import { Http } from '@status/codes';
 import type { IncomingMessage, ServerResponse } from 'node:http';

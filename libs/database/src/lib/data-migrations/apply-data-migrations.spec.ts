@@ -1,6 +1,7 @@
 import type { Logger } from '@nestjs/common';
 import { Prisma } from '../client';
-import { applyDataMigrations, DataMigrationRevisionError, type DataMigrationsClient } from './apply-data-migrations';
+import type { DataMigrationsClient } from './apply-data-migrations';
+import { applyDataMigrations, DataMigrationRevisionError } from './apply-data-migrations';
 import type { DataMigrationEntry, DataMigrationLedgerRow } from './data-migration-entry';
 
 // The apply loop over a fake client: one transaction per entry, the entry's

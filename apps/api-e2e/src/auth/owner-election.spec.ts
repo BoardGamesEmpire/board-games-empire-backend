@@ -1,9 +1,11 @@
 import { SystemRole } from '@bge/database';
-import { performSignup, waitForProvisionedRoleNames, type SignupResult } from '@bge/testing-e2e';
+import type { SignupResult } from '@bge/testing-e2e';
+import { performSignup, waitForProvisionedRoleNames } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import { requireBaseUrl } from '../support/e2e-env';
 import { expectBackendsQueuedBehind, withBarrier } from '../support/lock-barrier';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { holdProvisioningAtRoleWrite } from './lock-fixtures';
 
 const OWNER_ROLE_SET = [SystemRole.Owner, SystemRole.User].sort().join(', ');

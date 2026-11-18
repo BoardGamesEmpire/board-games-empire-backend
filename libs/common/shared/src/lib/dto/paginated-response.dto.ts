@@ -1,4 +1,5 @@
-import { applyDecorators, type Type as NestType } from '@nestjs/common';
+import type { Type as NestType } from '@nestjs/common';
+import { applyDecorators } from '@nestjs/common';
 import { ApiExtraModels, ApiProperty, ApiResponse, getSchemaPath } from '@nestjs/swagger';
 import { assertListScopeComposed } from '../scope/assert-list-scope-composed.js';
 import type { ListScope } from '../scope/list-scope.js';

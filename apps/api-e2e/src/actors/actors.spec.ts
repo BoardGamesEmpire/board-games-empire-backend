@@ -1,9 +1,11 @@
 import { SystemRole } from '@bge/database';
-import { createActors, type Actors } from '@bge/testing-e2e';
+import type { Actors } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import request from 'supertest';
 import { resetDatabase } from '../support/database-reset';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 
 /**
  * Acceptance for the actor fixtures (#256). The factories' unit specs cover

@@ -1,5 +1,6 @@
 import { DatabaseService } from '@bge/database';
-import { Injectable, Logger, type OnModuleInit } from '@nestjs/common';
+import type { OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { I18nService } from 'nestjs-i18n';
 import { FALLBACK_LOCALE } from './locale.constants';
 

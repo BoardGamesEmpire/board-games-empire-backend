@@ -1,5 +1,6 @@
 import { AuditExclude, MutationEvent } from '@bge/actor-context';
-import { ResourceType, type User } from '@bge/database';
+import type { User } from '@bge/database';
+import { ResourceType } from '@bge/database';
 import { AuthEvent } from '../constants';
 
 /**

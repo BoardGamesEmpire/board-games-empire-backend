@@ -1,6 +1,8 @@
 import type { Actor, AuditContextService } from '@bge/actor-context';
-import { JobStatus, type DatabaseService } from '@bge/database';
-import { ImportJobCompletedEvent, type ImportJobCompletedContext } from '../events/import.events';
+import type { DatabaseService } from '@bge/database';
+import { JobStatus } from '@bge/database';
+import type { ImportJobCompletedContext } from '../events/import.events';
+import { ImportJobCompletedEvent } from '../events/import.events';
 import { ImportJobOrigin } from '../interfaces/import-job.interface';
 import { ImportActivityListener } from './import-activity.listener';
 

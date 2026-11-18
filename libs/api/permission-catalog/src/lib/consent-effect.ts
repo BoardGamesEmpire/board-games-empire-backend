@@ -1,3 +1,11 @@
+import type {
+  PermissionRuleColumns,
+  PluginActiveManifest,
+  PluginActiveManifestReader,
+  PluginGrant,
+  Prisma,
+  RiskLevel,
+} from '@bge/database';
 import {
   derivePluginUnitDormancy,
   isPluginServing,
@@ -6,12 +14,6 @@ import {
   PluginGrantScope,
   PluginGrantStatus,
   requestedByManifest,
-  type PermissionRuleColumns,
-  type PluginActiveManifest,
-  type PluginActiveManifestReader,
-  type PluginGrant,
-  type Prisma,
-  type RiskLevel,
 } from '@bge/database';
 
 /** The columns of a permission that decide whether a consent decision on it confers anything. */

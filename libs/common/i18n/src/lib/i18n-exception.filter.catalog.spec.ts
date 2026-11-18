@@ -1,17 +1,7 @@
 import { AuditContextService } from '@bge/actor-context';
 import { I18N_CATALOG_DIR, t } from '@bge/i18n-core';
-import {
-  Controller,
-  Get,
-  type INestApplication,
-  type MiddlewareConsumer,
-  Module,
-  type NestMiddleware,
-  type NestModule,
-  NotFoundException,
-  Param,
-  UnauthorizedException,
-} from '@nestjs/common';
+import type { INestApplication, MiddlewareConsumer, NestMiddleware, NestModule } from '@nestjs/common';
+import { Controller, Get, Module, NotFoundException, Param, UnauthorizedException } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import { I18nModule } from 'nestjs-i18n';

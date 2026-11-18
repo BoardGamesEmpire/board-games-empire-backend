@@ -1,4 +1,5 @@
-import { QUEUE_REDIS_CLIENT, type Redis } from '@bge/redis';
+import type { Redis } from '@bge/redis';
+import { QUEUE_REDIS_CLIENT } from '@bge/redis';
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { HealthIndicatorResult, HealthIndicatorService } from '@nestjs/terminus';
 

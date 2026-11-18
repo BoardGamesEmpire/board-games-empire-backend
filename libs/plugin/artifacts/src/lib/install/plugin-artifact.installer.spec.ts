@@ -1,20 +1,24 @@
 import type { DatabaseService, Plugin, PluginArtifact } from '@bge/database';
+import type {
+  PluginDirectoryResolverService,
+  PluginGrantAuthorityService,
+  PluginInstallerService,
+  PluginInstallResult,
+} from '@bge/plugin';
 import {
   PluginDirectoryLayoutError,
   PluginDirectoryNotFoundError,
   PluginInstallAuthorityError,
   PluginInstallConflictError,
   PluginInstallCriticalConfirmationError,
-  type PluginDirectoryResolverService,
-  type PluginGrantAuthorityService,
-  type PluginInstallerService,
-  type PluginInstallResult,
 } from '@bge/plugin';
-import { buildPluginArtifactSha256, type PluginArtifactDirectory } from '@boardgamesempire/plugin-contract';
+import type { PluginArtifactDirectory } from '@boardgamesempire/plugin-contract';
+import { buildPluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
 import { Logger } from '@nestjs/common';
 import { join } from 'node:path';
 import { PluginArtifactNotFoundError } from '../artifacts.errors';
-import { PLUGIN_ARTIFACT_TTL_MS, type PluginArtifactStore } from '../store/plugin-artifact.store';
+import type { PluginArtifactStore } from '../store/plugin-artifact.store';
+import { PLUGIN_ARTIFACT_TTL_MS } from '../store/plugin-artifact.store';
 import { PluginArtifactInstaller } from './plugin-artifact.installer';
 
 describe('PluginArtifactInstaller (#1094)', () => {

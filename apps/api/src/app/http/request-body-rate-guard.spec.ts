@@ -1,6 +1,8 @@
 import { EventEmitter } from 'node:events';
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { connect, type AddressInfo, type Socket } from 'node:net';
+import type { IncomingMessage, Server, ServerResponse } from 'node:http';
+import { createServer } from 'node:http';
+import type { AddressInfo, Socket } from 'node:net';
+import { connect } from 'node:net';
 import {
   API_REQUEST_TIMEOUT_MS,
   installRequestBodyRateGuard,

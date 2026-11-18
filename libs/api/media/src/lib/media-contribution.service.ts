@@ -1,3 +1,4 @@
+import type { MediaContribution } from '@bge/database';
 import {
   Action,
   ContributionOrigin,
@@ -6,7 +7,6 @@ import {
   Prisma,
   Reach,
   ResourceType,
-  type MediaContribution,
 } from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService, ModelResourceType, ScopeComposer, Unscoped } from '@bge/permissions';

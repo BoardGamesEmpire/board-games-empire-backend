@@ -1,4 +1,5 @@
-import { FALLBACK_LOCALE, I18N_CATALOG_DIR, type I18nTranslations } from '@bge/i18n';
+import type { I18nTranslations } from '@bge/i18n';
+import { FALLBACK_LOCALE, I18N_CATALOG_DIR } from '@bge/i18n';
 import { Test } from '@nestjs/testing';
 import { I18nModule, I18nService } from 'nestjs-i18n';
 import { ImportErrorCode, importErrorMarker, importErrorMessage } from './sanitize-import-error';

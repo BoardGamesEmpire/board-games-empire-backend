@@ -1,4 +1,5 @@
-import { Queue, type RedisOptions } from 'bullmq';
+import type { RedisOptions } from 'bullmq';
+import { Queue } from 'bullmq';
 import { redisTlsOptions } from './redis-reset';
 
 /**

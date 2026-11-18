@@ -1,9 +1,11 @@
 import { EventParticipationStatus, Reach } from '@bge/database';
-import { befriend, createActors, type Actors, type AuthenticatedActor, type SessionActor } from '@bge/testing-e2e';
+import type { Actors, AuthenticatedActor, SessionActor } from '@bge/testing-e2e';
+import { befriend, createActors } from '@bge/testing-e2e';
 import request from 'supertest';
-import { type Caller } from '../support/api-key';
+import type { Caller } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { attendeesPath, BROWSE_PATH, createEventClient, EVENTS_PATH } from './event-request';
 import { eventDetailEnvelope, listEventsEnvelope } from './event-wire';
 

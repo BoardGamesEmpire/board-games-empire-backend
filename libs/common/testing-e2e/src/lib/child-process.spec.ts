@@ -3,14 +3,8 @@ import * as net from 'node:net';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import {
-  getFreePort,
-  launchChild,
-  launchOnFreePort,
-  stopChild,
-  WORKSPACE_ROOT,
-  type ChildLaunch,
-} from './child-process.js';
+import type { ChildLaunch } from './child-process.js';
+import { getFreePort, launchChild, launchOnFreePort, stopChild, WORKSPACE_ROOT } from './child-process.js';
 
 /**
  * `launchChild`'s failure paths, against real `node` children built from the

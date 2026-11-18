@@ -1,4 +1,5 @@
-import pino, { type LoggerOptions, type Logger as PinoInstance } from 'pino';
+import type { LoggerOptions, Logger as PinoInstance } from 'pino';
+import pino from 'pino';
 import { buildBasePinoOptions } from './base-pino.options';
 
 /**

@@ -1,12 +1,7 @@
 import { Action, Prisma, ResourceType } from '@bge/database';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
-import {
-  batchTransactionCall,
-  createMockAbilityService,
-  createTestingModuleWithDb,
-  type MockAbilityService,
-  type MockDatabaseService,
-} from '@bge/testing';
+import type { MockAbilityService, MockDatabaseService } from '@bge/testing';
+import { batchTransactionCall, createMockAbilityService, createTestingModuleWithDb } from '@bge/testing';
 import { plainToInstance } from 'class-transformer';
 import { UserSearchQueryDto } from './dto';
 import { UserService } from './user.service';

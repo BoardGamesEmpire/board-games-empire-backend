@@ -1,8 +1,10 @@
 import { AuditContextService } from '@bge/actor-context';
 import { JobStatus } from '@bge/database';
-import { FALLBACK_LOCALE, I18N_CATALOG_DIR, I18nResponseInterceptor, type I18nTranslations } from '@bge/i18n';
+import type { I18nTranslations } from '@bge/i18n';
+import { FALLBACK_LOCALE, I18N_CATALOG_DIR, I18nResponseInterceptor } from '@bge/i18n';
 import type { NotificationsService } from '@bge/notifications-service';
-import { Controller, Get, type INestApplication } from '@nestjs/common';
+import type { INestApplication } from '@nestjs/common';
+import { Controller, Get } from '@nestjs/common';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import { I18nModule, I18nService } from 'nestjs-i18n';

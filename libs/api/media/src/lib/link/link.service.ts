@@ -4,7 +4,8 @@ import type { ModelResourceType } from '@bge/permissions';
 import { AbilityService } from '@bge/permissions';
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { linkKey, mediaKindForMime } from '../constants/media-link.constants';
-import { type AttachContext, LINK_HANDLERS } from './link.registry';
+import type { AttachContext } from './link.registry';
+import { LINK_HANDLERS } from './link.registry';
 
 export interface AttachTarget {
   context?: AttachContext;

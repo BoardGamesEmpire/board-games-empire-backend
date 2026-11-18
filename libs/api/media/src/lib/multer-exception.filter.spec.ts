@@ -1,4 +1,4 @@
-import { ArgumentsHost, HttpException } from '@nestjs/common';
+import type { ArgumentsHost, HttpException } from '@nestjs/common';
 import { BaseExceptionFilter } from '@nestjs/core';
 import { MulterError } from 'multer';
 import { MAX_UPLOAD_BYTES } from './media-mime.policy';

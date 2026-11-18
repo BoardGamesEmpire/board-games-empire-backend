@@ -1,5 +1,7 @@
-import { PluginCategory, PluginScope, type Prisma } from '@bge/database';
-import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
+import type { Prisma } from '@bge/database';
+import { PluginCategory, PluginScope } from '@bge/database';
+import type { PluginManifest } from '@boardgamesempire/plugin-manifest';
+import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { randomUUID } from 'node:crypto';
 
 /** The staging id (#357) a staged update carries by default; approve and reject must send it. */

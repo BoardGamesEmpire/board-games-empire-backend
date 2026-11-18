@@ -1,5 +1,7 @@
-import { buildPluginManifest, type ManifestIssue } from '@boardgamesempire/plugin-manifest';
-import { revalidateStoredManifest, type StoredManifestRow } from './stored-manifest';
+import type { ManifestIssue } from '@boardgamesempire/plugin-manifest';
+import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
+import type { StoredManifestRow } from './stored-manifest';
+import { revalidateStoredManifest } from './stored-manifest';
 
 class TestManifestError extends Error {
   override readonly name = 'TestManifestError';

@@ -1,10 +1,10 @@
+import type { PluginArchiveEntry } from './archive-rules.js';
 import {
   createPluginArchiveChecker,
   PLUGIN_ARCHIVE_MAX_COMPRESSED_BYTES,
   PLUGIN_ARCHIVE_MAX_ENTRIES,
   PLUGIN_ARCHIVE_MAX_EXTRACTED_BYTES,
   PLUGIN_ARCHIVE_MAX_MANIFEST_BYTES,
-  type PluginArchiveEntry,
 } from './archive-rules.js';
 
 const MIB = 1024 * 1024;

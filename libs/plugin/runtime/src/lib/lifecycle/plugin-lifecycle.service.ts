@@ -14,9 +14,11 @@ import {
 import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
 import { disablePluginDataGatewayRow } from '../install/plugin-data-gateway-row';
 import { PluginInstanceRegistry } from '../loader/plugin-instance-registry';
-import { bindManifest, classifyManifestMove, type ClaimedPluginRow } from '../manifest/manifest-move';
+import type { ClaimedPluginRow } from '../manifest/manifest-move';
+import { bindManifest, classifyManifestMove } from '../manifest/manifest-move';
 import { revalidateStoredManifest } from '../manifest/stored-manifest';
-import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
+import type { PluginModuleOptions } from '../plugin-module.options';
+import { MODULE_OPTIONS_TOKEN } from '../plugin-module.options';
 import { CLEARED_STAGED_UPDATE } from '../update/staged-update.columns';
 import {
   PluginLifecycleAuthorityError,

@@ -1,4 +1,5 @@
 import type { AuditContextService } from '@bge/actor-context';
+import type { HouseholdPlugin, Permission, Plugin, PluginGrant, UserPlugin } from '@bge/database';
 import {
   PluginCategory,
   PluginConsentActKind,
@@ -8,17 +9,14 @@ import {
   PluginScope,
   Prisma,
   RiskLevel,
-  type HouseholdPlugin,
-  type Permission,
-  type Plugin,
-  type PluginGrant,
-  type UserPlugin,
 } from '@bge/database';
 import { deadlock, uniqueViolation, uniqueViolationWithoutMeta } from '@bge/database/testing';
-import { createMockDatabaseService, UNIT_BOUND_RULES, type MockDatabaseService } from '@bge/testing';
-import type { PluginArtifactDirectory } from '@boardgamesempire/plugin-contract';
-import { buildPluginArtifactSha256 as sha, type PluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
-import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
+import type { MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService, UNIT_BOUND_RULES } from '@bge/testing';
+import type { PluginArtifactDirectory, PluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
+import { buildPluginArtifactSha256 as sha } from '@boardgamesempire/plugin-contract';
+import type { PluginManifest } from '@boardgamesempire/plugin-manifest';
+import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { Logger } from '@nestjs/common';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -38,9 +36,10 @@ import type { PluginGrantAuthorityService } from '../grants/plugin-grant-authori
 import type { PluginStaticAnalysisService } from '../install/plugin-static-analysis.service';
 import type { StaticAnalysisFinding, StaticAnalysisReport } from '../install/static-analysis.types';
 import { PluginDirectoryLayoutError } from '../loader/loader.errors';
-import { PluginDirectoryResolverService } from '../loader/plugin-directory-resolver.service';
+import type { PluginDirectoryResolverService } from '../loader/plugin-directory-resolver.service';
 import { buildPluginModuleOptions } from '../testing/plugin-module-options.fixture';
-import { PluginUpdateService, type PluginUpdateStageInput } from './plugin-update.service';
+import type { PluginUpdateStageInput } from './plugin-update.service';
+import { PluginUpdateService } from './plugin-update.service';
 import {
   PluginUpdateActiveArtifactMovedError,
   PluginUpdateAuthorityError,

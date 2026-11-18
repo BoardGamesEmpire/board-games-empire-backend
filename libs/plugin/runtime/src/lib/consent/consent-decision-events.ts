@@ -1,11 +1,9 @@
-import { PluginGrantStatus, type PluginGrant } from '@bge/database';
+import type { PluginGrant } from '@bge/database';
+import { PluginGrantStatus } from '@bge/database';
 import type { EventEmitter2 } from '@nestjs/event-emitter';
 import { grantSnapshot } from '../events/plugin-event-snapshots';
-import {
-  PluginGrantCreatedEvent,
-  PluginGrantRejectedEvent,
-  type PluginGrantEventContext,
-} from '../events/plugin.events';
+import type { PluginGrantEventContext } from '../events/plugin.events';
+import { PluginGrantCreatedEvent, PluginGrantRejectedEvent } from '../events/plugin.events';
 
 /** A consent decision a consent act wrote, with the row it replaced. */
 export interface WrittenDecision {

@@ -1,7 +1,8 @@
 import { actorHasValidPluginUnits, AuditContextInternalService } from '@bge/actor-context';
 import { WorkerHost } from '@nestjs/bullmq';
 import { Inject } from '@nestjs/common';
-import { UnrecoverableError, type Job } from 'bullmq';
+import type { Job } from 'bullmq';
+import { UnrecoverableError } from 'bullmq';
 import { extractJobMeta } from './job-meta';
 
 /**

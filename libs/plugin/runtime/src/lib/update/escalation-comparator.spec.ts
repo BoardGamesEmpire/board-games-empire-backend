@@ -1,5 +1,6 @@
 import { PluginGrantScope, PluginGrantStatus, RiskLevel } from '@bge/database';
-import { compareForEscalations, type EscalationComparatorInput } from './escalation-comparator';
+import type { EscalationComparatorInput } from './escalation-comparator';
+import { compareForEscalations } from './escalation-comparator';
 import type { GrantComparisonView, ManifestComparisonView } from './update-escalation.types';
 
 describe('compareForEscalations', () => {

@@ -1,12 +1,15 @@
 import { FriendshipStatus, Reach } from '@bge/database';
 import { EXTENDED_NETWORK_QUEUE, ExtendedNetworkJobNames, REBUILD_ALL_BATCH_SIZE } from '@bge/friendship';
 import { wrapJobData } from '@bge/queue-actor-context';
-import { befriend, createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
+import type { Actors, AuthenticatedActor } from '@bge/testing-e2e';
+import { befriend, createActors } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
-import { drainQueue, eventStreamReader, markQueueEvents, type DrainQueueOptions } from '../support/queues';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { DrainQueueOptions } from '../support/queues';
+import { drainQueue, eventStreamReader, markQueueEvents } from '../support/queues';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { useWorker } from '../support/worker';
 import { friendshipEnvelope } from './friendship-wire';
 

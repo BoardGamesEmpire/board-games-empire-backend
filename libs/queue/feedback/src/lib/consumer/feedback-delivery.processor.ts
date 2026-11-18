@@ -1,4 +1,5 @@
-import { ActorAwareWorkerHost, type JobMetaEnvelope } from '@bge/queue-actor-context';
+import type { JobMetaEnvelope } from '@bge/queue-actor-context';
+import { ActorAwareWorkerHost } from '@bge/queue-actor-context';
 import { guardWorkerEvent } from '@bge/utils';
 import { OnWorkerEvent, Processor } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';

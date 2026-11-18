@@ -1,4 +1,6 @@
-import { SERVER_PLUGIN_UNIT, type AuditContextService } from '@bge/actor-context';
+import type { AuditContextService } from '@bge/actor-context';
+import { SERVER_PLUGIN_UNIT } from '@bge/actor-context';
+import type { Plugin, PluginGrant, Prisma } from '@bge/database';
 import {
   PluginCategory,
   PluginExecutionMode,
@@ -7,13 +9,12 @@ import {
   PluginScope,
   RiskLevel,
   SERVER_SCOPE_SENTINEL,
-  type Plugin,
-  type PluginGrant,
-  type Prisma,
 } from '@bge/database';
 import { deadlock } from '@bge/database/testing';
-import { createMockDatabaseService, rawQueryText, type MockDatabaseService } from '@bge/testing';
-import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
+import type { MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService, rawQueryText } from '@bge/testing';
+import type { PluginManifest } from '@boardgamesempire/plugin-manifest';
+import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { PluginGrantCreatedEvent, PluginGrantRejectedEvent } from '../events/plugin.events';
 import type { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
 import { PluginLifecycleAuthorityError } from '../lifecycle/lifecycle.errors';
@@ -27,7 +28,8 @@ import type { ConsentCheckClassification } from './consent-classification.types'
 import { PluginConsentActAnswerError, PluginConsentActStaleError } from './plugin-consent-act.errors';
 import type { ConsentActAnswer } from './plugin-consent-act.types';
 import type { PluginConsentCheckClassifier } from './plugin-consent-check-classifier.service';
-import { PluginServerConsentActService, type ServerConsentActInput } from './plugin-server-consent-act.service';
+import type { ServerConsentActInput } from './plugin-server-consent-act.service';
+import { PluginServerConsentActService } from './plugin-server-consent-act.service';
 
 describe('PluginServerConsentActService', () => {
   const options = buildPluginModuleOptions();

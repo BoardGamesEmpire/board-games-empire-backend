@@ -1,4 +1,5 @@
-import { countMutations, type ReconcilePlan } from './catalog-reconcile-plan';
+import type { ReconcilePlan } from './catalog-reconcile-plan';
+import { countMutations } from './catalog-reconcile-plan';
 import { describeConflicts, describeDrift, describeWrites, summarizePlan } from './catalog-reconciler';
 
 export interface PlanReport {

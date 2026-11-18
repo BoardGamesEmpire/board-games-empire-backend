@@ -1,9 +1,11 @@
 import { BGE_VERSION } from '@bge/version';
-import { fetchEachGame, type DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
+import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
+import { fetchEachGame } from '@boardgamesempire/gateway-driver-contract';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { Injectable } from '@nestjs/common';
 import * as crypto from 'node:crypto';
-import { from, of, type Observable } from 'rxjs';
+import type { Observable } from 'rxjs';
+import { from, of } from 'rxjs';
 import { STUB_CATEGORIES, STUB_GAMES, STUB_LANGUAGES, STUB_MECHANICS, STUB_PLATFORMS } from '../fixtures/catalog';
 
 /** The most external IDs one FetchGames call takes (#925). */

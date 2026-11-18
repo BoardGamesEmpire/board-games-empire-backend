@@ -1,12 +1,17 @@
-import { PluginGrantScope, PluginGrantStatus, PluginScope, RiskLevel, type Plugin } from '@bge/database';
-import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
+import type { Plugin } from '@bge/database';
+import { PluginGrantScope, PluginGrantStatus, PluginScope, RiskLevel } from '@bge/database';
+import type { Actors, SessionActor } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
-import request from 'supertest';
+import type request from 'supertest';
 import { SOFT_DELETE_HOUSEHOLD } from '../household/lock-fixtures';
 import type { Caller } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
-import { expectLockWaiter, withBarrier, type Barrier } from '../support/lock-barrier';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { Barrier } from '../support/lock-barrier';
+import { expectLockWaiter, withBarrier } from '../support/lock-barrier';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
+import type { ConsentSurface } from './consent-act-fixtures';
 import {
   readConsentSurface,
   reviewBody,
@@ -15,9 +20,9 @@ import {
   sendToggle,
   switchOnBody,
   toggleBody,
-  type ConsentSurface,
 } from './consent-act-fixtures';
-import { MANAGE_DIGEST_CHECK, type Check } from './manifest-checks';
+import type { Check } from './manifest-checks';
+import { MANAGE_DIGEST_CHECK } from './manifest-checks';
 import { householdPluginKey } from './plugin-api-key';
 import { pluginRowData } from './plugin-row-fixtures';
 

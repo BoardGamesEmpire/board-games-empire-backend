@@ -1,9 +1,11 @@
-import { unsupportedOperation, type DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
+import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
+import { unsupportedOperation } from '@boardgamesempire/gateway-driver-contract';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { status } from '@grpc/grpc-js';
 import { RpcException } from '@nestjs/microservices';
 import { Test } from '@nestjs/testing';
-import { firstValueFrom, lastValueFrom, Observable, of, throwError, toArray } from 'rxjs';
+import type { Observable } from 'rxjs';
+import { firstValueFrom, lastValueFrom, of, throwError, toArray } from 'rxjs';
 import { DATA_GATEWAY_DRIVER } from './data-gateway-driver.token';
 import { DataGatewayController } from './data-gateway.controller';
 

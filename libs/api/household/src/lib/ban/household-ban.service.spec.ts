@@ -1,3 +1,4 @@
+import type { GameShare } from '@bge/database';
 import {
   Action,
   FriendshipStatus,
@@ -7,22 +8,23 @@ import {
   Prisma,
   ResourceType,
   SystemRole,
-  type GameShare,
 } from '@bge/database';
-import { InviteService, type InviteDomainEvent, type InviteSnapshot } from '@bge/invites';
+import type { InviteDomainEvent, InviteSnapshot } from '@bge/invites';
+import { InviteService } from '@bge/invites';
 import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
+import type { MockDatabaseService } from '@bge/testing';
 import {
   batchTransactionCall,
   createTestingModuleWithDb,
   paginationQuery,
   rawQueryText,
   unwrapTransaction,
-  type MockDatabaseService,
 } from '@bge/testing';
 import { ForbiddenException } from '@nestjs/common';
 import { Http, PrismaError } from '@status/codes';
 import { HouseholdNotificationListener } from '../listeners/household-notification.listener';
-import { HouseholdMemberService, type RemovedMembership } from '../member/household-member.service';
+import type { RemovedMembership } from '../member/household-member.service';
+import { HouseholdMemberService } from '../member/household-member.service';
 import { HOUSEHOLD_BAN_SELECT } from './household-ban.read-shape';
 import { HouseholdBanService } from './household-ban.service';
 

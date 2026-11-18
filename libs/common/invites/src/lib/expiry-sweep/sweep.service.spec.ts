@@ -1,5 +1,6 @@
 import type { AuditContextService, SystemActorScope } from '@bge/actor-context';
-import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService } from '@bge/testing';
 import { Logger } from '@nestjs/common';
 import type { InviteService } from '../invite.service';
 import { InviteExpirySweepService } from './sweep.service';

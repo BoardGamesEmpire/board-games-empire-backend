@@ -1,4 +1,5 @@
 import type { AuditContextService } from '@bge/actor-context';
+import type { HouseholdPlugin, Plugin, PluginGrant, Prisma, UserPlugin } from '@bge/database';
 import {
   PluginCategory,
   PluginExecutionMode,
@@ -6,15 +7,12 @@ import {
   PluginGrantStatus,
   PluginScope,
   RiskLevel,
-  type HouseholdPlugin,
-  type Plugin,
-  type PluginGrant,
-  type Prisma,
-  type UserPlugin,
 } from '@bge/database';
 import { deadlock } from '@bge/database/testing';
-import { createMockDatabaseService, rawQueryText, type MockDatabaseService } from '@bge/testing';
-import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
+import type { MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService, rawQueryText } from '@bge/testing';
+import type { PluginManifest } from '@boardgamesempire/plugin-manifest';
+import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { PluginConfigSchemaUnusableError } from '../config/config-schema.errors';
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
 import {
@@ -35,7 +33,8 @@ import {
   PluginConsentActStaleError,
   PluginConsentActUnitOffError,
 } from './plugin-consent-act.errors';
-import { PluginConsentActService, type ConsentActInput, type SwitchOnInput } from './plugin-consent-act.service';
+import type { ConsentActInput, SwitchOnInput } from './plugin-consent-act.service';
+import { PluginConsentActService } from './plugin-consent-act.service';
 import type { ConsentActAnswer } from './plugin-consent-act.types';
 import type { PluginConsentCheckClassifier } from './plugin-consent-check-classifier.service';
 

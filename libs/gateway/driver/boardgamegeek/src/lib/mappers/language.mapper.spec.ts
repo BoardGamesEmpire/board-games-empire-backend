@@ -1,4 +1,4 @@
-import * as proto from '@boardgamesempire/proto-gateway';
+import type * as proto from '@boardgamesempire/proto-gateway';
 import { BggLinkType } from '../constants';
 import type { BggLink } from '../types';
 import { resolveLocaleLanguageNames, toLanguageData, toLanguageDataList } from './language.mapper';

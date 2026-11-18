@@ -1,12 +1,15 @@
 import { Reach } from '@bge/database';
-import { WsErrorEvents, type WsErrorPayload } from '@bge/shared';
-import { befriend, createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
+import type { WsErrorPayload } from '@bge/shared';
+import { WsErrorEvents } from '@bge/shared';
+import type { Actors, AuthenticatedActor } from '@bge/testing-e2e';
+import { befriend, createActors } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import type { Socket } from 'socket.io-client';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { connect, openSocket } from '../support/socket';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 
 interface LocalHit {
   readonly gameId?: string;

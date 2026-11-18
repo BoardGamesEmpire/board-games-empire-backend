@@ -1,4 +1,5 @@
-import { DatabaseService, EventParticipationStatus, Prisma, SystemRole } from '@bge/database';
+import type { DatabaseService, Prisma } from '@bge/database';
+import { EventParticipationStatus, SystemRole } from '@bge/database';
 import { NOT_REMOVED } from '../constants/not-removed.constant';
 
 /**

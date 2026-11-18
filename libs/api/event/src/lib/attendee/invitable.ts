@@ -1,4 +1,5 @@
-import { HUMAN_USER_WHERE, InviteType, Prisma } from '@bge/database';
+import type { Prisma } from '@bge/database';
+import { HUMAN_USER_WHERE, InviteType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { gateInvitee } from '@bge/invites';
 import { NotFoundException } from '@nestjs/common';

@@ -1,5 +1,6 @@
 import { Action, NominationStatus, ResourceType } from '@bge/database';
-import { t, type I18nPath } from '@bge/i18n';
+import type { I18nPath } from '@bge/i18n';
+import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { ApiPaginatedEnvelope, DefaultPaginationQueryDto, paginated } from '@bge/shared';
 import { Body, Controller, Get, Logger, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';

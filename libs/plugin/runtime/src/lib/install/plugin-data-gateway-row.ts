@@ -1,5 +1,7 @@
-import { constraintIdentity, identifiesConstraint, type Prisma } from '@bge/database';
-import { resolveLocalizedString, type PluginManifest } from '@boardgamesempire/plugin-manifest';
+import type { Prisma } from '@bge/database';
+import { constraintIdentity, identifiesConstraint } from '@bge/database';
+import type { PluginManifest } from '@boardgamesempire/plugin-manifest';
+import { resolveLocalizedString } from '@boardgamesempire/plugin-manifest';
 
 /**
  * A data-gateway plugin's DataGateway row (#1083): what installing,

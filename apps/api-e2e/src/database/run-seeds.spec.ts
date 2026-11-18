@@ -2,7 +2,8 @@ import type { ReconcilePlan } from '@bge/database';
 import { CATALOG_MANIFEST, reconcileCatalog, SystemRole } from '@bge/database';
 import { runSeeds, SEEDERS } from '@bge/database/seeds';
 import type { Logger } from '@nestjs/common';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 
 /**
  * `runSeeds` against a real database (#236). The reference seeds run first,

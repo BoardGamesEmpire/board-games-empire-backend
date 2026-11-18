@@ -1,8 +1,8 @@
 import { Action, ResourceType, RiskLevel } from '@bge/database';
 import { toErrorCode } from '@bge/i18n';
+import type { PluginConfigIssue, StaticAnalysisFinding } from '@bge/plugin';
 import * as pluginRuntime from '@bge/plugin';
 import {
-  type PluginConfigIssue,
   PluginConsentPresentationManifestError,
   PluginConsentPresentationNoStagedUpdateError,
   PluginConsentPresentationNotFoundError,
@@ -47,7 +47,6 @@ import {
   PluginUpdateTombstonedError,
   PluginUpdateUnknownCorePermissionError,
   PluginUpdateVersionConflictError,
-  StaticAnalysisFinding,
 } from '@bge/plugin';
 import * as pluginArtifacts from '@bge/plugin-artifacts';
 import {
@@ -59,8 +58,10 @@ import {
   PluginArtifactNotFoundError,
   PluginArtifactTooLargeError,
 } from '@bge/plugin-artifacts';
-import { ManifestErrorCode, ManifestIssue } from '@boardgamesempire/plugin-manifest';
-import { ArgumentsHost, HttpException, Logger } from '@nestjs/common';
+import type { ManifestIssue } from '@boardgamesempire/plugin-manifest';
+import { ManifestErrorCode } from '@boardgamesempire/plugin-manifest';
+import type { ArgumentsHost, HttpException } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import { BaseExceptionFilter } from '@nestjs/core';
 import { Http } from '@status/codes';
 import { PluginArtifactSourceError } from '../plugin-artifact-source.error';

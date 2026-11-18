@@ -1,4 +1,5 @@
-import { Injectable, Logger, type OnApplicationBootstrap, type OnApplicationShutdown } from '@nestjs/common';
+import type { OnApplicationBootstrap, OnApplicationShutdown } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { DiscoveryService } from '@nestjs/core';
 import type { BatchObservableCallback, BatchObservableResult, ObservableGauge } from '@opentelemetry/api';
 import { metrics } from '@opentelemetry/api';

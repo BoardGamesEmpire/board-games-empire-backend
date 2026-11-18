@@ -1,6 +1,8 @@
 import { SCAN_PAGE } from '@bge/redis/scan-page';
-import Redis, { type RedisOptions } from 'iovalkey';
-import { E2E_OWNS_REDIS_VAR, E2E_REDIS_FLUSH_OK_VAR, E2E_REDIS_URL_VAR, type RedisEnvPrefix } from './e2e-env';
+import type { RedisOptions } from 'iovalkey';
+import Redis from 'iovalkey';
+import type { RedisEnvPrefix } from './e2e-env';
+import { E2E_OWNS_REDIS_VAR, E2E_REDIS_FLUSH_OK_VAR, E2E_REDIS_URL_VAR } from './e2e-env';
 
 /**
  * Whether destructive Redis helpers are permitted against the currently

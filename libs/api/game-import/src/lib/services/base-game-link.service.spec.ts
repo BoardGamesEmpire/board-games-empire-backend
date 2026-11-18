@@ -1,6 +1,8 @@
 import { ContentType, ExpansionType, Prisma } from '@bge/database';
-import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
-import { BaseGameLinkService, type LinkBaseGamesInput } from './base-game-link.service';
+import type { MockDatabaseService } from '@bge/testing';
+import { createTestingModuleWithDb } from '@bge/testing';
+import type { LinkBaseGamesInput } from './base-game-link.service';
+import { BaseGameLinkService } from './base-game-link.service';
 
 const uniqueViolation = () =>
   new Prisma.PrismaClientKnownRequestError('Unique constraint failed', { code: 'P2002', clientVersion: 'test' });

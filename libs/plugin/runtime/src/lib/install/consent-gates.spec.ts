@@ -1,4 +1,5 @@
-import { CONSENT_UNIT_BINDING_REFUSAL, PERMISSION_CATALOG, RiskLevel, type Permission } from '@bge/database';
+import type { Permission } from '@bge/database';
+import { CONSENT_UNIT_BINDING_REFUSAL, PERMISSION_CATALOG, RiskLevel } from '@bge/database';
 import { UNIT_BOUND_RULES, UNIT_ID_OFF_ID_COLUMN_RULES } from '@bge/testing';
 import { buildPluginManifest, validatePluginManifest } from '@boardgamesempire/plugin-manifest';
 import {

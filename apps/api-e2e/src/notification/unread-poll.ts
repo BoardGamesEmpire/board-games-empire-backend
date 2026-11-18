@@ -1,6 +1,8 @@
-import { pollUntil, type SessionActor } from '@bge/testing-e2e';
+import type { SessionActor } from '@bge/testing-e2e';
+import { pollUntil } from '@bge/testing-e2e';
 import request from 'supertest';
-import { unreadNotifications, type UnreadNotificationWire } from './notification-wire';
+import type { UnreadNotificationWire } from './notification-wire';
+import { unreadNotifications } from './notification-wire';
 
 const UNREAD_PATH = '/api/notifications/unread';
 

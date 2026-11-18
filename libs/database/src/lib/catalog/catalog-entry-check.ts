@@ -4,6 +4,7 @@ import { stripVTControlCharacters } from 'node:util';
 import { PluginGrantScope, Prisma, SystemRole } from '../client';
 import { sqlStateOf } from '../utils/deadlock';
 import { hasBoundingConditions } from '../utils/permission-conditions';
+import type { TemplateDefect } from './catalog-guards';
 import {
   findEventSpanningGrants,
   findShorthandRelationConditions,
@@ -13,9 +14,9 @@ import {
   findUnconditionedScopedGrants,
   findUnrenderableTemplateGrants,
   parseTemplate,
-  type TemplateDefect,
 } from './catalog-guards';
-import { findReadsIgnoringReach, modelsWithField, type ReadIgnoringReach } from './catalog-read-ceilings';
+import type { ReadIgnoringReach } from './catalog-read-ceilings';
+import { findReadsIgnoringReach, modelsWithField } from './catalog-read-ceilings';
 import type { CatalogManifest, CatalogSnapshot, PermissionSnapshotRow } from './catalog-reconcile-plan';
 import { PAIRED_GRANTS } from './role-permission.catalog';
 import { KNOWN_TEMPLATE_VARIABLES, RENDER_CONTEXT_VARIABLES, ROLE_SCOPE } from './role.catalog';

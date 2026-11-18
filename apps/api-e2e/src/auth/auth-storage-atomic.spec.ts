@@ -1,4 +1,5 @@
-import { AUTH_CLIENT_IP_HEADER, authFactory, createRedisAuthStorage, type CompleteAuthStorage } from '@bge/auth';
+import type { CompleteAuthStorage } from '@bge/auth';
+import { AUTH_CLIENT_IP_HEADER, authFactory, createRedisAuthStorage } from '@bge/auth';
 import type { PrismaClient } from '@bge/database';
 import { ConfigService } from '@nestjs/config';
 import Redis from 'iovalkey';

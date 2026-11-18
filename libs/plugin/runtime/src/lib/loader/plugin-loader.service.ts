@@ -1,11 +1,10 @@
 import { PluginActorScope, SERVER_PLUGIN_UNIT, SystemActorScope } from '@bge/actor-context';
-import { DatabaseService, isPrismaDependentRecordNotFoundError, type Plugin } from '@bge/database';
-import {
-  parsePluginArtifactSha256,
-  type PluginArtifactSha256,
-  type PluginFactory,
-} from '@boardgamesempire/plugin-contract';
-import { validatePluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
+import type { Plugin } from '@bge/database';
+import { DatabaseService, isPrismaDependentRecordNotFoundError } from '@bge/database';
+import type { PluginArtifactSha256, PluginFactory } from '@boardgamesempire/plugin-contract';
+import { parsePluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
+import type { PluginManifest } from '@boardgamesempire/plugin-manifest';
+import { validatePluginManifest } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { readFile } from 'node:fs/promises';
@@ -26,7 +25,8 @@ import {
 import { PluginDirectoryResolverService } from './plugin-directory-resolver.service';
 import { PluginInstanceRegistry } from './plugin-instance-registry';
 import { PluginLoadRecorder } from './plugin-load-recorder.service';
-import { PLUGIN_MODULE_IMPORTER, type PluginModuleImporter } from './plugin-module-importer';
+import type { PluginModuleImporter } from './plugin-module-importer';
+import { PLUGIN_MODULE_IMPORTER } from './plugin-module-importer';
 
 /**
  * The boot path (#59 Phase B): loads every ENABLED plugin row of the

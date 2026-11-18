@@ -1,19 +1,21 @@
 import type { Actor, AuditContextService } from '@bge/actor-context';
 import { Action, PluginGrantStatus, ResourceType, RiskLevel } from '@bge/database';
 import type { SupportedLocalesService } from '@bge/i18n';
-import { CHECK_POLICIES_KEY, PoliciesGuard, ScopeComposer, type AppAbility } from '@bge/permissions';
-import {
-  PluginConsentActLocaleError,
-  type PluginConsentActService,
-  type PluginConsentPresentation,
-  type PluginConsentPresentationService,
-  type PluginFeatureStateService,
-  type PluginFeatureUnitState,
-  type PluginInventoryService,
-  type PluginUnitLifecycleService,
+import type { AppAbility } from '@bge/permissions';
+import { CHECK_POLICIES_KEY, PoliciesGuard, ScopeComposer } from '@bge/permissions';
+import type {
+  PluginConsentActService,
+  PluginConsentPresentation,
+  PluginConsentPresentationService,
+  PluginFeatureStateService,
+  PluginFeatureUnitState,
+  PluginInventoryService,
+  PluginUnitLifecycleService,
 } from '@bge/plugin';
+import { PluginConsentActLocaleError } from '@bge/plugin';
 import { ListScopeNotComposedError } from '@bge/shared';
-import { createMockAbilityService, type MockAbilityService } from '@bge/testing';
+import type { MockAbilityService } from '@bge/testing';
+import { createMockAbilityService } from '@bge/testing';
 import { ForbiddenException, RequestMethod } from '@nestjs/common';
 import { ClsServiceManager } from 'nestjs-cls';
 import 'reflect-metadata';

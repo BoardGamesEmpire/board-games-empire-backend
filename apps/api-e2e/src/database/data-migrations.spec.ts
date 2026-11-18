@@ -1,6 +1,8 @@
-import { applyDataMigrations, DataMigrationRevisionError, type DataMigrationEntry } from '@bge/database';
+import type { DataMigrationEntry } from '@bge/database';
+import { applyDataMigrations, DataMigrationRevisionError } from '@bge/database';
 import type { Logger } from '@nestjs/common';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 
 /**
  * The data-migration ledger against a real database (#236): `applyDataMigrations`

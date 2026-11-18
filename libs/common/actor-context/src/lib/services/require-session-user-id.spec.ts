@@ -1,6 +1,7 @@
 import { t } from '@bge/i18n-core';
 import { ForbiddenException } from '@nestjs/common';
-import { SERVER_PLUGIN_UNIT, type Actor } from '../types';
+import type { Actor } from '../types';
+import { SERVER_PLUGIN_UNIT } from '../types';
 import { requireSessionUserId } from './require-session-user-id';
 
 function refusalOf(actor: Actor | null): unknown {

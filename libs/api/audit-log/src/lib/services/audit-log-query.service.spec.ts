@@ -1,12 +1,12 @@
 import { Action, Prisma, ResourceType } from '@bge/database';
 import { ScopeComposer } from '@bge/permissions';
+import type { MockDatabaseService } from '@bge/testing';
 import {
   batchTransactionCall,
   createMockAbilityService,
   createMockDatabaseService,
   MOCK_RESOURCE_CONDITION,
   shippedReadReaches,
-  type MockDatabaseService,
 } from '@bge/testing';
 import { plainToInstance } from 'class-transformer';
 import { AUDIT_LOG_DEFAULT_PAGE_SIZE } from '../constants/audit-log.constants';

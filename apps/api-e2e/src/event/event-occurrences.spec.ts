@@ -8,11 +8,14 @@ import {
   ResourceType,
   ScheduledGameRole,
 } from '@bge/database';
-import { createActors, pollUntil, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
+import type { Actors, AuthenticatedActor } from '@bge/testing-e2e';
+import { createActors, pollUntil } from '@bge/testing-e2e';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
-import { expectBackendsQueuedBehind, expectLockWaiter, withBarrier, type Barrier } from '../support/lock-barrier';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { Barrier } from '../support/lock-barrier';
+import { expectBackendsQueuedBehind, expectLockWaiter, withBarrier } from '../support/lock-barrier';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { arrangeListEntry, hoursFromNow } from './event-fixtures';
 import { createEventClient, EVENTS_PATH } from './event-request';
 import { eventGameEnvelope, listOccurrencesEnvelope, nominationEnvelope, occurrenceEnvelope } from './event-wire';

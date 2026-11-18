@@ -1,4 +1,4 @@
-import { Prisma } from '@bge/database';
+import type { Prisma } from '@bge/database';
 
 /**
  * The rows nobody has removed. A removed attendee, or a game taken off an

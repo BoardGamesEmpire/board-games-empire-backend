@@ -1,4 +1,4 @@
-import { Prisma } from '@bge/database';
+import type { Prisma } from '@bge/database';
 import { SHOWN_NAME_SELECT, shownName } from '../shown-name';
 
 /** A household ban as the ban routes read it (#782). */

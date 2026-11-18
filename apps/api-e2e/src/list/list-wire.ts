@@ -1,5 +1,6 @@
 import type { List, ListEntry } from '@bge/database';
-import { envelopeFailure, isRecord, type HttpResponseLike, type RequestDescription, type Wire } from '../support/wire';
+import type { HttpResponseLike, RequestDescription, Wire } from '../support/wire';
+import { envelopeFailure, isRecord } from '../support/wire';
 
 /**
  * Fail-loud parsers for the list and list entry envelopes (#1241), on the

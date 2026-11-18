@@ -1,4 +1,5 @@
-import { indent, type PlanReport } from '../catalog/catalog-plan-report';
+import type { PlanReport } from '../catalog/catalog-plan-report';
+import { indent } from '../catalog/catalog-plan-report';
 import type { MigrationState } from './migration-state';
 
 /**

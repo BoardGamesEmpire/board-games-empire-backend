@@ -1,4 +1,5 @@
-import { FriendshipStatus, type PrismaClient } from '@bge/database';
+import type { PrismaClient } from '@bge/database';
+import { FriendshipStatus } from '@bge/database';
 import type { AuthenticatedActor } from './types.js';
 
 /**

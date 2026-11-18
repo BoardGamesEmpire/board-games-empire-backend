@@ -16,7 +16,8 @@ import {
 import { catalogPermission } from '@bge/testing';
 import { subject } from '@casl/ability';
 import { accessibleBy } from '@casl/prisma';
-import { Test, TestingModule } from '@nestjs/testing';
+import type { TestingModule } from '@nestjs/testing';
+import { Test } from '@nestjs/testing';
 import { AbilityFactory } from './ability.factory';
 import { PluginAbilityRenderRejectionError } from './errors/plugin-ability-render-rejection.error';
 import type {

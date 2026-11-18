@@ -3,7 +3,8 @@ import type { PrismaClient } from '@bge/database';
 import type { MailMessage } from '@bge/mail';
 import { Logger } from '@nestjs/common';
 import { isAPIError } from 'better-auth/api';
-import { createPasswordReset, passwordResetDeps, resetLink, type PasswordResetDeps } from './password-reset';
+import type { PasswordResetDeps } from './password-reset';
+import { createPasswordReset, passwordResetDeps, resetLink } from './password-reset';
 
 const CLIENT_RESET = 'https://c.example/reset';
 const CALLBACK_URL = `https://api.example/api/auth/reset-password/tok?callbackURL=${encodeURIComponent(CLIENT_RESET)}`;

@@ -1,7 +1,8 @@
 import { MutationEvent } from '@bge/actor-context';
-import { DatabaseService, JobStatus } from '@bge/database';
+import type { DatabaseService } from '@bge/database';
+import { JobStatus } from '@bge/database';
 import { WebhookEventType } from '@bge/webhooks';
-import { EventEmitter2 } from '@nestjs/event-emitter';
+import type { EventEmitter2 } from '@nestjs/event-emitter';
 import { ImportEvents } from '../constants/queue.constants';
 import { ImportBatchStatus } from '../interfaces/import-job.interface';
 import { ImportBatchCompletionService } from './batch-completion.service';

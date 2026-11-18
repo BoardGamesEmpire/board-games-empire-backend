@@ -1,5 +1,7 @@
-import { InviteStatus, type Prisma } from '@bge/database';
-import { OUTSTANDING_INVITE_STATUSES, type OutstandingInviteStatus } from './constants/invite.constants';
+import type { Prisma } from '@bge/database';
+import { InviteStatus } from '@bge/database';
+import type { OutstandingInviteStatus } from './constants/invite.constants';
+import { OUTSTANDING_INVITE_STATUSES } from './constants/invite.constants';
 
 export function isOutstandingInviteStatus(status: InviteStatus): status is OutstandingInviteStatus {
   return (OUTSTANDING_INVITE_STATUSES as readonly InviteStatus[]).includes(status);

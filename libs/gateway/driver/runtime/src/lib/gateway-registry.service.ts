@@ -1,13 +1,6 @@
 import { SystemActorScope } from '@bge/actor-context';
-import {
-  DatabaseService,
-  DataGatewayCapability,
-  PluginCategory,
-  type ContentFormat,
-  type ContentType,
-  type PlatformType,
-  type SearchFilterAxis,
-} from '@bge/database';
+import type { ContentFormat, ContentType, PlatformType, SearchFilterAxis } from '@bge/database';
+import { DatabaseService, DataGatewayCapability, PluginCategory } from '@bge/database';
 import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
 import {
   Inject,
@@ -21,17 +14,15 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { FAILURE_THRESHOLD, FAILURE_WINDOW_MS } from './constants/gateway-registry.constants';
 import { RemoteGatewayDriverFactory } from './drivers/remote-gateway-driver.factory';
-import { GatewayRoutingRefusedError, type GatewayRefusalReason } from './errors/gateway-routing-refused.error';
-import { GatewayDisabledEvent, type GatewayAutoDisableReason } from './events/gateway-registry.events';
+import type { GatewayRefusalReason } from './errors/gateway-routing-refused.error';
+import { GatewayRoutingRefusedError } from './errors/gateway-routing-refused.error';
+import type { GatewayAutoDisableReason } from './events/gateway-registry.events';
+import { GatewayDisabledEvent } from './events/gateway-registry.events';
 import { GatewayConfigEventsService } from './gateway-config-events.service';
 import { GatewayInterviewService } from './gateway-interview.service';
 import type { GatewayConfigEvent, GatewayConnectionOptions } from './interfaces';
-import {
-  PLUGIN_DRIVER_SOURCE,
-  ROUTED_PLUGIN_FIELDS,
-  type PluginDriverSource,
-  type RoutedPlugin,
-} from './plugin-driver-source';
+import type { PluginDriverSource, RoutedPlugin } from './plugin-driver-source';
+import { PLUGIN_DRIVER_SOURCE, ROUTED_PLUGIN_FIELDS } from './plugin-driver-source';
 import type { CoverageFilter } from './utils/coverage-filter';
 import { hashGatewayConfig } from './utils/hash-config';
 import { remoteConnectionOptions } from './utils/remote-connection-options';

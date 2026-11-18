@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { LookupAddress, LookupOptions } from 'node:dns';
-import { Agent, type Dispatcher } from 'undici';
+import type { Dispatcher } from 'undici';
+import { Agent } from 'undici';
 import { IpFamily } from './ip';
 
 /**

@@ -1,5 +1,6 @@
 import { CodedHttpException, t } from '@bge/i18n';
-import { Injectable, type ArgumentMetadata, type PipeTransform } from '@nestjs/common';
+import type { ArgumentMetadata, PipeTransform } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { Http } from '@status/codes';
 
 /**

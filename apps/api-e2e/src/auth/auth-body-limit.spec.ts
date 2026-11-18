@@ -1,4 +1,5 @@
-import { request as httpRequest, type ClientRequest, type IncomingHttpHeaders } from 'node:http';
+import type { ClientRequest, IncomingHttpHeaders } from 'node:http';
+import { request as httpRequest } from 'node:http';
 import { requireBaseUrl } from '../support/e2e-env';
 
 interface Answer {

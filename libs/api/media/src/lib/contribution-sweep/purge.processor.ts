@@ -1,4 +1,5 @@
-import { ActorAwareWorkerHost, type JobMetaEnvelope } from '@bge/queue-actor-context';
+import type { JobMetaEnvelope } from '@bge/queue-actor-context';
+import { ActorAwareWorkerHost } from '@bge/queue-actor-context';
 import {
   DriverNotRegisteredError,
   InsufficientStorageError,

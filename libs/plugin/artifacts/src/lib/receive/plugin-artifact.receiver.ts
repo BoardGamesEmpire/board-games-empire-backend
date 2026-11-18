@@ -1,4 +1,6 @@
-import { DatabaseService, type PluginArtifact } from '@bge/database';
+import type { PluginArtifact } from '@bge/database';
+import { DatabaseService } from '@bge/database';
+import type { PluginInstallAssessment, PluginModuleOptions, PluginUpdateAssessment } from '@bge/plugin';
 import {
   MODULE_OPTIONS_TOKEN,
   PluginDirectoryNotFoundError,
@@ -7,9 +9,6 @@ import {
   PluginInstallAuthorityError,
   PluginInstallerService,
   PluginUpdateService,
-  type PluginInstallAssessment,
-  type PluginModuleOptions,
-  type PluginUpdateAssessment,
 } from '@bge/plugin';
 import {
   InvalidRequestUrlError,
@@ -21,12 +20,8 @@ import {
   SecureHttpService,
   SsrfRejectionError,
 } from '@bge/secure-http';
-import {
-  PLUGIN_MANIFEST_FILENAME,
-  PLUGIN_PACKAGE_JSON_FILENAME,
-  type PluginArtifactDirectory,
-  type PluginArtifactSha256,
-} from '@boardgamesempire/plugin-contract';
+import type { PluginArtifactDirectory, PluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
+import { PLUGIN_MANIFEST_FILENAME, PLUGIN_PACKAGE_JSON_FILENAME } from '@boardgamesempire/plugin-contract';
 import { PLUGIN_ARCHIVE_MAX_COMPRESSED_BYTES } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { rm } from 'node:fs/promises';
@@ -42,7 +37,8 @@ import {
 } from '../artifacts.errors';
 import { placePluginArtifact } from '../placement/place-plugin-artifact';
 import { PluginArtifactStore } from '../store/plugin-artifact.store';
-import { allocateIncoming, INCOMING_DIRNAME, type IncomingWorkspace } from '../workspace/incoming';
+import type { IncomingWorkspace } from '../workspace/incoming';
+import { allocateIncoming, INCOMING_DIRNAME } from '../workspace/incoming';
 import { parseRequestedSha256 } from './requested-sha256';
 
 /**

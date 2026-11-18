@@ -1,4 +1,5 @@
-import { CACHE_REDIS_CLIENT, type Redis } from '@bge/redis';
+import type { Redis } from '@bge/redis';
+import { CACHE_REDIS_CLIENT } from '@bge/redis';
 import { Inject, Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { GATEWAY_CONFIG_UPDATE_CHANNEL } from './constants/gateway-registry.constants';
 import type { GatewayConfigEvent } from './interfaces/gateway-config-event.interface';

@@ -1,5 +1,6 @@
 import * as proto from '@boardgamesempire/proto-gateway';
-import { concatMap, defer, from, map, Observable, of, take, throwError, throwIfEmpty } from 'rxjs';
+import type { Observable } from 'rxjs';
+import { concatMap, defer, from, map, of, take, throwError, throwIfEmpty } from 'rxjs';
 import { GRPC_STATUS_INVALID_ARGUMENT, grpcStatusError } from './driver-observables.js';
 
 /**

@@ -1,14 +1,17 @@
-import { ContentFormat, DatabaseService, InitiatorType, JobStatus, ResourceType } from '@bge/database';
-import { wrapJobData, type JobActorMeta } from '@bge/queue-actor-context';
+import type { DatabaseService } from '@bge/database';
+import { ContentFormat, InitiatorType, JobStatus, ResourceType } from '@bge/database';
+import type { JobActorMeta } from '@bge/queue-actor-context';
+import { wrapJobData } from '@bge/queue-actor-context';
 import { WebhookEventType } from '@bge/webhooks';
-import { EventEmitter2 } from '@nestjs/event-emitter';
-import { Job } from 'bullmq';
+import type { EventEmitter2 } from '@nestjs/event-emitter';
+import type { Job } from 'bullmq';
 import { JobNames } from '../constants/queue.constants';
 import { ImportJobCompletedEvent, ImportJobFailedEvent } from '../events/import.events';
-import { ImportJobOrigin, type GameImportJobPayload, type ImportJobResult } from '../interfaces/import-job.interface';
-import { ImportBatchCompletionService } from '../services/batch-completion.service';
-import { ExpansionSpawnerService } from '../services/expansion-spawner.service';
-import { GameUpsertService } from '../services/game.service';
+import type { GameImportJobPayload, ImportJobResult } from '../interfaces/import-job.interface';
+import { ImportJobOrigin } from '../interfaces/import-job.interface';
+import type { ImportBatchCompletionService } from '../services/batch-completion.service';
+import type { ExpansionSpawnerService } from '../services/expansion-spawner.service';
+import type { GameUpsertService } from '../services/game.service';
 import { extractGameDataFromChildren } from '../utils/extract-game-data';
 import { GameImportProcessor } from './game-import.processor';
 

@@ -4,7 +4,8 @@ import { PluginGrantScope } from '../client';
 import { UNIT_ID_COLUMNS } from '../generated/unit-id-columns';
 import { riskCovers } from '../utils/risk-ordering';
 import { parseTemplate } from './catalog-guards';
-import { matchesCatalogRule, type PermissionRuleColumns } from './catalog-reconcile-plan';
+import type { PermissionRuleColumns } from './catalog-reconcile-plan';
+import { matchesCatalogRule } from './catalog-reconcile-plan';
 import { PERMISSION_CATALOG } from './permission.catalog';
 import type { PermissionSeedDefinition } from './seed-definitions';
 

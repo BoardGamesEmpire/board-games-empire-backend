@@ -1,3 +1,11 @@
+import type {
+  BootstrapLogger,
+  BootstrapSummary,
+  DataMigrationsPhase,
+  Migrator,
+  ReconcileSummary,
+  SeedsPhase,
+} from '@bge/bootstrap';
 import {
   BOOTSTRAP_LOCK_NAME,
   createPrismaCliMigrator,
@@ -14,31 +22,28 @@ import {
   RunSeedsSeeder,
   SchemaNotReadyError,
   systemClock,
-  type BootstrapLogger,
-  type BootstrapSummary,
-  type DataMigrationsPhase,
-  type Migrator,
-  type ReconcileSummary,
-  type SeedsPhase,
 } from '@bge/bootstrap';
+import type { PrismaClient } from '@bge/database';
 import {
   CATALOG_MANIFEST,
   DATA_MIGRATIONS,
   DataMigrationRevisionError,
   MIGRATION_NAMES,
   readAppliedMigrations,
-  type PrismaClient,
 } from '@bge/database';
 import type { Logger, LoggerService } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { connect, createServer, type AddressInfo, type Socket } from 'node:net';
+import type { AddressInfo, Socket } from 'node:net';
+import { connect, createServer } from 'node:net';
 import * as path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { Client } from 'pg';
 import { schemaFromDatabaseUrl } from '../support/e2e-env';
 import { expectAdvisoryWaiter, withBarrier } from '../support/lock-barrier';
-import { startPgBouncer, type PgBouncer } from '../support/pgbouncer';
-import { createTestDatabase, requireDatabaseUrl, type TestDatabase } from '../support/test-db';
+import type { PgBouncer } from '../support/pgbouncer';
+import { startPgBouncer } from '../support/pgbouncer';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase, requireDatabaseUrl } from '../support/test-db';
 
 /**
  * The boot sequence against a real database (#236).

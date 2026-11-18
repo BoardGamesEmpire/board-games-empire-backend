@@ -1,12 +1,12 @@
-import { DatabaseService, type Plugin } from '@bge/database';
+import type { Plugin } from '@bge/database';
+import { DatabaseService } from '@bge/database';
+import type { PluginInstallResult, ShownRisk } from '@bge/plugin';
 import {
   PluginDirectoryNotFoundError,
   PluginDirectoryResolverService,
   PluginGrantAuthorityService,
   PluginInstallAuthorityError,
   PluginInstallerService,
-  type PluginInstallResult,
-  type ShownRisk,
 } from '@bge/plugin';
 import type { PluginArtifactDirectory, PluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
 import { Injectable, Logger } from '@nestjs/common';

@@ -1,12 +1,10 @@
 import type { DatabaseService } from '@bge/database';
 import { InitiatorType, JobStatus, JobType, Prisma } from '@bge/database';
-import { extractJobMeta, type JobActorMeta } from '@bge/queue-actor-context';
-import { FlowJob, FlowProducer } from 'bullmq';
-import {
-  ExpansionSpawnerService,
-  type SpawnBaseGameInput,
-  type SpawnExpansionsInput,
-} from './expansion-spawner.service';
+import type { JobActorMeta } from '@bge/queue-actor-context';
+import { extractJobMeta } from '@bge/queue-actor-context';
+import type { FlowJob, FlowProducer } from 'bullmq';
+import type { SpawnBaseGameInput, SpawnExpansionsInput } from './expansion-spawner.service';
+import { ExpansionSpawnerService } from './expansion-spawner.service';
 
 describe('ExpansionSpawnerService', () => {
   let service: ExpansionSpawnerService;

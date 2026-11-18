@@ -1,4 +1,5 @@
-import { EventParticipationStatus, NominationStatus, Prisma, type EventAttendee } from '@bge/database';
+import type { EventAttendee } from '@bge/database';
+import { EventParticipationStatus, NominationStatus, Prisma } from '@bge/database';
 import { LineupRemovalReason } from '@bge/notifications-service';
 import type { EventEmitter2 } from '@nestjs/event-emitter';
 import {

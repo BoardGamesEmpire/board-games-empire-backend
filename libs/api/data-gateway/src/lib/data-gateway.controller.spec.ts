@@ -6,11 +6,13 @@ import { ListScopeNotComposedError } from '@bge/shared';
 import { createTestingModuleWithDb, paginationQuery } from '@bge/testing';
 import { ConflictException, Logger, NotFoundException } from '@nestjs/common';
 import { ClsServiceManager } from 'nestjs-cls';
-import { firstValueFrom, Observable, of, throwError } from 'rxjs';
+import type { Observable } from 'rxjs';
+import { firstValueFrom, of, throwError } from 'rxjs';
 import { DataGatewayController } from './data-gateway.controller';
 import { DataGatewayService } from './data-gateway.service';
-import { toDataGatewayView, type DataGatewayWithSections } from './data-gateway.view';
-import { CreateDataGatewayDto } from './dto';
+import type { DataGatewayWithSections } from './data-gateway.view';
+import { toDataGatewayView } from './data-gateway.view';
+import type { CreateDataGatewayDto } from './dto';
 
 describe('DataGatewayController', () => {
   let controller: DataGatewayController;

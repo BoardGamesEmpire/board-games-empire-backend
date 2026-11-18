@@ -3,12 +3,12 @@ import { Action, PluginGrantScope, ResourceType, RiskLevel } from '../client';
 import { hasBoundingConditions } from '../utils/permission-conditions';
 import { parseTemplate } from './catalog-guards';
 import { PERMISSION_CATALOG } from './permission.catalog';
+import type { PluginUnitGrantScope } from './plugin-consent-unit-binding';
 import {
   bindsConsentUnit,
   isWildcardSubject,
   judgeConsentDecision,
   PLUGIN_UNIT_CONSENT_PUBLIC_READS,
-  type PluginUnitGrantScope,
 } from './plugin-consent-unit-binding';
 
 const catalogEntry = (slug: string) => {

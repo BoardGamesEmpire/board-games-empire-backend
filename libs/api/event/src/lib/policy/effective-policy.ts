@@ -1,12 +1,5 @@
-import {
-  GameAdditionMode,
-  InterestedWeight,
-  VoteEligibility,
-  VoteQuorumType,
-  VoteThresholdType,
-  type EventOccurrencePolicy,
-  type EventPolicy,
-} from '@bge/database';
+import type { EventOccurrencePolicy, EventPolicy } from '@bge/database';
+import { GameAdditionMode, InterestedWeight, VoteEligibility, VoteQuorumType, VoteThresholdType } from '@bge/database';
 import { CodedHttpException, t } from '@bge/i18n';
 import { Http } from '@status/codes';
 import type { VotingPolicy } from '../interfaces/vote.interface';

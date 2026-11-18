@@ -4,7 +4,8 @@ import {
   StorageMisconfiguredError,
   StorageUnavailableError,
 } from '@boardgamesempire/storage-contract';
-import { ArgumentsHost, HttpException, Logger } from '@nestjs/common';
+import type { ArgumentsHost, HttpException } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import { BaseExceptionFilter } from '@nestjs/core';
 import { Http } from '@status/codes';
 import { StorageExceptionFilter } from './storage-exception.filter';

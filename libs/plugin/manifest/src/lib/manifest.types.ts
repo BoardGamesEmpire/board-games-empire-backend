@@ -1,7 +1,7 @@
-import { z } from 'zod';
+import type { z } from 'zod';
 import type { PluginConsentScopeValue } from './constants.js';
 import type { ManifestWarning } from './errors.js';
-import {
+import type {
   pluginFeatureDeclarationSchema,
   pluginManifestSchema,
   pluginPermissionRequestSchema,

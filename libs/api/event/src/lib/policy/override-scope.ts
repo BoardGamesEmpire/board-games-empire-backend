@@ -1,5 +1,7 @@
-import { OccurrenceOverrideScope, type PlatformType } from '@bge/database';
-import { CodedHttpException, t, type I18nPath } from '@bge/i18n';
+import type { PlatformType } from '@bge/database';
+import { OccurrenceOverrideScope } from '@bge/database';
+import type { I18nPath } from '@bge/i18n';
+import { CodedHttpException, t } from '@bge/i18n';
 import { Http } from '@status/codes';
 
 /**

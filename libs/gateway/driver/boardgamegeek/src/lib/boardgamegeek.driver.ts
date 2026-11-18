@@ -1,12 +1,9 @@
-import {
-  unsupportedOperation,
-  type DataGatewayDriver,
-  type DriverLogger,
-  type UpstreamFetch,
-} from '@boardgamesempire/gateway-driver-contract';
+import type { DataGatewayDriver, DriverLogger, UpstreamFetch } from '@boardgamesempire/gateway-driver-contract';
+import { unsupportedOperation } from '@boardgamesempire/gateway-driver-contract';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { randomUUID } from 'node:crypto';
-import { defer, EMPTY, from, Observable, of, throwError } from 'rxjs';
+import type { Observable } from 'rxjs';
+import { defer, EMPTY, from, of, throwError } from 'rxjs';
 import { catchError, endWith, map, mergeMap, tap, timeout, toArray } from 'rxjs/operators';
 import { BggCaller } from './bgg-caller';
 import { createBggClient } from './client/bgg-client';
@@ -22,13 +19,13 @@ import {
 } from './mappers/game.mapper';
 import { toGatewayLanguageEntries } from './mappers/language.mapper';
 import { toCategoryList, toMechanicList } from './mappers/taxonomy.mapper';
+import type { ThingFetchOptions } from './requests/game.requests';
 import {
   chunk,
   fetchThingRequest,
   fetchThingsRequest,
   parseExternalId,
   searchGamesRequest,
-  type ThingFetchOptions,
 } from './requests/game.requests';
 import type { BggSearchItem, BggThing } from './types';
 

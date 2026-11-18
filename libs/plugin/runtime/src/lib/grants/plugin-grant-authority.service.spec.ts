@@ -1,5 +1,7 @@
-import { DatabaseService, SystemRole, type HouseholdMember, type UserRole } from '@bge/database';
-import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
+import type { DatabaseService, HouseholdMember, UserRole } from '@bge/database';
+import { SystemRole } from '@bge/database';
+import type { MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService } from '@bge/testing';
 import { PluginGrantAuthorityService } from './plugin-grant-authority.service';
 
 describe('PluginGrantAuthorityService', () => {

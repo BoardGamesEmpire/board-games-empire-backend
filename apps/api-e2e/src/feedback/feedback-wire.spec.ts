@@ -1,4 +1,5 @@
-import { submitEnvelope, type HttpResponseLike } from './feedback-wire';
+import type { HttpResponseLike } from './feedback-wire';
+import { submitEnvelope } from './feedback-wire';
 
 /**
  * The happy path here runs on every assertion of every feedback suite, so this

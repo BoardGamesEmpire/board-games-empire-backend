@@ -1,3 +1,4 @@
+import type { GameShare } from '@bge/database';
 import {
   Action,
   DatabaseService,
@@ -5,16 +6,17 @@ import {
   householdGameShareSubject,
   Prisma,
   ResourceType,
-  type GameShare,
 } from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
-import { PaginationQueryDto, type PaginatedRows } from '@bge/shared';
+import type { PaginatedRows } from '@bge/shared';
+import { PaginationQueryDto } from '@bge/shared';
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { HouseholdGameShareApprovedEvent } from '../events/household.events';
 import { assertHouseholdExists, lockExistingHousehold } from '../household-access.helpers';
-import { ROSTER_ROLE_SELECT, type RosterRow } from '../invite/household-authority';
+import type { RosterRow } from '../invite/household-authority';
+import { ROSTER_ROLE_SELECT } from '../invite/household-authority';
 
 /**
  * The column an approval writes, and the one the approve permission is bound

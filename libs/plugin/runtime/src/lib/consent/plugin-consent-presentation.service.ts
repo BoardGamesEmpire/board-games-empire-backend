@@ -1,14 +1,16 @@
-import { assertPluginUnit, type PluginUnit } from '@bge/actor-context';
+import type { PluginUnit } from '@bge/actor-context';
+import { assertPluginUnit } from '@bge/actor-context';
 import { DatabaseService, Prisma } from '@bge/database';
-import {
-  resolveLocalizedStringDetailed,
-  type LocalizedString,
-  type PluginManifestValidationResult,
-  type ResolvedLocalizedString,
+import type {
+  LocalizedString,
+  PluginManifestValidationResult,
+  ResolvedLocalizedString,
 } from '@boardgamesempire/plugin-manifest';
+import { resolveLocalizedStringDetailed } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable } from '@nestjs/common';
 import { revalidateStoredManifest } from '../manifest/stored-manifest';
-import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
+import type { PluginModuleOptions } from '../plugin-module.options';
+import { MODULE_OPTIONS_TOKEN } from '../plugin-module.options';
 import { unitOwnsConsentScope } from './consent-classification.types';
 import {
   PluginConsentPresentationManifestError,

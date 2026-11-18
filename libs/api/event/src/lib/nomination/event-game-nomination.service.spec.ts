@@ -22,6 +22,7 @@ import {
 } from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
+import type { MockAbilityService, MockDatabaseService } from '@bge/testing';
 import {
   batchTransactionCall,
   createMockAbilityService,
@@ -30,15 +31,14 @@ import {
   makeVoterRole,
   paginationQuery,
   rawQueryText,
-  type MockAbilityService,
-  type MockDatabaseService,
 } from '@bge/testing';
 import { BadRequestException, ConflictException, ForbiddenException, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { LINEUP_GAME_SNAPSHOT_SELECT, type LockedSupplier } from '../attendee/attendance';
+import type { LockedSupplier } from '../attendee/attendance';
+import { LINEUP_GAME_SNAPSHOT_SELECT } from '../attendee/attendance';
 import { ATTENDEE_SUMMARY_SELECT } from '../attendee/attendee-summary';
 import { LINEUP_GAME_SELECT } from '../lineup/lineup-game';
-import { NominateGameDto } from './dto/nominate-game.dto';
+import type { NominateGameDto } from './dto/nominate-game.dto';
 import { EventGameNominationService } from './event-game-nomination.service';
 import {
   GameAddedToEventEvent,

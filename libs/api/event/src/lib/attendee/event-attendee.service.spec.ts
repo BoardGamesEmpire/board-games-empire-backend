@@ -13,6 +13,7 @@ import {
 import { t } from '@bge/i18n';
 import { LineupRemovalReason } from '@bge/notifications-service';
 import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
+import type { MockAbilityService, MockDatabaseService } from '@bge/testing';
 import {
   batchTransactionCall,
   createMockAbilityService,
@@ -23,8 +24,6 @@ import {
   paginationQuery,
   rawQueryText,
   unwrapTransaction,
-  type MockAbilityService,
-  type MockDatabaseService,
 } from '@bge/testing';
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';

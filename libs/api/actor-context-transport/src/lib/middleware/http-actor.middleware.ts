@@ -1,10 +1,12 @@
 import type { Actor } from '@bge/actor-context';
 import { AuditContextInternalService } from '@bge/actor-context';
-import { AuthService, type AuthUser } from '@bge/auth';
+import type { AuthUser } from '@bge/auth';
+import { AuthService } from '@bge/auth';
 import { t } from '@bge/i18n';
 import { CORRELATION_ID_HEADER, TRACEPARENT_HEADER } from '@bge/shared';
 import { firstValue, resolveCorrelationId, sessionImpersonatorId } from '@bge/utils';
-import { ForbiddenException, Injectable, Logger, UnauthorizedException, type NestMiddleware } from '@nestjs/common';
+import type { NestMiddleware } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import type { NextFunction, Request, Response } from 'express';
 import type { AnonymousUserSession } from '../interfaces';
 

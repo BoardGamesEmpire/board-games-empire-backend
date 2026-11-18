@@ -1,7 +1,8 @@
 import { AbilityService } from '@bge/permissions';
 import { ActorAwareWorkerHost } from '@bge/queue-actor-context';
 import { ForbiddenException, Inject } from '@nestjs/common';
-import { UnrecoverableError, type Job } from 'bullmq';
+import type { Job } from 'bullmq';
+import { UnrecoverableError } from 'bullmq';
 
 /**
  * Base class for BullMQ processors that perform ability-filtered work.

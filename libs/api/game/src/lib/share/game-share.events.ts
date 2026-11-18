@@ -1,5 +1,6 @@
 import { MutationEvent } from '@bge/actor-context';
-import { ResourceType, type GameShareSnapshot } from '@bge/database';
+import type { GameShareSnapshot } from '@bge/database';
+import { ResourceType } from '@bge/database';
 
 /**
  * Domain mutation events for game shares (#810).

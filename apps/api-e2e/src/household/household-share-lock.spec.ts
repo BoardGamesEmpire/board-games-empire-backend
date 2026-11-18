@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { expectBlocked, expectNotBlocked, withBarrier } from '../support/lock-barrier';
 import { readShippedSql } from '../support/shipped-sql';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { arrangeEmptyHousehold, FK_PARENT_LOCK, SOFT_DELETE_HOUSEHOLD } from './lock-fixtures';
 
 /**

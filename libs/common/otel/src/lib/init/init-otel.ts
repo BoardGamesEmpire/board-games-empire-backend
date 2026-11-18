@@ -5,12 +5,15 @@ import { OTLPMetricExporter as OtlpHttpMetricExporter } from '@opentelemetry/exp
 import { OTLPTraceExporter as OtlpGrpcTraceExporter } from '@opentelemetry/exporter-trace-otlp-grpc';
 import { OTLPTraceExporter as OtlpHttpTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { resourceFromAttributes } from '@opentelemetry/resources';
-import { PeriodicExportingMetricReader, type MetricReader } from '@opentelemetry/sdk-metrics';
+import type { MetricReader } from '@opentelemetry/sdk-metrics';
+import { PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics';
 import { NodeSDK } from '@opentelemetry/sdk-node';
-import { BatchSpanProcessor, type SpanExporter, type SpanProcessor } from '@opentelemetry/sdk-trace-base';
+import type { SpanExporter, SpanProcessor } from '@opentelemetry/sdk-trace-base';
+import { BatchSpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { ActorSpanProcessor } from '../processors/actor-span.processor';
 import { OTEL_LOG_LEVEL_ENV, resolveDiagLogLevel } from './diag-log-level';
 import { metricsExportEnabled } from './metrics-enabled';
+import type { OtelInitConfig } from './otel.config';
 import {
   DEFAULT_SERVICE_NAMESPACE,
   OTEL_EXPORTER_NONE,
@@ -20,7 +23,6 @@ import {
   OTEL_METRICS_EXPORTER_ENV,
   OTEL_OTLP_PROTOCOL_GRPC,
   OTEL_OTLP_PROTOCOL_HTTP,
-  type OtelInitConfig,
 } from './otel.config';
 
 /**

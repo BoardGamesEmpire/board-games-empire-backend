@@ -7,15 +7,20 @@ import {
   ResourceType,
   SystemRole,
 } from '@bge/database';
-import { LineupRemovalReason, type GameRemovedFromEventPayload } from '@bge/notifications-service';
-import { createActors, pollUntil, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
+import type { GameRemovedFromEventPayload } from '@bge/notifications-service';
+import { LineupRemovalReason } from '@bge/notifications-service';
+import type { Actors, AuthenticatedActor } from '@bge/testing-e2e';
+import { createActors, pollUntil } from '@bge/testing-e2e';
 import request from 'supertest';
-import { mintApiKey, type Caller } from '../support/api-key';
+import type { Caller } from '../support/api-key';
+import { mintApiKey } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import { expectErrorEnvelope } from '../support/error-envelope';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { arrangeListEntry } from './event-fixtures';
 import { attendeeGamesPath, attendeesPath, createEventClient, EVENTS_PATH } from './event-request';
+import type { ListLineupEnvelope } from './event-wire';
 import {
   attendeeEnvelope,
   eventGameEnvelope,
@@ -24,7 +29,6 @@ import {
   listLineupEnvelope,
   listNominationsEnvelope,
   nominationEnvelope,
-  type ListLineupEnvelope,
 } from './event-wire';
 
 /**

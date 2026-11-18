@@ -1,10 +1,10 @@
-import {
-  type DataGateway,
-  type DataGatewayCapability,
-  type DataGatewayInterviewFailure,
-  type DataGatewaySection,
-  type DataGatewaySectionFailure,
-  type Prisma,
+import type {
+  DataGateway,
+  DataGatewayCapability,
+  DataGatewayInterviewFailure,
+  DataGatewaySection,
+  DataGatewaySectionFailure,
+  Prisma,
 } from '@bge/database';
 import { SECTION_ORDER } from '@bge/gateway-registry';
 

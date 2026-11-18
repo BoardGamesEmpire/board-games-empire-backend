@@ -1,4 +1,5 @@
-import { EventStatus, OccurrenceStatus, type Event, type EventOccurrence } from '@bge/database';
+import type { Event, EventOccurrence } from '@bge/database';
+import { EventStatus, OccurrenceStatus } from '@bge/database';
 import { dateEnd } from './date-end.util';
 
 /** The columns of a date the event's status is worked out from. */

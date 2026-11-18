@@ -1,5 +1,6 @@
 import { errorEnvelope } from '@bge/i18n';
-import { WsConnectionRefusal, wsErrorPayload, wsExceptionPayload, type WsFrame } from './ws-error-payload';
+import type { WsFrame } from './ws-error-payload';
+import { WsConnectionRefusal, wsErrorPayload, wsExceptionPayload } from './ws-error-payload';
 
 describe('the WebSocket error envelope (#1260)', () => {
   const frame: WsFrame = { pattern: 'search:start', data: { correlationId: 'corr-1' } };

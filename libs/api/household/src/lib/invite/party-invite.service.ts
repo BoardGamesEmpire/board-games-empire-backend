@@ -8,6 +8,7 @@ import {
   SystemRole,
 } from '@bge/database';
 import { t } from '@bge/i18n';
+import type { InvitePartyView, InviteTarget, RespondToInviteParams } from '@bge/invites';
 import {
   effectiveInviteStatusWhere,
   InviteService,
@@ -15,9 +16,6 @@ import {
   PARTY_INVITE_SELECT,
   unexpiredInviteWhere,
   withEffectiveInviteStatus,
-  type InvitePartyView,
-  type InviteTarget,
-  type RespondToInviteParams,
 } from '@bge/invites';
 import { AbilityService, PermissionsService } from '@bge/permissions';
 import { QuotaService } from '@bge/quota';
@@ -25,7 +23,8 @@ import { PaginatedRows, PaginationQueryDto } from '@bge/shared';
 import { ConflictException, Injectable } from '@nestjs/common';
 import { ListSentInvitesQueryDto } from '../dto';
 import { lockExistingHousehold } from '../household-access.helpers';
-import { HouseholdMemberService, type HouseholdMemberWithRelations } from '../member/household-member.service';
+import type { HouseholdMemberWithRelations } from '../member/household-member.service';
+import { HouseholdMemberService } from '../member/household-member.service';
 import { offeredRole, readInviteAuthority, senderCouldStillSend } from './household-authority';
 import { receivedHouseholdInviteWhere, vouchedEmailOf } from './received-invites';
 

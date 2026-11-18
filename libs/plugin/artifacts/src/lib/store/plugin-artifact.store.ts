@@ -1,4 +1,5 @@
-import { DatabaseService, type PluginArtifact } from '@bge/database';
+import type { PluginArtifact } from '@bge/database';
+import { DatabaseService } from '@bge/database';
 import type { PluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
 import { Injectable } from '@nestjs/common';
 

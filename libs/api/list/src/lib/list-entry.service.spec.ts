@@ -2,13 +2,13 @@ import { Action, ListKind, Prisma, ResourceType, WishlistPriority } from '@bge/d
 import { uniqueViolation, uniqueViolationWithoutMeta } from '@bge/database/testing';
 import { t } from '@bge/i18n';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
+import type { MockDatabaseService } from '@bge/testing';
 import {
   batchTransactionCall,
   createTestingModuleWithDb,
   paginationQuery,
   rawQueryText,
   unwrapTransaction,
-  type MockDatabaseService,
 } from '@bge/testing';
 import { Logger } from '@nestjs/common';
 import { LIST_ENTRY_SELECT } from './list-entry-row';

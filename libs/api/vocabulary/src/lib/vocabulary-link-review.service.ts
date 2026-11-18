@@ -2,7 +2,8 @@ import { DatabaseService, VocabularyLinkStatus } from '@bge/database';
 import { t } from '@bge/i18n';
 import type { PaginatedRows } from '@bge/shared';
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { REVIEWED_ADAPTERS, type ReviewedVocabularyAdapter } from './vocabulary-adapters';
+import type { ReviewedVocabularyAdapter } from './vocabulary-adapters';
+import { REVIEWED_ADAPTERS } from './vocabulary-adapters';
 import { VocabularyLinkService } from './vocabulary-link.service';
 import type { ReviewedVocabularyKind, VocabularyLinkView } from './vocabulary.types';
 

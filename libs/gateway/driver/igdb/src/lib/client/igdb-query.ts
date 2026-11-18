@@ -1,4 +1,5 @@
-import { discardBody, type UpstreamFetch } from '@boardgamesempire/gateway-driver-contract';
+import type { UpstreamFetch } from '@boardgamesempire/gateway-driver-contract';
+import { discardBody } from '@boardgamesempire/gateway-driver-contract';
 import type { IGDBClient } from './igdb-client.interface';
 import { IgdbHttpError } from './igdb-http.error';
 

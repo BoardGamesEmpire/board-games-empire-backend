@@ -1,4 +1,5 @@
-import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers';
+import type { StartedTestContainer } from 'testcontainers';
+import { GenericContainer, Wait } from 'testcontainers';
 import { E2E_DATABASE_CONTAINER_ADDRESS_VAR } from './e2e-env';
 
 /**

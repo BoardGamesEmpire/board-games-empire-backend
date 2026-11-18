@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@bge/database';
 import { escapeLikePattern } from '@bge/shared';
-import { isProviderSignInPath, type ProviderPictureContext } from './provider-picture';
+import type { ProviderPictureContext } from './provider-picture';
+import { isProviderSignInPath } from './provider-picture';
 
 /**
  * The username a first sign-in gets (#912): `requested` when no one holds it,

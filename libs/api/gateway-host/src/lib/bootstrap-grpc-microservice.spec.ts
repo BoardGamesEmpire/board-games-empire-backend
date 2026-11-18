@@ -1,16 +1,8 @@
 import { env } from '@bge/env';
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
-import {
-  ConsoleLogger,
-  Controller,
-  Injectable,
-  Logger,
-  Module,
-  type INestMicroservice,
-  type OnModuleInit,
-  type Type,
-} from '@nestjs/common';
+import type { INestMicroservice, OnModuleInit, Type } from '@nestjs/common';
+import { ConsoleLogger, Controller, Injectable, Logger, Module } from '@nestjs/common';
 import { ConfigModule, registerAs } from '@nestjs/config';
 import { GrpcMethod } from '@nestjs/microservices';
 import Joi from 'joi';
@@ -21,11 +13,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { Writable } from 'node:stream';
 import pino from 'pino';
-import {
-  bootstrapGrpcMicroservice,
-  type GrpcListenAddress,
-  type GrpcMicroserviceBootstrapConfig,
-} from './bootstrap-grpc-microservice';
+import type { GrpcListenAddress, GrpcMicroserviceBootstrapConfig } from './bootstrap-grpc-microservice';
+import { bootstrapGrpcMicroservice } from './bootstrap-grpc-microservice';
 
 const HOST_ENV = 'GATEWAY_HOST_SPEC_GRPC_HOST';
 const PORT_ENV = 'GATEWAY_HOST_SPEC_GRPC_PORT';

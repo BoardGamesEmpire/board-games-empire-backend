@@ -1,4 +1,5 @@
-import { SignatureExpiredError, SignatureInvalidError, type StorageOp } from '@boardgamesempire/storage-contract';
+import type { StorageOp } from '@boardgamesempire/storage-contract';
+import { SignatureExpiredError, SignatureInvalidError } from '@boardgamesempire/storage-contract';
 import { Injectable } from '@nestjs/common';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { SigningKeyService } from './signing-key.service.js';

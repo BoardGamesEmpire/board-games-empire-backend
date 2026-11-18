@@ -1,6 +1,7 @@
 import { Logger } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { Test, TestingModule } from '@nestjs/testing';
+import type { TestingModule } from '@nestjs/testing';
+import { Test } from '@nestjs/testing';
 import type { Redis, RedisOptions } from 'iovalkey';
 import type { BgeRedisConnectionConfig, BgeRedisModuleAsyncOptions } from './redis-connection.config';
 import { RedisLifecycleManager } from './redis-lifecycle.service';

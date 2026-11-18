@@ -1,3 +1,4 @@
+import type { Plugin, PluginConsentAct, PluginGrant, PluginProcessRole, Prisma } from '@bge/database';
 import {
   PLUGIN_PROCESS_ROLES,
   PluginCategory,
@@ -7,19 +8,15 @@ import {
   PluginGrantStatus,
   PluginScope,
   RiskLevel,
-  type Plugin,
-  type PluginConsentAct,
-  type PluginGrant,
-  type PluginProcessRole,
-  type Prisma,
 } from '@bge/database';
-import {
-  type PluginUpdateReconsentHouseholdUnit,
-  type PluginUpdateReconsentUserUnit,
-  type UpdateEscalation,
-  type UpdateEscalationComparison,
+import type {
+  PluginUpdateReconsentHouseholdUnit,
+  PluginUpdateReconsentUserUnit,
+  UpdateEscalation,
+  UpdateEscalationComparison,
 } from '@bge/plugin';
-import { PLUGIN_CONSENT_SCOPES, type PluginConsentScopeValue } from '@boardgamesempire/plugin-manifest';
+import type { PluginConsentScopeValue } from '@boardgamesempire/plugin-manifest';
+import { PLUGIN_CONSENT_SCOPES } from '@boardgamesempire/plugin-manifest';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { PluginInventoryDetailDto } from './plugin-inventory.response';
 

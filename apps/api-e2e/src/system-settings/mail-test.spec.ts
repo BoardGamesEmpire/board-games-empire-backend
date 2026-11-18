@@ -1,5 +1,6 @@
 import { MAIL_QUEUE_NAME } from '@bge/queue-mail';
-import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
+import type { Actors, SessionActor } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import { createServer } from 'node:net';
 import request from 'supertest';
 import type { UnreadNotificationWire } from '../notification/notification-wire';
@@ -8,7 +9,8 @@ import { requireBaseUrl } from '../support/e2e-env';
 import { useMailSettings } from '../support/mail-settings';
 import { mailpit } from '../support/mailpit';
 import { drainQueue, markQueueEvents } from '../support/queues';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { useWorker } from '../support/worker';
 
 const MAIL_TEST_PATH = '/api/system-settings/mail-test';

@@ -1,5 +1,7 @@
-import { ResourceType, SystemRole } from '../client';
-import { deriveReadCeilings, type ReadReach } from './catalog-read-ceilings';
+import type { SystemRole } from '../client';
+import { ResourceType } from '../client';
+import type { ReadReach } from './catalog-read-ceilings';
+import { deriveReadCeilings } from './catalog-read-ceilings';
 import type { PermissionSlug } from './permission.catalog';
 import { PERMISSION_CATALOG } from './permission.catalog';
 import { ROLE_PERMISSION_CATALOG } from './role-permission.catalog';

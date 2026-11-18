@@ -1,6 +1,7 @@
 import { DEADLOCK_SQLSTATE, isDeadlockError, Prisma } from '@bge/database';
 import { inspect } from 'node:util';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 
 /**
  * Pins the payload a real deadlock produces, against a real database.

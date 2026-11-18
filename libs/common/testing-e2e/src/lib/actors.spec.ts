@@ -1,4 +1,5 @@
-import { SystemRole, type PrismaClient, type User } from '@bge/database';
+import type { PrismaClient, User } from '@bge/database';
+import { SystemRole } from '@bge/database';
 import { makeUser } from '@bge/testing';
 import { createActors } from './actors.js';
 import { SET_AUTH_TOKEN_HEADER, SIGN_IN_ANONYMOUS_PATH } from './signup.js';

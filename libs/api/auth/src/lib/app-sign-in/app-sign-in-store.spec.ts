@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { APP_SIGN_IN_LIFETIME_MS, type AppSignInFlow, createAppSignInStore } from './app-sign-in-store';
+import type { AppSignInFlow } from './app-sign-in-store';
+import { APP_SIGN_IN_LIFETIME_MS, createAppSignInStore } from './app-sign-in-store';
 import { parseAppReturnAddress } from './return-address';
 import { memoryVerificationStore } from './verification-store.fixture';
 

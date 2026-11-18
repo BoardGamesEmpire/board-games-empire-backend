@@ -6,8 +6,10 @@ import {
   SOURCE_CLS_KEY,
 } from '@bge/actor-context';
 import { Metadata } from '@grpc/grpc-js';
-import { type CallHandler, ExecutionContext, UnauthorizedException } from '@nestjs/common';
-import { Test, type TestingModule } from '@nestjs/testing';
+import type { CallHandler, ExecutionContext } from '@nestjs/common';
+import { UnauthorizedException } from '@nestjs/common';
+import type { TestingModule } from '@nestjs/testing';
+import { Test } from '@nestjs/testing';
 import { ClsModule, ClsService } from 'nestjs-cls';
 import { Observable, firstValueFrom, of } from 'rxjs';
 import { GATEWAY_ID_METADATA_KEY, GrpcActorInterceptor } from './grpc-actor.interceptor';

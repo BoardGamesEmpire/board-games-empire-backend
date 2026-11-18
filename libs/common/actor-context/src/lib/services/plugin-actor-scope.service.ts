@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import * as crypto from 'node:crypto';
-import { type Actor, assertPluginUnit, clonePluginUnit, type PluginActor, type PluginUnit } from '../types';
+import type { Actor, PluginActor, PluginUnit } from '../types';
+import { assertPluginUnit, clonePluginUnit } from '../types';
 import { AuditContextInternalService } from './audit-context-internal.service';
 import { AuditContextService } from './audit-context.service';
 

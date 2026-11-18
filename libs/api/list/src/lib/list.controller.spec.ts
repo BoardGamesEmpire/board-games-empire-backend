@@ -5,7 +5,7 @@ import { paginationQuery } from '@bge/testing';
 import { ClsServiceManager } from 'nestjs-cls';
 import { firstValueFrom } from 'rxjs';
 import { ListController } from './list.controller';
-import { ListService } from './list.service';
+import type { ListService } from './list.service';
 
 const PAGINATION = paginationQuery({ limit: 20 });
 

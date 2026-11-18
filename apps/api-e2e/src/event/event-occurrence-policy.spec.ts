@@ -7,17 +7,21 @@ import {
   ResourceType,
   SystemRole,
 } from '@bge/database';
-import { createActors, pollUntil, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
+import type { Actors, AuthenticatedActor } from '@bge/testing-e2e';
+import { createActors, pollUntil } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
-import { mintApiKey, type Caller } from '../support/api-key';
+import type { Caller } from '../support/api-key';
+import { mintApiKey } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import { expectErrorEnvelope } from '../support/error-envelope';
 import { tabletopPlatform } from '../support/seeded-platforms';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { isRecord } from '../support/wire';
 import { arrangeListEntry } from './event-fixtures';
 import { createEventClient, eventPolicyPath, EVENTS_PATH, occurrencePolicyPath } from './event-request';
+import type { OccurrencePolicyWire } from './event-wire';
 import {
   eventDetailEnvelope,
   eventPolicyEnvelope,
@@ -25,7 +29,6 @@ import {
   nominationEnvelope,
   occurrenceEnvelope,
   occurrencePolicyEnvelope,
-  type OccurrencePolicyWire,
 } from './event-wire';
 
 /**

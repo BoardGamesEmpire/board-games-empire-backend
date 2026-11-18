@@ -34,13 +34,8 @@
  * inherit. `next.handle().subscribe(subscriber)` runs inside `runWith`
  * so AsyncLocalStorage propagates to async emissions downstream.
  */
-import {
-  type Actor,
-  type ActorContextInit,
-  AuditContextInternalService,
-  clonePluginUnit,
-  isPluginUnit,
-} from '@bge/actor-context';
+import type { Actor, ActorContextInit } from '@bge/actor-context';
+import { AuditContextInternalService, clonePluginUnit, isPluginUnit } from '@bge/actor-context';
 import { BGE_ACTOR_HEADER, CORRELATION_ID_HEADER, TRACEPARENT_HEADER } from '@bge/shared';
 import { resolveCorrelationId } from '@bge/utils';
 import type { Metadata } from '@grpc/grpc-js';

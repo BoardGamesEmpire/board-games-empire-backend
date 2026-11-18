@@ -1,9 +1,12 @@
 import { GatewayCoordinatorClientService } from '@bge/coordinator';
-import { Action, DatabaseService, type Prisma, ResourceType } from '@bge/database';
-import { type DataGatewayLink, gameListScope, GameService } from '@bge/game';
+import type { Prisma } from '@bge/database';
+import { Action, DatabaseService, ResourceType } from '@bge/database';
+import type { DataGatewayLink } from '@bge/game';
+import { gameListScope, GameService } from '@bge/game';
 import { t } from '@bge/i18n';
 import { AbilityService, everyAbilityCan, resolveScopeSubjectId, ScopeComposer } from '@bge/permissions';
-import { ResultStatus, type SearchGameResult } from '@boardgamesempire/proto-gateway';
+import type { SearchGameResult } from '@boardgamesempire/proto-gateway';
+import { ResultStatus } from '@boardgamesempire/proto-gateway';
 import { BadRequestException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import * as crypto from 'node:crypto';
 import { defer, forkJoin, from, merge, Observable, of, timer } from 'rxjs';
@@ -13,7 +16,8 @@ import type { WsGameSearchResult } from './dto/search-outbound.dto';
 import type { SearchQueryDto } from './dto/search-query.dto';
 import type { SearchResponseDto } from './dto/search-response.dto';
 import type { SearchGamesResponse } from './interfaces';
-import { type GameSearchFilter, localFilterConditions, toProtoSearchFilter } from './search-filter';
+import type { GameSearchFilter } from './search-filter';
+import { localFilterConditions, toProtoSearchFilter } from './search-filter';
 
 /**
  * Marks a `where` as {@link GameSearchService.localSearchScope}'s. Declared and

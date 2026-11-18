@@ -1,5 +1,6 @@
 import { Action, ResourceType } from '@bge/database';
-import { AbilityService, CHECK_POLICIES_KEY, PoliciesGuard, type AppAbility } from '@bge/permissions';
+import type { AppAbility } from '@bge/permissions';
+import { AbilityService, CHECK_POLICIES_KEY, PoliciesGuard } from '@bge/permissions';
 import { createMockAbilityService, createTestingModuleWithDb, MOCK_ACTING_USER_ID } from '@bge/testing';
 import { SystemSettingsController } from './system-settings.controller';
 import { SystemSettingsService } from './system-settings.service';

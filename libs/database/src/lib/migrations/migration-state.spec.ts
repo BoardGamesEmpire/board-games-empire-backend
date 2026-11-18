@@ -1,4 +1,5 @@
-import { classifyMigrationState, type AppliedMigrationRow } from './migration-state';
+import type { AppliedMigrationRow } from './migration-state';
+import { classifyMigrationState } from './migration-state';
 
 // What boot does with a database is decided from two lists: the migrations
 // this build was cut from, and the rows in `_prisma_migrations`. This is that

@@ -1,4 +1,5 @@
-import { ProviderLinkingPolicy, type SystemSetting } from '@bge/database';
+import type { SystemSetting } from '@bge/database';
+import { ProviderLinkingPolicy } from '@bge/database';
 import { createTestingModuleWithDb } from '@bge/testing';
 import { ConfigService } from '@nestjs/config';
 import { AUTH_BASE_PATH, authPath, AuthStrategyType, SERVER_DISCOVERY_PATH } from './constants';

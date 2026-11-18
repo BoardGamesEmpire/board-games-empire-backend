@@ -1,6 +1,8 @@
-import { Action, DatabaseService, JobType, liveEventWhere, PERMISSION_CATALOG, ResourceType } from '@bge/database';
+import type { DatabaseService } from '@bge/database';
+import { Action, JobType, liveEventWhere, PERMISSION_CATALOG, ResourceType } from '@bge/database';
 import type { AppAbility } from '@bge/permissions';
-import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService } from '@bge/testing';
 import { createPrismaAbility } from '@casl/prisma';
 import { WEBHOOK_EVENT_DESCRIPTORS } from '../constants/webhook-event-types';
 import { WebhookVisibilityService } from './webhook-visibility.service';

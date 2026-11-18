@@ -11,14 +11,10 @@ import {
   pluginTablePrefix,
   RESERVED_PLUGIN_SLUGS,
 } from './constants.js';
-import {
-  ManifestErrorCode,
-  ManifestIssue,
-  ManifestWarning,
-  ManifestWarningCode,
-  PluginManifestValidationError,
-} from './errors.js';
-import { canonicalizeLocale, isWellFormedBcp47, LocalizedString } from './localized-string.js';
+import type { ManifestIssue, ManifestWarning } from './errors.js';
+import { ManifestErrorCode, ManifestWarningCode, PluginManifestValidationError } from './errors.js';
+import type { LocalizedString } from './localized-string.js';
+import { canonicalizeLocale, isWellFormedBcp47 } from './localized-string.js';
 import { pluginManifestSchema } from './manifest.schema.js';
 import type {
   DeclaredPluginPermission,

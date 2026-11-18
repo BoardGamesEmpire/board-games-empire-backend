@@ -1,4 +1,5 @@
-import { request as httpRequest, type IncomingMessage, type OutgoingHttpHeaders } from 'node:http';
+import type { IncomingMessage, OutgoingHttpHeaders } from 'node:http';
+import { request as httpRequest } from 'node:http';
 import { connect as netConnect } from 'node:net';
 import request from 'supertest';
 import { API_CONFIGURED_SERVER_NAME, requireBaseUrl } from '../support/e2e-env';

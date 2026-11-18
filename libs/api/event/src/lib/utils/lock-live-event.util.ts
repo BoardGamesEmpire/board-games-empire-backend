@@ -1,4 +1,5 @@
-import { liveEventWhere, Prisma, type Event } from '@bge/database';
+import type { Event } from '@bge/database';
+import { liveEventWhere, Prisma } from '@bge/database';
 import { t } from '@bge/i18n';
 import { NotFoundException } from '@nestjs/common';
 import assert from 'node:assert';

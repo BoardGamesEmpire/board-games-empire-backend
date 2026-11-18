@@ -1,4 +1,4 @@
-import { AgeRatingOrganization, PlatformType } from '../constants';
+import type { AgeRatingOrganization, PlatformType } from '../constants';
 
 /**
  * Shapes returned by the IGDB API

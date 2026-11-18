@@ -1,12 +1,5 @@
-import {
-  Action,
-  DatabaseService,
-  isPrismaDependentRecordNotFoundError,
-  ResourceType,
-  type EventOccurrencePolicy,
-  type EventPolicy,
-  type Prisma,
-} from '@bge/database';
+import type { EventOccurrencePolicy, EventPolicy, Prisma } from '@bge/database';
+import { Action, DatabaseService, isPrismaDependentRecordNotFoundError, ResourceType } from '@bge/database';
 import { CodedHttpException, t } from '@bge/i18n';
 import { AbilityService } from '@bge/permissions';
 import { webhookEnvelope, WebhookEventType } from '@bge/webhooks';
@@ -31,14 +24,8 @@ import {
   replaceOccurrencePolicyLists,
   splitPolicyPatch,
 } from './policy-lists';
-import {
-  POLICY_VIEW_INCLUDE,
-  toEventPolicyView,
-  toOccurrencePolicyView,
-  type EventPolicyView,
-  type OccurrencePolicyView,
-  type PolicyListsView,
-} from './policy-view';
+import type { EventPolicyView, OccurrencePolicyView, PolicyListsView } from './policy-view';
+import { POLICY_VIEW_INCLUDE, toEventPolicyView, toOccurrencePolicyView } from './policy-view';
 
 /** The columns of a date's own policy, without the row's identity and timestamps. */
 type OccurrencePolicyColumns = Omit<EventOccurrencePolicy, 'id' | 'occurrenceId' | 'createdAt' | 'updatedAt'>;

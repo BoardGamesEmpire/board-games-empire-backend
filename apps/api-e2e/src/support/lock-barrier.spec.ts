@@ -1,3 +1,12 @@
+import type {
+  AdvisoryWaiter,
+  Barrier,
+  BarrierConnection,
+  LockWaiter,
+  PendingStatement,
+  QueuedBackend,
+  UngrantedLock,
+} from './lock-barrier';
 import {
   BARRIER_IDLE_IN_TRANSACTION_TIMEOUT_MS,
   BARRIER_LOCK_TIMEOUT_MS,
@@ -10,13 +19,6 @@ import {
   expectLockWaiter,
   expectNotBlocked,
   quoteIdentifier,
-  type AdvisoryWaiter,
-  type Barrier,
-  type BarrierConnection,
-  type LockWaiter,
-  type PendingStatement,
-  type QueuedBackend,
-  type UngrantedLock,
 } from './lock-barrier';
 
 /**

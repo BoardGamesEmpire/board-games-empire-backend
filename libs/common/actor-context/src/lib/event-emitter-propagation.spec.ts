@@ -36,7 +36,8 @@
 
 import { Injectable } from '@nestjs/common';
 import { EventEmitter2, EventEmitterModule, OnEvent } from '@nestjs/event-emitter';
-import { Test, type TestingModule } from '@nestjs/testing';
+import type { TestingModule } from '@nestjs/testing';
+import { Test } from '@nestjs/testing';
 import { context, createContextKey } from '@opentelemetry/api';
 import { AsyncLocalStorageContextManager } from '@opentelemetry/context-async-hooks';
 import { ClsModule } from 'nestjs-cls';

@@ -1,4 +1,5 @@
 import { AuditContextService } from '@bge/actor-context';
+import type { Permission, Plugin, PluginConsentAct, PluginGrant, PluginPermission } from '@bge/database';
 import {
   DatabaseService,
   PluginCategory,
@@ -7,21 +8,18 @@ import {
   Prisma,
   RiskLevel,
   SERVER_SCOPE_SENTINEL,
-  type Permission,
-  type Plugin,
-  type PluginConsentAct,
-  type PluginGrant,
-  type PluginPermission,
 } from '@bge/database';
 import type { PluginArtifactDirectory } from '@boardgamesempire/plugin-contract';
+import type {
+  ManifestWarning,
+  NormalizedPermissionRequest,
+  PluginManifest,
+  PluginManifestValidationResult,
+} from '@boardgamesempire/plugin-manifest';
 import {
   PluginManifestValidationError,
   resolveLocalizedString,
   validatePluginManifest,
-  type ManifestWarning,
-  type NormalizedPermissionRequest,
-  type PluginManifest,
-  type PluginManifestValidationResult,
 } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -32,10 +30,12 @@ import { PluginConsentActStaleError } from '../consent/plugin-consent-act.errors
 import type { ShownRisk } from '../consent/plugin-consent-act.types';
 import { planServerAcceptance, staleShownRisks } from '../consent/server-acceptance';
 import { writeConsentAct } from '../consent/write-consent-act';
-import { PluginInstalledEvent, type GrantedPermissionRecord, type PluginProvenance } from '../events/plugin.events';
+import type { GrantedPermissionRecord, PluginProvenance } from '../events/plugin.events';
+import { PluginInstalledEvent } from '../events/plugin.events';
 import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
 import { PluginDirectoryResolverService } from '../loader/plugin-directory-resolver.service';
-import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
+import type { PluginModuleOptions } from '../plugin-module.options';
+import { MODULE_OPTIONS_TOKEN } from '../plugin-module.options';
 import { MANIFEST_CATEGORY_TO_PRISMA } from '../registry/plugin-category.map';
 import { CLEARED_STAGED_UPDATE } from '../update/staged-update.columns';
 import {
@@ -65,7 +65,8 @@ import {
 } from './manifest-enum.maps';
 import { findDataGatewayNameHolder, placePluginDataGatewayRow, pluginDataGatewayName } from './plugin-data-gateway-row';
 import { PluginStaticAnalysisService } from './plugin-static-analysis.service';
-import { gatingFindings, type StaticAnalysisFinding, type StaticAnalysisReport } from './static-analysis.types';
+import type { StaticAnalysisFinding, StaticAnalysisReport } from './static-analysis.types';
+import { gatingFindings } from './static-analysis.types';
 
 export interface PluginInstallInput {
   /**

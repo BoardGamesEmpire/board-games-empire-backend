@@ -10,7 +10,8 @@ import {
 } from '@nestjs/terminus';
 import { SkipThrottle } from '@nestjs/throttler';
 import { AllowAnonymous } from '@thallesp/nestjs-better-auth';
-import { type NextParameters, NextAsyncPre, SurrogateDelegate } from 'surrogate';
+import type { NextParameters } from 'surrogate';
+import { NextAsyncPre, SurrogateDelegate } from 'surrogate';
 import { CacheRedisHealthIndicator } from './indicators/cache-redis.health-indicator';
 import { PrismaHealthIndicator } from './indicators/prisma.health-indicator';
 import { QueueRedisHealthIndicator } from './indicators/queue-redis.health-indicator';

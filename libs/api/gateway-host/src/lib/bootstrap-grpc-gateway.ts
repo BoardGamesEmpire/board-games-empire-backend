@@ -1,7 +1,8 @@
 import { registerLoggerShutdown } from '@bge/logger';
 import { PROTO_PACKAGE_NAME } from '@boardgamesempire/proto-gateway';
 import type { Type } from '@nestjs/common';
-import { bootstrapGrpcMicroservice, type GrpcAddressConfig } from './bootstrap-grpc-microservice';
+import type { GrpcAddressConfig } from './bootstrap-grpc-microservice';
+import { bootstrapGrpcMicroservice } from './bootstrap-grpc-microservice';
 import type { GatewayLoggers } from './gateway-logger';
 
 /** Proto walk skips the coordinator package — gateways serve only their own. */

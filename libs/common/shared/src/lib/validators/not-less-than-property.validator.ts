@@ -1,11 +1,6 @@
 import { i18nValidationMessage } from '@bge/i18n-core';
-import {
-  registerDecorator,
-  type ValidationArguments,
-  type ValidationOptions,
-  ValidatorConstraint,
-  type ValidatorConstraintInterface,
-} from 'class-validator';
+import type { ValidationArguments, ValidationOptions, ValidatorConstraintInterface } from 'class-validator';
+import { registerDecorator, ValidatorConstraint } from 'class-validator';
 
 /**
  * Checks that a value is not less than another property's on the same

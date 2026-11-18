@@ -42,7 +42,9 @@ const withFlags = new RuleTester({
 });
 
 withFlags.run('consistent-type-imports with the root decorator flags', rule, {
-  valid: [{ name: 'a decorated file reports nothing, so an injected class stays a value (#1317)', code: injected, options }],
+  valid: [
+    { name: 'a decorated file reports nothing, so an injected class stays a value (#1317)', code: injected, options },
+  ],
   invalid: [
     {
       name: 'a file without decorators gets a type import',

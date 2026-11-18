@@ -1,5 +1,6 @@
-import { Prisma } from '@bge/database';
-import { INVITE_SNAPSHOT_FIELDS, type InviteSnapshotField } from './events/invite.events';
+import type { Prisma } from '@bge/database';
+import type { InviteSnapshotField } from './events/invite.events';
+import { INVITE_SNAPSHOT_FIELDS } from './events/invite.events';
 
 /**
  * Select-shaped read surfaces for invites, owned here so every consumer of

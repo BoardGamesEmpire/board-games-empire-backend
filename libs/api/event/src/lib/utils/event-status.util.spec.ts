@@ -1,5 +1,6 @@
 import { EventStatus, OccurrenceStatus } from '@bge/database';
-import { deriveEventStatus, withEventStatus, type EventStatusDate } from './event-status.util';
+import type { EventStatusDate } from './event-status.util';
+import { deriveEventStatus, withEventStatus } from './event-status.util';
 
 describe('deriveEventStatus', () => {
   const now = new Date('2026-06-15T12:00:00.000Z');

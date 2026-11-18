@@ -1,4 +1,11 @@
 import type { PluginUnit } from '@bge/actor-context';
+import type {
+  ConsentDecisionVerdict,
+  PluginActiveManifest,
+  PluginActiveManifestReader,
+  PluginUnitEnablement,
+  RiskLevel,
+} from '@bge/database';
 import {
   CONSENT_UNIT_BINDING_REFUSAL,
   DatabaseService,
@@ -15,13 +22,9 @@ import {
   Prisma,
   requestedByManifest,
   riskCovers,
-  type ConsentDecisionVerdict,
-  type PluginActiveManifest,
-  type PluginActiveManifestReader,
-  type PluginUnitEnablement,
-  type RiskLevel,
 } from '@bge/database';
-import { CACHE_REDIS_CLIENT, RedisKeyFlush, type Redis } from '@bge/redis';
+import type { Redis } from '@bge/redis';
+import { CACHE_REDIS_CLIENT, RedisKeyFlush } from '@bge/redis';
 import { isPluginPermissionSlug, parsePluginPermissionSlug } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import type { Cache } from 'cache-manager';

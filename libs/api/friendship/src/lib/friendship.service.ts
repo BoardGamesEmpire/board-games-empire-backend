@@ -1,7 +1,7 @@
+import type { Friendship } from '@bge/database';
 import {
   Action,
   DatabaseService,
-  type Friendship,
   FriendshipStatus,
   isPrismaDependentRecordNotFoundError,
   isPrismaUniqueConstraintError,

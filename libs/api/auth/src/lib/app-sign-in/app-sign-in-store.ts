@@ -1,6 +1,7 @@
 import { generateRandomString } from 'better-auth/crypto';
 import { createHash } from 'node:crypto';
-import { type JsonObject, parseJsonObject } from './json-object';
+import type { JsonObject } from './json-object';
+import { parseJsonObject } from './json-object';
 import { parseAppReturnAddress } from './return-address';
 
 /** How long an app sign-in's flow, and the code issued for it, last: ten minutes (#1019). */

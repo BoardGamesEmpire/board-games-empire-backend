@@ -12,11 +12,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { FlowProducer } from 'bullmq';
 import { FlowProducerNames } from '../constants/queue.constants';
 import { buildBaseFlow, buildExpansionFlow } from '../flows/import-flow.builder';
-import {
-  ImportJobOrigin,
-  type ExpansionImportJobPayload,
-  type GameImportJobPayload,
-} from '../interfaces/import-job.interface';
+import type { ExpansionImportJobPayload, GameImportJobPayload } from '../interfaces/import-job.interface';
+import { ImportJobOrigin } from '../interfaces/import-job.interface';
 import { idempotencyKeyFor } from '../utils/idempotency-key';
 
 export interface SpawnExpansionsInput {

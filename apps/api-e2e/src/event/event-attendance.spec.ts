@@ -1,19 +1,15 @@
 import { EventParticipationStatus, Reach, ResourceType, SystemRole } from '@bge/database';
-import { befriend, createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
+import type { Actors, AuthenticatedActor } from '@bge/testing-e2e';
+import { befriend, createActors } from '@bge/testing-e2e';
 import request from 'supertest';
-import { mintApiKey, type Caller } from '../support/api-key';
+import type { Caller } from '../support/api-key';
+import { mintApiKey } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { attendeesPath, BROWSE_PATH, createEventClient, EVENTS_PATH } from './event-request';
-import {
-  attendeeEnvelope,
-  eventDetailEnvelope,
-  listAttendeesEnvelope,
-  listEventsEnvelope,
-  type EventAttendanceWire,
-  type EventDetailWire,
-  type EventReadWire,
-} from './event-wire';
+import type { EventAttendanceWire, EventDetailWire, EventReadWire } from './event-wire';
+import { attendeeEnvelope, eventDetailEnvelope, listAttendeesEnvelope, listEventsEnvelope } from './event-wire';
 
 /**
  * `attendance` over the real routes (#867): how the acting user attends each

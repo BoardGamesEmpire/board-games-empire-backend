@@ -1,5 +1,6 @@
 import { Action } from '@bge/database';
-import { isUnscoped, type ListScope, recordComposedScope, Unscoped, type UnscopedList } from '@bge/shared';
+import type { ListScope, UnscopedList } from '@bge/shared';
+import { isUnscoped, recordComposedScope, Unscoped } from '@bge/shared';
 import type { WhereInput } from '@casl/prisma';
 import { Injectable } from '@nestjs/common';
 import { AbilityService } from '../ability.service';

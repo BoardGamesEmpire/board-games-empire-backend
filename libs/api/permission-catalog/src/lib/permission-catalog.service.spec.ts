@@ -1,3 +1,11 @@
+import type {
+  CatalogSnapshot,
+  EntryProblem,
+  PermissionSnapshotRow,
+  Prisma,
+  RolePermissionSnapshotRow,
+  RoleSnapshotRow,
+} from '@bge/database';
 import {
   CATALOG_EDIT_LOCK_NAME,
   CATALOG_MANIFEST,
@@ -11,16 +19,11 @@ import {
   ResourceType,
   RiskLevel,
   SystemRole,
-  type CatalogSnapshot,
-  type EntryProblem,
-  type PermissionSnapshotRow,
-  type Prisma,
-  type RolePermissionSnapshotRow,
-  type RoleSnapshotRow,
 } from '@bge/database';
 import { PermissionsService } from '@bge/permissions';
 import { CacheFlushError } from '@bge/redis';
-import { createTestingModuleWithDb, rawQueryText, unwrapTransaction, type MockDatabaseService } from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { createTestingModuleWithDb, rawQueryText, unwrapTransaction } from '@bge/testing';
 import { HttpException, HttpStatus } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import {

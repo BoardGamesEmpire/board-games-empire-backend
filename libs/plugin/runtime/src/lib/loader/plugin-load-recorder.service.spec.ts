@@ -1,6 +1,7 @@
-import { SystemActorScope } from '@bge/actor-context';
-import { DatabaseService } from '@bge/database';
-import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
+import type { SystemActorScope } from '@bge/actor-context';
+import type { DatabaseService } from '@bge/database';
+import type { MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService } from '@bge/testing';
 import { buildPluginArtifactSha256 as sha } from '@boardgamesempire/plugin-contract';
 import { Logger } from '@nestjs/common';
 import { buildPluginModuleOptions } from '../testing/plugin-module-options.fixture';

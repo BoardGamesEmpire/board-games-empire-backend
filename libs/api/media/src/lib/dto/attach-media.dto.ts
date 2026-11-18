@@ -2,7 +2,8 @@ import { i18nValidationMessage } from '@bge/i18n';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsBoolean, IsDate, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, Min } from 'class-validator';
-import { LINKABLE_SUBJECT_TYPES, type LinkableSubjectType } from '../constants/media-link.constants';
+import type { LinkableSubjectType } from '../constants/media-link.constants';
+import { LINKABLE_SUBJECT_TYPES } from '../constants/media-link.constants';
 
 export class AttachMediaDto {
   @ApiProperty({ enum: LINKABLE_SUBJECT_TYPES })

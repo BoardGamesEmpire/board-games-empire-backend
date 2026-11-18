@@ -1,13 +1,9 @@
 import { InviteStatus, InviteType, NotificationType, SystemRole } from '@bge/database';
-import {
-  InviteAcceptedEvent,
-  InviteApprovedEvent,
-  InviteCreatedEvent,
-  InviteDeclinedEvent,
-  type InviteSnapshot,
-} from '@bge/invites';
+import type { InviteSnapshot } from '@bge/invites';
+import { InviteAcceptedEvent, InviteApprovedEvent, InviteCreatedEvent, InviteDeclinedEvent } from '@bge/invites';
 import { NotificationsService } from '@bge/notifications-service';
-import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { createTestingModuleWithDb } from '@bge/testing';
 import { Logger } from '@nestjs/common';
 import { HouseholdOwnershipTransferredEvent } from '../events/household.events';
 import { receivedHouseholdInviteWhere } from '../invite/received-invites';

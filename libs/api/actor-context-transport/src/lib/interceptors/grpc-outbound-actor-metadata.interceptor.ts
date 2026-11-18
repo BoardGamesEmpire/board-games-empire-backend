@@ -1,6 +1,7 @@
 import { getActorSnapshotFromCls } from '@bge/actor-context';
 import { BGE_ACTOR_HEADER, CORRELATION_ID_HEADER } from '@bge/shared';
-import { InterceptingCall, type Interceptor, type InterceptorOptions, Metadata, type NextCall } from '@grpc/grpc-js';
+import type { Interceptor, InterceptorOptions, Metadata, NextCall } from '@grpc/grpc-js';
+import { InterceptingCall } from '@grpc/grpc-js';
 import { Logger } from '@nestjs/common';
 
 /**

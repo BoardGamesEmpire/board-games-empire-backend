@@ -1,21 +1,23 @@
+import type { Actor, PluginActor } from '@bge/actor-context';
 import {
-  type Actor,
   AuditContextService,
   isAnonymousActor,
   isApiKeyActor,
   isPluginActor,
   isSystemActor,
   isUserActor,
-  type PluginActor,
 } from '@bge/actor-context';
-import { Action, Prisma, type ResourceType } from '@bge/database';
+import type { ResourceType } from '@bge/database';
+import { Action, Prisma } from '@bge/database';
 import { t } from '@bge/i18n';
 import { subject } from '@casl/ability';
-import { accessibleBy, type WhereInput } from '@casl/prisma';
+import type { WhereInput } from '@casl/prisma';
+import { accessibleBy } from '@casl/prisma';
 import { ForbiddenException, Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
 import { abilityOfRules } from './ability-of-rules';
 import { AbilityFactory } from './ability.factory';
-import { type ActorAccess, resourceTypeAccess } from './access';
+import type { ActorAccess } from './access';
+import { resourceTypeAccess } from './access';
 import { AbilityContextNotPrimedError } from './errors/ability-context-not-primed.error';
 import { PluginAbilityRenderRejectionError } from './errors/plugin-ability-render-rejection.error';
 import type { ApikeyWithScopes, AppAbility, ModelResourceType, SubjectInstance } from './interfaces';

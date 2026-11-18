@@ -1,4 +1,5 @@
-import { DatabaseService, JobStatus, Prisma, type ContentFormat } from '@bge/database';
+import type { ContentFormat } from '@bge/database';
+import { DatabaseService, JobStatus, Prisma } from '@bge/database';
 import { ActorAwareWorkerHost, extractJobMeta } from '@bge/queue-actor-context';
 import { guardWorkerEvent } from '@bge/utils';
 import { WebhookEventType, webhookEnvelope } from '@bge/webhooks';
@@ -8,14 +9,14 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Job } from 'bullmq';
 import { JobNames, QueueNames } from '../constants/queue.constants';
 import { ImportJobCompletedEvent } from '../events/import.events';
-import {
-  ImportJobOrigin,
-  type ExpansionImportJobPayload,
-  type GameImportJobPayload,
-  type ImportJobResult,
-  type PersistedJobFailure,
-  type PersistedJobResult,
+import type {
+  ExpansionImportJobPayload,
+  GameImportJobPayload,
+  ImportJobResult,
+  PersistedJobFailure,
+  PersistedJobResult,
 } from '../interfaces/import-job.interface';
+import { ImportJobOrigin } from '../interfaces/import-job.interface';
 import { ImportBatchCompletionService } from '../services/batch-completion.service';
 import { ExpansionSpawnerService } from '../services/expansion-spawner.service';
 import { GameUpsertService } from '../services/game.service';

@@ -1,14 +1,16 @@
 import { SystemRole } from '@bge/database';
-import { expectBlocked, expectNotBlocked, withBarrier, type BarrierConnection } from '../support/lock-barrier';
+import type { BarrierConnection } from '../support/lock-barrier';
+import { expectBlocked, expectNotBlocked, withBarrier } from '../support/lock-barrier';
 import { readShippedSql } from '../support/shipped-sql';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
+import type { LockFixture } from './lock-fixtures';
 import {
   arrangeHouseholdWithRoles,
   FK_PARENT_LOCK,
   memberWithRole,
   RESTORE_HOUSEHOLD,
   SOFT_DELETE_HOUSEHOLD,
-  type LockFixture,
 } from './lock-fixtures';
 
 /**

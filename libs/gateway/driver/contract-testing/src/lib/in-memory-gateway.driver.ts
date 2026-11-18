@@ -1,6 +1,8 @@
-import { fetchEachGame, type DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
+import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
+import { fetchEachGame } from '@boardgamesempire/gateway-driver-contract';
 import * as proto from '@boardgamesempire/proto-gateway';
-import { concat, from, Observable, of, throwError } from 'rxjs';
+import type { Observable } from 'rxjs';
+import { concat, from, of, throwError } from 'rxjs';
 import { OPERATIONS } from './operations.js';
 
 export interface InMemoryGatewayFixtures {

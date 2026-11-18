@@ -1,8 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import addFormats from 'ajv-formats';
-import Ajv2020, { type AsyncValidateFunction, type ValidateFunction } from 'ajv/dist/2020';
+import type { AsyncValidateFunction, ValidateFunction } from 'ajv/dist/2020';
+import Ajv2020 from 'ajv/dist/2020';
 import { createHash } from 'node:crypto';
-import { PluginConfigSchemaUnusableError, type PluginConfigIssue } from './config-schema.errors';
+import type { PluginConfigIssue } from './config-schema.errors';
+import { PluginConfigSchemaUnusableError } from './config-schema.errors';
 
 export interface PluginConfigValidationInput {
   readonly config: Record<string, unknown>;

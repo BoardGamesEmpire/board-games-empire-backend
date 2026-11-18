@@ -1,6 +1,6 @@
 import { AuditContextService } from '@bge/actor-context';
-import type { HouseholdPlugin, Plugin, PluginConsentAct, PluginScope, UserPlugin } from '@bge/database';
-import { DatabaseService, lockLiveHousehold, PluginConsentActKind, PluginGrantScope, type Prisma } from '@bge/database';
+import type { HouseholdPlugin, Plugin, PluginConsentAct, PluginScope, Prisma, UserPlugin } from '@bge/database';
+import { DatabaseService, lockLiveHousehold, PluginConsentActKind, PluginGrantScope } from '@bge/database';
 import type { PluginManifestValidationResult } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -16,7 +16,8 @@ import {
 } from '../events/plugin.events';
 import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
 import { revalidateStoredManifest } from '../manifest/stored-manifest';
-import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
+import type { PluginModuleOptions } from '../plugin-module.options';
+import { MODULE_OPTIONS_TOKEN } from '../plugin-module.options';
 import { assertHouseholdAdmin } from '../units/household-admin-assertion';
 import { assertHeldConfigSatisfiesGate } from '../units/household-config-gate';
 import { assertHouseholdSurface, loadLivingPlugin } from '../units/living-plugin';
@@ -28,8 +29,10 @@ import {
   PluginUnitPluginTombstonedError,
 } from '../units/unit.errors';
 import { planConsentAct } from './consent-act-plan';
-import { unitOwnsConsentScope, type ConsentManifestSource } from './consent-classification.types';
-import { emitDecisionEvents, type WrittenDecision } from './consent-decision-events';
+import type { ConsentManifestSource } from './consent-classification.types';
+import { unitOwnsConsentScope } from './consent-classification.types';
+import type { WrittenDecision } from './consent-decision-events';
+import { emitDecisionEvents } from './consent-decision-events';
 import { decisionsStand, decisionStands } from './consent-decision-stands';
 import {
   PluginConsentActNoUserScopeError,

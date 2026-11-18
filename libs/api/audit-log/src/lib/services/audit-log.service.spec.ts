@@ -1,5 +1,6 @@
 import type { Actor } from '@bge/actor-context';
-import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService } from '@bge/testing';
 import type { RecordAuditEntry } from '../interfaces/record-audit-entry.interface';
 import { AuditLogService } from './audit-log.service';
 

@@ -1,15 +1,10 @@
-import {
-  PluginCategory,
-  PluginExecutionMode,
-  PluginScope,
-  Prisma,
-  type HouseholdPlugin,
-  type Plugin,
-  type UserPlugin,
-} from '@bge/database';
-import { createMockDatabaseService, rawQueryText, type MockDatabaseService } from '@bge/testing';
+import type { HouseholdPlugin, Plugin, Prisma, UserPlugin } from '@bge/database';
+import { PluginCategory, PluginExecutionMode, PluginScope } from '@bge/database';
+import type { MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService, rawQueryText } from '@bge/testing';
 import { PluginEvent } from '@boardgamesempire/plugin-contract';
-import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
+import type { PluginManifest } from '@boardgamesempire/plugin-manifest';
+import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { Logger } from '@nestjs/common';
 import { PluginConfigValidationError } from '../config/config-schema.errors';
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';

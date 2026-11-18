@@ -1,4 +1,5 @@
-import { DatabaseService, type SafeHttpPolicy } from '@bge/database';
+import type { SafeHttpPolicy } from '@bge/database';
+import { DatabaseService } from '@bge/database';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import {

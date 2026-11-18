@@ -3,12 +3,8 @@ import { Action, FriendshipStatus, Prisma, ResourceType } from '@bge/database';
 import { uniqueViolationWithoutMeta } from '@bge/database/testing';
 import { t } from '@bge/i18n';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
-import {
-  batchTransactionCall,
-  createTestingModuleWithDb,
-  paginationQuery,
-  type MockDatabaseService,
-} from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { batchTransactionCall, createTestingModuleWithDb, paginationQuery } from '@bge/testing';
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ExtendedNetworkProducer } from './extended-network/extended-network.producer';
 import { FriendshipService } from './friendship.service';

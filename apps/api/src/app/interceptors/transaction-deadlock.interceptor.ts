@@ -3,7 +3,8 @@ import { CodedHttpException, t, toErrorCode } from '@bge/i18n';
 import type { CallHandler, ExecutionContext, NestInterceptor } from '@nestjs/common';
 import { Injectable } from '@nestjs/common';
 import { Http } from '@status/codes';
-import { catchError, type Observable, throwError } from 'rxjs';
+import type { Observable } from 'rxjs';
+import { catchError, throwError } from 'rxjs';
 
 /** Pinned rather than read from the class, so the code survives a rename or minification. */
 const DEADLOCK_NAME = 'TransactionDeadlockError';

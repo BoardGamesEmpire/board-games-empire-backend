@@ -1,4 +1,5 @@
-import { ContributionOrigin, MediaContributionStatus, ResourceType, type MediaContribution } from '@bge/database';
+import type { MediaContribution } from '@bge/database';
+import { ContributionOrigin, MediaContributionStatus, ResourceType } from '@bge/database';
 import { ApiProperty } from '@nestjs/swagger';
 
 export interface MediaContributionResponse {

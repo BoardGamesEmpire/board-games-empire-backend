@@ -1,5 +1,5 @@
 import { CodedHttpException } from '@bge/i18n';
-import { type ArgumentMetadata } from '@nestjs/common';
+import type { ArgumentMetadata } from '@nestjs/common';
 import { CatalogEntryNamePipe } from './catalog-entry-name.pipe';
 
 const param = (data: 'slug' | 'name'): ArgumentMetadata => ({ type: 'param', data, metatype: String });

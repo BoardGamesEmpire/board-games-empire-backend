@@ -1,4 +1,4 @@
-import { DatabaseService } from '@bge/database';
+import type { DatabaseService } from '@bge/database';
 import * as jest from 'jest-mock';
 
 /**

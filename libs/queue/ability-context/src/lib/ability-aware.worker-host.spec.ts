@@ -1,6 +1,7 @@
-import { AbilityService } from '@bge/permissions';
+import type { AbilityService } from '@bge/permissions';
 import { ForbiddenException } from '@nestjs/common';
-import { UnrecoverableError, type Job } from 'bullmq';
+import type { Job } from 'bullmq';
+import { UnrecoverableError } from 'bullmq';
 import { AbilityAwareWorkerHost } from './ability-aware.worker-host';
 
 interface TestJobData {

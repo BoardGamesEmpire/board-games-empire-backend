@@ -2,6 +2,7 @@ import { AuditExclude, Auditable } from '@bge/actor-context';
 import { InviteStatus, InviteType, ResourceType } from '@bge/database';
 import { Reflector } from '@nestjs/core';
 import { InviteEvents } from '../constants/invite-events.constant';
+import type { InviteSnapshot } from './invite.events';
 import {
   INVITE_SNAPSHOT_FIELDS,
   InviteAcceptedEvent,
@@ -12,7 +13,6 @@ import {
   InviteRevokedEvent,
   InviteWithdrawnEvent,
   toInviteSnapshot,
-  type InviteSnapshot,
 } from './invite.events';
 
 const INITIATED_AT = new Date('2026-10-12T12:00:00Z');

@@ -1,4 +1,5 @@
-import { roleLoading, type Plugin, type PluginProcessRole } from '@bge/database';
+import type { Plugin, PluginProcessRole } from '@bge/database';
+import { roleLoading } from '@bge/database';
 
 /**
  * The process roles to restart for a plugin so the server runs what it has

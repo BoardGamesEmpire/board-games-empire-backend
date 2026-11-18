@@ -1,7 +1,9 @@
-import { AuditContextInternalService, AuditContextService, type Actor } from '@bge/actor-context';
+import type { Actor } from '@bge/actor-context';
+import { AuditContextInternalService, AuditContextService } from '@bge/actor-context';
 import { FALLBACK_LOCALE, LocaleResolutionService } from '@bge/i18n';
 import { Logger } from '@nestjs/common';
-import { Test, type TestingModule } from '@nestjs/testing';
+import type { TestingModule } from '@nestjs/testing';
+import { Test } from '@nestjs/testing';
 import type { NextFunction, Request, Response } from 'express';
 import { ClsModule, ClsService } from 'nestjs-cls';
 import { LocaleResolutionMiddleware } from './locale-resolution.middleware';

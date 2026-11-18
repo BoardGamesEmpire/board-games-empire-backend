@@ -1,10 +1,5 @@
-import {
-  fetchAccessToken,
-  GAME_FETCH_FIELDS,
-  type IGDBClient,
-  IgdbQuery,
-  resolveLanguageIds,
-} from '@bge/gateway-driver-igdb';
+import type { IGDBClient } from '@bge/gateway-driver-igdb';
+import { fetchAccessToken, GAME_FETCH_FIELDS, IgdbQuery, resolveLanguageIds } from '@bge/gateway-driver-igdb';
 import process from 'node:process';
 
 // This script is for ad-hoc testing and exploration of the IGDB API and related codes

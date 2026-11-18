@@ -1,4 +1,5 @@
-import { ListKind, PlatformType, Reach, type List, type PrismaClient } from '@bge/database';
+import type { List, PrismaClient } from '@bge/database';
+import { ListKind, PlatformType, Reach } from '@bge/database';
 import { randomUUID } from 'node:crypto';
 
 /** What a spec may choose about a list it arranges; the rest takes the schema's defaults. */

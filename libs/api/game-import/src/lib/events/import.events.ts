@@ -1,5 +1,6 @@
 import { MutationEvent } from '@bge/actor-context';
-import { ResourceType, type Job } from '@bge/database';
+import type { Job } from '@bge/database';
+import { ResourceType } from '@bge/database';
 import { ImportEvents } from '../constants/queue.constants';
 import type { ImportJobOrigin, PlatformGameRef } from '../interfaces/import-job.interface';
 import type { ImportErrorCode } from '../utils/sanitize-import-error';

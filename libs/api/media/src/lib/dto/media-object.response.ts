@@ -1,4 +1,5 @@
-import { Reach, type MediaObject } from '@bge/database';
+import type { MediaObject } from '@bge/database';
+import { Reach } from '@bge/database';
 import { ApiProperty } from '@nestjs/swagger';
 
 /** Public shape of a MediaObject. Excludes the internal storage location

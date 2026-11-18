@@ -1,6 +1,6 @@
 import { StorageService } from '@bge/storage';
 import { StorageUnavailableError } from '@boardgamesempire/storage-contract';
-import { Provider } from '@nestjs/common';
+import type { Provider } from '@nestjs/common';
 import { TerminusModule } from '@nestjs/terminus';
 import { Test } from '@nestjs/testing';
 import { StorageHealthIndicator } from './storage.health-indicator';

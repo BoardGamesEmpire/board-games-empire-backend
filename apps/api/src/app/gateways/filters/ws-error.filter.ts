@@ -1,18 +1,14 @@
 import { AuditContextService } from '@bge/actor-context';
-import {
-  type I18nTranslations,
-  reasonPhrase,
-  renderErrorBody,
-  renderMarker,
-  t,
-  translateValidationErrors,
-} from '@bge/i18n';
-import { WsErrorEvents, type WsErrorPayload } from '@bge/shared';
+import type { I18nTranslations } from '@bge/i18n';
+import { reasonPhrase, renderErrorBody, renderMarker, t, translateValidationErrors } from '@bge/i18n';
+import type { WsErrorPayload } from '@bge/shared';
+import { WsErrorEvents } from '@bge/shared';
 import { ArgumentsHost, Catch, HttpException, Logger, WsExceptionFilter } from '@nestjs/common';
 import { Http } from '@status/codes';
 import { I18nService, I18nValidationException } from 'nestjs-i18n';
 import type { Socket } from 'socket.io';
-import { refuseSocket, wsErrorPayload, wsExceptionPayload, type WsFrame } from './ws-error-payload';
+import type { WsFrame } from './ws-error-payload';
+import { refuseSocket, wsErrorPayload, wsExceptionPayload } from './ws-error-payload';
 
 /**
  * Tells a WebSocket client why its frame failed, on one of the two

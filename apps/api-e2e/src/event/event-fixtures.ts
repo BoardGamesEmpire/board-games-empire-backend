@@ -1,4 +1,5 @@
-import { ContentType, GameMedium, PlatformType, Reach, type PrismaClient } from '@bge/database';
+import type { PrismaClient } from '@bge/database';
+import { ContentType, GameMedium, PlatformType, Reach } from '@bge/database';
 import { randomUUID } from 'node:crypto';
 import { arrangeCollectionEntry } from '../game-collection/game-collection-fixtures';
 import { tabletopPlatform } from '../support/seeded-platforms';

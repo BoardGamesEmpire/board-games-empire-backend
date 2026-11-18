@@ -1,4 +1,5 @@
-import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { createTestingModuleWithDb } from '@bge/testing';
 import { ServiceAccountService } from './service-account.service';
 
 describe('ServiceAccountService', () => {

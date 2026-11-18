@@ -1,5 +1,6 @@
 import { MAIL_QUEUE_NAME } from '@bge/queue-mail';
-import { createActors, type Actors } from '@bge/testing-e2e';
+import type { Actors } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import request from 'supertest';
 import { postToAuth } from '../support/auth-routes';
 import { requireBaseUrl } from '../support/e2e-env';
@@ -7,7 +8,8 @@ import { useMailSettings } from '../support/mail-settings';
 import { isolateQueue } from '../support/queue-isolation';
 import { waitForStableJobCount } from '../support/queues';
 import { useSettingSwitch } from '../support/setting-switch';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 
 const REQUEST_RESET_PATH = '/api/auth/request-password-reset';
 const RESET_PATH = '/api/auth/reset-password';

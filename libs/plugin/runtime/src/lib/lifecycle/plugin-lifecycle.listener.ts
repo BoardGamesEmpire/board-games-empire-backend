@@ -1,11 +1,7 @@
-import { actorUserId, AuditContextService, MutationEvent, type SystemActor } from '@bge/actor-context';
-import {
-  DatabaseService,
-  PluginGrantScope,
-  ResourceType,
-  type PluginLifecycleEventType,
-  type Prisma,
-} from '@bge/database';
+import type { SystemActor } from '@bge/actor-context';
+import { actorUserId, AuditContextService, MutationEvent } from '@bge/actor-context';
+import type { PluginLifecycleEventType, Prisma } from '@bge/database';
+import { DatabaseService, PluginGrantScope, ResourceType } from '@bge/database';
 import { Injectable, Logger, OnApplicationShutdown, OnModuleInit } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PluginConfigEventsService } from '../config/plugin-config-events.service';

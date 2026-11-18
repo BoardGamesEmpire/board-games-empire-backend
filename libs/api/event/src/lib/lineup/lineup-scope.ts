@@ -1,4 +1,5 @@
-import { Action, type EventGame, type Prisma, ResourceType } from '@bge/database';
+import type { EventGame, Prisma } from '@bge/database';
+import { Action, ResourceType } from '@bge/database';
 import type { ScopeComposer } from '@bge/permissions';
 
 /**

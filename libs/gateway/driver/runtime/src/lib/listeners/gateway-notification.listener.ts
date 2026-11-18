@@ -1,4 +1,5 @@
-import { DatabaseService, NotificationType, type DataGateway } from '@bge/database';
+import type { DataGateway } from '@bge/database';
+import { DatabaseService, NotificationType } from '@bge/database';
 import { findServerAdminIds, NotificationsService } from '@bge/notifications-service';
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';

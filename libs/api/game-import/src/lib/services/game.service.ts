@@ -10,7 +10,8 @@ import {
 import { toStoredContentType } from '@bge/gateway-registry';
 import { ServiceAccountService } from '@bge/services';
 import { VocabularyLinkService } from '@bge/vocabulary';
-import { DlcData, type GameData } from '@boardgamesempire/proto-gateway';
+import type { GameData } from '@boardgamesempire/proto-gateway';
+import { DlcData } from '@boardgamesempire/proto-gateway';
 import { Injectable, Logger } from '@nestjs/common';
 import type { ImportJobResult, PlatformGameRef } from '../interfaces/import-job.interface';
 import { BaseGameLinkService } from './base-game-link.service';

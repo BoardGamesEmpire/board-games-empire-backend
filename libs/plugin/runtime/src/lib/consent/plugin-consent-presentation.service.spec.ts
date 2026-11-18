@@ -1,6 +1,8 @@
 import type { PluginUnit } from '@bge/actor-context';
-import { DatabaseService, PluginGrantScope, PluginGrantStatus, RiskLevel } from '@bge/database';
-import { createMockDatabaseService, UNIT_BOUND_RULES, type MockDatabaseService } from '@bge/testing';
+import type { DatabaseService } from '@bge/database';
+import { PluginGrantScope, PluginGrantStatus, RiskLevel } from '@bge/database';
+import type { MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService, UNIT_BOUND_RULES } from '@bge/testing';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { buildPluginModuleOptions } from '../testing/plugin-module-options.fixture';
 import {

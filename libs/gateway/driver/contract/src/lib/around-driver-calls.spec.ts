@@ -1,4 +1,5 @@
-import { defer, lastValueFrom, Observable, of } from 'rxjs';
+import type { Observable } from 'rxjs';
+import { defer, lastValueFrom, of } from 'rxjs';
 import { aroundDriverCalls } from './around-driver-calls.js';
 import { DATA_GATEWAY_DRIVER_OPERATIONS } from './data-gateway-driver-factory.js';
 import type { DataGatewayDriver } from './data-gateway-driver.js';

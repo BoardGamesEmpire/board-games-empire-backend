@@ -1,16 +1,15 @@
 import { AuditContextService, SystemActorScope } from '@bge/actor-context';
-import { type JobMetaEnvelope, wrapJobData } from '@bge/queue-actor-context';
+import type { JobMetaEnvelope } from '@bge/queue-actor-context';
+import { wrapJobData } from '@bge/queue-actor-context';
 import { InjectQueue } from '@nestjs/bullmq';
-import { Injectable, Logger, type OnApplicationBootstrap } from '@nestjs/common';
+import type { OnApplicationBootstrap } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import type { Queue } from 'bullmq';
 import { randomUUID } from 'node:crypto';
 import { EXTENDED_NETWORK_JOB_RETRY } from './extended-network-job-options';
-import {
-  EXTENDED_NETWORK_QUEUE,
-  type ExtendedNetworkJob,
-  ExtendedNetworkJobNames,
-} from './extended-network-queue.constants';
+import type { ExtendedNetworkJob } from './extended-network-queue.constants';
+import { EXTENDED_NETWORK_QUEUE, ExtendedNetworkJobNames } from './extended-network-queue.constants';
 
 const REBUILD_SCHEDULE_NAME = 'extended-network-rebuild';
 const REBUILD_INTERVAL_MS = 24 * 60 * 60 * 1000;

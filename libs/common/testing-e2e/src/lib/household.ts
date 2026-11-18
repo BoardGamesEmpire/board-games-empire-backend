@@ -1,11 +1,5 @@
-import {
-  SystemRole,
-  type Household,
-  type HouseholdMember,
-  type MemberInvitePolicy,
-  type MemberSharePolicy,
-  type PrismaClient,
-} from '@bge/database';
+import type { Household, HouseholdMember, MemberInvitePolicy, MemberSharePolicy, PrismaClient } from '@bge/database';
+import { SystemRole } from '@bge/database';
 import type { HouseholdRoleName, SessionActor } from './types.js';
 
 export interface HouseholdRosterEntry {

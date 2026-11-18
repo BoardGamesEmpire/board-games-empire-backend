@@ -1,5 +1,6 @@
 import { PluginCategory } from '@bge/database';
-import { PluginInventoryService, type RunningServerPlugin } from '@bge/plugin';
+import type { RunningServerPlugin } from '@bge/plugin';
+import { PluginInventoryService } from '@bge/plugin';
 import { createTestingModuleWithDb } from '@bge/testing';
 import { SERVER_DISCOVERY_SCHEMA_VERSION } from './constants';
 import { ServerDiscoveryService } from './server-discovery.service';

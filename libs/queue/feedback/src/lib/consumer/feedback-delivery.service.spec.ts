@@ -1,6 +1,7 @@
 import type { FeedbackReport, FeedbackSubmission } from '@bge/database';
 import { FeedbackSubmissionStatus } from '@bge/database';
-import { createTestingModuleWithDb, MockDatabaseService } from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { createTestingModuleWithDb } from '@bge/testing';
 import { SinkNotRegisteredError } from '../contract/errors';
 import type { FeedbackSink } from '../contract/feedback-sink';
 import type { FeedbackDeliveryJob } from '../interfaces/feedback-delivery-job.interface';

@@ -1,7 +1,8 @@
 import { defineRequestState, hasRequestState } from '@better-auth/core/context';
 import type { PrismaClient } from '@bge/database';
 import type { I18nPath, I18nTranslations } from '@bge/i18n';
-import { isMailConfigured, MAIL_READINESS_SELECT, MailFailureCode, type MailMessage } from '@bge/mail';
+import type { MailMessage } from '@bge/mail';
+import { isMailConfigured, MAIL_READINESS_SELECT, MailFailureCode } from '@bge/mail';
 import type { MailDispatcherService } from '@bge/queue-mail';
 import { Logger } from '@nestjs/common';
 import { APIError } from 'better-auth/api';

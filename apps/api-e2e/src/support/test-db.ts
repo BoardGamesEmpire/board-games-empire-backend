@@ -1,4 +1,5 @@
-import { openStandaloneClient, type PrismaClient } from '@bge/database';
+import type { PrismaClient } from '@bge/database';
+import { openStandaloneClient } from '@bge/database';
 
 /** The harness database's URL, set by the e2e globalSetup; the one every DB-only spec targets. */
 export function requireDatabaseUrl(): string {

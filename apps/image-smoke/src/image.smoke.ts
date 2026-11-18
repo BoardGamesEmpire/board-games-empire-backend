@@ -1,6 +1,9 @@
-import { performSignup, type SignupResult } from '@bge/testing-e2e/signup';
+import type { SignupResult } from '@bge/testing-e2e/signup';
+import { performSignup } from '@bge/testing-e2e/signup';
 import { request as httpRequest } from 'node:http';
-import { chromium, type Browser } from 'playwright';
+import type { Browser } from 'playwright';
+import { chromium } from 'playwright';
+import type { Session } from './support/api';
 import {
   awaitImport,
   currentUser,
@@ -10,7 +13,6 @@ import {
   searchGatewayOverSocket,
   signIn,
   startImport,
-  type Session,
 } from './support/api';
 import { visitClient } from './support/browser';
 import { recordFields, unexpectedErrors } from './support/logs';

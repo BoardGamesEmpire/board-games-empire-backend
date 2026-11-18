@@ -1,11 +1,14 @@
 import type { Actor } from '@bge/actor-context';
 import { AuditContextInternalService, AuditContextService } from '@bge/actor-context';
 import { Injectable } from '@nestjs/common';
-import { Test, type TestingModule } from '@nestjs/testing';
-import { UnrecoverableError, type Job } from 'bullmq';
+import type { TestingModule } from '@nestjs/testing';
+import { Test } from '@nestjs/testing';
+import type { Job } from 'bullmq';
+import { UnrecoverableError } from 'bullmq';
 import { ClsModule, ClsService } from 'nestjs-cls';
 import { ActorAwareWorkerHost } from './actor-aware.worker-host';
-import { wrapJobData, type JobActorMeta } from './job-meta';
+import type { JobActorMeta } from './job-meta';
+import { wrapJobData } from './job-meta';
 
 interface SampleJobData {
   readonly gameId: string;

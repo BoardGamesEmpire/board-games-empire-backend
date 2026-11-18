@@ -1,5 +1,6 @@
 import { actorUserId, AuditContextService } from '@bge/actor-context';
-import { DatabaseService, type SafeHttpPolicy } from '@bge/database';
+import type { SafeHttpPolicy } from '@bge/database';
+import { DatabaseService } from '@bge/database';
 import { t } from '@bge/i18n';
 import { SafeHttpPolicyEventsService } from '@bge/secure-http';
 import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';

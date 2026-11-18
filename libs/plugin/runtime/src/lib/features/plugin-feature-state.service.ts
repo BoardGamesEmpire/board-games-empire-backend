@@ -1,11 +1,12 @@
-import { assertPluginUnit, type PluginUnit } from '@bge/actor-context';
+import type { PluginUnit } from '@bge/actor-context';
+import { assertPluginUnit } from '@bge/actor-context';
+import type { PluginUnitDormancy } from '@bge/database';
 import {
   DatabaseService,
   derivePluginUnitDormancy,
   isPluginUnitServed,
   loadPluginUnitEnablement,
   PluginScope,
-  type PluginUnitDormancy,
 } from '@bge/database';
 import { resolveLocalizedString } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable } from '@nestjs/common';
@@ -15,8 +16,10 @@ import { PluginConsentStandingService } from '../consent/plugin-consent-standing
 import type { ConsentOutstandingCheck, PluginConsentStanding } from '../consent/plugin-consent-standing.types';
 import { activeManifestOf } from '../manifest/active-manifest';
 import { revalidateStoredManifest } from '../manifest/stored-manifest';
-import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
-import { derivePluginUnitState, type PluginUnitStateCode } from '../units/plugin-unit-state';
+import type { PluginModuleOptions } from '../plugin-module.options';
+import { MODULE_OPTIONS_TOKEN } from '../plugin-module.options';
+import type { PluginUnitStateCode } from '../units/plugin-unit-state';
+import { derivePluginUnitState } from '../units/plugin-unit-state';
 import { PluginUnitScopeError } from '../units/unit.errors';
 import {
   PluginFeatureStateManifestError,

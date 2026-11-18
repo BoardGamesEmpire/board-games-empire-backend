@@ -1,5 +1,7 @@
-import { SystemRole, type DatabaseService } from '@bge/database';
-import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
+import type { DatabaseService } from '@bge/database';
+import { SystemRole } from '@bge/database';
+import type { MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService } from '@bge/testing';
 import { findServerAdminIds } from './server-admins';
 
 describe('findServerAdminIds', () => {

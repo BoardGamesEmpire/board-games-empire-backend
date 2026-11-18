@@ -1,4 +1,12 @@
 import type { AuditContextService } from '@bge/actor-context';
+import type {
+  DatabaseService,
+  HouseholdPlugin,
+  Permission,
+  Plugin,
+  PluginGrant,
+  PluginPermission,
+} from '@bge/database';
 import {
   PluginCategory,
   PluginConsentActKind,
@@ -8,28 +16,24 @@ import {
   PluginScope,
   RiskLevel,
   SERVER_SCOPE_SENTINEL,
-  type DatabaseService,
-  type HouseholdPlugin,
-  type Permission,
-  type Plugin,
-  type PluginGrant,
-  type PluginPermission,
 } from '@bge/database';
-import { createMockDatabaseService, UNIT_BOUND_RULES, type MockDatabaseService } from '@bge/testing';
-import type { PluginArtifactDirectory } from '@boardgamesempire/plugin-contract';
-import { buildPluginArtifactSha256 as sha, type PluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
-import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
+import type { MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService, UNIT_BOUND_RULES } from '@bge/testing';
+import type { PluginArtifactDirectory, PluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
+import { buildPluginArtifactSha256 as sha } from '@boardgamesempire/plugin-contract';
+import type { PluginManifest } from '@boardgamesempire/plugin-manifest';
+import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { Logger } from '@nestjs/common';
-import { EventEmitter2 } from '@nestjs/event-emitter';
+import type { EventEmitter2 } from '@nestjs/event-emitter';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
 import { PluginConsentActStaleError } from '../consent/plugin-consent-act.errors';
 import { PluginInstalledEvent } from '../events/plugin.events';
-import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
+import type { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
 import { PluginDirectoryLayoutError } from '../loader/loader.errors';
-import { PluginDirectoryResolverService } from '../loader/plugin-directory-resolver.service';
+import type { PluginDirectoryResolverService } from '../loader/plugin-directory-resolver.service';
 import { buildPluginModuleOptions } from '../testing/plugin-module-options.fixture';
 import {
   PluginInstallAuthorityError,
@@ -44,8 +48,9 @@ import {
   PluginReinstallConflictError,
 } from './install.errors';
 import { DEFAULT_PLUGIN_EXECUTION_MODE } from './manifest-enum.maps';
-import { PluginInstallerService, type PluginInstallInput } from './plugin-installer.service';
-import { PluginStaticAnalysisService } from './plugin-static-analysis.service';
+import type { PluginInstallInput } from './plugin-installer.service';
+import { PluginInstallerService } from './plugin-installer.service';
+import type { PluginStaticAnalysisService } from './plugin-static-analysis.service';
 import type { StaticAnalysisFinding, StaticAnalysisReport } from './static-analysis.types';
 
 describe('PluginInstallerService', () => {

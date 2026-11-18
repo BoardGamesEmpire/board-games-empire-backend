@@ -1,4 +1,5 @@
-import { t, type I18nMessage } from '@bge/i18n';
+import type { I18nMessage } from '@bge/i18n';
+import { t } from '@bge/i18n';
 import type { OfferedGame } from '../offered-game/offered-game.types';
 
 /**

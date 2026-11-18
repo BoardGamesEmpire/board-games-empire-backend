@@ -1,13 +1,8 @@
-import {
-  Action,
-  AvailabilityResponse,
-  EventAvailabilityVote,
-  EventOccurrence,
-  OccurrenceStatus,
-  ResourceType,
-} from '@bge/database';
+import type { EventAvailabilityVote, EventOccurrence } from '@bge/database';
+import { Action, AvailabilityResponse, OccurrenceStatus, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
-import { CHECK_POLICIES_KEY, PoliciesGuard, type AppAbility } from '@bge/permissions';
+import type { AppAbility } from '@bge/permissions';
+import { CHECK_POLICIES_KEY, PoliciesGuard } from '@bge/permissions';
 import { ListScopeNotComposedError } from '@bge/shared';
 import { createTestingModuleWithDb, makeEventOccurrence, paginationQuery } from '@bge/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -15,8 +10,9 @@ import { ClsServiceManager } from 'nestjs-cls';
 import 'reflect-metadata';
 import { firstValueFrom } from 'rxjs';
 import { EventOccurrenceController } from './event-occurrence.controller';
-import { EventOccurrenceService, type OccurrenceDetail } from './event-occurrence.service';
-import { AvailabilitySummary } from './interfaces';
+import type { OccurrenceDetail } from './event-occurrence.service';
+import { EventOccurrenceService } from './event-occurrence.service';
+import type { AvailabilitySummary } from './interfaces';
 
 describe('EventOccurrenceController', () => {
   let controller: EventOccurrenceController;

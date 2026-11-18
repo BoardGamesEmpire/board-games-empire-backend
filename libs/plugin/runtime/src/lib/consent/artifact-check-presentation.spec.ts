@@ -1,4 +1,5 @@
-import { RiskLevel, type Permission } from '@bge/database';
+import type { Permission } from '@bge/database';
+import { RiskLevel } from '@bge/database';
 import { buildPluginManifest, validatePluginManifest } from '@boardgamesempire/plugin-manifest';
 import type { PluginInstallAssessment } from '../install/plugin-installer.service';
 import type { StaticAnalysisReport } from '../install/static-analysis.types';

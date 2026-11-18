@@ -2,19 +2,21 @@ import { MutationEvent } from '@bge/actor-context';
 import { PluginGrantScope, PluginGrantStatus, RiskLevel } from '@bge/database';
 import { PluginEvent, buildPluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
 import type { StaticAnalysisFinding } from '../install/static-analysis.types';
-import {
+import type {
   GrantedPermissionRecord,
+  NpmAuditFinding,
+  PluginInstallAuditContext,
+  PluginProvenance,
+} from './plugin.events';
+import {
   HouseholdPluginConfigUpdatedEvent,
   HouseholdPluginReconsentRequestedEvent,
-  NpmAuditFinding,
   PluginConfigUpdatedEvent,
   PluginDisabledEvent,
   PluginGrantCreatedEvent,
   PluginGrantRejectedEvent,
   PluginGrantRevokedEvent,
-  PluginInstallAuditContext,
   PluginInstalledEvent,
-  PluginProvenance,
   PluginUninstalledEvent,
   PluginUpdateCheckCompletedEvent,
   UserPluginReconsentRequestedEvent,

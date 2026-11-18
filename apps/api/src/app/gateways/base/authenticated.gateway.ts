@@ -1,8 +1,10 @@
 import { AuthService } from '@bge/auth';
-import { type I18nMessage, type I18nPath, isI18nMessage, t } from '@bge/i18n';
+import type { I18nMessage, I18nPath } from '@bge/i18n';
+import { isI18nMessage, t } from '@bge/i18n';
 import { PoliciesGuard } from '@bge/permissions';
 import type { BaseClientData } from '@bge/shared';
-import { buildWsClientData, type WsRefusalReason } from '@bge/utils';
+import type { WsRefusalReason } from '@bge/utils';
+import { buildWsClientData } from '@bge/utils';
 import { HttpException, Logger, UseFilters, UseGuards } from '@nestjs/common';
 import { OnGatewayConnection, OnGatewayInit } from '@nestjs/websockets';
 import { Http } from '@status/codes';

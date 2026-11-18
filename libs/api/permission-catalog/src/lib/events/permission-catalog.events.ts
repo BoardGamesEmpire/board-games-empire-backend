@@ -1,10 +1,6 @@
 import { MutationEvent } from '@bge/actor-context';
-import {
-  ResourceType,
-  type PermissionSnapshotRow,
-  type RolePermissionSnapshotRow,
-  type RoleSnapshotRow,
-} from '@bge/database';
+import type { PermissionSnapshotRow, RolePermissionSnapshotRow, RoleSnapshotRow } from '@bge/database';
+import { ResourceType } from '@bge/database';
 import { PermissionCatalogEvents } from '../constants/permission-catalog-events.constant';
 
 /**

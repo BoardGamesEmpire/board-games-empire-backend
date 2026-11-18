@@ -1,6 +1,7 @@
 import type { Logger as PinoInstance } from 'pino';
 import type { OtelBootstrapHandle } from '../init/init-otel';
-import { createShutdown, registerShutdownHandlers, type ShutdownableApp } from './register-shutdown';
+import type { ShutdownableApp } from './register-shutdown';
+import { createShutdown, registerShutdownHandlers } from './register-shutdown';
 
 interface MockLogger {
   error: jest.Mock;

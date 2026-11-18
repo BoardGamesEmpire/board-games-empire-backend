@@ -1,3 +1,4 @@
+import type { Plugin } from '@bge/database';
 import {
   PERMISSION_CATALOG,
   PermissionOwner,
@@ -7,18 +8,20 @@ import {
   Reach,
   RiskLevel,
   SystemRole,
-  type Plugin,
 } from '@bge/database';
 import { PermissionsService } from '@bge/permissions';
-import { createActors, type Actors, type AuthenticatedActor, type SessionActor } from '@bge/testing-e2e';
-import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
+import type { Actors, AuthenticatedActor, SessionActor } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
+import type { PluginManifest } from '@boardgamesempire/plugin-manifest';
+import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { readConsentSurface, sendSwitchOn, switchOnBody } from '../plugin/consent-act-fixtures';
 import { pluginRowData } from '../plugin/plugin-row-fixtures';
 import { permissionsCacheHas } from '../support/api-cache';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { flushPermissionGraphs, reconcileAsAtStart, restoreShippedCatalog } from './shipped-catalog';
 
 /**

@@ -1,16 +1,8 @@
 import { AuditContextInternalService, AuditContextService } from '@bge/actor-context';
 import { AuthService } from '@bge/auth';
 import { FALLBACK_LOCALE, I18N_CATALOG_DIR, I18nExceptionFilter, LocaleResolutionService, t } from '@bge/i18n';
-import {
-  Controller,
-  Get,
-  type INestApplication,
-  Logger,
-  type MiddlewareConsumer,
-  Module,
-  type NestModule,
-  NotFoundException,
-} from '@nestjs/common';
+import type { INestApplication, MiddlewareConsumer, NestModule } from '@nestjs/common';
+import { Controller, Get, Logger, Module, NotFoundException } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import { ClsMiddleware, ClsModule } from 'nestjs-cls';

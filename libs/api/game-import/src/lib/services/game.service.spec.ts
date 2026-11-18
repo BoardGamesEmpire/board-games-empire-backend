@@ -1,6 +1,7 @@
 import { ContentFormat, Prisma, Reach, ContentType as StoredContentType } from '@bge/database';
 import { ServiceAccountService } from '@bge/services';
-import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { createTestingModuleWithDb } from '@bge/testing';
 import { VocabularyLinkService } from '@bge/vocabulary';
 import type { GameData } from '@boardgamesempire/proto-gateway';
 import { ContentType, PlatformType as ProtoPlatformType } from '@boardgamesempire/proto-gateway';

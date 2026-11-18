@@ -1,4 +1,5 @@
-import { OccurrenceStatus, type Prisma } from '@bge/database';
+import type { Prisma } from '@bge/database';
+import { OccurrenceStatus } from '@bge/database';
 import { countLiveDates, LIVE_DATE_STATUSES } from './live-dates.util';
 
 describe('countLiveDates (#796)', () => {

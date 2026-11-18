@@ -1,4 +1,4 @@
-import { PluginGrantStatus, type RiskLevel } from '@bge/database';
+import type { PluginGrantStatus, RiskLevel } from '@bge/database';
 import request from 'supertest';
 import type { Caller } from '../support/api-key';
 

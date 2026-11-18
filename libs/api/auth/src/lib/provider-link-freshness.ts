@@ -1,5 +1,6 @@
 import type { I18nPath } from '@bge/i18n';
-import { APIError, dispatchAuthEndpoint, getSession, type DispatchContext } from 'better-auth/api';
+import type { DispatchContext } from 'better-auth/api';
+import { APIError, dispatchAuthEndpoint, getSession } from 'better-auth/api';
 
 /** The stable code a link refused for a stale session carries, so a client can announce or rephrase it. */
 export const PROVIDER_LINK_NEEDS_RECENT_SIGN_IN = 'PROVIDER_LINK_NEEDS_RECENT_SIGN_IN';

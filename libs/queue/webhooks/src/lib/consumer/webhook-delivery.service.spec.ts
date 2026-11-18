@@ -1,7 +1,9 @@
-import { WebhookSubscription, WebhookSubscriptionStatus } from '@bge/database';
+import type { WebhookSubscription } from '@bge/database';
+import { WebhookSubscriptionStatus } from '@bge/database';
 import { SecureHttpService } from '@bge/secure-http';
 import { EncryptionService } from '@bge/services';
-import { createTestingModuleWithDb, MockDatabaseService } from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { createTestingModuleWithDb } from '@bge/testing';
 import { WEBHOOK_DISABLED_EVENT, WebhookSigner } from '@bge/webhooks';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Http } from '@status/codes';

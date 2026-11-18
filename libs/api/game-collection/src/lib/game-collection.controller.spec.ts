@@ -5,7 +5,7 @@ import { paginationQuery } from '@bge/testing';
 import { ClsServiceManager } from 'nestjs-cls';
 import { firstValueFrom } from 'rxjs';
 import { GameCollectionController } from './game-collection.controller';
-import { GameCollectionService } from './game-collection.service';
+import type { GameCollectionService } from './game-collection.service';
 
 const PAGINATION = paginationQuery({ limit: 20 });
 

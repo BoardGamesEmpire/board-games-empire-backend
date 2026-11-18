@@ -1,4 +1,5 @@
-import { SET_AUTH_TOKEN_HEADER, type SessionActor } from '@bge/testing-e2e';
+import type { SessionActor } from '@bge/testing-e2e';
+import { SET_AUTH_TOKEN_HEADER } from '@bge/testing-e2e';
 import request from 'supertest';
 
 const SIGN_IN_PATH = '/api/auth/sign-in/email';

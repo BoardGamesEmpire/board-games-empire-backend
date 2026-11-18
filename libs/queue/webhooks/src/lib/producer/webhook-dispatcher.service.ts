@@ -1,20 +1,10 @@
-import { AuditContextService, type Actor } from '@bge/actor-context';
+import type { Actor } from '@bge/actor-context';
+import { AuditContextService } from '@bge/actor-context';
 import { DatabaseService, Prisma, ResourceType, WebhookSubscriptionStatus } from '@bge/database';
-import {
-  AbilityFactory,
-  PermissionsService,
-  type ApikeyWithScopes,
-  type AppAbility,
-  type UserWithRoles,
-} from '@bge/permissions';
-import {
-  WebhookEventRegistry,
-  WebhookVisibilityService,
-  isWebhookEmittableEvent,
-  type WebhookEmittableEvent,
-  type WebhookEventDescriptor,
-  type WebhookEventType,
-} from '@bge/webhooks';
+import type { ApikeyWithScopes, AppAbility, UserWithRoles } from '@bge/permissions';
+import { AbilityFactory, PermissionsService } from '@bge/permissions';
+import type { WebhookEmittableEvent, WebhookEventDescriptor, WebhookEventType } from '@bge/webhooks';
+import { WebhookEventRegistry, WebhookVisibilityService, isWebhookEmittableEvent } from '@bge/webhooks';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Injectable, Logger, OnApplicationShutdown, OnModuleInit } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';

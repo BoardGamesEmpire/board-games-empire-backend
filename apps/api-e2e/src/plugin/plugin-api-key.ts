@@ -1,6 +1,8 @@
-import { ResourceType, type PrismaClient } from '@bge/database';
+import type { PrismaClient } from '@bge/database';
+import { ResourceType } from '@bge/database';
 import type { SessionActor } from '@bge/testing-e2e';
-import { mintApiKey, type Caller } from '../support/api-key';
+import type { Caller } from '../support/api-key';
+import { mintApiKey } from '../support/api-key';
 
 /**
  * An API key of `owner`'s, scoped to the household plugin routes and nothing
