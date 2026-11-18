@@ -311,6 +311,99 @@ const noUncodedExceptionBody = {
   },
 };
 
+// #1318: blank lines between the members of an interface, an object type
+// literal, or a class's property list are set by the members alone. A member
+// is special when it carries a leading comment of any kind (a line comment
+// too, or the fix would pull a `//`-commented member up against the one above)
+// or spans more than one line, decorators included. A blank line goes before a
+// special member and before the member after one; between two plain one-line
+// members there is none. The first member is never checked. With members
+// sorted (#1374), the same body always gets the same layout.
+//
+// In a class body only property pairs are checked: a method on either side
+// leaves the pair alone, since class methods are out of scope. Members that
+// share a line are Prettier's business, so a gap without a newline is skipped.
+const CLASS_PROPERTY_TYPES = new Set(['PropertyDefinition', 'TSAbstractPropertyDefinition', 'TSIndexSignature']);
+
+const memberBlankLines = {
+  meta: {
+    type: 'layout',
+    fixable: 'whitespace',
+    schema: [],
+    messages: {
+      blankLineRequired:
+        'Put one blank line before this member: it or the member above carries a comment or spans more than one line (#1318).',
+      blankLineForbidden:
+        'Remove the blank line before this member: neither it nor the member above carries a comment or spans more than one line (#1318).',
+    },
+  },
+  create(context) {
+    const sourceCode = context.sourceCode;
+
+    // Comments before a member that start below the token ahead of it. A
+    // comment on that token's own line trails the member above instead.
+    const leadingComments = (member) => {
+      const tokenBefore = sourceCode.getTokenBefore(member);
+      const afterLine = tokenBefore ? tokenBefore.loc.end.line : 0;
+
+      return sourceCode.getCommentsBefore(member).filter((comment) => comment.loc.start.line > afterLine);
+    };
+
+    const startLine = (member) => Math.min(member.loc.start.line, member.decorators?.[0]?.loc.start.line ?? Infinity);
+
+    const isSpecial = (member) => leadingComments(member).length > 0 || member.loc.end.line > startLine(member);
+
+    const checkPair = (prev, cur) => {
+      const [firstComment] = leadingComments(cur);
+      const firstOfCur = firstComment ?? sourceCode.getFirstToken(cur);
+      const before = sourceCode.getTokenBefore(firstOfCur, { includeComments: true });
+      const gap = sourceCode.text.slice(before.range[1], firstOfCur.range[0]);
+      const newlines = gap.split('\n').length - 1;
+
+      if (newlines === 0) {
+        return;
+      }
+
+      const wanted = isSpecial(prev) || isSpecial(cur) ? 2 : 1;
+
+      if (newlines === wanted) {
+        return;
+      }
+
+      const indent = gap.slice(gap.lastIndexOf('\n') + 1);
+
+      context.report({
+        node: cur,
+        messageId: wanted === 2 ? 'blankLineRequired' : 'blankLineForbidden',
+        fix: (fixer) => fixer.replaceTextRange([before.range[1], firstOfCur.range[0]], '\n'.repeat(wanted) + indent),
+      });
+    };
+
+    const checkList = (members, inScope = () => true) => {
+      for (let index = 1; index < members.length; index++) {
+        const prev = members[index - 1];
+        const cur = members[index];
+
+        if (inScope(prev) && inScope(cur)) {
+          checkPair(prev, cur);
+        }
+      }
+    };
+
+    return {
+      TSInterfaceBody(node) {
+        checkList(node.body);
+      },
+      TSTypeLiteral(node) {
+        checkList(node.members);
+      },
+      ClassBody(node) {
+        checkList(node.body, (member) => CLASS_PROPERTY_TYPES.has(member.type));
+      },
+    };
+  },
+};
+
 // Interface and type-literal members sort alphabetically (#1374): natural
 // order (field2 before field10), case-insensitive, one list per body. Blank
 // lines neither partition the sort nor get touched by it; bge/member-blank-lines
@@ -327,7 +420,11 @@ export const sortedMemberOptions = {
 
 export const bgePlugin = {
   meta: { name: 'bge' },
-  rules: { 'no-nested-ceiling': noNestedCeiling, 'no-uncoded-exception-body': noUncodedExceptionBody },
+  rules: {
+    'member-blank-lines': memberBlankLines,
+    'no-nested-ceiling': noNestedCeiling,
+    'no-uncoded-exception-body': noUncodedExceptionBody,
+  },
 };
 
 // #145: CI guardrail against NEW hardcoded user-facing strings in libs already

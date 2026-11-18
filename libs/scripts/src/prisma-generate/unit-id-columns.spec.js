@@ -4,6 +4,11 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { getDMMF } = require('@prisma/get-dmmf');
+const { Linter } = require('eslint');
+const { default: perfectionist } = require('eslint-plugin-perfectionist');
+const tseslint = require('typescript-eslint');
+
+const { bgePlugin, sortedMemberOptions } = require('../../../../eslint.config.mjs');
 
 const { deriveUnitIdColumns, renderUnitIdColumns, writeUnitIdColumns } = require('./unit-id-columns');
 
@@ -109,6 +114,31 @@ describe('unit-id columns (#994)', () => {
       expect(source).toContain('export const UNIT_ID_COLUMNS: Readonly<Record<string, ModelUnitIdColumns>> = ');
       expect(parseRendered(source)).toEqual(FIXTURE_COLUMNS);
       expect(renderUnitIdColumns(deriveUnitIdColumns(fixtureDatamodel()))).toBe(source);
+    });
+
+    // The module is gitignored, but lint still reads it, and every generate
+    // rewrites it, so its interface must already be in the sorted order and
+    // layout the root config asks for (#1374, #1318).
+    it('renders an interface the member sort and blank-line rules accept', () => {
+      const source = renderUnitIdColumns(deriveUnitIdColumns(fixtureDatamodel()));
+
+      const messages = new Linter({ configType: 'flat' }).verify(
+        source,
+        [
+          {
+            files: ['**/*.ts'],
+            languageOptions: { parser: tseslint.parser },
+            plugins: { bge: bgePlugin, perfectionist },
+            rules: {
+              'bge/member-blank-lines': 'error',
+              'perfectionist/sort-interfaces': ['error', sortedMemberOptions],
+            },
+          },
+        ],
+        'unit-id-columns.ts',
+      );
+
+      expect(messages).toEqual([]);
     });
   });
 
