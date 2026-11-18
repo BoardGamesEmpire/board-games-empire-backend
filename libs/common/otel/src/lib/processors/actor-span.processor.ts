@@ -43,6 +43,7 @@ export class ActorSpanProcessor implements SpanProcessor {
     try {
       snapshot = this.provider();
     } catch (error) {
+      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- a catch binding is `unknown`, and this reads it as the Error the provider throws (#1321)
       return this.logger.warn(`Actor context provider threw — span will not be annotated: ${(error as Error).message}`);
     }
 

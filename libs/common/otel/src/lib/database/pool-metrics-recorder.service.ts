@@ -140,7 +140,7 @@ export class DbPoolMetricsRecorder implements OnApplicationBootstrap, OnApplicat
   private discoverSources(): DatabasePoolMetricsSource[] {
     return this.discovery
       .getProviders()
-      .map((wrapper) => wrapper.instance as unknown)
+      .map((wrapper): unknown => wrapper.instance)
       .filter(isDatabasePoolMetricsSource);
   }
 }

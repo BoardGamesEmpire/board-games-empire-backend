@@ -49,6 +49,7 @@ export function isDatabasePoolMetricsSource(value: unknown): value is DatabasePo
   return (
     typeof value === 'object' &&
     value !== null &&
-    typeof (value as Record<string, unknown>).getDatabasePoolMetrics === 'function'
+    'getDatabasePoolMetrics' in value &&
+    typeof value.getDatabasePoolMetrics === 'function'
   );
 }
