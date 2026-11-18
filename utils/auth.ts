@@ -1,6 +1,6 @@
 import 'dotenv/config';
 
-// eslint-disable-next-line @nx/enforce-module-boundaries
+// eslint-disable-next-line @nx/enforce-module-boundaries -- the better-auth CLI loads this root file, which no Nx project owns (#1321)
 import { authFactory } from '../libs/api/auth/src/lib/auth-factory';
 
 import { PrismaClient } from '@bge/database';

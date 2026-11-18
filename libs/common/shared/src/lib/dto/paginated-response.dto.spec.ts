@@ -139,7 +139,7 @@ describe('paginatedEnvelopeSchema — for endpoints with no row model yet', () =
  */
 describe('ApiPaginatedEnvelope — the schema and its model registration, together', () => {
   class Probe {
-    // eslint-disable-next-line @typescript-eslint/no-empty-function
+    // eslint-disable-next-line @typescript-eslint/no-empty-function -- a probe route; only its decorators matter (#1321)
     list() {}
   }
 
@@ -161,7 +161,7 @@ describe('ApiPaginatedEnvelope — the schema and its model registration, togeth
 
   it('defaults the description to the resource, and lets a route override it', () => {
     class Custom {
-      // eslint-disable-next-line @typescript-eslint/no-empty-function
+      // eslint-disable-next-line @typescript-eslint/no-empty-function -- a probe route; only its decorators matter (#1321)
       list() {}
     }
     ApiPaginatedEnvelope('widgets', { description: 'Only the visible ones' })(
