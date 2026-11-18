@@ -71,6 +71,8 @@ GitHub epics carry the current state.
 - **Format**: run `npm run nx -- format:check --all` before pushing; CI checks
   the whole tree. Prettier here removes unused imports, so read the diff after
   `prettier --write`.
+- **Style**: `docs/STYLE.md` states the code style rules and the tool enforcing
+  each.
 - **Comments and test names** carry the reasoning and an issue reference
   (`#123`). Decision codes such as `D-123-4` belong in issues and commit
   messages only.
