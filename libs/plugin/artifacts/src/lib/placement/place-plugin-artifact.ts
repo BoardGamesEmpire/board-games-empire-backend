@@ -3,6 +3,9 @@ import { PLUGIN_SLUG_PATTERN } from '@boardgamesempire/plugin-manifest';
 import { lstat, mkdir, rename, rm, utimes } from 'node:fs/promises';
 import { join } from 'node:path';
 
+const errorCode = (err: unknown): string | undefined =>
+  typeof err === 'object' && err !== null && 'code' in err && typeof err.code === 'string' ? err.code : undefined;
+
 /**
  * Renames the extracted directory to its checksum path. The artifact sweep
  * leaves slug directories alone, but something else, such as a manual
@@ -15,7 +18,7 @@ const renameIntoSlugDirectory = async (extractDir: string, slugDir: string, targ
   try {
     await rename(extractDir, target);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+    if (errorCode(err) !== 'ENOENT') {
       throw err;
     }
 
@@ -66,7 +69,7 @@ export const placePluginArtifact = async (
     await renameIntoSlugDirectory(extractDir, slugDir, target);
     return 'placed';
   } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
+    const code = errorCode(err);
     if (code !== 'EEXIST' && code !== 'ENOTEMPTY') {
       throw err;
     }

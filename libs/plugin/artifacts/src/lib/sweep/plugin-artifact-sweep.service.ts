@@ -93,7 +93,7 @@ const addTotals = (totals: WalkTotals, more: Partial<WalkTotals> | undefined): W
 });
 
 const errorCode = (err: unknown): string | undefined =>
-  typeof err === 'object' && err !== null ? (err as NodeJS.ErrnoException).code : undefined;
+  typeof err === 'object' && err !== null && 'code' in err && typeof err.code === 'string' ? err.code : undefined;
 
 const describeError = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 

@@ -518,7 +518,8 @@ export class PluginArtifactReceiver {
         return 'a non-error value';
       }
 
-      const { code, reason } = value as { code?: unknown; reason?: unknown };
+      const code = 'code' in value ? value.code : undefined;
+      const reason = 'reason' in value ? value.reason : undefined;
       const details = [
         typeof code === 'string' ? `code ${code}` : null,
         typeof reason === 'string' ? `reason ${reason}` : null,

@@ -36,7 +36,8 @@ export const readArtifactSlug = async (extractDir: string): Promise<string> => {
       throw err;
     }
 
-    const code = (err as NodeJS.ErrnoException | null)?.code;
+    const code =
+      typeof err === 'object' && err !== null && 'code' in err && typeof err.code === 'string' ? err.code : undefined;
     if (err instanceof SyntaxError || (code !== undefined && NO_MANIFEST_CODES.has(code))) {
       throw refuse();
     }
@@ -44,7 +45,7 @@ export const readArtifactSlug = async (extractDir: string): Promise<string> => {
     throw err;
   }
 
-  const slug = (parsed as { slug?: unknown } | null)?.slug;
+  const slug = typeof parsed === 'object' && parsed !== null && 'slug' in parsed ? parsed.slug : undefined;
   if (typeof slug !== 'string' || !PLUGIN_SLUG_PATTERN.test(slug)) {
     throw refuse();
   }
