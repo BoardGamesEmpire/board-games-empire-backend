@@ -31,8 +31,10 @@ export async function lockLiveEvent(tx: Prisma.TransactionClient, id: string): P
  * Locks the event's row `FOR SHARE` until the caller's transaction ends, then
  * checks under the lock that the event is live, answering 404 when it isn't
  * ({@link assertEventExists}): one deleted itself, or one whose household is
- * deleted (#992). Every write beneath an event that doesn't lock the row
- * already takes it, so none lands on an event a delete has taken (#1065).
+ * deleted (#992). Every write in this lib beneath an event that doesn't lock
+ * the row already takes it, so none lands on an event a delete has taken
+ * (#1065). Linking media to an event is the media lib's write, and doesn't
+ * take it yet (#828).
  *
  * `FOR SHARE` conflicts with the `UPDATE` an event's delete runs, so the two
  * take turns: a write that locked first commits before the delete, and one
