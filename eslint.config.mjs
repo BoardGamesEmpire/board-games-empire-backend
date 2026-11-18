@@ -146,7 +146,9 @@ const FUNCTION_NODES = new Set(['ArrowFunctionExpression', 'FunctionDeclaration'
 
 /** The name a call's receiver goes by: `scopeComposer` for both `scopeComposer.x()` and `this.scopeComposer.x()`. */
 function receiverName(object) {
-  if (object.type === 'Identifier') return object.name;
+  if (object.type === 'Identifier') {
+    return object.name;
+  }
   if (object.type === 'MemberExpression' && !object.computed && object.property.type === 'Identifier') {
     return object.property.name;
   }
@@ -163,21 +165,33 @@ function ceilingCallName(callee) {
   }
 
   const name = callee.property.name;
-  if (CEILING_CALLS.has(name)) return name;
-  if (name === 'compose' && /composer$/i.test(receiverName(callee.object) ?? '')) return name;
+  if (CEILING_CALLS.has(name)) {
+    return name;
+  }
+  if (name === 'compose' && /composer$/i.test(receiverName(callee.object) ?? '')) {
+    return name;
+  }
   return undefined;
 }
 
 function propertyKeyName(property) {
-  if (property.key.type === 'Identifier' && !property.computed) return property.key.name;
-  if (property.key.type === 'Literal' && typeof property.key.value === 'string') return property.key.value;
+  if (property.key.type === 'Identifier' && !property.computed) {
+    return property.key.name;
+  }
+  if (property.key.type === 'Literal' && typeof property.key.value === 'string') {
+    return property.key.value;
+  }
   return undefined;
 }
 
 /** The name a value is bound to: `include` in `const include = ...`, or in `args.include = ...`. */
 function bindingName(node) {
-  if (node.type === 'VariableDeclarator' && node.id.type === 'Identifier') return node.id.name;
-  if (node.type === 'AssignmentExpression') return receiverName(node.left);
+  if (node.type === 'VariableDeclarator' && node.id.type === 'Identifier') {
+    return node.id.name;
+  }
+  if (node.type === 'AssignmentExpression') {
+    return receiverName(node.left);
+  }
   return undefined;
 }
 
@@ -206,11 +220,17 @@ const noNestedCeiling = {
     return {
       CallExpression(node) {
         const name = ceilingCallName(node.callee);
-        if (!name) return;
+        if (!name) {
+          return;
+        }
 
         for (let child = node, ancestor = node.parent; ancestor; child = ancestor, ancestor = ancestor.parent) {
-          if (FUNCTION_NODES.has(ancestor.type)) return;
-          if (ancestor.type === 'CallExpression' && ancestor.arguments.includes(child)) return;
+          if (FUNCTION_NODES.has(ancestor.type)) {
+            return;
+          }
+          if (ancestor.type === 'CallExpression' && ancestor.arguments.includes(child)) {
+            return;
+          }
 
           const key = relationKey(ancestor);
           if (key) {
@@ -245,11 +265,17 @@ const noUncodedExceptionBody = {
   },
   create(context) {
     const check = (node, exceptionClass) => {
-      if (exceptionClass?.type !== 'Identifier' || !exceptionClass.name.endsWith('Exception')) return;
-      if (EXCEPTIONS_THAT_MAY_NAME_A_CODE.has(exceptionClass.name)) return;
+      if (exceptionClass?.type !== 'Identifier' || !exceptionClass.name.endsWith('Exception')) {
+        return;
+      }
+      if (EXCEPTIONS_THAT_MAY_NAME_A_CODE.has(exceptionClass.name)) {
+        return;
+      }
 
       const [body] = node.arguments;
-      if (body?.type !== 'ObjectExpression') return;
+      if (body?.type !== 'ObjectExpression') {
+        return;
+      }
 
       if (body.properties.some((property) => property.type === 'Property' && propertyKeyName(property) === 'code')) {
         context.report({ node, messageId: 'uncoded' });
@@ -372,6 +398,10 @@ export default [
     files: ['**/*.ts', '**/*.tsx', '**/*.cts', '**/*.mts', '**/*.js', '**/*.jsx', '**/*.cjs', '**/*.mjs'],
     plugins: { bge: bgePlugin },
     rules: {
+      // Every if/else/for/while/do body takes braces (#1320). This block comes
+      // after the Nx spreads, which pull in eslint-config-prettier's `curly: 0`,
+      // so it wins; the 'all' option is one Prettier can print.
+      curly: ['error', 'all'],
       'bge/no-nested-ceiling': 'error',
       'bge/no-uncoded-exception-body': 'error',
     },

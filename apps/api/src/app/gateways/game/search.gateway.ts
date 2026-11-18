@@ -354,7 +354,9 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
 
   private cancelAllSearches(client: Socket): void {
     const data = this.userQueryMap.get(client) as WsClientData | undefined;
-    if (!data) return;
+    if (!data) {
+      return;
+    }
 
     for (const [correlationId, sub] of data.activeSearches) {
       sub.unsubscribe();

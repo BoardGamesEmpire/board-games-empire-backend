@@ -73,8 +73,11 @@ describe('createPrismaCliMigrator', () => {
 
       expect(lines).toContain('[prisma] migrate deploy with postgresql://bge_migrator@bge-rw/bge');
     } finally {
-      if (inherited === undefined) delete process.env['DATABASE_MIGRATION_URL'];
-      else process.env['DATABASE_MIGRATION_URL'] = inherited;
+      if (inherited === undefined) {
+        delete process.env['DATABASE_MIGRATION_URL'];
+      } else {
+        process.env['DATABASE_MIGRATION_URL'] = inherited;
+      }
       fs.rmSync(root, { recursive: true, force: true });
     }
   });

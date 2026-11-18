@@ -52,7 +52,9 @@ function splitOptionalParams(level: PinoLevel, params: readonly unknown[]): Opti
   }
 
   const context = typeof last === 'string' ? last : undefined;
-  if (!carriesStack) return { context };
+  if (!carriesStack) {
+    return { context };
+  }
 
   const rest = context === undefined ? params : params.slice(0, -1);
   const stack = rest[rest.length - 1];

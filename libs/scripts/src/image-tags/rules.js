@@ -47,7 +47,9 @@ const DIGEST = /^sha256:[0-9a-f]{64}$/;
  * platform, such as a nested index, and that entry's platform is 'no platform'.
  */
 function listedImages(manifest) {
-  if (!Array.isArray(manifest.manifests)) return null;
+  if (!Array.isArray(manifest.manifests)) {
+    return null;
+  }
 
   return manifest.manifests.map(({ digest, platform }) => ({
     digest,
@@ -68,18 +70,26 @@ function listedImages(manifest) {
  * @returns {{ action: 'build' } | { action: 'reuse', digest: string } | { action: 'stop', reason: string }}
  */
 function reuseDecision({ commit, platform, published }) {
-  if (published === null) return { action: 'build' };
+  if (published === null) {
+    return { action: 'build' };
+  }
 
   const stop = (problem) => ({ action: 'stop', reason: `${published.ref} ${problem}, and a sha tag never moves.` });
 
   const listed = listedImages(published.manifest);
-  if (listed === null) return stop('is a single image, not an index');
+  if (listed === null) {
+    return stop('is a single image, not an index');
+  }
 
   const [image] = listed.filter((candidate) => candidate.platform === platform);
-  if (image === undefined) return stop(`lists no ${platform} image`);
+  if (image === undefined) {
+    return stop(`lists no ${platform} image`);
+  }
 
   const revision = published.labels[image.digest][REVISION_LABEL];
-  if (revision !== commit) return stop(`names ${revision || 'no commit'}, not ${commit}`);
+  if (revision !== commit) {
+    return stop(`names ${revision || 'no commit'}, not ${commit}`);
+  }
 
   return { action: 'reuse', digest: image.digest };
 }
@@ -153,7 +163,9 @@ async function edgeDecision({ commit, tip, edge, otherEdges, compare }) {
       reason: `no package has an \`edge\`, and only master's tip, now \`${tip}\`, writes the first, since no commit published can be newer than the tip.`,
     };
   }
-  if (edge === null) return { move: true, reason: 'there was no `edge` yet.' };
+  if (edge === null) {
+    return { move: true, reason: 'there was no `edge` yet.' };
+  }
 
   const revision = namedCommit(edge);
   if (revision === null) {
@@ -231,7 +243,9 @@ function namedCommit(published) {
  */
 function publishProblems({ commit, manifest, tested, labels }) {
   const listed = listedImages(manifest);
-  if (listed === null) return ['it is a single image, not an index'];
+  if (listed === null) {
+    return ['it is a single image, not an index'];
+  }
 
   const problems = [];
 
@@ -250,8 +264,12 @@ function publishProblems({ commit, manifest, tested, labels }) {
   }
   for (const platform of Object.keys(tested)) {
     const entries = listed.filter((image) => image.platform === platform).length;
-    if (entries === 0) problems.push(`it lists no ${platform} image`);
-    if (entries > 1) problems.push(`it lists ${entries} entries for ${platform}, not one`);
+    if (entries === 0) {
+      problems.push(`it lists no ${platform} image`);
+    }
+    if (entries > 1) {
+      problems.push(`it lists ${entries} entries for ${platform}, not one`);
+    }
   }
 
   return problems;
@@ -270,8 +288,12 @@ function publishProblems({ commit, manifest, tested, labels }) {
  * @returns {'not-found' | 'denied' | 'unknown'}
  */
 function inspectFailure(ref, stderr) {
-  if (stderr.includes(`${ref}: not found`)) return 'not-found';
-  if (/403 Forbidden|denied/.test(stderr)) return 'denied';
+  if (stderr.includes(`${ref}: not found`)) {
+    return 'not-found';
+  }
+  if (/403 Forbidden|denied/.test(stderr)) {
+    return 'denied';
+  }
 
   return 'unknown';
 }
@@ -284,7 +306,9 @@ function inspectFailure(ref, stderr) {
  * @returns {string}
  */
 function shaTag(commit) {
-  if (!COMMIT.test(commit)) throw new Error(`${commit} is not a full commit SHA`);
+  if (!COMMIT.test(commit)) {
+    throw new Error(`${commit} is not a full commit SHA`);
+  }
 
   return `sha-${commit.slice(0, 7)}`;
 }
@@ -315,7 +339,9 @@ function testedDigests(outputs, { images, platforms }) {
   const byPlatform = Object.fromEntries(
     platforms.map((platform) => {
       const output = outputs[platform.split('/')[1]];
-      if (!output) throw new Error(`build-push's ${platform} job handed on no digests`);
+      if (!output) {
+        throw new Error(`build-push's ${platform} job handed on no digests`);
+      }
 
       const digests = JSON.parse(output);
       for (const image of Object.keys(digests)) {

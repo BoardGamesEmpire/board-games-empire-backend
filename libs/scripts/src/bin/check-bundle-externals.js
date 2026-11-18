@@ -16,7 +16,9 @@ const { checkBundleExternals } = require('../bundle-externals/check');
 const bundles = process.argv.slice(2).map((bundle) => path.resolve(bundle));
 
 try {
-  if (bundles.length === 0) throw new Error('name the bundles to check');
+  if (bundles.length === 0) {
+    throw new Error('name the bundles to check');
+  }
 
   const { externals, missing, withoutExternals } = checkBundleExternals(bundles);
 

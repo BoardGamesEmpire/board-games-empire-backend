@@ -20,6 +20,8 @@ export const INT32_MAX = 2 ** 31 - 1;
 export const TransformRangeBound = () =>
   Transform(({ obj, key, value }) => {
     const raw: unknown = obj[key];
-    if (typeof raw === 'string') return raw.trim() === '' ? undefined : value;
+    if (typeof raw === 'string') {
+      return raw.trim() === '' ? undefined : value;
+    }
     return typeof raw === 'number' ? value : raw;
   });

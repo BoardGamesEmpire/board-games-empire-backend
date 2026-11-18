@@ -861,7 +861,9 @@ export class SecureHttpService {
   private computeBackoff(attempt: number, retry: SafeHttpRetryPolicy): number {
     const cap = retry.maxDelayMs ?? DEFAULT_MAX_BACKOFF_MS;
     const exp = Math.min(retry.baseDelayMs * 2 ** (attempt - 1), cap);
-    if (retry.jitter === false) return exp;
+    if (retry.jitter === false) {
+      return exp;
+    }
     return Math.floor(Math.random() * exp);
   }
 
@@ -880,7 +882,9 @@ export class SecureHttpService {
   private async notify(method: 'onRedirectDenied', event: RedirectDeniedEvent): Promise<void>;
   private async notify(method: keyof OutboundHttpObserver, event: unknown): Promise<void> {
     const handler = this.observer[method] as ((e: unknown) => void | Promise<void>) | undefined;
-    if (!handler) return;
+    if (!handler) {
+      return;
+    }
     try {
       await handler.call(this.observer, event);
     } catch (err) {

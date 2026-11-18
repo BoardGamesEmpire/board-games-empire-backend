@@ -41,8 +41,11 @@ function readFiles(root) {
   const walk = (dir) => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) walk(full);
-      else files.set(path.relative(root, full), fs.readFileSync(full));
+      if (entry.isDirectory()) {
+        walk(full);
+      } else {
+        files.set(path.relative(root, full), fs.readFileSync(full));
+      }
     }
   };
 
@@ -50,7 +53,9 @@ function readFiles(root) {
     walk(root);
   } catch (error) {
     // Missing, or being replaced by another run while this one read it.
-    if (error.code === 'ENOENT') return null;
+    if (error.code === 'ENOENT') {
+      return null;
+    }
     throw error;
   }
   return files;
@@ -59,10 +64,14 @@ function readFiles(root) {
 function sameFiles(a, b) {
   const left = readFiles(a);
   const right = readFiles(b);
-  if (!left || !right || left.size !== right.size) return false;
+  if (!left || !right || left.size !== right.size) {
+    return false;
+  }
 
   for (const [file, content] of left) {
-    if (!right.get(file)?.equals(content)) return false;
+    if (!right.get(file)?.equals(content)) {
+      return false;
+    }
   }
   return true;
 }
@@ -70,7 +79,9 @@ function sameFiles(a, b) {
 /** Moves `staging` to `outputDir`, unless that already holds the same files. Returns whether it moved. */
 function moveIntoPlace(staging, outputDir) {
   for (let attempt = 1; ; attempt += 1) {
-    if (sameFiles(staging, outputDir)) return false;
+    if (sameFiles(staging, outputDir)) {
+      return false;
+    }
 
     fs.rmSync(outputDir, { recursive: true, force: true });
     try {
@@ -80,7 +91,9 @@ function moveIntoPlace(staging, outputDir) {
       // Something moved an export in between the delete and the rename: a run
       // the lock let in once it judged this one stale, or one that takes no lock.
       const collided = error.code === 'ENOTEMPTY' || error.code === 'EEXIST';
-      if (!collided || attempt === ATTEMPTS) throw error;
+      if (!collided || attempt === ATTEMPTS) {
+        throw error;
+      }
     }
   }
 }
@@ -97,7 +110,9 @@ function exportProtos({ outputDir, stagingRoot, runExport, lock }) {
   const staging = fs.mkdtempSync(path.join(stagingRoot, 'run-'));
   try {
     const status = runExport(staging);
-    if (status !== 0) return { status, written: false };
+    if (status !== 0) {
+      return { status, written: false };
+    }
 
     lock.acquire();
     try {

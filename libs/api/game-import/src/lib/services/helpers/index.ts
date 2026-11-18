@@ -31,7 +31,9 @@ export function toEditionKey(externalId: string | undefined): string {
 }
 
 export function toReleaseRegion(localizations: LocalizationData[]): ReleaseRegion {
-  if (!localizations.length) return ReleaseRegion.Worldwide;
+  if (!localizations.length) {
+    return ReleaseRegion.Worldwide;
+  }
 
   const REGION_CODE_MAP: Record<string, ReleaseRegion> = {
     ww: ReleaseRegion.Worldwide,

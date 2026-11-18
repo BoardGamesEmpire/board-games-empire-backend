@@ -388,11 +388,15 @@ export class GameSearchService {
     if (externalResponse) {
       for (const result of externalResponse.results) {
         const source = result.gatewayId;
-        if (!source) continue;
+        if (!source) {
+          continue;
+        }
 
         switch (result.status) {
           case ResultStatus.RESULT_STATUS_RESULT: {
-            if (!result.game) break;
+            if (!result.game) {
+              break;
+            }
 
             if (!resultsBySource[source]) {
               resultsBySource[source] = [];

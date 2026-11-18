@@ -54,8 +54,12 @@ export class RedisModule {
     providers.push(RedisLifecycleManager);
 
     const exports_: Array<symbol> = [];
-    if (options.cache) exports_.push(CACHE_REDIS_CLIENT);
-    if (options.queue) exports_.push(QUEUE_REDIS_CLIENT);
+    if (options.cache) {
+      exports_.push(CACHE_REDIS_CLIENT);
+    }
+    if (options.queue) {
+      exports_.push(QUEUE_REDIS_CLIENT);
+    }
 
     return {
       module: RedisModule,

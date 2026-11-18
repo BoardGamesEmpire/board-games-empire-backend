@@ -63,19 +63,27 @@ class FakeLock implements BootstrapLock {
   lost: Error | undefined;
   constructor(private readonly clock?: FakeClock) {}
   assertHeld(): void {
-    if (this.lost) throw this.lost;
+    if (this.lost) {
+      throw this.lost;
+    }
   }
   async acquire(options?: LockAcquireOptions): Promise<void> {
     this.events.push('acquire');
     this.acquireOptions.push(options);
     const blocked = this.blockedFor.shift();
-    if (blocked && this.clock) this.clock.time += blocked;
+    if (blocked && this.clock) {
+      this.clock.time += blocked;
+    }
   }
   async release(): Promise<void> {
     this.events.push('release');
     const blocked = this.releaseBlockedFor.shift();
-    if (blocked && this.clock) this.clock.time += blocked;
-    if (this.releaseError) throw this.releaseError;
+    if (blocked && this.clock) {
+      this.clock.time += blocked;
+    }
+    if (this.releaseError) {
+      throw this.releaseError;
+    }
   }
 }
 
@@ -246,7 +254,9 @@ describe('the boot sequence', () => {
     const original = ledger.readApplied.bind(ledger);
     ledger.readApplied = async () => {
       const rows = await original();
-      if (ledger.reads === 2) ledger.rows = CHAIN.map(finished);
+      if (ledger.reads === 2) {
+        ledger.rows = CHAIN.map(finished);
+      }
       return rows;
     };
 
@@ -276,9 +286,13 @@ describe('the boot sequence', () => {
     const original = ledger.readApplied.bind(ledger);
     ledger.readApplied = async () => {
       const rows = await original();
-      if (ledger.reads === 2) ledger.rows = CHAIN.map(finished);
+      if (ledger.reads === 2) {
+        ledger.rows = CHAIN.map(finished);
+      }
       // The read that finds the chain complete is a slow one: a second on a busy database.
-      if (ledger.reads === 3) clock.time += 1_000;
+      if (ledger.reads === 3) {
+        clock.time += 1_000;
+      }
       return rows;
     };
 
@@ -359,7 +373,9 @@ describe('the boot sequence', () => {
     const original = ledger.readApplied.bind(ledger);
     ledger.readApplied = async () => {
       const rows = await original();
-      if (ledger.reads === 3) ledger.rows = [...CHAIN.map(finished), finished('20260910_from_the_future')];
+      if (ledger.reads === 3) {
+        ledger.rows = [...CHAIN.map(finished), finished('20260910_from_the_future')];
+      }
       return rows;
     };
 
@@ -643,7 +659,9 @@ describe('the boot sequence', () => {
       const original = ledger.readApplied.bind(ledger);
       ledger.readApplied = async () => {
         const rows = await original();
-        if (ledger.reads === 2) ledger.rows.push(finishedAt('20260301_permissions', '2026-09-03T00:00:00Z'));
+        if (ledger.reads === 2) {
+          ledger.rows.push(finishedAt('20260301_permissions', '2026-09-03T00:00:00Z'));
+        }
         return rows;
       };
 
@@ -1013,7 +1031,9 @@ describe('the data-migrations phase', () => {
       run: async () => {
         phase.runs += 1;
         events.push('data-migrations');
-        if (dataMigrations.error) throw dataMigrations.error;
+        if (dataMigrations.error) {
+          throw dataMigrations.error;
+        }
         return { applied: dataMigrations.applied ?? [], unknown: dataMigrations.unknown ?? [], cachesFlushed: false };
       },
     };

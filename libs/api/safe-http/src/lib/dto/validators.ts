@@ -26,9 +26,13 @@ import { isFQDN } from 'validator';
 @ValidatorConstraint({ name: 'isHostnameOrWildcard', async: false })
 export class IsHostnameOrWildcardConstraint implements ValidatorConstraintInterface {
   validate(value: unknown): boolean {
-    if (typeof value !== 'string') return false;
+    if (typeof value !== 'string') {
+      return false;
+    }
     const candidate = value.startsWith('*.') ? value.slice(2) : value;
-    if (candidate.length === 0) return false;
+    if (candidate.length === 0) {
+      return false;
+    }
     return isFQDN(candidate, { require_tld: false, allow_underscores: false });
   }
 
@@ -66,7 +70,9 @@ export function IsHostnameOrWildcardArray(validationOptions?: ValidationOptions)
 @ValidatorConstraint({ name: 'isCidr', async: false })
 export class IsCidrConstraint implements ValidatorConstraintInterface {
   validate(value: unknown): boolean {
-    if (typeof value !== 'string') return false;
+    if (typeof value !== 'string') {
+      return false;
+    }
     return parseCidr(value) !== null;
   }
 

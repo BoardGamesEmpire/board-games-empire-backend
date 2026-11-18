@@ -12,7 +12,9 @@ describe('HttpDispatcherFactory', () => {
     dispatcher = undefined;
 
     await new Promise<void>((resolve) => {
-      if (!server) return resolve();
+      if (!server) {
+        return resolve();
+      }
       server.close(() => resolve());
       server = undefined;
     });

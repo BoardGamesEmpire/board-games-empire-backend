@@ -64,7 +64,9 @@ export class RedisKeyFlush {
     for (const pattern of this.patterns) {
       try {
         for await (const page of this.client.scanStream({ match: pattern, count: SCAN_PAGE })) {
-          if (page.length === 0) continue;
+          if (page.length === 0) {
+            continue;
+          }
           removed += await this.client.unlink(...page);
         }
       } catch (error) {

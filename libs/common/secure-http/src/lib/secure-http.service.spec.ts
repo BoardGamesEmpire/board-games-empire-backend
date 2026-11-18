@@ -58,7 +58,9 @@ class FakeDnsResolver implements DnsResolver {
 
   async resolveAll(hostname: string): Promise<ResolvedAddress[]> {
     const entry = this.responses.get(hostname);
-    if (!entry) throw new DnsResolutionError(hostname, new Error('NXDOMAIN'));
+    if (!entry) {
+      throw new DnsResolutionError(hostname, new Error('NXDOMAIN'));
+    }
     return entry;
   }
 }
@@ -817,7 +819,9 @@ describe('SecureHttpService', () => {
 
     function dnsFor(...hosts: Array<[string, string]>): FakeDnsResolver {
       const dns = new FakeDnsResolver();
-      for (const [host, ip] of hosts) dns.set(host, [v4(ip)]);
+      for (const [host, ip] of hosts) {
+        dns.set(host, [v4(ip)]);
+      }
       return dns;
     }
 
@@ -1053,7 +1057,9 @@ describe('SecureHttpService', () => {
       });
 
       afterEach(async () => {
-        for (const res of held) res.destroy();
+        for (const res of held) {
+          res.destroy();
+        }
         await agent.close();
         server.closeAllConnections();
         await new Promise((resolve) => server.close(resolve));

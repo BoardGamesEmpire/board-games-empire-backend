@@ -105,7 +105,9 @@ function serve(socket: Socket, onMessage: (type: string, text: string) => void):
     pending = Buffer.concat([pending, chunk]);
     // The startup message has no type byte, only its length.
     if (!started) {
-      if (pending.length < 4 || pending.length < pending.readInt32BE(0)) return;
+      if (pending.length < 4 || pending.length < pending.readInt32BE(0)) {
+        return;
+      }
       pending = pending.subarray(pending.readInt32BE(0));
       started = true;
       socket.write(STARTUP_ANSWERED);
@@ -131,11 +133,19 @@ function answersUntil(silentFrom: string, last?: Buffer) {
     serve(socket, (type, text) => {
       if (!silent && type === 'Q' && text.includes(silentFrom)) {
         silent = true;
-        if (last) socket.end(last);
+        if (last) {
+          socket.end(last);
+        }
       }
-      if (silent) return;
-      if (type === 'Q') socket.write(QUERY_ANSWERED);
-      if (type === 'S') socket.write(holdersAnswered([]));
+      if (silent) {
+        return;
+      }
+      if (type === 'Q') {
+        socket.write(QUERY_ANSWERED);
+      }
+      if (type === 'S') {
+        socket.write(holdersAnswered([]));
+      }
     });
   };
 }
@@ -153,12 +163,18 @@ function lockHeld(attempts: number, holders: readonly Holder[]) {
       if (type === 'Q' && lockTimeout && refused < attempts) {
         refused += 1;
         setTimeout(() => {
-          if (!socket.destroyed) socket.write(LOCK_TIMED_OUT);
+          if (!socket.destroyed) {
+            socket.write(LOCK_TIMED_OUT);
+          }
         }, Number(lockTimeout[1]));
         return;
       }
-      if (type === 'Q') socket.write(QUERY_ANSWERED);
-      if (type === 'S') socket.write(holdersAnswered(holders));
+      if (type === 'Q') {
+        socket.write(QUERY_ANSWERED);
+      }
+      if (type === 'S') {
+        socket.write(holdersAnswered(holders));
+      }
     });
 }
 
@@ -192,7 +208,9 @@ async function fakeDatabase(onConnection: (socket: Socket) => void) {
       );
     },
     close: async () => {
-      for (const socket of sockets) socket.destroy();
+      for (const socket of sockets) {
+        socket.destroy();
+      }
       await new Promise<void>((resolve) => server.close(() => resolve()));
     },
   };

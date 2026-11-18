@@ -15,7 +15,9 @@ function launch(): void {
   try {
     roles = parseRoles(process.env['BGE_ROLES']);
   } catch (error) {
-    if (!(error instanceof RoleSelectionError)) throw error;
+    if (!(error instanceof RoleSelectionError)) {
+      throw error;
+    }
     console.error(error.message);
     process.exitCode = 1;
     return;

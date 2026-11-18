@@ -30,7 +30,9 @@ export function describeDataMigrationsReport(plan: DataMigrationsPlan): PlanRepo
   }
 
   if (plan.ahead.length > 0) {
-    if (lines.length > 0) lines.push('');
+    if (lines.length > 0) {
+      lines.push('');
+    }
     lines.push(
       "Applied at a revision above this build's, left alone (a newer build ran them, and that build owns the data):",
       ...plan.ahead.map(describeMismatch).map(indent),
@@ -38,14 +40,18 @@ export function describeDataMigrationsReport(plan: DataMigrationsPlan): PlanRepo
   }
 
   if (plan.unknown.length > 0) {
-    if (lines.length > 0) lines.push('');
+    if (lines.length > 0) {
+      lines.push('');
+    }
     lines.push(
       'Ledger rows the registry does not know, left alone (a newer build applied them, or an entry was removed):',
       ...plan.unknown.map(indent),
     );
   }
 
-  if (lines.length > 0) lines.push('');
+  if (lines.length > 0) {
+    lines.push('');
+  }
   lines.push(closingLine(pendingNames.length, plan.applied.length, refusing));
 
   return { lines, exitCode: refusing ? 2 : pendingNames.length > 0 ? 1 : 0 };
@@ -99,7 +105,11 @@ export function describeSkippedDataMigrationsReport(): PlanReport {
 }
 
 function closingLine(pending: number, applied: number, refusing: boolean): string {
-  if (refusing) return 'Data migrations: the boot would refuse.';
-  if (pending > 0) return `Data migrations: ${pending} pending.`;
+  if (refusing) {
+    return 'Data migrations: the boot would refuse.';
+  }
+  if (pending > 0) {
+    return `Data migrations: ${pending} pending.`;
+  }
   return applied > 0 ? `Data migrations: none pending, ${applied} applied.` : 'Data migrations: none pending.';
 }

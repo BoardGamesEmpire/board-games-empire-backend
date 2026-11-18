@@ -27,7 +27,9 @@ export class SafeHttpPolicyEventsService implements OnModuleDestroy {
   constructor(@Inject(CACHE_REDIS_CLIENT) private readonly redis: Redis) {}
 
   async onModuleDestroy(): Promise<void> {
-    if (!this.subscriberConnection) return;
+    if (!this.subscriberConnection) {
+      return;
+    }
 
     try {
       await this.subscriberConnection.unsubscribe(SAFE_HTTP_POLICY_UPDATE_CHANNEL);
@@ -72,7 +74,9 @@ export class SafeHttpPolicyEventsService implements OnModuleDestroy {
     await this.subscriberConnection.subscribe(SAFE_HTTP_POLICY_UPDATE_CHANNEL);
 
     this.subscriberConnection.on('message', async (channel, message) => {
-      if (channel !== SAFE_HTTP_POLICY_UPDATE_CHANNEL) return;
+      if (channel !== SAFE_HTTP_POLICY_UPDATE_CHANNEL) {
+        return;
+      }
 
       try {
         const event = JSON.parse(message) as SafeHttpPolicyUpdatedEvent;

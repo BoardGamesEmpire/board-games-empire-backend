@@ -25,7 +25,9 @@ function installedVersion(pkg) {
   for (const dir of require.resolve.paths(pkg) ?? []) {
     const manifest = path.join(dir, pkg, 'package.json');
 
-    if (fs.existsSync(manifest)) return JSON.parse(fs.readFileSync(manifest, 'utf8')).version;
+    if (fs.existsSync(manifest)) {
+      return JSON.parse(fs.readFileSync(manifest, 'utf8')).version;
+    }
   }
 
   throw new Error(`prisma generate: ${pkg} is not installed`);
@@ -89,7 +91,9 @@ function createClientState(workspaceRoot) {
    * the recorded run wrote.
    */
   function outputFileCount() {
-    if (!fs.existsSync(outputDir)) return 0;
+    if (!fs.existsSync(outputDir)) {
+      return 0;
+    }
     return listFiles(outputDir, () => true).length;
   }
 

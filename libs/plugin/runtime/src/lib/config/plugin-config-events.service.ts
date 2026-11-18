@@ -30,7 +30,9 @@ export class PluginConfigEventsService implements OnModuleDestroy {
 
   async onModuleDestroy(): Promise<void> {
     const connection = this.subscriberConnection;
-    if (!connection) return;
+    if (!connection) {
+      return;
+    }
 
     this.subscriberConnection = undefined;
 
@@ -73,7 +75,9 @@ export class PluginConfigEventsService implements OnModuleDestroy {
     // Attached BEFORE subscribing so no message can land in the window
     // between the subscription taking effect and the listener existing.
     connection.on('message', (channel: string, message: string) => {
-      if (channel !== PLUGIN_CONFIG_UPDATE_CHANNEL) return;
+      if (channel !== PLUGIN_CONFIG_UPDATE_CHANNEL) {
+        return;
+      }
 
       void (async (): Promise<void> => {
         try {
