@@ -108,7 +108,7 @@ export abstract class AuthenticatedGateway implements OnGatewayInit, OnGatewayCo
    * base's. Left open, it would hear everything the namespace broadcasts.
    */
   handleConnection(client: Socket): void {
-    const { userId, correlationId, actor } = client.data as Partial<BaseClientData>;
+    const { userId, correlationId, actor }: Partial<BaseClientData> = client.data;
     if (!actor) {
       this.logger.error(`WS connection was never authenticated: socketId=${client.id}`);
       client.disconnect(true);
@@ -224,8 +224,8 @@ function markedBody(body: unknown): { fields: Record<string, unknown>; marker: I
     return { marker: body, fields: {} };
   }
 
-  if (body !== null && typeof body === 'object') {
-    const { message, ...fields } = body as Record<string, unknown>;
+  if (body !== null && typeof body === 'object' && 'message' in body) {
+    const { message, ...fields } = body;
     if (isI18nMessage(message)) {
       return { marker: message, fields };
     }

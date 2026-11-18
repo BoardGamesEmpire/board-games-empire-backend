@@ -162,7 +162,11 @@ import { apiPluginModuleOptions } from './plugin-module.options';
       middleware: {
         mount: false,
         generateId: true,
-        idGenerator: (req: Request) => <string>req?.headers?.['x-request-id'] || crypto.randomUUID(),
+        idGenerator: (req: Request) => {
+          // Node joins a repeated header into one string; only set-cookie arrives as an array.
+          const requestId = req?.headers?.['x-request-id'];
+          return (typeof requestId === 'string' && requestId) || crypto.randomUUID();
+        },
       },
     }),
 

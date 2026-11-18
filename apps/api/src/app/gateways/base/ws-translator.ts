@@ -66,7 +66,7 @@ export class WsTranslator {
    * callback that runs outside the frame, as a coordinator stream's do.
    */
   forClient(client: Socket, marker: I18nMessage): string {
-    const { locale } = client.data as Partial<BaseClientData>;
+    const { locale }: Partial<BaseClientData> = client.data;
 
     return this.translate(locale ?? FALLBACK_LOCALE, marker);
   }

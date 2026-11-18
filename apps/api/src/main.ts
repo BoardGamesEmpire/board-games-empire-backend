@@ -194,12 +194,12 @@ async function bootstrap() {
       .build();
 
     const openAPISchema: OpenAPIObject = await authInstance.api.generateOpenAPISchema();
-    const paths = Object.entries(openAPISchema.paths).reduce(
+    const paths = Object.entries(openAPISchema.paths).reduce<OpenAPIObject['paths']>(
       (acc, [path, methods]) => ({
         ...acc,
         [path.startsWith(`/${globalPrefix}/auth`) ? path : `/${globalPrefix}/auth${path}`]: methods,
       }),
-      {} as OpenAPIObject['paths'],
+      {},
     );
 
     const document = SwaggerModule.createDocument(app, swaggerConfig);
