@@ -1,4 +1,4 @@
-import { AuthType, Prisma } from '@bge/database';
+import { AuthType } from '@bge/database';
 import { GatewayRegistryService, GatewayRoutingRefusedError } from '@bge/gateway-registry';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { Injectable, Logger } from '@nestjs/common';
@@ -11,14 +11,14 @@ import { z } from 'zod';
  * sends them as JSON text, so valid JSON that isn't an object (a number,
  * null, an array) is refused here rather than stored (#1322).
  */
-const authParametersSchema = z.record(z.string(), z.unknown());
+const authParametersSchema = z.record(z.string(), z.json());
 
 /**
  * Parses the api's auth parameters. Invalid JSON throws its own SyntaxError,
  * and JSON that isn't an object throws a plain error; the caller answers
  * either one as a failed connect (#1322).
  */
-function parseAuthParameters(authParametersJson: string): Record<string, unknown> {
+function parseAuthParameters(authParametersJson: string): z.infer<typeof authParametersSchema> {
   const parsed = authParametersSchema.safeParse(JSON.parse(authParametersJson));
 
   if (!parsed.success) {
@@ -60,8 +60,7 @@ export class CoordinatorService {
         connectionUrl: request.connectionUrl,
         connectionPort: request.connectionPort,
         authType,
-        // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- JSON.parse yields only JSON values, which the schema's z.unknown() doesn't carry into the type (#1321)
-        authParameters: authParameters as Prisma.JsonValue,
+        authParameters,
       });
 
       return { success: true };
