@@ -38,7 +38,7 @@
     "proto:clean": "rimraf libs/proto/gateway/src/gen && rimraf libs/proto/gateway/proto-export",
     "proto:deps": "buf dep update libs/proto/gateway",
     "proto:format": "nx run proto-gateway:buf-format",
-    "preproto:generate": "npm run proto:clean && npm run proto:deps",
+    "preproto:generate": "npm run proto:clean",
     "proto:generate": "nx run proto-gateway:buf-export && nx run proto-gateway:generate",
     "proto:lint": "nx run proto-gateway:buf-lint",
     "proto:push": "nx run proto-gateway:buf-push",

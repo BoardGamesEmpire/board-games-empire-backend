@@ -138,13 +138,14 @@ runs:
       shell: bash
       run: npx nx run database:generate
 
+    # Through the npm script, so CI runs what a developer runs, from the
+    # committed buf.lock, as the Dockerfile builds. The script no longer runs
+    # `proto:deps`: `buf dep update` moved the lock to whatever upstream
+    # published last, so each job built against different commits, and a bug
+    # agent's fix carried the rewritten lock into its PR (#733).
     - name: Generate protobuf types
       shell: bash
-      run: |
-        npm run proto:clean
-        npm run proto:deps
-        npx nx run proto-gateway:buf-export
-        npx nx run proto-gateway:generate
+      run: npm run proto:generate
 
     # Untracked as of #260, like the two above. The task graph can mostly produce
     # this on its own: `typecheck` reaches `^generate` for every project except
