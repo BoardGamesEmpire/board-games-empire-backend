@@ -1,8 +1,10 @@
 import type { Redis } from '@bge/redis';
 import { CACHE_REDIS_CLIENT } from '@bge/redis';
 import { Inject, Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { z } from 'zod';
 import { SAFE_HTTP_POLICY_UPDATE_CHANNEL } from '../constants/safe-http.constants';
 import type { SafeHttpPolicyEventHandler, SafeHttpPolicyUpdatedEvent } from './safe-http-policy-event.interface';
+import { safeHttpPolicyUpdatedEventSchema } from './safe-http-policy-event.interface';
 
 /**
  * Cross-process invalidation for the `SafeHttpPolicy` snapshot. The admin
@@ -79,8 +81,12 @@ export class SafeHttpPolicyEventsService implements OnModuleDestroy {
         return;
       }
 
+      const event = this.decode(message);
+      if (!event) {
+        return;
+      }
+
       try {
-        const event = JSON.parse(message) as SafeHttpPolicyUpdatedEvent;
         await handler(event);
       } catch (err) {
         this.logger.error(`Failed to handle policy update message: ${err instanceof Error ? err.message : err}`);
@@ -92,5 +98,35 @@ export class SafeHttpPolicyEventsService implements OnModuleDestroy {
     return async () => {
       await this.onModuleDestroy();
     };
+  }
+
+  /**
+   * Parses a message from the channel, or returns `undefined` after logging
+   * one error line that names the channel. A message is outside data until
+   * its schema accepts it, so invalid JSON and a failed schema are both
+   * dropped the same way, without reaching the handler (#1322).
+   */
+  private decode(message: string): SafeHttpPolicyUpdatedEvent | undefined {
+    let payload: unknown;
+    try {
+      payload = JSON.parse(message);
+    } catch (err) {
+      this.logger.error(
+        `Dropped a message on ${SAFE_HTTP_POLICY_UPDATE_CHANNEL} that is not JSON: ${err instanceof Error ? err.message : err}`,
+      );
+
+      return undefined;
+    }
+
+    const parsed = safeHttpPolicyUpdatedEventSchema.safeParse(payload);
+    if (!parsed.success) {
+      this.logger.error(
+        `Dropped a message on ${SAFE_HTTP_POLICY_UPDATE_CHANNEL} that fails its schema: ${z.prettifyError(parsed.error)}`,
+      );
+
+      return undefined;
+    }
+
+    return parsed.data;
   }
 }
