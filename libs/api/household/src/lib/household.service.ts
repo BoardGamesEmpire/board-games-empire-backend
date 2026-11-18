@@ -160,12 +160,14 @@ export class HouseholdService {
     const memberGamesPromises = household.members.map((member) => this.getSelectMemberGames(member.userId, member.id));
 
     const memberGames = await Promise.all(memberGamesPromises);
-    const memberGamesMap = memberGames.reduce(
+    const memberGamesMap = memberGames.reduce<
+      Record<string, { id: string; platformGame: { game: { id: string; title: string }; id: string } }[]>
+    >(
       (acc, { memberId, gameCollections }) => ({
         ...acc,
         [memberId]: gameCollections,
       }),
-      {} as Record<string, { id: string; platformGame: { game: { id: string; title: string }; id: string } }[]>,
+      {},
     );
 
     const members = household.members.map((member) => ({

@@ -88,7 +88,9 @@ export const ADMISSIBLE_MEMBERSHIP_ORIGINS = [
 export type AdmissibleMembershipOrigin = (typeof ADMISSIBLE_MEMBERSHIP_ORIGINS)[number];
 
 export function isAdmissibleMembershipOrigin(origin: HouseholdMembershipOrigin): origin is AdmissibleMembershipOrigin {
-  return (ADMISSIBLE_MEMBERSHIP_ORIGINS as readonly HouseholdMembershipOrigin[]).includes(origin);
+  const origins: readonly HouseholdMembershipOrigin[] = ADMISSIBLE_MEMBERSHIP_ORIGINS;
+
+  return origins.includes(origin);
 }
 
 /**
