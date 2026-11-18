@@ -40,6 +40,7 @@ export async function startPgBouncer(options: PgBouncerOptions): Promise<PgBounc
         'starts; with BGE_E2E_DATABASE_URL, set it to the host:port a container reaches that database at.',
     );
   }
+
   // Parsed as a URL's authority, so an IPv6 address in brackets keeps its colons.
   const postgres = new URL(`postgres://${address}`);
   const url = new URL(options.databaseUrl);

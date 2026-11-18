@@ -26,6 +26,7 @@ export class SafeHttpService {
     if (rows.length === 0) {
       throw new NotFoundException(t('errors.safe_http.no_policy'));
     }
+
     if (rows.length > 1) {
       throw new ConflictException(t('errors.safe_http.multiple_policies'));
     }
@@ -112,6 +113,7 @@ export class SafeHttpService {
     if (allowedWildcards.length > 0) {
       offenders.push({ field: 'allowedHosts', entries: allowedWildcards });
     }
+
     if (blockedWildcards.length > 0) {
       offenders.push({ field: 'blockedHosts', entries: blockedWildcards });
     }

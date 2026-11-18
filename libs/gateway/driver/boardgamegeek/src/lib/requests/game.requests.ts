@@ -172,6 +172,7 @@ export function parseExternalId(externalId: string): number {
   if (!/^[1-9]\d*$/.test(externalId) || !Number.isSafeInteger(id)) {
     throw new Error(`Invalid BGG externalId: '${externalId}' — expected positive integer`);
   }
+
   return id;
 }
 
@@ -183,9 +184,11 @@ export function chunk<T>(items: readonly T[], size: number): T[][] {
   if (size <= 0) {
     throw new Error(`chunk size must be positive, got ${size}`);
   }
+
   const out: T[][] = [];
   for (let i = 0; i < items.length; i += size) {
     out.push(items.slice(i, i + size));
   }
+
   return out;
 }

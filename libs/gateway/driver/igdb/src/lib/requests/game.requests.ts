@@ -185,6 +185,7 @@ export function parseIgdbExternalId(externalId: string): number {
   if (!/^[1-9]\d*$/.test(externalId) || !Number.isSafeInteger(id)) {
     throw new Error(`Invalid IGDB externalId: '${externalId}' — expected positive integer`);
   }
+
   return id;
 }
 

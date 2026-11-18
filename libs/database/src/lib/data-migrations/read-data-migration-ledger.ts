@@ -20,6 +20,7 @@ export async function readDataMigrationLedger(
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === PrismaError.TableDoesNotExist) {
       return undefined;
     }
+
     throw error;
   }
 }

@@ -305,6 +305,7 @@ function refuseConnectionChange(
     if (CONNECTION_FIELDS.some((field) => update[field] !== undefined)) {
       throw pluginConnectionFields();
     }
+
     return;
   }
 

@@ -325,6 +325,7 @@ export class AbilityFactory {
         if (typeof value !== 'object' || value === null || !Object.prototype.hasOwnProperty.call(value, segment)) {
           return false;
         }
+
         value = (value as Record<string, unknown>)[segment];
       }
 
@@ -445,6 +446,7 @@ export class AbilityFactory {
       if (up.expiresAt === null) {
         return true;
       }
+
       // The user graph round-trips through Redis (Keyv/Valkey), where Date values
       // deserialize to ISO strings on a cache hit; normalize before comparing.
       return new Date(up.expiresAt).getTime() > now;

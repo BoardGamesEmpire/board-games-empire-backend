@@ -83,6 +83,7 @@ export function deriveReadCeilings(
         byRole = new Map();
         bySubject.set(role, byRole);
       }
+
       byRole.set(slug, reachOf(entry));
     }
   }

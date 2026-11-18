@@ -1069,6 +1069,7 @@ describe('PluginInventoryService', () => {
       for (const field of SERVER_ONLY) {
         expect(rows[0]).not.toHaveProperty(field);
       }
+
       // The server switch is still reported, under a name that cannot be
       // confused with the unit's own.
       expect(rows[0].serverEnabled).toBe(true);
@@ -1087,6 +1088,7 @@ describe('PluginInventoryService', () => {
       ]) {
         expect(select).not.toHaveProperty(column);
       }
+
       // `version` IS selected — the manifest re-validation cross-checks it —
       // but it must not reach the response, which the field loop above proves.
       expect(select).toHaveProperty('version');
@@ -1101,6 +1103,7 @@ describe('PluginInventoryService', () => {
       for (const field of SERVER_ONLY) {
         expect(rows[0]).not.toHaveProperty(field);
       }
+
       expect(rows[0].serverEnabled).toBe(true);
 
       const select = db.plugin.findMany.mock.calls[0]?.[0]?.select as Record<string, unknown>;

@@ -447,6 +447,7 @@ describe('PluginStaticAnalysisService', () => {
       for (let index = 0; index < MAX_GATING_EXAMPLES_PER_SPECIFIER + 20; index += 1) {
         await write(`importer${index}.js`, "import 'axios';\n");
       }
+
       await write('other.js', "import 'ioredis';\n");
 
       const report = await analyze();
@@ -462,6 +463,7 @@ describe('PluginStaticAnalysisService', () => {
       for (let index = 0; index < MAX_ADVISORY_FINDINGS + 30; index += 1) {
         await write(`noise${index}.cjs`, 'module.exports = (n) => require(n);\n');
       }
+
       await write('zbad.js', "import 'axios';\n");
 
       const report = await analyze();

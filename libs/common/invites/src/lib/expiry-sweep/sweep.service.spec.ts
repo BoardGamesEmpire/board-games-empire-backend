@@ -127,6 +127,7 @@ describe('InviteExpirySweepService', () => {
     for (const call of invites.expireOutstandingWithin.mock.calls) {
       expect(call).toEqual([tx, { limit: BATCH }]);
     }
+
     // Each emit carries the batch it followed, not a running total.
     expect(invites.emit.mock.calls.map(([events]) => events.length)).toEqual([BATCH, BATCH, 7]);
   });

@@ -160,6 +160,7 @@ export class GameFetchProcessor extends ActorAwareWorkerHost<
       } else {
         await this.gatewayRegistry.reportFailure(gatewayId, err);
       }
+
       throw err;
     }
   }

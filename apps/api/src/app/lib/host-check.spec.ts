@@ -143,6 +143,7 @@ describe('createHostCheck (#977)', () => {
       for (let name = 0; name < 150; name++) {
         handle(check, request(`evil-${name}.example`));
       }
+
       warn.mockClear();
 
       now.mockReturnValue(59 * 60 * 1000);

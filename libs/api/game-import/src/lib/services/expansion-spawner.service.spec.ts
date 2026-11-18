@@ -89,6 +89,7 @@ describe('ExpansionSpawnerService', () => {
     for (const [args] of upsert.mock.calls) {
       expect(args.create.payload).toEqual(expect.objectContaining({ origin: 'ChosenExpansion' }));
     }
+
     const flows = addBulk.mock.calls[0][0] as FlowJob[];
     for (const flow of flows) {
       expect((flow.data as { origin?: string }).origin).toBe('ChosenExpansion');

@@ -138,6 +138,7 @@ describe('AuditPersistenceListener', () => {
       // A failed assertion must still let close() finish, or Jest never exits.
       release();
     }
+
     await expect(response).resolves.toBe('done');
     await closing;
 

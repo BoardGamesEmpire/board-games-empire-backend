@@ -148,6 +148,7 @@ describe('event read scope', () => {
         const read = eventEnvelope(await readEvent(actor, strangersId).expect(200), `GET /api/events/:id as ${who}`);
         expect(read.id).toBe(strangersId);
       }
+
       await readEvent(plainUser, strangersId).expect(404);
 
       for (const [who, actor, ownId] of staff) {

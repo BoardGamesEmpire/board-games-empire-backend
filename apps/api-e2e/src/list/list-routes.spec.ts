@@ -408,6 +408,7 @@ describe('list routes (#1241)', () => {
       );
       expect(read.id).toBe(strangersList.id);
     }
+
     await request(baseUrl).get(`/api/lists/${strangersList.id}`).set(plainUser.headers).expect(404);
 
     for (const [who, actor] of staff) {

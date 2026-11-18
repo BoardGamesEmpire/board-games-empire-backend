@@ -93,6 +93,7 @@ export async function applyDataMigrations(
         'migration rolled back and apply the migrations again.',
     );
   }
+
   const plan = planDataMigrations(entries, rows);
 
   if (plan.edited.length > 0) {
@@ -152,6 +153,7 @@ export async function applyDataMigrations(
     if (applied.length > 0) {
       await invalidateAfter(applied, options, logger);
     }
+
     throw error;
   }
 
@@ -177,6 +179,7 @@ async function invalidateAfter(
     );
     return false;
   }
+
   try {
     await options.invalidate();
     return true;

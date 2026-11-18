@@ -47,12 +47,14 @@ class UploadController {
     if (handlerFails) {
       throw new Error('handler failed');
     }
+
     if (handlerReplacesFileWithDirectory && req.file) {
       // A path the backstop cannot remove: rmSync refuses a directory, even as root.
       rmSync(req.file.path);
       mkdirSync(req.file.path);
       writeFileSync(join(req.file.path, 'child'), '');
     }
+
     return { ok: true };
   }
 }
@@ -80,6 +82,7 @@ describe('PluginArtifactUploadInterceptor (#1094)', () => {
     for (const [k, v] of Object.entries(extra)) {
       form.append(k, v);
     }
+
     form.append('file', new Blob([new Uint8Array(bytes)], { type: 'application/gzip' }), 'a.tgz');
     return form;
   };

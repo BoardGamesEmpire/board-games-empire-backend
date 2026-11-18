@@ -421,6 +421,7 @@ describe('EventAttendeeService', () => {
           }),
         );
       }
+
       expect(db.eventGame.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { suppliedBy: { is: { attendeeId: 'att-1' } }, ...lineupStillAhead(expect.any(Date)) },
@@ -526,6 +527,7 @@ describe('EventAttendeeService', () => {
           }),
         );
       }
+
       expect(db.eventGame.findMany).not.toHaveBeenCalled();
       expect(db.eventGame.deleteMany).not.toHaveBeenCalled();
 

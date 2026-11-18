@@ -146,6 +146,7 @@ export class QuotaResourceRegistry {
     if (scope !== QuotaScope.User && scope !== QuotaScope.Household) {
       throw new Error(`household_invite_daily_count usage is not defined for scope '${scope}'`);
     }
+
     const client = db ?? this.databaseService;
     const since = new Date(Date.now() - HOUSEHOLD_INVITE_WINDOW_MS);
     const count = await client.invite.count({
@@ -167,6 +168,7 @@ export class QuotaResourceRegistry {
       // explicitly rather than be silently treated as User and skew accounting.
       throw new Error(`storage_bytes usage is not defined for scope '${scope}'`);
     }
+
     const client = db ?? this.databaseService;
     const { _sum } = await client.mediaObject.aggregate({
       _sum: { sizeBytes: true },

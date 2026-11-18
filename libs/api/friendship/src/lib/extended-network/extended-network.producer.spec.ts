@@ -107,6 +107,7 @@ describe('ExtendedNetworkProducer (#497)', () => {
     for (const [, data] of queue.add.mock.calls) {
       expect(data[JOB_META_KEY].actor).toEqual({ kind: 'system', reason: 'extended-network:unattributed-change' });
     }
+
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('has no actor'));
   });

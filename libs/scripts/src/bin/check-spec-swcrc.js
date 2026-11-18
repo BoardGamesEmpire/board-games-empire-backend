@@ -21,6 +21,7 @@ try {
     for (const problem of problems) {
       console.error(`spec-swcrc: ${problem}`);
     }
+
     console.error(
       'spec-swcrc: coverage maps back to source lines only with "inline"; see libs/scripts/src/spec-swcrc/check.js',
     );

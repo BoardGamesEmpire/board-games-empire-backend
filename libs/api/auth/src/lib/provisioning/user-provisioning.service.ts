@@ -121,6 +121,7 @@ export class UserProvisioningService {
       if (!isAnonymous) {
         await db.list.create({ data: { userId: user.id, kind: ListKind.Wishlist } });
       }
+
       await db.userRole.createMany({ data: elected ? firstHumanAssignments : baseAssignments });
 
       // First-human-ness, deliberately NOT `roleNames.includes(Owner)`. The

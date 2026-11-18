@@ -15,6 +15,7 @@ describe('HttpDispatcherFactory', () => {
       if (!server) {
         return resolve();
       }
+
       server.close(() => resolve());
       server = undefined;
     });

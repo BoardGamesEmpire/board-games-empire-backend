@@ -218,9 +218,11 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
       if (!migrator) {
         return 'Booting anyway.';
       }
+
       if (state.kind === 'diverged') {
         return 'Running the seeds and the data migrations, as over a database in sync.';
       }
+
       return (
         'Booting anyway, with the seeds and the data migrations skipped while the database is also ahead of this ' +
         'build; deleting these rows does not change that.'
@@ -236,6 +238,7 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
       if (state.unknown.length === 0) {
         return;
       }
+
       logger.warn(
         `Applying this build's migrations failed over a database holding ${state.unknown.length} migration(s) it ` +
           `does not know (${state.unknown.join(', ')}). A migration renamed or deleted after the database applied ` +
@@ -276,6 +279,7 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
           if (waiting) {
             waitedMs = clock.now() - started;
           }
+
           break;
         }
 
@@ -294,6 +298,7 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
             if (after.kind === 'failed') {
               throw new FailedMigrationError(after.failed);
             }
+
             if (after.pending.length > 0) {
               throw new MigrationsStillPendingError(after.pending, options.migrationCredential);
             }
@@ -382,6 +387,7 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
           root.recordException(releaseError instanceof Error ? releaseError : messageOf(releaseError));
         }
       }
+
       throw error;
     } finally {
       root.end();

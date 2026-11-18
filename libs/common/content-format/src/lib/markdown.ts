@@ -84,6 +84,7 @@ function dropEmpty(parent: Parents): void {
     if ('children' in child) {
       dropEmpty(child);
     }
+
     return !isEmptyContainer(child);
   }) as typeof parent.children;
 }

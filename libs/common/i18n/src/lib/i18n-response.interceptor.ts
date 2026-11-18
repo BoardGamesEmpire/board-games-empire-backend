@@ -80,6 +80,7 @@ export class I18nResponseInterceptor implements NestInterceptor {
           (clone ??= value.slice())[i] = resolved;
         }
       }
+
       return clone ?? value;
     }
 
@@ -89,11 +90,13 @@ export class I18nResponseInterceptor implements NestInterceptor {
         if (!Object.prototype.hasOwnProperty.call(value, key)) {
           continue;
         }
+
         const resolved = this.resolve(value[key], lang, depth + 1);
         if (resolved !== value[key]) {
           (clone ??= { ...value })[key] = resolved;
         }
       }
+
       return clone ?? value;
     }
 
@@ -106,6 +109,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (value === null || typeof value !== 'object') {
     return false;
   }
+
   const proto = Object.getPrototypeOf(value);
   return proto === Object.prototype || proto === null;
 }

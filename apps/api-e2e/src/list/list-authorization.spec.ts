@@ -210,6 +210,7 @@ describe('list authorization (#1241)', () => {
       const refused = await request(baseUrl).put('/api/lists/order').set(pinned.headers).send({ listIds }).expect(403);
       expect(refused.body.code).toBe('LIST_ORDER_FORBIDDEN');
     }
+
     expect(await positions()).toEqual(before);
 
     // An unpinned key holding the same slug reorders them.

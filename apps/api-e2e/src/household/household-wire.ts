@@ -238,6 +238,7 @@ export function readEnvelope(response: HttpResponseLike, request: RequestDescrip
     if (!isRecord(member)) {
       return fail('a roster entry is not an object', request, response);
     }
+
     if ('excludedFromHouseholds' in member) {
       return fail("a roster entry carried an 'excludedFromHouseholds' key", request, response);
     }

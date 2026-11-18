@@ -142,6 +142,7 @@ describe('household invite gating', () => {
         expect(Object.keys(invite).sort()).toEqual(Object.keys(toOpen).sort());
         expect(invite).toMatchObject({ status: toOpen.status, inviteeName: null });
       }
+
       expect(toOpen).not.toHaveProperty('withheld');
 
       const listed = inviteListEnvelope(

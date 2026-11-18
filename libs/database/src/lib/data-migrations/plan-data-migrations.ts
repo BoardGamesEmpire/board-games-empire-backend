@@ -99,6 +99,7 @@ export function assertDataMigrationRegistry(entries: readonly DataMigrationEntry
     if (seen.has(entry.name)) {
       throw new Error(`The data-migration registry names '${entry.name}' twice; every entry needs a name of its own.`);
     }
+
     seen.add(entry.name);
 
     if (!ENTRY_NAME.test(entry.name)) {

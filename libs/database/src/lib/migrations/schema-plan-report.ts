@@ -64,6 +64,7 @@ function behindLines({ pending, unknown }: MigrationState): string[] {
       DEVELOPMENT_DATABASE_RESET_LINE,
     );
   }
+
   lines.push(
     '',
     'The catalog and the data migrations are not planned here: the boot plans them over the migrated schema, and ' +

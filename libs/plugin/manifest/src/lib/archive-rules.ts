@@ -98,9 +98,11 @@ const createArchivePaths = () => {
         if (id === undefined) {
           return false;
         }
+
         if (files.has(id)) {
           return true;
         }
+
         if (index === segments.length - 1) {
           return kind === 'file';
         }
@@ -182,6 +184,7 @@ export function createPluginArchiveChecker(): PluginArchiveChecker {
       if (top === undefined || (rest.length === 0 && type !== 'directory')) {
         return refuse('top-level', name);
       }
+
       if (topLevel !== undefined && topLevel !== top) {
         return refuse('top-level', name);
       }
@@ -228,6 +231,7 @@ export function createPluginArchiveChecker(): PluginArchiveChecker {
           return refuse('required-file', required);
         }
       }
+
       return { ok: true };
     },
   };

@@ -9,11 +9,13 @@ function listFiles(dir, predicate) {
     if (!entry.isFile()) {
       continue;
     }
+
     const full = path.join(entry.parentPath ?? entry.path, entry.name);
     if (predicate(full)) {
       found.push(full);
     }
   }
+
   return found.sort();
 }
 

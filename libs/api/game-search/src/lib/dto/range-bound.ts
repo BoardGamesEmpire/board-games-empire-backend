@@ -23,5 +23,6 @@ export const TransformRangeBound = () =>
     if (typeof raw === 'string') {
       return raw.trim() === '' ? undefined : value;
     }
+
     return typeof raw === 'number' ? value : raw;
   });

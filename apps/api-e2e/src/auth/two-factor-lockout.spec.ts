@@ -189,6 +189,7 @@ describe('the two-factor lockout', () => {
     if (!totpSecret) {
       throw new Error(`the TOTP URI carries no secret: ${enabled.body.totpURI}`);
     }
+
     const secret = base32Decode(totpSecret);
 
     // Confirming the code is what turns two-factor on, and replaces the signup

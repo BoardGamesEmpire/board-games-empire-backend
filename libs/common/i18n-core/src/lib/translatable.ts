@@ -56,6 +56,7 @@ Object.defineProperty(I18nMessage.prototype, 'message', {
     } catch {
       return `${this.key} [unserializable args]`;
     }
+
     return args === undefined || args === '{}' ? this.key : `${this.key} ${args}`;
   },
 });
@@ -93,6 +94,7 @@ export function isI18nMessage(value: unknown): value is I18nMessage {
   if (typeof value !== 'object' || value === null) {
     return false;
   }
+
   const record = value as Record<string, unknown>;
   return (
     Object.prototype.hasOwnProperty.call(record, I18N_MESSAGE_BRAND) &&

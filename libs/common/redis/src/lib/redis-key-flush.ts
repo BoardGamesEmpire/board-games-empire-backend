@@ -67,12 +67,14 @@ export class RedisKeyFlush {
           if (page.length === 0) {
             continue;
           }
+
           removed += await this.client.unlink(...page);
         }
       } catch (error) {
         throw new CacheFlushError(pattern, removed, error);
       }
     }
+
     return removed;
   }
 

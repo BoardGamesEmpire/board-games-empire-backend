@@ -18,6 +18,7 @@ const handle = (storage: PluginArtifactUploadStorage, stream: Readable, mimetype
         fail(new Error('the callback ran twice'));
         return;
       }
+
       if (error) {
         fail(error);
       } else {

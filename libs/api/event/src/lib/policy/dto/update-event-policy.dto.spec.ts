@@ -46,6 +46,7 @@ describe('UpdateEventPolicyDto', () => {
     for (const occurrenceOverrideScope of ['None', 'TightenOnly', 'Any']) {
       await expect(propertiesWithErrors({ occurrenceOverrideScope })).resolves.toEqual([]);
     }
+
     await expect(propertiesWithErrors({ occurrenceOverrideScope: null })).resolves.toEqual(['occurrenceOverrideScope']);
     await expect(propertiesWithErrors({ occurrenceOverrideScope: 'Loose' })).resolves.toEqual([
       'occurrenceOverrideScope',

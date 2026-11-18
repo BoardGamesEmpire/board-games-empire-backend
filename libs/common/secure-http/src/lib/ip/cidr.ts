@@ -68,6 +68,7 @@ export function cidrContains(cidr: ParsedCidr, ip: ParsedIp): boolean {
       return false;
     }
   }
+
   return true;
 }
 
@@ -84,6 +85,7 @@ export function parseCidrList(input: readonly string[]): ParsedCidr[] {
       result.push(parsed);
     }
   }
+
   return result;
 }
 
@@ -97,6 +99,7 @@ export function findContainingCidr(cidrs: readonly ParsedCidr[], ip: ParsedIp): 
       return cidr;
     }
   }
+
   return null;
 }
 
@@ -113,14 +116,17 @@ function applyPrefixMask(bytes: Uint8Array, prefixLength: number): Uint8Array {
       bitsRemaining -= 8;
       continue;
     }
+
     if (bitsRemaining === 0) {
       masked[i] = 0;
       continue;
     }
+
     // Keep the top `bitsRemaining` bits, zero the rest.
     const mask = (0xff << (8 - bitsRemaining)) & 0xff;
     masked[i] = masked[i] & mask;
     bitsRemaining = 0;
   }
+
   return masked;
 }

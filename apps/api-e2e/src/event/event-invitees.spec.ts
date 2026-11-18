@@ -131,6 +131,7 @@ describe('placing a user on an event', () => {
       for (const id of await nonPersonIds()) {
         await createEvent(host, { inviteUserIds: [id] }).expect(404);
       }
+
       expect(await eventsCreatedBy(host)).toBe(before);
     });
 
@@ -143,6 +144,7 @@ describe('placing a user on an event', () => {
       for (const id of await nonPersonIds()) {
         await addAttendee(host, eventId, id).expect(404);
       }
+
       expect(await attendeeCount(eventId)).toBe(before);
     });
   });

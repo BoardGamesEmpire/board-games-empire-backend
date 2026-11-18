@@ -332,19 +332,24 @@ function planPermissions(
         if (changes.length > 0) {
           update.push({ slug: wanted.slug, changes });
         }
+
         if (row.retiredAt !== null) {
           revive.push(wanted.slug);
         }
+
         break;
       }
+
       case PermissionOwner.Admin: {
         const drift: FieldChange<PermissionField | 'retiredAt'>[] = diffPermission(wanted, row);
         if (row.retiredAt !== null) {
           drift.push({ field: 'retiredAt', from: row.retiredAt, to: null });
         }
+
         skipped.push({ slug: wanted.slug, managedBy: row.managedBy, drift });
         break;
       }
+
       case PermissionOwner.Plugin:
         conflicts.push({ slug: wanted.slug });
         break;
@@ -407,6 +412,7 @@ function planRoles(manifest: CatalogManifest, snapshot: CatalogSnapshot): Reconc
         if (drift.length > 0) {
           update.push({ name: wanted.name, changes: drift });
         }
+
         break;
       case PermissionOwner.Admin:
         skipped.push({ name: wanted.name, managedBy: row.managedBy, drift });
@@ -460,6 +466,7 @@ function planRolePermissions(
         } else {
           withheld.push({ roleName, permissionSlug, problems });
         }
+
         continue;
       }
 
@@ -474,12 +481,14 @@ function planRolePermissions(
               withheld.push({ roleName, permissionSlug, problems });
             }
           }
+
           break;
         case PermissionOwner.Admin:
           // An Owner's edge: left as it is, and a revocation on it is reported.
           if (row.revokedAt !== null) {
             skipped.push({ roleName, permissionSlug });
           }
+
           break;
         case PermissionOwner.Plugin:
           conflicts.push({ roleName, permissionSlug });
@@ -592,11 +601,13 @@ function comparePermissionField(
       const to = wanted.fields ?? [];
       return [row.fields, to, sameSet(row.fields, to)];
     }
+
     case 'conditions': {
       const to: Prisma.InputJsonObject = wanted.conditions ?? {};
       const from: Prisma.JsonValue = row.conditions ?? {};
       return [from, to, canonicalJson(from) === canonicalJson(to)];
     }
+
     default:
       return assertNever(field);
   }

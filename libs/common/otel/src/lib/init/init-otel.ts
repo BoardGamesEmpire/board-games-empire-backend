@@ -42,6 +42,7 @@ const resolveTraceExporter = (env: NodeJS.ProcessEnv): SpanExporter | undefined 
   if (!env[OTEL_EXPORTER_OTLP_ENDPOINT_ENV]) {
     return undefined;
   }
+
   const protocol = env[OTEL_EXPORTER_OTLP_PROTOCOL_ENV] ?? OTEL_OTLP_PROTOCOL_HTTP;
   return protocol === OTEL_OTLP_PROTOCOL_GRPC ? new OtlpGrpcTraceExporter() : new OtlpHttpTraceExporter();
 };
@@ -100,6 +101,7 @@ const defaultSignalExporters = (env: NodeJS.ProcessEnv): void => {
   if (env[OTEL_METRICS_EXPORTER_ENV] === undefined) {
     env[OTEL_METRICS_EXPORTER_ENV] = OTEL_EXPORTER_NONE;
   }
+
   if (env[OTEL_LOGS_EXPORTER_ENV] === undefined) {
     env[OTEL_LOGS_EXPORTER_ENV] = OTEL_EXPORTER_NONE;
   }

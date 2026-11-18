@@ -265,6 +265,7 @@ describe('ActorSpanProcessor', () => {
       const provider: ActorContextProvider = () => {
         throw new Error('provider broke');
       };
+
       const processor = new ActorSpanProcessor(provider);
 
       expect(() => processor.onStart(span as unknown as Span, emptyContext)).not.toThrow();

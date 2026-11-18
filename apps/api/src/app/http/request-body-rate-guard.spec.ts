@@ -99,6 +99,7 @@ describe('request body rate guard (#1094)', () => {
         if (socket.destroyed) {
           return resolve();
         }
+
         socket.write(CHUNK);
         if (++sent === chunks) {
           stopTimers();
@@ -114,6 +115,7 @@ describe('request body rate guard (#1094)', () => {
       if (received().split('HTTP/1.1 200').length - 1 >= count) {
         return;
       }
+
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
   }

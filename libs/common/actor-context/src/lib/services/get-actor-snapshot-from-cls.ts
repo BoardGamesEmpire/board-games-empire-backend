@@ -43,6 +43,7 @@ export const getActorSnapshotFromCls = (): ActorContextSnapshot => {
     if (!cls.isActive()) {
       return EMPTY_SNAPSHOT;
     }
+
     return {
       actor: cls.get<Actor | undefined>(ACTOR_CLS_KEY),
       correlationId: cls.get<string | undefined>(CORRELATION_ID_CLS_KEY),

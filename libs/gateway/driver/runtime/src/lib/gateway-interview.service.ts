@@ -463,6 +463,7 @@ export class GatewayInterviewService {
           `DataGateway ${gatewayId} was disabled or deleted during its interview; its answers weren't stored`,
         );
       }
+
       before = current;
     }
 

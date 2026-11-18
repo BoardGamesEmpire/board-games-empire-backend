@@ -103,6 +103,7 @@ describe('createRedisAuthStorage', () => {
         if (getError) {
           throw getError;
         }
+
         return values.get(key) ?? null;
       },
       async set(...args: unknown[]) {
@@ -110,6 +111,7 @@ describe('createRedisAuthStorage', () => {
         if (setError) {
           throw setError;
         }
+
         values.set(args[0], args[1]);
         return 'OK';
       },
@@ -118,6 +120,7 @@ describe('createRedisAuthStorage', () => {
         if (unlinkError) {
           throw unlinkError;
         }
+
         return values.delete(key) ? 1 : 0;
       },
       async eval(...args: unknown[]) {
@@ -125,6 +128,7 @@ describe('createRedisAuthStorage', () => {
         if (evalError) {
           throw evalError;
         }
+
         return evalResult;
       },
       async getdel(key: string) {
@@ -132,6 +136,7 @@ describe('createRedisAuthStorage', () => {
         if (getdelError) {
           throw getdelError;
         }
+
         const value = values.get(key) ?? null;
         values.delete(key);
         return value;

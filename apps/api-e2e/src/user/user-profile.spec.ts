@@ -179,6 +179,7 @@ describe('user profile', () => {
         reader = await actors.user();
         await befriend(db.client, reader, friend);
       }
+
       if (readerKey === 'extendedNetwork') {
         await arrangeExtendedNetwork(db.client, profileOwner, reader, 3);
       }

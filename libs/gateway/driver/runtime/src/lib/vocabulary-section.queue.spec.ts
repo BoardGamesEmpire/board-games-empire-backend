@@ -56,6 +56,7 @@ describe('VocabularySectionQueue', () => {
         },
       });
     }
+
     expect(queue.add.mock.calls.map(([, data]) => data.capability)).toEqual([
       ListLanguages,
       ListPlatforms,

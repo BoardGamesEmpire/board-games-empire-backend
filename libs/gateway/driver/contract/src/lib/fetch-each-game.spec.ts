@@ -23,12 +23,15 @@ function fakeFetchGame({
     if (failing.includes(externalId)) {
       return throwError(() => new Error(`upstream failed on ${externalId}`));
     }
+
     if (externalId in throttled) {
       return of({ correlationId, status: RATE_LIMITED, retryAfterMs: throttled[externalId] });
     }
+
     if (found.includes(externalId)) {
       return of({ correlationId, status: RESULT, game: game(externalId) });
     }
+
     return of({ correlationId, status: ERROR, message: `No game found for externalId ${externalId}` });
   });
 }

@@ -149,6 +149,7 @@ async function configFactories(root: Type): Promise<ConfigFactory[]> {
     if (visited.has(module)) {
       return;
     }
+
     visited.add(module);
 
     const dynamic = 'module' in module ? module : undefined;

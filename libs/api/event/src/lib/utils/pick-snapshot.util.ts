@@ -20,5 +20,6 @@ export function pickSnapshot<T extends { id: string }>(row: T, keys: readonly (k
   for (const key of keys) {
     snapshot[key as string] = row[key];
   }
+
   return snapshot as Partial<T> & Pick<T, 'id'>;
 }

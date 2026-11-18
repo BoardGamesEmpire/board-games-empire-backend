@@ -242,6 +242,7 @@ describe('RedisThrottlerStorage', () => {
         for (let attempt = 0; attempt < 5; attempt++) {
           await storage.increment('k', 60_000, 20, 60_000, 'default');
         }
+
         expect(error).toHaveBeenCalledTimes(1);
 
         jest.advanceTimersByTime(11_000);

@@ -53,6 +53,7 @@ describe('the data-migration ledger against Postgres', () => {
     const [row] = await db.client.$queryRawUnsafe<[{ n: number }]>(`SELECT count(*)::int AS n FROM "${PROBE}"`);
     return row.n;
   };
+
   /** Scoped to this spec's names: the harness ledger may one day hold the shipped registry's rows too. */
   const ledgerNames = async (): Promise<string[]> =>
     (

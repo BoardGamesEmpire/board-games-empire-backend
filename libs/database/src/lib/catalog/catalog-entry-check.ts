@@ -195,6 +195,7 @@ export function namedRoles(conditions: unknown): readonly string[] {
       if (SYSTEM_ROLES.has(value)) {
         named.add(value);
       }
+
       return;
     }
 
@@ -220,6 +221,7 @@ export function namedRoles(conditions: unknown): readonly string[] {
       if (key === 'name' && underRole) {
         collect(value);
       }
+
       walk(value, underRole || key === 'role');
     }
   };
@@ -296,8 +298,10 @@ export async function probeConditions(
     if (isVerdictOnCondition(error)) {
       return [{ kind: 'query-rejected', slug, message: reasonFor(error) }];
     }
+
     throw error;
   }
+
   await client.$executeRawUnsafe(`RELEASE SAVEPOINT ${PROBE_SAVEPOINT}`);
 
   return [];
@@ -350,6 +354,7 @@ function isVerdictOnCondition(error: unknown): error is Error {
     if (error.code === UNMAPPED_DATABASE_ERROR) {
       return isDataException(wrappedDriverCause(error));
     }
+
     return !isInfrastructureCode(error.code);
   }
 
@@ -457,6 +462,7 @@ function sampleContext(variables: readonly string[]): Record<string, unknown> {
     for (const key of keys) {
       node = (node[key] ??= {}) as Record<string, unknown>;
     }
+
     node[leaf] = PROBE_SAMPLE_VALUES[variable] ?? PROBE_SAMPLE_ID;
   }
 
@@ -623,6 +629,7 @@ function findUnpairedGrants(rolePermissions: Readonly<Record<string, readonly st
         PAIRED_GRANTS.filter(([slug]) => slug === first).map(([, second]) => second),
       );
     }
+
     for (const second of seconds) {
       unpaired(
         second,

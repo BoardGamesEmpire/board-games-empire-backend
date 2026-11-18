@@ -110,6 +110,7 @@ describe('feedback sink fan-out suppression on replay (#251)', () => {
     if (job === undefined) {
       throw new Error('Expected the original submission to have enqueued a job before removing it');
     }
+
     await job.remove();
     await waitForStableJobCount(feedbackQueue(), 0, { settleMs: 100 });
 

@@ -89,6 +89,7 @@ describe('friendship read scope', () => {
     for (const [, actor] of staffAndOwner) {
       await readHousehold(actor, strangersHousehold.id).expect(200);
     }
+
     await readHousehold(plainUser, strangersHousehold.id).expect(403);
 
     for (const [who, actor, ownId] of staffAndOwner) {

@@ -177,6 +177,7 @@ export function parseTemplate(conditions: unknown): ParsedTemplate {
         if ((type === '#' || type === '^') && Array.isArray(subTokens)) {
           walk(subTokens);
         }
+
         continue;
       }
 
@@ -514,13 +515,16 @@ export function findShorthandRelationConditions(
         if (relationOperators.length < keys.length) {
           findings.push({ slug, path: here });
         }
+
         for (const operator of relationOperators) {
           if (value[operator] === null) {
             findings.push({ slug, path: `${here}.${operator}` });
             continue;
           }
+
           walk(slug, value[operator], `${here}.${operator}`);
         }
+
         continue;
       }
 
@@ -608,6 +612,7 @@ function holdersBySlug(
         list = [];
         holders.set(slug, list);
       }
+
       if (!list.some((holder) => holder.role === role)) {
         list.push({ role, scope });
       }
@@ -627,12 +632,15 @@ function isReadableScalarFilter(filter: Record<string, unknown>): boolean {
       if (!SCALAR_FILTER_OPERATORS.has(operator)) {
         return false;
       }
+
       if (operator !== 'equals' && operator !== 'not') {
         return true;
       }
+
       if (Array.isArray(operand)) {
         return false;
       }
+
       return !isObject(operand) || (operator === 'not' && isReadableScalarFilter(operand));
     })
   );
@@ -647,5 +655,6 @@ function scopeOf(role: string, roleScope: Readonly<Record<string, RoleScope>>): 
   if (scope === undefined) {
     throw new Error(`Role '${role}' is not classified by the scope map, so its render pass is unknown`);
   }
+
   return scope;
 }

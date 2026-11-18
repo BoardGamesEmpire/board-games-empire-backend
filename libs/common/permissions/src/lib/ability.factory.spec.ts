@@ -1405,10 +1405,12 @@ describe('AbilityFactory', () => {
             expect(ability.can(Action.create, attendeeAs(role))).toBe(true);
             expect(ability.can(Action.delete, attendeeAs(role))).toBe(true);
           }
+
           for (const role of RUNNING_ROLES) {
             expect(ability.can(Action.create, attendeeAs(role))).toBe(false);
             expect(ability.can(Action.delete, attendeeAs(role))).toBe(false);
           }
+
           expect(ability.can(Action.create, attendeeAs(SystemRole.EventParticipant, 'ev-2'))).toBe(false);
         },
       );

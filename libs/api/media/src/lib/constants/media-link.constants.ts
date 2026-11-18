@@ -9,9 +9,11 @@ export function mediaKindForMime(mimeType: string): MediaKind | null {
   if (mimeType.startsWith('image/')) {
     return 'image';
   }
+
   if (DOCUMENT_MIME_TYPES.has(mimeType)) {
     return 'document';
   }
+
   return null;
 }
 

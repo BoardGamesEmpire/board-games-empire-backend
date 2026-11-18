@@ -427,6 +427,7 @@ describe('GameSearchService', () => {
         expect(refusal).toBeInstanceOf(ForbiddenException);
         expect(refusal.getResponse()).toEqual(t('errors.game_search.data_gateways_forbidden'));
       }
+
       expect(gameService.readDataGatewayLinks).not.toHaveBeenCalled();
       expect(coordinator.fetchExpansions).not.toHaveBeenCalled();
     });

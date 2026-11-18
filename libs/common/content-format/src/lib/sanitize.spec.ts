@@ -12,13 +12,16 @@ function reachable(markdown: string): { urls: string[]; html: boolean } {
     if (node.type === 'html') {
       html = true;
     }
+
     if (node.type === 'link' || node.type === 'image' || node.type === 'definition') {
       urls.push(node.url);
     }
+
     if ('children' in node) {
       node.children.forEach(visit);
     }
   };
+
   visit(parseMarkdown(markdown));
 
   return { urls, html };

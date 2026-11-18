@@ -50,6 +50,7 @@ describe('createProviderLinkingGate', () => {
     for (const action of ['create-user', 'sign-in']) {
       await expect(gate({ user: { emailVerified: false }, source: { action } })).resolves.toBeUndefined();
     }
+
     expect(deps.readPolicy).not.toHaveBeenCalled();
   });
 

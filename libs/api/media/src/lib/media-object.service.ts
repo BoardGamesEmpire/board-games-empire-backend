@@ -87,6 +87,7 @@ export class MediaObjectService {
     if (!ALLOWED_UPLOAD_MIME_TYPES.has(file.mimetype)) {
       throw new UnsupportedMediaTypeException(t('errors.media_object.unsupported_type', { mimeType: file.mimetype }));
     }
+
     // Fail fast before writing bytes: a type that can't link to the subject can never be approved.
     if (!this.mediaLink.canLink(file.mimetype, dto.subjectType)) {
       throw new BadRequestException(
@@ -329,9 +330,11 @@ export class MediaObjectService {
       if (error instanceof SignatureExpiredError) {
         throw new GoneException(t('errors.media_object.signed_url_expired'));
       }
+
       if (error instanceof SignatureInvalidError) {
         throw new ForbiddenException(t('errors.media_object.invalid_signature'));
       }
+
       throw error;
     }
 
@@ -346,9 +349,11 @@ export class MediaObjectService {
         this.logger.error(`Media ${slug}/${key} references unregistered driver '${error.slug}'`, error);
         throw new NotFoundException(t('errors.media_object.not_found_generic'));
       }
+
       if (error instanceof ObjectNotFoundError) {
         throw new NotFoundException(t('errors.media_object.not_found_generic'));
       }
+
       throw error;
     }
 

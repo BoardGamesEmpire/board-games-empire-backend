@@ -875,6 +875,7 @@ describe("The gateway registry and a plugin DataGateway's row (#1083)", () => {
         table.seed({ id, plugin: servedPlugin({ id: pluginId }) });
         await service.resolve(id, Search);
       }
+
       await expect(service.routableGatewayIds(Search)).resolves.toEqual(['served', 'switched-off', 'reinstalled']);
 
       table.patch('switched-off', { plugin: servedPlugin({ id: 'p-off', enabled: false }) });

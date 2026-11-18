@@ -103,6 +103,7 @@ export class MediaLinkService {
           t('errors.media_link.subject_not_found', { subjectType: target.subjectType, subjectId: target.subjectId }),
         );
       }
+
       throw error;
     }
   }

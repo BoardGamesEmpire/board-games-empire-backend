@@ -1332,6 +1332,7 @@ describe('PermissionsService', () => {
           if (withDecisions) {
             householdDecision();
           }
+
           reader.read.mockReturnValue({ valid: false, detail: 'manifest.scope: invalid' });
 
           const failure = await service

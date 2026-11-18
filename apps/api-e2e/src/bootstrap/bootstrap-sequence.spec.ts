@@ -157,6 +157,7 @@ async function slowLink(connectionString: string, delayMs: number) {
     from.on('close', () => void setTimeout(() => to.destroy(), delayMs));
     from.on('error', () => to.destroy());
   };
+
   const server = createServer((client) => {
     connections += 1;
     // A URL keeps an IPv6 address in brackets, which a socket would look up as a host name.
@@ -177,6 +178,7 @@ async function slowLink(connectionString: string, delayMs: number) {
       for (const socket of sockets) {
         socket.destroy();
       }
+
       await new Promise<void>((resolve) => server.close(() => resolve()));
     },
   };
@@ -365,6 +367,7 @@ describe('the boot sequence against Postgres', () => {
             if (Date.now() > deadline) {
               throw new Error(`no progress line; lines were:\n${logger.lines.join('\n')}`);
             }
+
             await sleep(25);
           }
 
@@ -400,6 +403,7 @@ describe('the boot sequence against Postgres', () => {
         if (Date.now() > deadline) {
           throw new Error('the terminated connection still holds the bootstrap lock');
         }
+
         await sleep(25);
       }
     });
@@ -446,11 +450,14 @@ describe('the boot sequence against Postgres', () => {
           } catch (error) {
             reported = error;
           }
+
           if (Date.now() > deadline) {
             throw new Error('assertHeld never reported the terminated connection');
           }
+
           await sleep(25);
         }
+
         expect(reported).toBeInstanceOf(LockLostError);
         await expect(lock.release()).resolves.toBeUndefined();
       } finally {
@@ -610,6 +617,7 @@ describe('the boot sequence against Postgres', () => {
           if (Date.now() > deadline) {
             throw new Error('the second boot never queued behind the bootstrap lock');
           }
+
           await sleep(25);
         }
 
@@ -871,10 +879,12 @@ describe('the migration credential against Postgres', () => {
       url.username = credentials.user;
       url.password = credentials.password;
     }
+
     url.pathname = `/${DATABASE}`;
     url.searchParams.delete('schema');
     return url.toString();
   };
+
   const urlAs = (user: string, password = PASSWORD) => inDatabase({ user, password });
 
   /** Empty and owned by the migration database role; with the grants docs/BOOTSTRAP.md gives, unless told otherwise. */
@@ -973,6 +983,7 @@ describe('the migration credential against Postgres', () => {
     for (const role of [MIGRATION_ROLE, APP_ROLE]) {
       await admin.query(`DROP ROLE IF EXISTS "${role}"`);
     }
+
     await admin.end();
   });
 
@@ -1098,6 +1109,7 @@ describe('the bootstrap lock through a transaction pooler', () => {
         await client.end();
       }
     };
+
     try {
       for (let i = 0; i < count; i += 1) {
         const client = new Client({ connectionString: pooled });
@@ -1109,6 +1121,7 @@ describe('the bootstrap lock through a transaction pooler', () => {
       await end();
       throw error;
     }
+
     return { clients, end };
   }
 
@@ -1180,11 +1193,14 @@ describe('the bootstrap lock through a transaction pooler', () => {
         if (migrator.calls > 1) {
           throw new Error('the second boot took the lock the first one holds');
         }
+
         if (Date.now() > deadline) {
           throw new Error('the second boot never queued behind the bootstrap lock');
         }
+
         await sleep(25);
       }
+
       proceed();
 
       const [a, b] = await Promise.all([first, second]);

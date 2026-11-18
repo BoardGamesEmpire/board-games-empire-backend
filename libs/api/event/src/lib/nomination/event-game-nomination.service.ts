@@ -337,6 +337,7 @@ export class EventGameNominationService {
       if (isPrismaDependentRecordNotFoundError(error)) {
         throw new ForbiddenException(t('errors.nomination.forbidden_withdraw'));
       }
+
       throw error;
     }
   }
@@ -521,6 +522,7 @@ export class EventGameNominationService {
       if (isPrismaDependentRecordNotFoundError(error)) {
         throw new ForbiddenException(t('errors.nomination.forbidden_resolve'));
       }
+
       throw error;
     }
   }
@@ -588,6 +590,7 @@ export class EventGameNominationService {
       if (isPrismaDependentRecordNotFoundError(error)) {
         throw new ForbiddenException(t('errors.nomination.forbidden_decide'));
       }
+
       throw error;
     }
   }

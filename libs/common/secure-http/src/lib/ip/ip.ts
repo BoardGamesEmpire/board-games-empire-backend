@@ -157,6 +157,7 @@ function bytesToCanonicalIpv6(bytes: Uint8Array): string {
       if (curStart === -1) {
         curStart = i;
       }
+
       curLen++;
       if (curLen > bestLen) {
         bestLen = curLen;
@@ -181,6 +182,7 @@ function isIpv4Mapped(bytes: Uint8Array): boolean {
   if (bytes.length !== 16) {
     return false;
   }
+
   for (let i = 0; i < 10; i++) {
     if (bytes[i] !== 0) {
       return false;

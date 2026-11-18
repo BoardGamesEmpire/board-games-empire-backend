@@ -60,6 +60,7 @@ export function planConsentAct(input: PlanConsentActInput): ConsentActPlan {
     // A permission named twice is listed once, in the order it was first named.
     throw new PluginConsentActAnswerError(pluginSlug, rule, [...new Set(slugs)]);
   };
+
   const slugsWhere = (predicate: (answer: ConsentActAnswer) => boolean): string[] =>
     answers.filter(predicate).map((answer) => answer.permissionSlug);
 
@@ -84,8 +85,10 @@ export function planConsentAct(input: PlanConsentActInput): ConsentActPlan {
     if (seen.has(permissionSlug)) {
       duplicated.add(permissionSlug);
     }
+
     seen.add(permissionSlug);
   }
+
   if (duplicated.size > 0) {
     refuse('duplicate', [...duplicated]);
   }
@@ -146,15 +149,19 @@ export function planConsentAct(input: PlanConsentActInput): ConsentActPlan {
           refused.map((check) => check.canonicalSlug),
         );
       }
+
       break;
     }
+
     case 'Toggle': {
       const required = slugsWhere((answer) => isRequired(answer.permissionSlug));
       if (required.length > 0) {
         refuse('toggle-required', required);
       }
+
       break;
     }
+
     case 'Review': {
       // The server admin's approval is the Server unit's consent, so its review
       // only accepts; refusing is a toggle of an optional permission (#1336).
@@ -189,6 +196,7 @@ export function planConsentAct(input: PlanConsentActInput): ConsentActPlan {
           refuse('not-outstanding', refusedWhileGranted);
         }
       }
+
       break;
     }
   }
@@ -208,6 +216,7 @@ export function planConsentAct(input: PlanConsentActInput): ConsentActPlan {
       ungrantable.push(permission);
     }
   }
+
   if (ungrantable.length > 0) {
     throw new PluginConsentActUngrantableError(pluginSlug, ungrantable);
   }
@@ -224,6 +233,7 @@ export function planConsentAct(input: PlanConsentActInput): ConsentActPlan {
       });
     }
   }
+
   if (staleRisks.length > 0) {
     throw new PluginConsentActStaleError(pluginSlug, 'risk', staleRisks);
   }

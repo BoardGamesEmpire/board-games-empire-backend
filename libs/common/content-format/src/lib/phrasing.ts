@@ -26,6 +26,7 @@ export function trimPhrasing(nodes: readonly PhrasingContent[]): PhrasingContent
     if (isBreakOrBlank(node) && (previous === undefined || previous.type === 'break')) {
       continue;
     }
+
     kept.push(node);
   }
 
@@ -37,6 +38,7 @@ export function trimPhrasing(nodes: readonly PhrasingContent[]): PhrasingContent
   if (first?.type === 'text') {
     kept[0] = { ...first, value: first.value.replace(/^[ \t\n]+/, '') };
   }
+
   const last = kept.at(-1);
   if (last?.type === 'text') {
     kept[kept.length - 1] = { ...last, value: trimEndSpace(last.value) };
@@ -94,6 +96,7 @@ export function wrap(
       inner.shift();
       continue;
     }
+
     if (first.type !== 'text') {
       break;
     }
@@ -102,10 +105,12 @@ export function wrap(
     if (space) {
       before.push({ type: 'text', value: space });
     }
+
     if (space.length < first.value.length) {
       inner[0] = { ...first, value: first.value.slice(space.length) };
       break;
     }
+
     inner.shift();
   }
 
@@ -116,6 +121,7 @@ export function wrap(
       inner.pop();
       continue;
     }
+
     if (last.type !== 'text') {
       break;
     }
@@ -124,10 +130,12 @@ export function wrap(
     if (space) {
       after.unshift({ type: 'text', value: space });
     }
+
     if (space.length < last.value.length) {
       inner[inner.length - 1] = { ...last, value: last.value.slice(0, last.value.length - space.length) };
       break;
     }
+
     inner.pop();
   }
 

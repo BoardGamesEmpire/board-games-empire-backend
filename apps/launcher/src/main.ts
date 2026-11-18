@@ -18,6 +18,7 @@ function launch(): void {
     if (!(error instanceof RoleSelectionError)) {
       throw error;
     }
+
     console.error(error.message);
     process.exitCode = 1;
     return;

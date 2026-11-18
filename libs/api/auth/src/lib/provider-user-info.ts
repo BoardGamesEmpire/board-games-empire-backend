@@ -166,6 +166,7 @@ export function createProviderUserInfo(
         if (userInfoFailed) {
           warn("UserInfo couldn't be read, and there's no ID token to sign in with instead");
         }
+
         return null;
       case 'profile':
         if (userInfoFailed) {
@@ -179,6 +180,7 @@ export function createProviderUserInfo(
           setAsideWarned = true;
           warn("UserInfo carries no subject that can be read, so its answers are set aside; this isn't logged again");
         }
+
         return merged.profile;
     }
   };

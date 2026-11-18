@@ -180,6 +180,7 @@ export class PgAdvisoryLock implements BootstrapLock {
         if (this.client !== client) {
           throw new LockLostError('as the lock was granted');
         }
+
         this.held = true;
         return;
       }
@@ -215,6 +216,7 @@ export class PgAdvisoryLock implements BootstrapLock {
     if (!this.held) {
       return;
     }
+
     this.held = false;
     const lost = this.lost;
     this.lost = undefined;
@@ -232,6 +234,7 @@ export class PgAdvisoryLock implements BootstrapLock {
     } catch (error) {
       throw new LockLostError(error instanceof Error ? error.message : String(error));
     }
+
     if (committed === UNANSWERED) {
       throw new LockLostError(`the database did not answer the COMMIT within ${graceMs}ms`);
     }
@@ -247,6 +250,7 @@ export class PgAdvisoryLock implements BootstrapLock {
     if (!lost) {
       return;
     }
+
     this.held = false;
     this.lost = undefined;
     throw new LockLostError(lost.message);
@@ -288,6 +292,7 @@ export class PgAdvisoryLock implements BootstrapLock {
         await client.query('ROLLBACK').catch(() => undefined);
         throw error;
       }
+
       await client.query('ROLLBACK');
       return false;
     }
@@ -309,6 +314,7 @@ export class PgAdvisoryLock implements BootstrapLock {
       if (this.client === client) {
         this.client = undefined;
       }
+
       client.end().catch(() => undefined);
     }, ms);
 
@@ -318,6 +324,7 @@ export class PgAdvisoryLock implements BootstrapLock {
       if (abandoned) {
         return UNANSWERED;
       }
+
       throw error;
     } finally {
       clearTimeout(timer);
@@ -345,6 +352,7 @@ export class PgAdvisoryLock implements BootstrapLock {
       if (this.client !== client) {
         return;
       }
+
       this.client = undefined;
       if (this.held) {
         this.lost ??= error;
@@ -356,8 +364,10 @@ export class PgAdvisoryLock implements BootstrapLock {
       if (isConnectTimeout(error)) {
         throw new LockConnectionTimeoutError(budgetMs);
       }
+
       throw error;
     }
+
     this.client = client;
     return client;
   }
@@ -403,6 +413,7 @@ export function describeHolder(rows: readonly HolderRow[]): string | undefined {
   if (rows.length === 0) {
     return undefined;
   }
+
   return rows
     .map((row) => `pid ${row.pid} (${row.application_name || 'unnamed'}${row.state ? `, ${row.state}` : ''})`)
     .join(', ');

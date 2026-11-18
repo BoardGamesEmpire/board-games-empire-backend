@@ -150,6 +150,7 @@ function createFakeWorld(
     if (provisionedHumanCount() === 0) {
       ownerIds.add(user.id);
     }
+
     users.set(user.id, user);
     provisionedIds.add(user.id);
 
@@ -167,6 +168,7 @@ function createFakeWorld(
         if (user === undefined) {
           throw new Error(`fake: no user '${args.where.id}'`);
         }
+
         return user;
       },
       count: async (args: { where: Readonly<Record<string, unknown>> }) =>

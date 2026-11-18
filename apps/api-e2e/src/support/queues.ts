@@ -418,11 +418,13 @@ export async function drainQueue(
 
             throw await retried(jobId, 'failed an attempt and was scheduled for a retry');
           }
+
           break;
         case 'waiting':
           if (entry['prev'] === 'active') {
             throw await retried(jobId, 'went back to waiting (a retry without backoff, or a stalled job)');
           }
+
           break;
       }
     }

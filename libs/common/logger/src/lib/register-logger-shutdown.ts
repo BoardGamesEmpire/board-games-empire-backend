@@ -31,6 +31,7 @@ const flushLogger = (logger: PinoInstance): Promise<void> =>
         reject(err);
         return;
       }
+
       resolve();
     });
   });
@@ -76,6 +77,7 @@ export const createLoggerShutdown = (app: ShutdownableApp, logger: PinoInstance)
       } catch (error) {
         logger.error({ err: error }, 'NestJS app.close() failed');
       }
+
       try {
         await flushLogger(logger);
       } catch (error) {

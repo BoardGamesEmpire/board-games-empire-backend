@@ -397,9 +397,11 @@ describe('SearchQueryDto', () => {
       for (const bound of ['playerCountMin', 'playerCountMax', 'playTimeMin', 'playTimeMax']) {
         expect(schemaOf(bound)).toMatchObject({ type: 'integer', format: 'int32' });
       }
+
       for (const flag of ['playerCountIncludeUnknown', 'playTimeIncludeUnknown']) {
         expect(schemaOf(flag)).toMatchObject({ type: Boolean });
       }
+
       expect(schemaOf('playTimeMin').description).toContain('minutes');
       expect(schemaOf('playTimeMax').description).toContain('minutes');
     });

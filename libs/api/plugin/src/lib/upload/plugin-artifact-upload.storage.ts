@@ -103,6 +103,7 @@ class UploadGate extends Transform {
           callback(new PluginArchiveRefusedError('not-gzip'));
           return;
         }
+
         this.checked = true;
       }
     }

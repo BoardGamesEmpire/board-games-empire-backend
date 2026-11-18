@@ -131,6 +131,7 @@ describe('PluginArtifactSweepService (#1094)', () => {
       for (const row of doomed) {
         rows.splice(rows.indexOf(row), 1);
       }
+
       events.push(`delete ${table}`);
       return { count: doomed.length };
     }) as never);
@@ -139,6 +140,7 @@ describe('PluginArtifactSweepService (#1094)', () => {
       for (const row of hit) {
         Object.assign(row, data);
       }
+
       return { count: hit.length };
     }) as never);
     delegate.findUnique.mockImplementation((async ({ where }: { where: Where }) => {
@@ -288,6 +290,7 @@ describe('PluginArtifactSweepService (#1094)', () => {
     for (const dir of named) {
       expect(await exists(dir)).toBe(true);
     }
+
     expect(await exists(unnamed)).toBe(false);
     expect(result).toEqual({
       removedDirectories: 1,
@@ -543,6 +546,7 @@ describe('PluginArtifactSweepService (#1094)', () => {
     for (const path of [lostAndFound, ...Object.values(strangers), join(root, 'demo-sink')]) {
       await age(path, AGED);
     }
+
     const unnamed = await artifactDirectory('other-plugin', sha('c'), AGED);
 
     await service.runSweep(now);
@@ -550,11 +554,13 @@ describe('PluginArtifactSweepService (#1094)', () => {
     for (const path of [lostAndFound, ...Object.values(strangers)]) {
       expect(await exists(path)).toBe(true);
     }
+
     expect(await exists(join(root, 'Not_A_Slug', sha('a')))).toBe(true);
     expect(await exists(unnamed)).toBe(false);
     for (const relative of Object.keys(strangers)) {
       expect(warn).toHaveBeenCalledWith(expect.stringContaining(`${relative} `));
     }
+
     expect(debug).toHaveBeenCalledWith(expect.stringContaining('lost+found '));
     expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('lost+found'));
   });
@@ -642,6 +648,7 @@ describe('PluginArtifactSweepService (#1094)', () => {
       await age(path, ageMs);
       return path;
     };
+
     const scratchExtraction = async (name: string, ageMs: number) => {
       const path = join(incoming, name);
       await mkdir(join(path, 'package'), { recursive: true });
@@ -649,6 +656,7 @@ describe('PluginArtifactSweepService (#1094)', () => {
       await age(path, ageMs);
       return path;
     };
+
     const removed = [
       await scratchArchive('aged.tgz', AGED),
       await scratchExtraction('aged', AGED),
@@ -665,9 +673,11 @@ describe('PluginArtifactSweepService (#1094)', () => {
     for (const path of removed) {
       expect(await exists(path)).toBe(false);
     }
+
     for (const path of kept) {
       expect(await exists(path)).toBe(true);
     }
+
     // The directory itself stays, for the next upload.
     expect(await exists(incoming)).toBe(true);
   });
@@ -684,6 +694,7 @@ describe('PluginArtifactSweepService (#1094)', () => {
             asideComplete: await exists(join(String(path), 'manifest.json')),
           });
         }
+
         return actualRm(path, options);
       });
 
@@ -703,6 +714,7 @@ describe('PluginArtifactSweepService (#1094)', () => {
         if (String(path).endsWith('.swept')) {
           throw Object.assign(new Error(`EACCES: permission denied, rm '${String(path)}'`), { code: 'EACCES' });
         }
+
         return actualRm(path, options);
       });
 
@@ -753,6 +765,7 @@ describe('PluginArtifactSweepService (#1094)', () => {
         if (from === stuck) {
           throw Object.assign(new Error(`EACCES: permission denied, rename '${stuck}'`), { code: 'EACCES' });
         }
+
         return actualRename(from, to);
       });
 
@@ -793,6 +806,7 @@ describe('PluginArtifactSweepService (#1094)', () => {
       for (const dir of spared) {
         expect(await exists(dir)).toBe(true);
       }
+
       expect(await exists(join(root, 'empty-plugin'))).toBe(true);
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('notes.txt '));
       const guardWarnings = warn.mock.calls.filter(([message]) => String(message).includes('DATABASE_URL'));
@@ -852,9 +866,11 @@ describe('PluginArtifactSweepService (#1094)', () => {
       if (path === root) {
         await actualRm(join(root, 'other-plugin'), { recursive: true, force: true });
       }
+
       if (path === join(root, 'demo-sink')) {
         await actualRm(directoryGone, { recursive: true, force: true });
       }
+
       return names;
     }) as never);
 

@@ -75,6 +75,7 @@ describe.each(['platform', 'category', 'mechanic'] as const)('VocabularyLinkRevi
         }),
       );
     }
+
     expect(recordTable().findUnique).toHaveBeenCalledWith(expect.objectContaining({ where: { id: RECORD.id } }));
 
     linkTable().update.mockClear();

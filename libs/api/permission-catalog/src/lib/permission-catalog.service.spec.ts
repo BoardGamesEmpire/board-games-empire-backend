@@ -85,6 +85,7 @@ const rowOf = (snapshot: CatalogSnapshot, slug: string): PermissionSnapshotRow =
   if (row === undefined) {
     throw new Error(`The snapshot has no '${slug}'`);
   }
+
   return row;
 };
 
@@ -105,6 +106,7 @@ const roleRowOf = (snapshot: CatalogSnapshot, name: string): RoleSnapshotRow => 
   if (row === undefined) {
     throw new Error(`The snapshot has no role '${name}'`);
   }
+
   return row;
 };
 

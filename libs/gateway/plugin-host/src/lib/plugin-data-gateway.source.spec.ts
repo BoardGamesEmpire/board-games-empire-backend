@@ -622,6 +622,7 @@ describe('PluginDataGatewaySource', () => {
         const actor = audit.getActor();
         triggers[where] = actor?.kind === 'plugin' ? actor.trigger : actor;
       };
+
       const pluginDriver = Object.assign(new InMemoryGatewayDriver(), {
         handleInbound: async () => note('inbound'),
       });

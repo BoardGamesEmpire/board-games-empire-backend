@@ -45,6 +45,7 @@ export function canonicalizeTag(value: string | null | undefined): string | null
     if (!first) {
       return null;
     }
+
     canonical = first;
   } catch {
     return null;

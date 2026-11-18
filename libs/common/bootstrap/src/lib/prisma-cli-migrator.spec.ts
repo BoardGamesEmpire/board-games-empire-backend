@@ -78,6 +78,7 @@ describe('createPrismaCliMigrator', () => {
       } else {
         process.env['DATABASE_MIGRATION_URL'] = inherited;
       }
+
       fs.rmSync(root, { recursive: true, force: true });
     }
   });

@@ -333,6 +333,7 @@ describe('event write authorization', () => {
         for (const role of MANAGING_ROLES) {
           invitees.set(role, await actors.user());
         }
+
         const inviteeFor = (role: SystemRole) => invitees.get(role)?.user.id;
 
         const eventId = await createdEventId(host);
@@ -346,6 +347,7 @@ describe('event write authorization', () => {
         for (const role of MANAGING_ROLES) {
           await addAttendee(delegate, eventId, { userId: inviteeFor(role), role }).expect(403);
         }
+
         expect(await attendeeCount(eventId)).toBe(before);
 
         for (const role of MANAGING_ROLES) {

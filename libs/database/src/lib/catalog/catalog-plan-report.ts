@@ -34,6 +34,7 @@ export function describePlanReport(plan: ReconcilePlan): PlanReport {
   } else {
     lines.push('Plan only; nothing is written. The next reconcile (an api boot, or `npm run db:seed`) would do this:');
   }
+
   lines.push(indent(summarizePlan(plan)), ...describeWrites(plan).map(indent));
 
   if (drift.length > 0) {

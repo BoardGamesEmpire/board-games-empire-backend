@@ -67,6 +67,7 @@ async function compare(github, base, head) {
   if (response.status === 404) {
     return 'missing';
   }
+
   if (!response.ok) {
     throw await failure(response, `${base}...${head}`);
   }

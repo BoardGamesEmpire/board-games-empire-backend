@@ -104,6 +104,7 @@ function moveEdge({ published, was }) {
     if (now !== published.digest) {
       throw new Error(`${published.image}:edge points at ${now}, not ${published.digest}.`);
     }
+
     console.log(`Moved ${published.image}:edge to ${published.digest}, from ${was ?? 'nothing'}.`);
   }
 
@@ -155,6 +156,7 @@ function edgeSummary({ decision, moved }) {
     if (before === null) {
       return 'none';
     }
+
     return before === digest ? 'unchanged' : `\`${before}\``;
   };
 

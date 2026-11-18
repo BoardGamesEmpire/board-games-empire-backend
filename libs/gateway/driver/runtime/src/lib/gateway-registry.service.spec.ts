@@ -292,6 +292,7 @@ describe('GatewayRegistryService', () => {
       for (let attempt = 0; attempt < FAILURE_THRESHOLD; attempt++) {
         await expect(service.resolve('bgg', Search)).rejects.toThrow();
       }
+
       expect(table.row('bgg')?.enabled).toBe(true);
     });
 
@@ -354,6 +355,7 @@ describe('GatewayRegistryService', () => {
       for (const id of ['searches', 'fetches-only', 'switched-off', 'disabled']) {
         await service.register(id, makeDriver());
       }
+
       table.patch('disabled', { enabled: false });
 
       await expect(service.routableGatewayIds(Search)).resolves.toEqual(['searches']);

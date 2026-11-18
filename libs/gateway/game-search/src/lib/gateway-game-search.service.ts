@@ -412,6 +412,7 @@ export class GatewayGameSearchService {
           message: result.message,
         });
       }
+
       case proto.ResultStatus.RESULT_STATUS_ERROR: {
         this.logger.error(`Received error status from gateway ${gatewayId}: ${result.message ?? 'Unknown error'}`);
         return this.errorGameSearchResult(gatewayId, result.correlationId, result.message ?? 'Unknown error');

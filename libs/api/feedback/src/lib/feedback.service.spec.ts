@@ -700,6 +700,7 @@ describe('FeedbackService', () => {
         if (value !== null && value !== undefined && 'apiKey' in value) {
           return { value: { ...value, apiKey: '[REDACTED]' }, mutated: true };
         }
+
         return { value: value ?? null, mutated: false };
       });
 

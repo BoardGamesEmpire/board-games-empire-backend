@@ -139,6 +139,7 @@ export class VoteResolver {
         if (eligibleCount === 0) {
           return false;
         }
+
         const requiredPercent = (policy.voteQuorumValue ?? 50) / 100;
         return totalVotes >= Math.ceil(eligibleCount * requiredPercent);
       }

@@ -102,6 +102,7 @@ export class HttpActorMiddleware implements NestMiddleware {
       if (this.authService.hasSessionCredential(req.headers)) {
         this.logger.warn(`Request carries both '${API_KEY_HEADER}' and a session credential; preferring API key`);
       }
+
       return this.actorFromApiKey(apiKey);
     }
 

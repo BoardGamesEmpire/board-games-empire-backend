@@ -97,6 +97,7 @@ function parse(source: string): BbNode[] {
       } else if (!closing) {
         append(top(), { kind: 'item', tag });
       }
+
       continue;
     }
 
@@ -114,6 +115,7 @@ function parse(source: string): BbNode[] {
         append(top(), { kind: 'element', name, attribute, children: [{ kind: 'text', value: code }] });
         index = tags.lastIndex = close.lastIndex;
       }
+
       continue;
     }
 
@@ -124,6 +126,7 @@ function parse(source: string): BbNode[] {
       } else {
         stack.push({ kind: 'element', name, attribute, children: [], openingTag: tag, tooDeep: new Map() });
       }
+
       continue;
     }
 
@@ -170,6 +173,7 @@ function openDepth(stack: readonly OpenElement[], name: string): number {
       return depth;
     }
   }
+
   return -1;
 }
 
@@ -207,6 +211,7 @@ function toFlow(nodes: readonly BbNode[]): BlockContent[] {
     for (const paragraph of toParagraphs(inline)) {
       blocks.push(paragraph);
     }
+
     inline = [];
   };
 
@@ -347,6 +352,7 @@ function splitItems(children: readonly BbNode[]): BbNode[][] {
       segments[segments.length - 1].push(child);
     }
   }
+
   return segments;
 }
 
@@ -359,5 +365,6 @@ function textOf(node: BbNode): string {
   if (node.kind === 'text') {
     return node.value;
   }
+
   return node.kind === 'element' ? node.children.map(textOf).join('') : '';
 }
