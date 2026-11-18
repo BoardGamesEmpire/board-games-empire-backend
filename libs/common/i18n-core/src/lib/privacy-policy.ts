@@ -25,6 +25,6 @@ export const PRIVACY_POLICY_DIR = path.join(__dirname, 'privacy-policy');
  */
 export const STANDARD_PRIVACY_POLICY_HASHES: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   en: {
-    '2026-11-18': '1cce8eb98c613b0dc6159c18c021c8c8cd91fd5fa26042bb37b49b87e2bb8752',
+    '2026-11-18': '79cdb10cf8409e9b1331018a513d41a293806e8ee9a8facc76da790807719b61',
   },
 };

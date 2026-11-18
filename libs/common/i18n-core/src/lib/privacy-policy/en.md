@@ -74,4 +74,4 @@ Some features send data to other services. This happens only in these cases:
 
 This policy comes with the date it last changed. When the policy changes, the date changes too, so you can tell whether it has changed since you last read it.
 
-The operator can replace this policy with their own, in any language.
+The people who run this server can replace this policy with their own, in any language.

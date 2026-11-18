@@ -2715,7 +2715,7 @@ export const PERMISSION_CATALOG = [
 
   // ─── PrivacyPolicy ──────────────────────────────────────
   // Unconditioned because the policy is server-owned, with no scope to bind
-  // to. No read slug: the route that serves the policy is anonymous. High
+  // to. No read slug: the route that serves the policy needs no sign-in. High
   // because everyone, signed in or not, reads the text this replaces (#934).
   permission({
     action: Action.manage,

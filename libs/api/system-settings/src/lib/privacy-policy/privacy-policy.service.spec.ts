@@ -266,6 +266,22 @@ describe('PrivacyPolicyService (#934)', () => {
       expect(emitter.emit).not.toHaveBeenCalled();
     });
 
+    // The length is checked before sanitizing. Sanitized first, this text,
+    // past the sanitizer's bound, would be kept as plain text, shrink under
+    // the limit as its trailing newlines go, and be stored with its heading
+    // flattened.
+    it('refuses Markdown past the limit before sanitizing it', async () => {
+      const padded = `# Datenschutz\n\n${'a'.repeat(PRIVACY_POLICY_MAX_LENGTH - 100)}${'\n'.repeat(200)}`;
+
+      await expect(service.put('de', padded)).rejects.toMatchObject(
+        refusal(HttpStatus.BAD_REQUEST, PrivacyPolicyErrorCode.TooLong, 'errors.privacy_policy.too_long', {
+          max: PRIVACY_POLICY_MAX_LENGTH,
+        }),
+      );
+
+      expect(db.privacyPolicy.upsert).not.toHaveBeenCalled();
+    });
+
     it('accepts Markdown at the limit', async () => {
       await service.put('de', 'a'.repeat(PRIVACY_POLICY_MAX_LENGTH));
 

@@ -1,11 +1,11 @@
 import { FALLBACK_LOCALE, PRIVACY_POLICY_DIR } from '@bge/i18n';
-import { canonicalizeTag, displayName } from '@bge/locale';
+import { displayName } from '@bge/locale';
 import type { OnModuleInit } from '@nestjs/common';
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import * as path from 'node:path';
 import type { PolicyFileProblem, PolicyText } from './policy-file';
-import { parsePolicyFile, POLICY_FILE_EXTENSION } from './policy-file';
+import { parsePolicyFile, POLICY_FILE_EXTENSION, policyFileLanguage } from './policy-file';
 import { PRIVACY_POLICY_MAX_LENGTH } from './privacy-policy.constants';
 
 /**
@@ -22,7 +22,7 @@ const NEEDS_FALLBACK = `The server needs a privacy policy in ${displayName(FALLB
 
 /** What each problem means, for the log. */
 const PROBLEMS: Readonly<Record<PolicyFileProblem['problem'], string>> = {
-  empty: 'nothing is left of its text once raw HTML and unsafe links are removed',
+  empty: 'nothing is left of its text once unsafe content is removed',
   'no-valid-date':
     'it must start with three lines and nothing else: "---", then "updated: YYYY-MM-DD" with a real date, then "---"',
   'not-a-language-tag': `its name must be a language tag and ${POLICY_FILE_EXTENSION}, such as ${FALLBACK_FILE} or pt-BR${POLICY_FILE_EXTENSION}`,
@@ -183,8 +183,5 @@ export class PrivacyPolicyFilesService implements OnModuleInit {
  * alias its name is written in (`en.md`, `EN.md`, `eng.md`).
  */
 function isFallbackFile(name: string): boolean {
-  return (
-    name.endsWith(POLICY_FILE_EXTENSION) &&
-    canonicalizeTag(path.basename(name, POLICY_FILE_EXTENSION)) === FALLBACK_LOCALE
-  );
+  return name.endsWith(POLICY_FILE_EXTENSION) && policyFileLanguage(name) === FALLBACK_LOCALE;
 }

@@ -1,5 +1,6 @@
+import { ResourceType } from '@bge/database';
 import type { Actors } from '@bge/testing-e2e';
-import { createActors } from '@bge/testing-e2e';
+import { createActors, pollUntil } from '@bge/testing-e2e';
 import type { Response } from 'supertest';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
@@ -10,7 +11,7 @@ import { createTestDatabase } from '../support/test-db';
 /**
  * The privacy policy on the wire (#934): anyone reads it, signed in or not,
  * found through the bge-identity document; a server admin replaces or removes
- * it in one language, and nobody else may.
+ * it in one language, and nobody else may. Each write is audited.
  *
  * Every read here is unauthenticated, with no cookie and no API key, so it
  * passes through the api's global auth guard as someone who is not signed in
@@ -29,6 +30,12 @@ describe('privacy policy (#934)', () => {
    * so the server stores and serves it exactly as sent.
    */
   const GERMAN = '# Datenschutzerklärung\n\nDieser Server speichert nur, was Ihr Konto braucht.\n';
+
+  /** The audit listener writes after the response; generous for a loaded CI runner. */
+  const AUDIT_ROW_LANDS_MS = 5_000;
+
+  const REPLACED = 'privacy_policy.replaced';
+  const REMOVED = 'privacy_policy.removed';
 
   let db: TestDatabase;
   let actors: Actors;
@@ -51,6 +58,20 @@ describe('privacy policy (#934)', () => {
     String(response.headers['vary'] ?? '')
       .split(',')
       .map((name) => name.trim().toLowerCase());
+
+  /** A privacy policy row's audit entries, oldest first, once one for `event` has been written. */
+  const auditEntriesOnceOneIs = (subjectId: string, event: string) =>
+    pollUntil(
+      async () => {
+        const entries = await db.client.auditLog.findMany({
+          where: { subject: ResourceType.PrivacyPolicy, subjectId },
+          orderBy: { occurredAt: 'asc' },
+        });
+
+        return entries.some((entry) => entry.event === event) ? entries : undefined;
+      },
+      { description: `the ${event} audit entry for privacy policy ${subjectId}`, timeoutMs: AUDIT_ROW_LANDS_MS },
+    );
 
   it('serves the standard policy to someone who is not signed in, found through bge-identity', async () => {
     const identity = await request(baseUrl).get('/.well-known/bge-identity').expect(200);
@@ -77,7 +98,7 @@ describe('privacy policy (#934)', () => {
     });
   });
 
-  it('lets an admin replace a language and read the change back at once, and refuses a moderator and a plain user', async () => {
+  it('lets an Admin replace a language and read the change back at once, and refuses a Moderator and a User', async () => {
     const [admin, moderator, user] = await Promise.all([actors.admin(), actors.moderator(), actors.user()]);
     const put = (headers: Record<string, string>) =>
       request(baseUrl).put(GERMAN_PATH).set(headers).send({ markdown: GERMAN });
@@ -129,7 +150,7 @@ describe('privacy policy (#934)', () => {
     expect(byHeader.body.privacyPolicy).toEqual(replaced.body.privacyPolicy);
   });
 
-  it('falls back to the file once the admin removes their text', async () => {
+  it('falls back to the file once an Admin removes their text', async () => {
     const admin = await actors.admin();
 
     await request(baseUrl).put(GERMAN_PATH).set(admin.headers).send({ markdown: GERMAN }).expect(200);
@@ -151,5 +172,39 @@ describe('privacy policy (#934)', () => {
       status: 404,
       code: 'PRIVACY_POLICY_NOT_FOUND',
     });
+  });
+
+  // Each write is audited (#934). The entries are read from the audit log
+  // itself, where the unit specs see only the events that feed it.
+  it('audits each write as the Admin who made it: the first replace as a create, the removal as a delete', async () => {
+    const admin = await actors.admin();
+
+    await request(baseUrl).put(GERMAN_PATH).set(admin.headers).send({ markdown: GERMAN }).expect(200);
+    // The answer carries no row id, so the audit entries' subject is read here.
+    const { id } = await db.client.privacyPolicy.findFirstOrThrow({
+      where: { languageTag: { tag: 'de' } },
+      select: { id: true },
+    });
+
+    const created = expect.objectContaining({
+      action: 'create',
+      actorUserId: admin.user.id,
+      event: REPLACED,
+      payload: { before: null, after: expect.objectContaining({ id, markdown: GERMAN }) },
+    });
+
+    await expect(auditEntriesOnceOneIs(id, REPLACED)).resolves.toEqual([created]);
+
+    await request(baseUrl).delete(GERMAN_PATH).set(admin.headers).expect(204);
+
+    await expect(auditEntriesOnceOneIs(id, REMOVED)).resolves.toEqual([
+      created,
+      expect.objectContaining({
+        action: 'delete',
+        actorUserId: admin.user.id,
+        event: REMOVED,
+        payload: { before: expect.objectContaining({ id, markdown: GERMAN }), after: null },
+      }),
+    ]);
   });
 });

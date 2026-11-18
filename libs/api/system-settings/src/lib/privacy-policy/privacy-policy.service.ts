@@ -1,4 +1,3 @@
-import { sanitizeMarkdown } from '@bge/content-format';
 import { DatabaseService, isPrismaDependentRecordNotFoundError, Prisma } from '@bge/database';
 import { CodedHttpException, FALLBACK_LOCALE, t } from '@bge/i18n';
 import { canonicalizeTag, lookupTag, parseAcceptLanguage } from '@bge/locale';
@@ -7,6 +6,8 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Http } from '@status/codes';
 import type { PrivacyPolicyDto } from './dto/privacy-policy.dto';
 import type { PolicyText } from './policy-file';
+import type { PolicyMarkdownProblem } from './policy-markdown';
+import { sanitizePolicyMarkdown } from './policy-markdown';
 import { PrivacyPolicyFilesService } from './privacy-policy-files.service';
 import { PRIVACY_POLICY_MAX_LENGTH, PrivacyPolicyErrorCode } from './privacy-policy.constants';
 import type { PrivacyPolicySnapshot } from './privacy-policy.events';
@@ -17,7 +18,7 @@ export interface PrivacyPolicyLanguageRequest {
   /** The request's `Accept-Language` header, as sent. */
   acceptLanguage?: string | null;
 
-  /** The language tag the caller asked for by name, tried first. */
+  /** The language tag the reader asked for by name, tried first. */
   lang?: string;
 }
 
@@ -28,6 +29,17 @@ const SNAPSHOT_SELECT = {
   markdown: true,
   updatedAt: true,
 } as const satisfies Prisma.PrivacyPolicySelect;
+
+/** The 400 a server admin's Markdown is refused with, for each problem it can have. */
+const MARKDOWN_REFUSALS: Readonly<Record<PolicyMarkdownProblem, () => CodedHttpException>> = {
+  empty: () => new CodedHttpException(Http.BadRequest, PrivacyPolicyErrorCode.Empty, t('errors.privacy_policy.empty')),
+  'too-long': () =>
+    new CodedHttpException(
+      Http.BadRequest,
+      PrivacyPolicyErrorCode.TooLong,
+      t('errors.privacy_policy.too_long', { max: PRIVACY_POLICY_MAX_LENGTH }),
+    ),
+};
 
 /**
  * The privacy policy (#934). For each language a server admin's row wins over
@@ -62,16 +74,17 @@ export class PrivacyPolicyService {
    * Replaces the privacy policy in one language with a server admin's
    * Markdown, and answers the policy as it is now served in that language.
    *
-   * Markdown longer than {@link PRIVACY_POLICY_MAX_LENGTH} UTF-16 code units
-   * is refused with 400 `PRIVACY_POLICY_TOO_LONG` before it is sanitized: the
-   * sanitizer keeps longer Markdown as plain text, and the request's
-   * validation counts a character outside the Basic Multilingual Plane once,
-   * not twice, so it lets some such text through. The Markdown is then
-   * sanitized, and refused with 400 `PRIVACY_POLICY_EMPTY` when nothing but
-   * whitespace is left. The language tag is canonicalized, so `EN-us` names
-   * `en-US`, and must be one the server knows, or the answer is 404
-   * `PRIVACY_POLICY_LANGUAGE_TAG_NOT_FOUND`. It need not be a language the
-   * interface is translated into.
+   * The Markdown is kept as a policy file's body is
+   * ({@link sanitizePolicyMarkdown}). Longer than
+   * {@link PRIVACY_POLICY_MAX_LENGTH} UTF-16 code units, it is refused with
+   * 400 `PRIVACY_POLICY_TOO_LONG` before it is sanitized. The request's
+   * validation can't be relied on for that: it counts a character outside the
+   * Basic Multilingual Plane once, not twice, so it lets some such text
+   * through. With nothing but whitespace left once sanitized, it is refused
+   * with 400 `PRIVACY_POLICY_EMPTY`. The language tag is canonicalized, so
+   * `EN-us` names `en-US`, and must be one the server knows, or the answer is
+   * 404 `PRIVACY_POLICY_LANGUAGE_TAG_NOT_FOUND`. It need not be a language the
+   * app is translated into.
    *
    * One transaction locks the language tag's row ({@link lockLanguageTag}),
    * reads the text being replaced, and upserts the row. The replaced event,
@@ -81,19 +94,12 @@ export class PrivacyPolicyService {
    * policy changed.
    */
   async put(languageTag: string, markdown: string): Promise<PrivacyPolicyDto> {
-    if (markdown.length > PRIVACY_POLICY_MAX_LENGTH) {
-      throw new CodedHttpException(
-        Http.BadRequest,
-        PrivacyPolicyErrorCode.TooLong,
-        t('errors.privacy_policy.too_long', { max: PRIVACY_POLICY_MAX_LENGTH }),
-      );
+    const kept = sanitizePolicyMarkdown(markdown);
+    if ('problem' in kept) {
+      throw MARKDOWN_REFUSALS[kept.problem]();
     }
 
-    const sanitized = sanitizeMarkdown(markdown);
-    if (sanitized.trim() === '') {
-      throw new CodedHttpException(Http.BadRequest, PrivacyPolicyErrorCode.Empty, t('errors.privacy_policy.empty'));
-    }
-
+    const sanitized = kept.markdown;
     const tag = canonicalizeTag(languageTag);
     const unknownLanguage = () =>
       new CodedHttpException(

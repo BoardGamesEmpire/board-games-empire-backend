@@ -104,7 +104,7 @@ export class PrivacyPolicyController {
   /**
    * Replaces the privacy policy in one language with the operator's (#934).
    * `PoliciesGuard` is bound here, not on the class, so the read stays open:
-   * the global auth guard only signs the caller in, and without this guard
+   * the global auth guard only signs the requester in, and without this guard
    * any signed-in user would pass.
    */
   @ApiOperation({
@@ -113,7 +113,7 @@ export class PrivacyPolicyController {
       'Saves the operator’s privacy policy in a language, which is served from then on in place of the ' +
       'policy file for that language, if there is one. Writing a language again replaces its text; sending ' +
       'the text already saved changes nothing, and its date stays as it was. The ' +
-      'language must be one the server knows, though the interface need not be translated into it. Needs ' +
+      'language must be one the server knows, though the app need not be translated into it. Needs ' +
       '`manage:privacy_policy`, which server admins hold. Each write is audited.',
   })
   @ApiBearerAuth()

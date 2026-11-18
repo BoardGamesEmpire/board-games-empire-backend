@@ -151,7 +151,7 @@ You replace the policy one language at a time, through the API or with files. In
 
 **Through the API:** a server admin saves the operator's privacy policy in a language with `PUT /api/privacy-policy/<language tag>` and a body of `{ "markdown": "…" }`, such as `PUT /api/privacy-policy/de`. It is served from the next request, with no restart. The language must be one the server knows, though the app need not be translated into it. `DELETE /api/privacy-policy/<language tag>` removes it, and that language's file is served again, if there is one. Server admins hold the `manage:privacy_policy` permission both need, and each change is audited.
 
-**With files:** the api reads the policy files from a directory that holds nothing else: `/app/apps/api/dist/privacy-policy` in the BGE image, or `apps/api/dist/privacy-policy` in a build from source. To replace the files, mount a directory of your own over it. Mount the whole directory, not single files (`subPath`, in Kubernetes). Your directory then takes the place of the shipped one, so it must hold an `en.md`: your own, or the standard one. To start from the shipped files, copy them out of a running api:
+**With files:** the api reads the policy files from a directory that holds nothing else: `/app/apps/api/dist/privacy-policy` in the BGE image, or `apps/api/dist/privacy-policy` in a build from source. To replace the files, mount a directory of your own over it. Mount the whole directory, not single files (`subPath`, in Kubernetes). Your directory then takes the place of the shipped one, so it must hold an `en.md`: your own, or the standard one. Each build from source empties `apps/api/dist` and writes the standard files back, so keep your own files outside it, and mount or copy them in after every build. To start from the shipped files, copy them out of a running api:
 
 ```sh
 docker compose --profile split cp api:/app/apps/api/dist/privacy-policy ./privacy-policy
@@ -212,7 +212,7 @@ The api reads the files once, at boot, so a change to them applies when it resta
   ---
   ```
 
-- The Markdown is at most 20,000 characters, as a text saved through the API is. Both are sanitized as every Markdown the server stores is: raw HTML is removed, and a link that isn't `http`, `https` or `mailto` is reduced to its text. Headings and lists are kept, so a screen reader can move through the policy.
+- The Markdown is at most 20,000 characters, as a text saved through the API is. Both are sanitized as every Markdown the server stores is: HTML tags are removed, though the text between them is kept, except a script, which goes whole. A link that isn't `http`, `https` or `mailto` is reduced to its text. Headings and lists are kept, so a screen reader can move through the policy.
 - A file that is byte for byte a standard privacy policy the server shipped is served as the standard one. Any other file is served as the operator's privacy policy.
 
 **A file the api can't use:** a missing or malformed `en.md` stops the api at boot, and the log names the file and what is wrong with it. English is the language read when nothing else matches, so the server can't start without it. Any other file the api can't use, such as one whose name isn't a language tag or whose front matter is malformed, is skipped with a warning in the log. Readers of its language get another language until you fix the file and restart the api.

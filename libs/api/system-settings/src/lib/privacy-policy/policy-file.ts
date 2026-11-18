@@ -1,10 +1,11 @@
-import { sanitizeMarkdown } from '@bge/content-format';
 import { STANDARD_PRIVACY_POLICY_HASHES } from '@bge/i18n';
 import { canonicalizeTag } from '@bge/locale';
 import { DateTime } from 'luxon';
 import { createHash } from 'node:crypto';
 import * as path from 'node:path';
-import { PRIVACY_POLICY_MAX_LENGTH } from './privacy-policy.constants';
+import type { PolicyMarkdownProblem } from './policy-markdown';
+import { sanitizePolicyMarkdown } from './policy-markdown';
+import type { PrivacyPolicySource } from './privacy-policy.constants';
 
 /** The extension of a privacy policy file, which is named `<language tag>.md` (#934). */
 export const POLICY_FILE_EXTENSION = '.md';
@@ -30,14 +31,22 @@ export interface PolicyText {
   markdown: string;
 
   /** Whether it is the standard privacy policy, as shipped, or the operator's. */
-  source: 'standard' | 'operator';
+  source: PrivacyPolicySource;
 
   /** The day the text last changed, at midnight UTC. */
   updatedAt: Date;
 }
 
 /** Why a policy file can't be served (#934). */
-export type PolicyFileProblem = { problem: 'not-a-language-tag' | 'no-valid-date' | 'empty' | 'too-long' };
+export type PolicyFileProblem = { problem: 'not-a-language-tag' | 'no-valid-date' | PolicyMarkdownProblem };
+
+/**
+ * The canonical language tag a policy file's name gives, or null when the
+ * name, less its extension, is not a language tag (#934).
+ */
+export function policyFileLanguage(fileName: string): string | null {
+  return canonicalizeTag(path.basename(fileName, POLICY_FILE_EXTENSION));
+}
 
 /**
  * Reads one privacy policy file (#934). The name is `<language tag>.md`, and
@@ -46,12 +55,13 @@ export type PolicyFileProblem = { problem: 'not-a-language-tag' | 'no-valid-date
  * read as a Unix editor would save them.
  *
  * Blank lines between the front matter and the text are dropped. The body is
+ * kept as a server admin's Markdown is ({@link sanitizePolicyMarkdown}):
  * limited in length before it is sanitized, and refused when sanitizing
  * leaves nothing but whitespace. A file whose bytes match a hash pinned for its
  * language is the standard privacy policy; any other is the operator's.
  */
 export function parsePolicyFile(fileName: string, bytes: Buffer): PolicyText | PolicyFileProblem {
-  const language = canonicalizeTag(path.basename(fileName, POLICY_FILE_EXTENSION));
+  const language = policyFileLanguage(fileName);
   if (!language) {
     return { problem: 'not-a-language-tag' };
   }
@@ -65,18 +75,14 @@ export function parsePolicyFile(fileName: string, bytes: Buffer): PolicyText | P
 
   // The blank lines that usually follow the front matter aren't the text's.
   const body = text.slice(frontMatter[0].length).replace(LEADING_BLANK_LINES, '');
-  if (body.length > PRIVACY_POLICY_MAX_LENGTH) {
-    return { problem: 'too-long' };
-  }
-
-  const markdown = sanitizeMarkdown(body);
-  if (markdown.trim() === '') {
-    return { problem: 'empty' };
+  const kept = sanitizePolicyMarkdown(body);
+  if ('problem' in kept) {
+    return { problem: kept.problem };
   }
 
   return {
     language,
-    markdown,
+    markdown: kept.markdown,
     source: isStandard(language, bytes) ? 'standard' : 'operator',
     updatedAt: updated.toJSDate(),
   };

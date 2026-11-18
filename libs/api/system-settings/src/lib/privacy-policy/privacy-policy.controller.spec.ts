@@ -92,7 +92,7 @@ describe('PrivacyPolicyController (#934)', () => {
   });
 
   // The class carries no guard, so the read stays open to anyone. Each write
-  // binds PoliciesGuard itself: the global auth guard only signs a caller in,
+  // binds PoliciesGuard itself: the global auth guard only signs a requester in,
   // and without the guard CheckPolicies is never read, so any signed-in user
   // would pass.
   it.each(['replace', 'remove'] as const)(

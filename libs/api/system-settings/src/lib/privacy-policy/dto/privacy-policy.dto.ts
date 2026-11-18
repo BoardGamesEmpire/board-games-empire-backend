@@ -1,4 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
+import type { PrivacyPolicySource } from '../privacy-policy.constants';
+import { PRIVACY_POLICY_SOURCES } from '../privacy-policy.constants';
 
 /**
  * The privacy policy as anyone reads it, signed in or not (#934): the text in
@@ -27,22 +29,23 @@ export class PrivacyPolicyDto {
     format: 'date-time',
     description:
       'When the text served last changed, in ISO 8601: a server admin’s last edit, or the date in the ' +
-      'policy file it comes from. Each language has its own date, so a change in another language does not ' +
-      'move it. Treat any change of this date as an update, not only a later one: when a server admin ' +
-      'removes their text for a language, the file’s text is served again with its own date, which can be ' +
-      'earlier.',
+      'policy file it comes from. A policy file’s date has no time of day, so it is served as midnight UTC on ' +
+      'that day: a client that shows only the date should show it in UTC, or a reader west of UTC sees the day ' +
+      'before. Each language has its own date, so a change in another language does not move it. Treat any ' +
+      'change of this date as an update, not only a later one: when a server admin removes their text for a ' +
+      'language, the file’s text is served again with its own date, which can be earlier.',
     example: '2026-11-18T00:00:00.000Z',
   })
   updatedAt!: string;
 
   @ApiProperty({
-    enum: ['standard', 'operator'],
+    enum: PRIVACY_POLICY_SOURCES,
     description:
       'Whether the text is the standard privacy policy the server ships, unchanged, or the operator’s privacy ' +
       'policy, which replaces it for this language.',
     example: 'standard',
   })
-  source!: 'standard' | 'operator';
+  source!: PrivacyPolicySource;
 
   @ApiProperty({
     type: [String],

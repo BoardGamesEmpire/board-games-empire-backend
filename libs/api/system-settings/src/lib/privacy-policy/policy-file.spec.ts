@@ -85,6 +85,17 @@ describe('parsePolicyFile (#934)', () => {
     });
   });
 
+  // The limit must stay within the sanitizer's own bound, past which it keeps
+  // Markdown as plain text and escapes the heading below as `\# Privacy`, so a
+  // limit raised past that bound fails here.
+  it('keeps the headings of a body at the limit', () => {
+    const heading = '# Privacy\n\n';
+    const atLimit = `${heading}${'a'.repeat(PRIVACY_POLICY_MAX_LENGTH - heading.length)}`;
+
+    expect(atLimit).toHaveLength(PRIVACY_POLICY_MAX_LENGTH);
+    expect(parsePolicyFile('en.md', policyFile(atLimit))).toMatchObject({ markdown: atLimit });
+  });
+
   it("marks a file that matches a pinned hash as standard, and any other as the operator's", () => {
     const sources = (files: Array<[string, Buffer]>) =>
       files.map(([name, bytes]) => {
