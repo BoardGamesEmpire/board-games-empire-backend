@@ -33,6 +33,7 @@
     "ajv-formats": "^3.0.1",
     "es-module-lexer": "^2.3.1",
     "meriyah": "^7.2.0",
-    "tslib": "^2.3.0"
+    "tslib": "^2.3.0",
+    "zod": "^4.4.3"
   }
 }
