@@ -100,5 +100,6 @@ async function sessionTheRouteWillUse(
     query: { disableRefresh: true },
   });
 
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- better-auth types a dispatched endpoint's answer as unknown; its getSession endpoint answers this shape or null (#1321)
   return (found as { session: { createdAt: Date | string } } | null) ?? null;
 }

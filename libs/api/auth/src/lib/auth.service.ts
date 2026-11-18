@@ -148,6 +148,7 @@ export class AuthService {
     const context = await this.auth.$context;
     const user = await context.internalAdapter.findUserById(userId);
 
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- better-auth's internal adapter returns its base User, without the fields this instance's plugins add (#1321)
     return user ? (parseUserOutput(context.options, user) as AuthUser) : null;
   }
 

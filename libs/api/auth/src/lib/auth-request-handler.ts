@@ -119,7 +119,7 @@ async function carriesCode(response: Response): Promise<boolean> {
   try {
     const body: unknown = await response.clone().json();
 
-    return typeof (body as { code?: unknown } | null)?.code === 'string';
+    return typeof body === 'object' && body !== null && 'code' in body && typeof body.code === 'string';
   } catch {
     return false;
   }

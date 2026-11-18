@@ -103,7 +103,9 @@ export function createPasswordReset(deps: PasswordResetDeps) {
         return;
       }
 
-      const redirectTo = (context.body as { redirectTo?: unknown } | undefined)?.redirectTo;
+      const { body } = context;
+      const redirectTo =
+        typeof body === 'object' && body !== null && 'redirectTo' in body ? body.redirectTo : undefined;
       if (!isAbsolute(redirectTo)) {
         throw refusal(
           'BAD_REQUEST',

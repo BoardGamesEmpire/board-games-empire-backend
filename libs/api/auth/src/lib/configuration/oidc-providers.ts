@@ -131,16 +131,23 @@ export function readOidcProviders(): OidcProviderConfig[] {
   for (const id of new Set(validIds)) {
     const segment = oidcVariableSegment(id);
     const key = (suffix: ProviderVariableSuffix) => `OIDC_${segment}_${suffix}`;
-    const values = {} as Record<ProviderVariableSuffix, string>;
-
-    // Read in the order a missing key is reported.
-    for (const suffix of PROVIDER_VARIABLE_SUFFIXES) {
-      values[suffix] = env.provide<string>(key(suffix), { defaultValue: '' }).trim();
-
-      if (values[suffix].length === 0) {
+    const read = (suffix: ProviderVariableSuffix): string => {
+      const value = env.provide<string>(key(suffix), { defaultValue: '' }).trim();
+      if (value.length === 0) {
         missingKeys.push(key(suffix));
       }
-    }
+
+      return value;
+    };
+
+    // Read in the order a missing key is reported, which is the order of
+    // PROVIDER_VARIABLE_SUFFIXES.
+    const values: Record<ProviderVariableSuffix, string> = {
+      DISCOVERY_URL: read('DISCOVERY_URL'),
+      CLIENT_ID: read('CLIENT_ID'),
+      CLIENT_SECRET: read('CLIENT_SECRET'),
+      DISPLAY_NAME: read('DISPLAY_NAME'),
+    };
 
     // A missing URL is reported as missing only.
     if (values.DISCOVERY_URL.length > 0 && DISCOVERY_URL_RULE.validate(values.DISCOVERY_URL).error !== undefined) {
