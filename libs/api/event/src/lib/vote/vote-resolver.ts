@@ -136,7 +136,9 @@ export class VoteResolver {
       case VoteQuorumType.FixedCount:
         return totalVotes >= (policy.voteQuorumValue ?? 1);
       case VoteQuorumType.PercentOfAttendees: {
-        if (eligibleCount === 0) return false;
+        if (eligibleCount === 0) {
+          return false;
+        }
         const requiredPercent = (policy.voteQuorumValue ?? 50) / 100;
         return totalVotes >= Math.ceil(eligibleCount * requiredPercent);
       }

@@ -62,7 +62,9 @@ function carriesSqlState(error: unknown, sqlState: string, messageSays?: (messag
 
   while (stack.length > 0) {
     const current = stack.pop();
-    if (current === null || typeof current !== 'object' || seen.has(current)) continue;
+    if (current === null || typeof current !== 'object' || seen.has(current)) {
+      continue;
+    }
     seen.add(current);
 
     const record = current as Record<string, unknown>;
@@ -77,7 +79,9 @@ function carriesSqlState(error: unknown, sqlState: string, messageSays?: (messag
     }
 
     for (const key of ['cause', 'meta', 'driverAdapterError', 'originalError']) {
-      if (key in record) stack.push(record[key]);
+      if (key in record) {
+        stack.push(record[key]);
+      }
     }
   }
 

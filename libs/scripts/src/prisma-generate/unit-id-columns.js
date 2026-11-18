@@ -72,7 +72,9 @@ function deriveUnitIdColumns(datamodel) {
     }
 
     for (const field of model.fields) {
-      if (field.kind !== 'object') continue;
+      if (field.kind !== 'object') {
+        continue;
+      }
 
       relations[field.name] = field.type;
 

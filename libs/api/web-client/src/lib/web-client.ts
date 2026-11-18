@@ -57,10 +57,14 @@ export async function createWebClient(options: WebClientOptions): Promise<Reques
   const index = await readFile(indexPath).catch((error: NodeJS.ErrnoException) => {
     // Only an absent client means there is none to serve. One that is there
     // but unreadable is a broken image, and the api should not start on it.
-    if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return undefined;
+    if (error.code === 'ENOENT' || error.code === 'ENOTDIR') {
+      return undefined;
+    }
     throw error;
   });
-  if (!index) return undefined;
+  if (!index) {
+    return undefined;
+  }
 
   const entityTags = await contentEntityTags(root);
   const isServerPath = serverPathMatcher(options.serverRoutes);
@@ -79,7 +83,9 @@ export async function createWebClient(options: WebClientOptions): Promise<Reques
   });
 
   return (req: Request, res: Response, next: NextFunction) => {
-    if (isServerPath(req.path)) return next();
+    if (isServerPath(req.path)) {
+      return next();
+    }
 
     // The files are served without a modification date, and RFC 9110 has a
     // server ignore If-Unmodified-Since then. send fails the precondition
@@ -89,11 +95,15 @@ export async function createWebClient(options: WebClientOptions): Promise<Reques
     files(req, res, (error?: unknown) => {
       // A failure to read a file the build has is the server's error, not a
       // miss: serve-static passes those on and treats only the rest as absent.
-      if (error) return next(error);
+      if (error) {
+        return next(error);
+      }
       // A path the build lacks is the page to a browser and a 404 to anything
       // else, so the answer depends on Accept either way.
       res.vary('Accept');
-      if (!isPageNavigation(req)) return next();
+      if (!isPageNavigation(req)) {
+        return next();
+      }
       setClientHeaders(res, entityTags.get(indexPath));
       res.type('html').send(index);
     });
@@ -107,7 +117,9 @@ export async function createWebClient(options: WebClientOptions): Promise<Reques
  */
 function setClientHeaders(res: ServerResponse, entityTag: string | undefined): void {
   res.setHeader('Cache-Control', 'no-cache');
-  if (entityTag) res.setHeader('ETag', entityTag);
+  if (entityTag) {
+    res.setHeader('ETag', entityTag);
+  }
   clientPolicy(res.req, res, () => undefined);
 }
 
@@ -148,7 +160,9 @@ async function contentEntityTags(root: string): Promise<Map<string, string>> {
  * instance may be on plain HTTP.
  */
 function isPageNavigation(req: Request): boolean {
-  if (req.method !== 'GET' && req.method !== 'HEAD') return false;
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    return false;
+  }
 
   return (req.headers.accept ?? '').split(',').some((range) => {
     const [type, ...params] = range.split(';').map((part) => part.trim().toLowerCase());
@@ -168,7 +182,9 @@ function serverPathMatcher(routes: readonly string[]): (path: string) => boolean
       routes.map((route) => {
         const literal: string[] = [];
         for (const segment of route.split('/').filter(Boolean)) {
-          if (/[*:{(]/.test(segment)) break;
+          if (/[*:{(]/.test(segment)) {
+            break;
+          }
           literal.push(segment.toLowerCase());
         }
         return `/${literal.join('/')}`;

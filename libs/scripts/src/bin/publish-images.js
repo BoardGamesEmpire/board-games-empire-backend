@@ -51,7 +51,9 @@ function checkShaTag({ image, tag, commit, tested }) {
   const published = readTag(image, tag);
   if (published !== null) {
     const problems = publishProblems({ commit, manifest: published.manifest, tested, labels: published.labels });
-    if (problems.length > 0) throw new Error(`${published.ref} can't stand as this commit's: ${problems.join('; ')}.`);
+    if (problems.length > 0) {
+      throw new Error(`${published.ref} can't stand as this commit's: ${problems.join('; ')}.`);
+    }
 
     console.log(`${published.ref} already lists exactly the tested images, so it stays as it is.`);
     return { image, tested, labels: published.labels, digest: published.digest, sources: null };
@@ -75,7 +77,9 @@ function checkShaTag({ image, tag, commit, tested }) {
  * digests, which the check finds listed, or names as a problem.
  */
 function writeShaTag({ plan, tag, commit }) {
-  if (plan.sources === null) return { ...plan, written: false };
+  if (plan.sources === null) {
+    return { ...plan, written: false };
+  }
 
   writeTag(`${plan.image}:${tag}`, plan.sources);
   const written = readIndex(plan.image, tag);
@@ -83,7 +87,9 @@ function writeShaTag({ plan, tag, commit }) {
     written === null
       ? ["it can't be read back"]
       : publishProblems({ commit, manifest: written.manifest, tested: plan.tested, labels: plan.labels });
-  if (problems.length > 0) throw new Error(`${plan.image}:${tag} was written, but ${problems.join('; ')}.`);
+  if (problems.length > 0) {
+    throw new Error(`${plan.image}:${tag} was written, but ${problems.join('; ')}.`);
+  }
 
   console.log(`Wrote ${plan.image}:${tag} as ${written.digest}.`);
   return { ...plan, digest: written.digest, written: true };
@@ -95,7 +101,9 @@ function moveEdge({ published, was }) {
     writeTag(`${published.image}:edge`, [`${published.image}@${published.digest}`]);
 
     const now = readDigest(published.image, 'edge');
-    if (now !== published.digest) throw new Error(`${published.image}:edge points at ${now}, not ${published.digest}.`);
+    if (now !== published.digest) {
+      throw new Error(`${published.image}:edge points at ${now}, not ${published.digest}.`);
+    }
     console.log(`Moved ${published.image}:edge to ${published.digest}, from ${was ?? 'nothing'}.`);
   }
 
@@ -130,17 +138,23 @@ function shaSummary({ commit, tag, platforms, published }) {
 
 /** What happened to `edge`, as the summary and the annotation put it. */
 function edgeOutcome({ decision, moved }) {
-  if (!decision.move) return 'stays where it is';
+  if (!decision.move) {
+    return 'stays where it is';
+  }
 
   return moved.some((edge) => edge.was !== edge.digest) ? 'moved' : "didn't need to move";
 }
 
 function edgeSummary({ decision, moved }) {
   const headline = `\`edge\` ${edgeOutcome({ decision, moved })}: ${decision.reason}`;
-  if (!decision.move) return `${headline}\n`;
+  if (!decision.move) {
+    return `${headline}\n`;
+  }
 
   const was = ({ digest, was: before }) => {
-    if (before === null) return 'none';
+    if (before === null) {
+      return 'none';
+    }
     return before === digest ? 'unchanged' : `\`${before}\``;
   };
 

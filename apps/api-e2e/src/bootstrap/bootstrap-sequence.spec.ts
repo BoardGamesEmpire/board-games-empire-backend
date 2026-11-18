@@ -174,7 +174,9 @@ async function slowLink(connectionString: string, delayMs: number) {
     url: url.toString(),
     connections: () => connections,
     close: async () => {
-      for (const socket of sockets) socket.destroy();
+      for (const socket of sockets) {
+        socket.destroy();
+      }
       await new Promise<void>((resolve) => server.close(() => resolve()));
     },
   };
@@ -360,7 +362,9 @@ describe('the boot sequence against Postgres', () => {
           // One attempt is 500ms here; the progress line names the holder after it.
           const deadline = Date.now() + 5_000;
           while (!logger.lines.some((line) => /Waiting for the bootstrap lock held by pid \d+/.test(line))) {
-            if (Date.now() > deadline) throw new Error(`no progress line; lines were:\n${logger.lines.join('\n')}`);
+            if (Date.now() > deadline) {
+              throw new Error(`no progress line; lines were:\n${logger.lines.join('\n')}`);
+            }
             await sleep(25);
           }
 
@@ -393,7 +397,9 @@ describe('the boot sequence against Postgres', () => {
       // The backend gives its locks up as it exits, just after it reports the end.
       const deadline = Date.now() + 5_000;
       while ((await bootstrapLocks(db, true)) > 0) {
-        if (Date.now() > deadline) throw new Error('the terminated connection still holds the bootstrap lock');
+        if (Date.now() > deadline) {
+          throw new Error('the terminated connection still holds the bootstrap lock');
+        }
         await sleep(25);
       }
     });
@@ -440,7 +446,9 @@ describe('the boot sequence against Postgres', () => {
           } catch (error) {
             reported = error;
           }
-          if (Date.now() > deadline) throw new Error('assertHeld never reported the terminated connection');
+          if (Date.now() > deadline) {
+            throw new Error('assertHeld never reported the terminated connection');
+          }
           await sleep(25);
         }
         expect(reported).toBeInstanceOf(LockLostError);
@@ -499,7 +507,9 @@ describe('the boot sequence against Postgres', () => {
       const setting = await db.client.$queryRaw<
         unknown[]
       >`SELECT 1 FROM pg_settings WHERE name = 'transaction_timeout'`;
-      if (setting.length === 0) return;
+      if (setting.length === 0) {
+        return;
+      }
 
       const lock = new PgAdvisoryLock({
         connectionString: withSetting(requireDatabaseUrl(), 'transaction_timeout', '200'),
@@ -597,7 +607,9 @@ describe('the boot sequence against Postgres', () => {
         // waiter on the key — not merely "not finished yet".
         const deadline = Date.now() + 10_000;
         while ((await bootstrapLocks(sandbox, false)) === 0) {
-          if (Date.now() > deadline) throw new Error('the second boot never queued behind the bootstrap lock');
+          if (Date.now() > deadline) {
+            throw new Error('the second boot never queued behind the bootstrap lock');
+          }
           await sleep(25);
         }
 
@@ -869,7 +881,9 @@ describe('the migration credential against Postgres', () => {
   async function freshDatabase(options: { grants: boolean }): Promise<void> {
     await admin.query(`DROP DATABASE IF EXISTS "${DATABASE}" WITH (FORCE)`);
     await admin.query(`CREATE DATABASE "${DATABASE}" OWNER "${MIGRATION_ROLE}"`);
-    if (!options.grants) return;
+    if (!options.grants) {
+      return;
+    }
 
     // Default privileges belong to one database, so they are set inside it.
     const inside = new Client({ connectionString: inDatabase() });
@@ -935,8 +949,11 @@ describe('the migration credential against Postgres', () => {
       });
     } finally {
       for (const [key, value] of Object.entries(saved)) {
-        if (value === undefined) delete process.env[key];
-        else process.env[key] = value;
+        if (value === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
       }
     }
   }
@@ -1160,8 +1177,12 @@ describe('the bootstrap lock through a transaction pooler', () => {
       // the migrator too.
       const deadline = Date.now() + 10_000;
       while ((await bootstrapLocks(database, false)) === 0) {
-        if (migrator.calls > 1) throw new Error('the second boot took the lock the first one holds');
-        if (Date.now() > deadline) throw new Error('the second boot never queued behind the bootstrap lock');
+        if (migrator.calls > 1) {
+          throw new Error('the second boot took the lock the first one holds');
+        }
+        if (Date.now() > deadline) {
+          throw new Error('the second boot never queued behind the bootstrap lock');
+        }
         await sleep(25);
       }
       proceed();

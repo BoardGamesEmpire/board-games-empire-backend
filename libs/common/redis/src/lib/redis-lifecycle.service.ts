@@ -29,10 +29,16 @@ export class RedisLifecycleManager implements OnApplicationShutdown {
 
   async onApplicationShutdown(signal?: string): Promise<void> {
     const clients: Array<readonly [string, Redis]> = [];
-    if (this.cache) clients.push(['cache', this.cache] as const);
-    if (this.queue) clients.push(['queue', this.queue] as const);
+    if (this.cache) {
+      clients.push(['cache', this.cache] as const);
+    }
+    if (this.queue) {
+      clients.push(['queue', this.queue] as const);
+    }
 
-    if (clients.length === 0) return;
+    if (clients.length === 0) {
+      return;
+    }
 
     this.logger.log(
       `Closing shared Redis connections (signal=${signal ?? 'unknown'}, connections=${clients.map(([name]) => name).join(',')})`,

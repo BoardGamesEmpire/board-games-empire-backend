@@ -26,7 +26,9 @@ function runMigrateDiff(env) {
     { cwd: workspaceRoot, env, stdio: 'inherit' },
   );
 
-  if (result.error) throw result.error;
+  if (result.error) {
+    throw result.error;
+  }
 
   return result.status ?? 1;
 }

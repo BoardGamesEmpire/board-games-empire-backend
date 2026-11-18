@@ -886,10 +886,16 @@ describe('EventService', () => {
           action: Action,
           field?: string,
         ) => {
-          if (type !== ResourceType.Event || action !== Action.update) return [COND];
+          if (type !== ResourceType.Event || action !== Action.update) {
+            return [COND];
+          }
           // An equal clause, but not the same object, as each read builds its own.
-          if (field === 'title' || field === 'description') return [{ ...TITLE_COND }];
-          if (field === 'location') return [LOCATION_COND];
+          if (field === 'title' || field === 'description') {
+            return [{ ...TITLE_COND }];
+          }
+          if (field === 'location') {
+            return [LOCATION_COND];
+          }
           return [{ OR: [] }];
         }) as never);
       });

@@ -99,7 +99,9 @@ export class SafeHttpService {
    *   - DTO supplies both strict=true and wildcards in the same payload.
    */
   private assertWildcardPolicyConsistent(effective: SafeHttpPolicy): void {
-    if (!effective.strictMode) return;
+    if (!effective.strictMode) {
+      return;
+    }
 
     const wildcardsIn = (list: readonly string[]): string[] => list.filter((entry) => entry.startsWith('*.'));
 
@@ -114,7 +116,9 @@ export class SafeHttpService {
       offenders.push({ field: 'blockedHosts', entries: blockedWildcards });
     }
 
-    if (offenders.length === 0) return;
+    if (offenders.length === 0) {
+      return;
+    }
 
     const detail = offenders.map((o) => `${o.field}: [${o.entries.join(', ')}]`).join('; ');
 

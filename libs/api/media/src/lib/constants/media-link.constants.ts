@@ -6,8 +6,12 @@ const DOCUMENT_MIME_TYPES: ReadonlySet<string> = new Set(['application/pdf']);
 
 /** Kind is derived from the stored object's mime; video/audio aren't linkable yet. */
 export function mediaKindForMime(mimeType: string): MediaKind | null {
-  if (mimeType.startsWith('image/')) return 'image';
-  if (DOCUMENT_MIME_TYPES.has(mimeType)) return 'document';
+  if (mimeType.startsWith('image/')) {
+    return 'image';
+  }
+  if (DOCUMENT_MIME_TYPES.has(mimeType)) {
+    return 'document';
+  }
   return null;
 }
 

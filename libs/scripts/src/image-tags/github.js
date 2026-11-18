@@ -44,7 +44,9 @@ async function failure(response, what) {
  */
 async function branchTip(github, branch) {
   const response = await get(github, `/git/ref/heads/${branch}`);
-  if (!response.ok) throw await failure(response, `${branch}'s tip`);
+  if (!response.ok) {
+    throw await failure(response, `${branch}'s tip`);
+  }
 
   return (await response.json()).object.sha;
 }
@@ -62,11 +64,17 @@ async function branchTip(github, branch) {
  */
 async function compare(github, base, head) {
   const response = await get(github, `/compare/${base}...${head}?per_page=1`);
-  if (response.status === 404) return 'missing';
-  if (!response.ok) throw await failure(response, `${base}...${head}`);
+  if (response.status === 404) {
+    return 'missing';
+  }
+  if (!response.ok) {
+    throw await failure(response, `${base}...${head}`);
+  }
 
   const { status } = await response.json();
-  if (!COMPARISONS.has(status)) throw new Error(`GitHub compared ${base}...${head} as "${status}"`);
+  if (!COMPARISONS.has(status)) {
+    throw new Error(`GitHub compared ${base}...${head} as "${status}"`);
+  }
 
   return status;
 }

@@ -51,10 +51,14 @@ function databaseNames(url, env) {
   } catch {
     return null;
   }
-  if (parsed.protocol !== 'postgresql:' && parsed.protocol !== 'postgres:') return null;
+  if (parsed.protocol !== 'postgresql:' && parsed.protocol !== 'postgres:') {
+    return null;
+  }
 
   const database = decode(parsed.pathname.split('/')[1] ?? '');
-  if (database) return [database];
+  if (database) {
+    return [database];
+  }
 
   const databaseRole = decode(parsed.username) || env['PGUSER'] || env['USER'] || env['USERNAME'];
   return [...new Set(['postgres', env['PGDATABASE'], databaseRole].filter(Boolean))];
@@ -80,7 +84,9 @@ function shadowDatabaseProblem(env) {
 
   for (const variable of MAIN_VARIABLES) {
     const value = env[variable];
-    if (!value) continue;
+    if (!value) {
+      continue;
+    }
 
     const main = databaseNames(value, env);
     if (main === null) {
@@ -121,7 +127,9 @@ function migrateDiffEnv(env) {
 
   const result = { ...env };
   for (const variable of MAIN_VARIABLES) {
-    if (!env[variable]) continue;
+    if (!env[variable]) {
+      continue;
+    }
 
     const url = new URL(env[variable]);
     url.searchParams.set('schema', schema);

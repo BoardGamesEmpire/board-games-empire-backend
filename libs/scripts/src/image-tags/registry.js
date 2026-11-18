@@ -104,7 +104,9 @@ function readIndex(image, tag, { missing = ['not-found'], onMissing } = {}) {
  */
 function readTag(image, tag, options) {
   const read = readIndex(image, tag, options);
-  if (read === null) return null;
+  if (read === null) {
+    return null;
+  }
 
   const digests = (listedImages(read.manifest) ?? [{ digest: read.digest }]).map((listed) => listed.digest);
   const labels = Object.fromEntries(digests.map((digest) => [digest, readLabels(`${image}@${digest}`)]));

@@ -587,10 +587,14 @@ describe('CreateFeedbackReportDto', () => {
           const serialized = JSON.stringify(candidate);
           const byteSize = Buffer.byteLength(serialized, 'utf8');
 
-          if (serialized.length >= FEEDBACK_BREADCRUMBS_MAX_BYTES) break; // safety
+          if (serialized.length >= FEEDBACK_BREADCRUMBS_MAX_BYTES) {
+            break; // safety
+          }
           entries.push(candidate[candidate.length - 1]!);
 
-          if (byteSize > FEEDBACK_BREADCRUMBS_MAX_BYTES + 4_096) break; // far enough over
+          if (byteSize > FEEDBACK_BREADCRUMBS_MAX_BYTES + 4_096) {
+            break; // far enough over
+          }
         }
 
         const serialized = JSON.stringify(entries);

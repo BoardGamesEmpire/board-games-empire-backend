@@ -119,7 +119,9 @@ describe('prisma-generate lock', () => {
       now: () => {
         // The holder releases mid-inspection: by call three the poll loop is
         // between reading the owner record and stat-ing the lock.
-        if (++calls === 3) fs.rmSync(lockPath, { recursive: true, force: true });
+        if (++calls === 3) {
+          fs.rmSync(lockPath, { recursive: true, force: true });
+        }
         return clock.now();
       },
     });
@@ -278,7 +280,9 @@ describe('prisma-generate lock', () => {
       // By the fourth reading the stale lock has been freed and we are staging a
       // fresh record: someone who was never waiting links first and wins.
       now: () => {
-        if (++calls === 4 && !competitorTook) competitorTook = attempt(competitor);
+        if (++calls === 4 && !competitorTook) {
+          competitorTook = attempt(competitor);
+        }
         return clock.now();
       },
       options: {

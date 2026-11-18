@@ -18,7 +18,9 @@ try {
   if (problems.length === 0) {
     console.log(`spec-swcrc: all ${checked.length} .spec.swcrc files set sourceMaps to "inline"`);
   } else {
-    for (const problem of problems) console.error(`spec-swcrc: ${problem}`);
+    for (const problem of problems) {
+      console.error(`spec-swcrc: ${problem}`);
+    }
     console.error(
       'spec-swcrc: coverage maps back to source lines only with "inline"; see libs/scripts/src/spec-swcrc/check.js',
     );

@@ -215,8 +215,12 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
     // What the boot does next, said where the fix is: deleting a diverged row
     // does not run the seeds while a newer migration is also present.
     const divergedOutcome = (state: MigrationState): string => {
-      if (!migrator) return 'Booting anyway.';
-      if (state.kind === 'diverged') return 'Running the seeds and the data migrations, as over a database in sync.';
+      if (!migrator) {
+        return 'Booting anyway.';
+      }
+      if (state.kind === 'diverged') {
+        return 'Running the seeds and the data migrations, as over a database in sync.';
+      }
       return (
         'Booting anyway, with the seeds and the data migrations skipped while the database is also ahead of this ' +
         'build; deleting these rows does not change that.'
@@ -229,7 +233,9 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
     // No DELETE here: while the pending migration stays failed, deleting the
     // old row recovers nothing, and the failure may have another cause.
     const warnAboutUnknownAfterFailedMigrate = (state: MigrationState): void => {
-      if (state.unknown.length === 0) return;
+      if (state.unknown.length === 0) {
+        return;
+      }
       logger.warn(
         `Applying this build's migrations failed over a database holding ${state.unknown.length} migration(s) it ` +
           `does not know (${state.unknown.join(', ')}). A migration renamed or deleted after the database applied ` +
@@ -267,7 +273,9 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
           warnAboutUnknown(state);
           settledState = state.kind;
           // The wait ends with the read that found the schema up, not when the lock came back.
-          if (waiting) waitedMs = clock.now() - started;
+          if (waiting) {
+            waitedMs = clock.now() - started;
+          }
           break;
         }
 
@@ -283,7 +291,9 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
             await phase('schema.migrate', () => migrator.apply(state.pending));
 
             after = await phase('schema.read', readState);
-            if (after.kind === 'failed') throw new FailedMigrationError(after.failed);
+            if (after.kind === 'failed') {
+              throw new FailedMigrationError(after.failed);
+            }
             if (after.pending.length > 0) {
               throw new MigrationsStillPendingError(after.pending, options.migrationCredential);
             }

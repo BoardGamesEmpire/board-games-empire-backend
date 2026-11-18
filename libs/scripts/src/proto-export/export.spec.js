@@ -34,8 +34,11 @@ function readFiles(dir) {
   const walk = (current) => {
     for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
       const full = path.join(current, entry.name);
-      if (entry.isDirectory()) walk(full);
-      else files[path.relative(dir, full)] = fs.readFileSync(full, 'utf8');
+      if (entry.isDirectory()) {
+        walk(full);
+      } else {
+        files[path.relative(dir, full)] = fs.readFileSync(full, 'utf8');
+      }
     }
   };
   walk(dir);

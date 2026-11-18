@@ -169,7 +169,9 @@ describe('HealthController', () => {
 
         const result = await controller.ready();
 
-        if (!isHealthCheckResult(result)) throw new Error('expected HealthCheckResult, got disabled response');
+        if (!isHealthCheckResult(result)) {
+          throw new Error('expected HealthCheckResult, got disabled response');
+        }
         expect(result.status).toBe('ok');
         expect(result.info).toMatchObject({
           database: { status: 'up' },
@@ -183,7 +185,9 @@ describe('HealthController', () => {
 
         const result = await controller.ready();
 
-        if (!isHealthCheckResult(result)) throw new Error('expected HealthCheckResult, got disabled response');
+        if (!isHealthCheckResult(result)) {
+          throw new Error('expected HealthCheckResult, got disabled response');
+        }
         expect(result.status).toBe('ok');
         expect(result.info?.cache).toEqual({ status: 'up', message: 'not configured' });
       });
@@ -193,7 +197,9 @@ describe('HealthController', () => {
 
         const result = await controller.ready();
 
-        if (!isHealthCheckResult(result)) throw new Error('expected HealthCheckResult, got disabled response');
+        if (!isHealthCheckResult(result)) {
+          throw new Error('expected HealthCheckResult, got disabled response');
+        }
         expect(result.info?.queue).toEqual({ status: 'up', message: 'not configured' });
       });
 
@@ -202,7 +208,9 @@ describe('HealthController', () => {
 
         const result = await controller.ready();
 
-        if (!isHealthCheckResult(result)) throw new Error('expected HealthCheckResult, got disabled response');
+        if (!isHealthCheckResult(result)) {
+          throw new Error('expected HealthCheckResult, got disabled response');
+        }
         expect(result.status).toBe('ok');
         expect(result.info?.database).toEqual({ status: 'up' });
         expect(result.info?.cache).toEqual({ status: 'up', message: 'not configured' });
@@ -214,7 +222,9 @@ describe('HealthController', () => {
 
         const result = await controller.ready();
 
-        if (!isHealthCheckResult(result)) throw new Error('expected HealthCheckResult, got disabled response');
+        if (!isHealthCheckResult(result)) {
+          throw new Error('expected HealthCheckResult, got disabled response');
+        }
         expect(result.info?.storage).toEqual({ status: 'up', message: 'not configured' });
       });
 
@@ -223,7 +233,9 @@ describe('HealthController', () => {
 
         const result = await controller.ready();
 
-        if (!isHealthCheckResult(result)) throw new Error('expected HealthCheckResult, got disabled response');
+        if (!isHealthCheckResult(result)) {
+          throw new Error('expected HealthCheckResult, got disabled response');
+        }
         expect(result.info?.storage).toEqual({ status: 'up' });
       });
     });
@@ -325,7 +337,9 @@ describe('HealthController', () => {
 
       const result = await controller.detail();
 
-      if (!isHealthCheckResult(result)) throw new Error('expected HealthCheckResult, got disabled response');
+      if (!isHealthCheckResult(result)) {
+        throw new Error('expected HealthCheckResult, got disabled response');
+      }
       expect(result.status).toBe('ok');
       expect(Object.keys(result.info ?? {})).toHaveLength(0);
     });

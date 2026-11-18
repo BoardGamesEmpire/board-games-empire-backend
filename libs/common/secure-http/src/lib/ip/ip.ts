@@ -154,7 +154,9 @@ function bytesToCanonicalIpv6(bytes: Uint8Array): string {
   let curLen = 0;
   for (let i = 0; i < 8; i++) {
     if (groups[i] === '0') {
-      if (curStart === -1) curStart = i;
+      if (curStart === -1) {
+        curStart = i;
+      }
       curLen++;
       if (curLen > bestLen) {
         bestLen = curLen;

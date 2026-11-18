@@ -43,13 +43,17 @@ function runPrismaGenerate(args) {
     shell: process.platform === 'win32',
   });
 
-  if (result.error) throw result.error;
+  if (result.error) {
+    throw result.error;
+  }
 
   return result.status ?? 1;
 }
 
 function reportIfCurrent(client, expectedFingerprint) {
-  if (!client.isCurrent(expectedFingerprint)) return false;
+  if (!client.isCurrent(expectedFingerprint)) {
+    return false;
+  }
 
   console.log('prisma generate: client is up to date, skipping');
 
@@ -60,7 +64,9 @@ function main(args) {
   const client = createClientState(workspaceRoot);
   const expectedFingerprint = client.fingerprint();
 
-  if (reportIfCurrent(client, expectedFingerprint)) return 0;
+  if (reportIfCurrent(client, expectedFingerprint)) {
+    return 0;
+  }
 
   fs.mkdirSync(stateDir, { recursive: true });
 
@@ -69,7 +75,9 @@ function main(args) {
 
   try {
     // The holder of the lock may have generated while we queued.
-    if (reportIfCurrent(client, expectedFingerprint)) return 0;
+    if (reportIfCurrent(client, expectedFingerprint)) {
+      return 0;
+    }
 
     // Stop advertising a tree we are about to destroy: another invocation's
     // unlocked check would otherwise match the old stamp part-way through the
@@ -81,7 +89,9 @@ function main(args) {
     fs.rmSync(outputDir, { recursive: true, force: true });
 
     const status = runPrismaGenerate(args);
-    if (status !== 0) return status;
+    if (status !== 0) {
+      return status;
+    }
 
     // Written after the generator so its `rmSync` of the output directory
     // cannot take them, and before the stamp so a stamped tree always has them.
