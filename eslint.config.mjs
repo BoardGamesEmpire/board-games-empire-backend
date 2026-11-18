@@ -474,6 +474,14 @@ const topLevelTypeImports = {
   },
 };
 
+// The decorator settings most tsconfigs here turn on. No ESLint config sets
+// `parserOptions.project`, so the parser learns them from `parserOptions` alone.
+// Without them `@typescript-eslint/consistent-type-imports` checks files that
+// contain a decorator too, and its autofix turns a constructor-injected class
+// into `import type`: the emitted metadata becomes `Object`, and Nest DI fails
+// at runtime (#1317). With them the rule skips those files entirely.
+export const decoratorParserOptions = { emitDecoratorMetadata: true, experimentalDecorators: true };
+
 // Interface and type-literal members sort alphabetically (#1374): natural
 // order (field2 before field10), case-insensitive, one list per body. Blank
 // lines neither partition the sort nor get touched by it; bge/member-blank-lines
@@ -564,6 +572,11 @@ export default [
       // rule doesn't warn on the generated header.
       '**/i18n.generated.ts',
     ],
+  },
+  {
+    // Must follow the Nx spreads, which set the parser (#1317).
+    files: ['**/*.ts', '**/*.tsx', '**/*.cts', '**/*.mts'],
+    languageOptions: { parserOptions: decoratorParserOptions },
   },
   {
     files: ['**/*.ts', '**/*.tsx', '**/*.js', '**/*.jsx'],
