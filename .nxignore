@@ -1,0 +1,15 @@
+# Keep the root manifest and lockfile visible to Nx inside the bug agent's
+# sandbox (#1370). When Claude Code starts with its subprocess env scrub on, it
+# appends /package.json and /package-lock.json, among others, to
+# .git/info/exclude. Nx's file walker honours that file, so without these
+# lines the lockfile plugin never sees package-lock.json, the project graph
+# holds no npm packages, and every target that names an external dependency
+# fails ("The externalDependency 'jest' ... could not be found").
+#
+# This works together with cli.packageManager in nx.json: the same startup
+# leaves an empty yarn.lock on disk, which Nx would otherwise pick over
+# package-lock.json. Either one alone still leaves the graph without npm
+# packages. Outside the sandbox nothing excludes these files, so the lines
+# change nothing.
+!/package.json
+!/package-lock.json
