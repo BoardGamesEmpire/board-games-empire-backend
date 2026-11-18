@@ -4,11 +4,11 @@ import type { ResourceType } from '@bge/database';
  *  row delete cascades the contribution away, so the data for the notification
  *  must travel on the job, not be re-read afterwards. */
 export interface PurgeContributionJob {
+  contributedById: string;
   contributionId: string;
-  mediaObjectId: string;
   driverKey: string;
   driverSlug: string;
-  contributedById: string;
-  subjectType: ResourceType;
+  mediaObjectId: string;
   subjectId: string;
+  subjectType: ResourceType;
 }

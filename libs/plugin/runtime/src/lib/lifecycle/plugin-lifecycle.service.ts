@@ -27,12 +27,12 @@ import {
 } from './lifecycle.errors';
 
 export interface PluginLifecycleActionInput {
-  readonly slug: string;
-
   /**
    *  The acting admin — resolved from CLS at the API edge, verified here, never taken from a request body.
    */
   readonly actorId: string;
+
+  readonly slug: string;
 }
 
 export interface PluginConfigWriteInput extends PluginLifecycleActionInput {
@@ -45,9 +45,9 @@ export interface PluginUninstallInput extends PluginLifecycleActionInput {
 }
 
 export interface PluginUninstallResult {
-  readonly plugin: Plugin;
   /** Household/user units that had the plugin enabled at uninstall time — the announcement seam (#324). */
   readonly affectedUnits: readonly PluginUnit[];
+  readonly plugin: Plugin;
 }
 
 /**

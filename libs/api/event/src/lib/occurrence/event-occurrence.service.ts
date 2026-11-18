@@ -978,9 +978,9 @@ const OCCURRENCE_GAME_ORDER = [
  * the shape it had when the votes and games were embedded in it.
  */
 export type OccurrenceDetail = EventOccurrence & {
-  policy: OccurrencePolicyView | null;
   availabilityVotes: OccurrenceVote[];
   games: LineupGame[];
+  policy: OccurrencePolicyView | null;
 };
 
 type VotesAndGames = Pick<OccurrenceDetail, 'availabilityVotes' | 'games'>;
@@ -1011,10 +1011,10 @@ type OccurrenceStatusField = 'confirmedAt' | 'declinedAt' | 'cancelledAt';
 
 /** A date status transition: the date, the statuses it may start from, and the one it moves to. */
 interface StatusTransition {
-  eventId: string;
-  occurrenceId: string;
   allowedFrom: OccurrenceStatus[];
+  eventId: string;
   newStatus: OccurrenceStatus;
+  occurrenceId: string;
 }
 
 /**

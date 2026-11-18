@@ -53,11 +53,11 @@ describe('PluginUnitLifecycleService', () => {
     });
 
   interface LivingRow {
-    readonly uninstalled_at: Date | null;
-    readonly scope: PluginScope;
-    readonly version: string;
     readonly installed_at: Date;
     readonly manifest_matches: boolean | null;
+    readonly scope: PluginScope;
+    readonly uninstalled_at: Date | null;
+    readonly version: string;
   }
 
   const makePlugin = (overrides: Partial<Plugin> = {}): Plugin => ({

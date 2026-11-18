@@ -185,7 +185,7 @@ describe('PluginArtifactReceiver (#1094)', () => {
   let root: string;
   let mockAgent: MockAgent;
   let http: SecureHttpService;
-  let store: { recordReceived: jest.Mock; findLive: jest.Mock; refreshForInstall: jest.Mock; remove: jest.Mock };
+  let store: { findLive: jest.Mock; recordReceived: jest.Mock; refreshForInstall: jest.Mock; remove: jest.Mock };
   let installer: { assess: jest.Mock };
   let updates: { assess: jest.Mock };
   let resolver: PluginDirectoryResolverService;
@@ -909,7 +909,7 @@ describe('PluginArtifactReceiver (#1094)', () => {
   });
 
   describe('the installed plugin a receipt reports', () => {
-    it.each<[string, { version: string; uninstalledAt: Date | null } | null, PluginArtifactReceipt['installedPlugin']]>(
+    it.each<[string, { uninstalledAt: Date | null; version: string } | null, PluginArtifactReceipt['installedPlugin']]>(
       [
         ['none, with no plugin row', null, { state: 'none', version: null }],
         [

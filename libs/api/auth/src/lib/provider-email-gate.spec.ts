@@ -4,7 +4,7 @@ import { createProviderEmailGate, SIGN_IN_PROVIDER_EMAIL_UNVERIFIED } from './pr
 const CALLBACK = '/callback/:id';
 
 /** What a refusal carries on the wire, read off the thrown `APIError`. */
-function refusalOf(attempt: () => void): { status: number; code?: string; message?: string } {
+function refusalOf(attempt: () => void): { code?: string; message?: string; status: number } {
   try {
     attempt();
   } catch (error) {

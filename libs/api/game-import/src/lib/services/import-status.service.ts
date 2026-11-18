@@ -207,8 +207,8 @@ export class GameImportStatusService {
 
   private toJobDto(job: JobRow): ImportJobStatusDto {
     const payload = (job.payload ?? {}) as {
-      externalId?: string;
       expansionExternalIds?: string[];
+      externalId?: string;
       origin: ImportJobOrigin;
     };
     const result = (job.result ?? undefined) as Partial<PersistedJobResult & PersistedJobFailure> | undefined;

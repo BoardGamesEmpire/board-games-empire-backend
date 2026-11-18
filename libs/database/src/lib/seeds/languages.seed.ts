@@ -6,8 +6,8 @@ import type { PrismaClient } from '../client';
 const systemSupportedTags = ['en'];
 
 interface CuratedLanguage {
-  iso6393: string;
   iso6391: string;
+  iso6393: string;
 
   // Canonical BCP 47 tags to seed; the first entry is the language's bare
   // tag. Extra entries are the script/region variants game releases

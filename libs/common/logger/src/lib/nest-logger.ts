@@ -2,12 +2,12 @@ import type { LoggerService } from '@nestjs/common';
 
 /** The slice of a pino instance this adapter needs; structural so tests need no pino. */
 export interface PinoLike {
-  trace(obj: object, msg?: string): void;
   debug(obj: object, msg?: string): void;
-  info(obj: object, msg?: string): void;
-  warn(obj: object, msg?: string): void;
   error(obj: object, msg?: string): void;
   fatal(obj: object, msg?: string): void;
+  info(obj: object, msg?: string): void;
+  trace(obj: object, msg?: string): void;
+  warn(obj: object, msg?: string): void;
 }
 
 type PinoLevel = keyof PinoLike;

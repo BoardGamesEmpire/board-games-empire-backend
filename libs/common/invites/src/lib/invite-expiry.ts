@@ -7,8 +7,8 @@ export function isOutstandingInviteStatus(status: InviteStatus): status is Outst
 
 /** The two columns lazy expiry is decided from. */
 export interface InviteExpiryFacts {
-  readonly status: InviteStatus;
   readonly expiresAt: Date;
+  readonly status: InviteStatus;
 }
 
 /**

@@ -28,8 +28,8 @@ describe('household config gate', () => {
   });
 
   interface ActiveConfig {
-    readonly schema?: Record<string, unknown>;
     readonly requiresHouseholdConfig?: boolean;
+    readonly schema?: Record<string, unknown>;
   }
 
   /** The re-validated active manifest a consent act hands the gate. */

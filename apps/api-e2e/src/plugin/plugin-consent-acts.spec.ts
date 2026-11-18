@@ -250,7 +250,7 @@ describe('consent acts (#1150)', () => {
         }));
       const recorded = (
         act?.presentation as {
-          checks: { slug: string; required: boolean; feature: string | null; riskLevel: string; reason: string }[];
+          checks: { feature: string | null; reason: string; required: boolean; riskLevel: string; slug: string }[];
         }
       ).checks.map(({ slug, required, feature, riskLevel, reason }) => ({
         slug,

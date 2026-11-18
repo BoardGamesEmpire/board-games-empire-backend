@@ -166,10 +166,10 @@ describe('webhook subscriptions made through an API key (#723)', () => {
     };
 
     interface Household {
-      readonly id: string;
-      readonly owner: AuthenticatedActor;
       readonly heir: AuthenticatedActor;
       readonly heirMemberId: string;
+      readonly id: string;
+      readonly owner: AuthenticatedActor;
     }
 
     /**

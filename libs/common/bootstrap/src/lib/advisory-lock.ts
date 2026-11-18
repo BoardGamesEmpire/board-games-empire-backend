@@ -33,15 +33,15 @@ export const LOCK_KEEP_ALIVE_MS = 30_000;
 const POOLER_QUEUE_HINT = 'as when a connection pooler has no server connection free';
 
 export interface PgAdvisoryLockOptions {
-  readonly connectionString: string;
-  readonly logger: BootstrapLogger;
   /** Shown in `pg_stat_activity` for whoever is waiting on us. */
   readonly applicationName: string;
-  readonly waitMs?: number;
-  readonly attemptMs?: number;
   /** See {@link LOCK_ATTEMPT_GRACE_MS}. */
   readonly attemptGraceMs?: number;
+  readonly attemptMs?: number;
   readonly clock?: Clock;
+  readonly connectionString: string;
+  readonly logger: BootstrapLogger;
+  readonly waitMs?: number;
 }
 
 export class LockNotAcquiredError extends Error {
@@ -92,8 +92,8 @@ export class LockLostError extends Error {
 }
 
 interface HolderRow {
-  pid: number;
   application_name: string;
+  pid: number;
   state: string | null;
 }
 

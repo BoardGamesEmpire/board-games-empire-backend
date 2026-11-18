@@ -110,9 +110,9 @@ describe('PluginFeatureStateService', () => {
   const pluginRow = (
     overrides: Partial<{
       enabled: boolean;
-      uninstalledAt: Date | null;
-      scope: PluginScope;
       manifestJson: unknown;
+      scope: PluginScope;
+      uninstalledAt: Date | null;
     }> = {},
   ) => ({
     id: 'plg_1',
@@ -126,10 +126,10 @@ describe('PluginFeatureStateService', () => {
   });
 
   interface GrantRowInput {
-    slug: string;
-    scopeType?: PluginGrantScope;
-    status?: PluginGrantStatus;
     decidedRiskLevel?: RiskLevel;
+    scopeType?: PluginGrantScope;
+    slug: string;
+    status?: PluginGrantStatus;
   }
 
   const grantRow = ({ slug, scopeType, status, decidedRiskLevel }: GrantRowInput) => ({

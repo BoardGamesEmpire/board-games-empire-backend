@@ -87,11 +87,11 @@ export const E2E_MAILPIT_VAR = 'BGE_E2E_MAILPIT';
 
 /** Mailpit's two ports, as this machine reaches them. */
 export interface MailpitEndpoint {
+  /** The base URL of its HTTP API, such as `http://localhost:55001`. */
+  readonly apiUrl: string;
   /** The host and port of its SMTP server: what the mail settings name. */
   readonly smtpHost: string;
   readonly smtpPort: number;
-  /** The base URL of its HTTP API, such as `http://localhost:55001`. */
-  readonly apiUrl: string;
 }
 
 /**
@@ -360,10 +360,10 @@ export function decideProvisioning(env: Readonly<Record<string, string | undefin
 
 export interface RedisEndpoint {
   readonly host: string;
-  readonly port: number;
-  readonly username: string;
   readonly password: string;
+  readonly port: number;
   readonly tls: boolean;
+  readonly username: string;
 }
 
 /**

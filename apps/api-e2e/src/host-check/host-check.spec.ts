@@ -9,8 +9,8 @@ const POLLING_HANDSHAKE = '/socket.io/?EIO=4&transport=polling';
 const WEBSOCKET_HANDSHAKE = '/socket.io/?EIO=4&transport=websocket';
 
 interface RawAnswer {
-  readonly status: number;
   readonly body: string;
+  readonly status: number;
 }
 
 /**

@@ -18,8 +18,8 @@ export enum ExtendedNetworkJobNames {
  * batches: the last user it rebuilt from, and its counts so far.
  */
 export interface ExtendedNetworkJob {
-  readonly userId?: string;
   readonly after?: string;
   readonly removed?: number;
+  readonly userId?: string;
   readonly written?: number;
 }

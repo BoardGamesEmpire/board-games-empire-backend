@@ -7,19 +7,19 @@ import type { WebhookSubscriptionStatus } from '@bge/database';
  * treat it as a single source of truth for "this subscription just went down."
  */
 export interface WebhookDisabledEvent {
-  readonly subscriptionId: string;
-  readonly createdById: string;
-  readonly status: Extract<WebhookSubscriptionStatus, 'Failed'>;
   readonly consecutiveFailures: number;
+  readonly createdById: string;
+  readonly disabledAt: Date;
+  /** Sanitized, static message paired with `lastErrorCode` — never raw error text. */
+  readonly lastError: string;
   /**
    * Stable classification (e.g. `TIMEOUT`, `NON_SUCCESS_RESPONSE`) — see
    * `WebhookDeliveryErrorCode` in `@bge/queue-webhooks`. Typed `string` here
    * rather than that enum: this package must not depend on the queue lib.
    */
   readonly lastErrorCode: string;
-  /** Sanitized, static message paired with `lastErrorCode` — never raw error text. */
-  readonly lastError: string;
-  readonly disabledAt: Date;
+  readonly status: Extract<WebhookSubscriptionStatus, 'Failed'>;
+  readonly subscriptionId: string;
 }
 
 /**

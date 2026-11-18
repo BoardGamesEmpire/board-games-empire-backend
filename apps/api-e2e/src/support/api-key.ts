@@ -19,9 +19,9 @@ export interface ApiKeyCaller extends Caller {
  * resource `resourceId` names when it is given.
  */
 export interface ApiKeyScope {
-  readonly slugs: readonly string[];
-  readonly resourceType: ResourceType;
   readonly resourceId?: string;
+  readonly resourceType: ResourceType;
+  readonly slugs: readonly string[];
 }
 
 /**

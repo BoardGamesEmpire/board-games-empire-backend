@@ -21,7 +21,6 @@ export type IdentifiedConstraintSource = 'driverAdapterError.fields' | 'driverAd
 
 /** A unique violation whose constraint we could name. */
 export interface IdentifiedConstraint {
-  readonly source: IdentifiedConstraintSource;
   /**
    * The names the payload reported, normalized and unquoted. Their SPELLING
    * varies by source — raw snake_case columns from `driverAdapterError.fields`,
@@ -30,6 +29,7 @@ export interface IdentifiedConstraint {
    * constraint it cares about. {@link identifiesConstraint} is how.
    */
   readonly names: readonly string[];
+  readonly source: IdentifiedConstraintSource;
   /** SQLSTATE from `cause.originalCode`, when the adapter reported one. */
   readonly sqlState?: string;
 }

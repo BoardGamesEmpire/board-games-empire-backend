@@ -56,24 +56,24 @@ const SWEPT_SUFFIX = '.swept';
 const LOST_AND_FOUND = 'lost+found';
 
 export interface PluginArtifactSweepResult {
+  /** Live artifact rows deleted because their directory was gone, removed by hand. */
+  readonly artifactsWithoutDirectory: number;
+  /** Artifact rows deleted at their expiry. */
+  readonly expiredArtifacts: number;
   /** `<slug>/<sha256>/` directories removed. */
   readonly removedDirectories: number;
   /** Entries removed from `.incoming/`. */
   readonly removedIncoming: number;
-  /** Artifact rows deleted at their expiry. */
-  readonly expiredArtifacts: number;
-  /** Live artifact rows deleted because their directory was gone, removed by hand. */
-  readonly artifactsWithoutDirectory: number;
   /** Load records deleted because their process stopped refreshing them. */
   readonly staleLoadRecords: number;
 }
 
 /** What a run keeps, read once before its walk. */
 interface WhatToKeep {
-  /** The checksums something still needs. */
-  readonly checksums: ReadonlySet<string>;
   /** Whether the database holds any plugin row at all, uninstalled ones included. */
   readonly anyPlugin: boolean;
+  /** The checksums something still needs. */
+  readonly checksums: ReadonlySet<string>;
 }
 
 interface WalkTotals {

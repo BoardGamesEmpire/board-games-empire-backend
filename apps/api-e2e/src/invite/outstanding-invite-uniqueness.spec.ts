@@ -293,7 +293,7 @@ describe('outstanding invite uniqueness (#161)', () => {
       );
     }
 
-    const indexes = await db.client.$queryRaw<{ name: string; isPrimary: boolean; isPartial: boolean }[]>`
+    const indexes = await db.client.$queryRaw<{ isPartial: boolean; isPrimary: boolean; name: string }[]>`
       SELECT i.relname::text AS name, ix.indisprimary AS "isPrimary", ix.indpred IS NOT NULL AS "isPartial"
       FROM pg_index ix
       JOIN pg_class i ON i.oid = ix.indexrelid

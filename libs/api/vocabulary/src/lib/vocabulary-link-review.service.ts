@@ -35,7 +35,7 @@ export class VocabularyLinkReviewService {
     kind: ReviewedVocabularyKind,
     gatewayId: string,
     statuses: readonly VocabularyLinkStatus[],
-    paging: { skip: number; pageSize: number },
+    paging: { pageSize: number; skip: number },
   ): Promise<PaginatedRows<VocabularyLinkView>> {
     return this.adapter(kind).list(this.db, { gatewayId, statuses, ...paging });
   }

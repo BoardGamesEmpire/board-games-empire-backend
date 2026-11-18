@@ -321,7 +321,7 @@ export class UserPluginsController {
    */
   private actInput(
     slug: string,
-    body: { readonly manifestSha256: string; readonly locale?: string },
+    body: { readonly locale?: string; readonly manifestSha256: string },
     answers: readonly ConsentActAnswer[],
   ): ConsentActInput {
     const userId = this.selfUserId();

@@ -330,7 +330,7 @@ describe('event occurrences', () => {
     const addDate = async (
       actor: AuthenticatedActor,
       eventId: string,
-      dates: { startDate: string; endDate?: string },
+      dates: { endDate?: string; startDate: string },
     ) =>
       occurrenceEnvelope(
         await request(baseUrl).post(occurrencesPath(eventId)).set(actor.headers).send(dates).expect(201),

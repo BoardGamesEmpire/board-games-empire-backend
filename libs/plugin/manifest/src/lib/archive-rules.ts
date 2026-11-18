@@ -39,15 +39,15 @@ export type PluginArchiveRule =
 
 export interface PluginArchiveEntry {
   readonly name: string;
-  readonly type: string;
   readonly size: number;
+  readonly type: string;
 }
 
 export type PluginArchiveRefusal = {
-  readonly ok: false;
-  readonly rule: PluginArchiveRule;
   /** The offending entry's name, where there is one. */
   readonly entry?: string;
+  readonly ok: false;
+  readonly rule: PluginArchiveRule;
 };
 
 /**
@@ -57,9 +57,9 @@ export type PluginArchiveRefusal = {
  */
 export type PluginArchiveVerdict =
   | {
+      readonly kind: 'file' | 'directory';
       readonly ok: true;
       readonly path: string;
-      readonly kind: 'file' | 'directory';
     }
   | PluginArchiveRefusal;
 

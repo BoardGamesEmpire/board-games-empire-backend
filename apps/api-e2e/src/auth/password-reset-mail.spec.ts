@@ -90,7 +90,7 @@ describe('password resets through outgoing mail', () => {
   }
 
   /** The one reset mail to `address`, the link in it, and the token in the link. */
-  async function resetMailTo(address: string): Promise<{ message: MailpitMessage; link: string; token: string }> {
+  async function resetMailTo(address: string): Promise<{ link: string; message: MailpitMessage; token: string }> {
     const messages = await mailbox().waitForMessagesTo(address, MAIL_WAIT_MS);
     expect(messages).toHaveLength(1);
 

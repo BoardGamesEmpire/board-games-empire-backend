@@ -118,7 +118,7 @@ export class GameWatchListener {
  * One watch per user: a user watching several of the expansion's base games
  * hears of it once, under the first of them its DataGateway named (#971).
  */
-function firstWatchPerUser<T extends { userId: string; gameId: string }>(watches: T[], baseGameIds: string[]): T[] {
+function firstWatchPerUser<T extends { gameId: string; userId: string }>(watches: T[], baseGameIds: string[]): T[] {
   const rank = (watch: T) => baseGameIds.indexOf(watch.gameId);
   const byUser = new Map<string, T>();
 

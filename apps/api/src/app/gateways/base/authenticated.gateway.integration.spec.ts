@@ -264,7 +264,7 @@ describe('AuthenticatedGateway (over a real socket)', () => {
   const sessionGuardSaw: (Actor | null)[] = [];
 
   /** What `PoliciesGuard` read on each frame: the actor, and the rules of its abilities. */
-  const policiesGuardSaw: { actor: Actor | null; abilityRules: unknown[] }[] = [];
+  const policiesGuardSaw: { abilityRules: unknown[]; actor: Actor | null }[] = [];
 
   /** The rules of the abilities an explicit resolution gives `userId`. */
   const resolvedAbilityRules = async (userId: string) =>

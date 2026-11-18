@@ -9,9 +9,9 @@ const MESSAGE: I18nPath = 'errors.auth.sign_in_provider_email_unverified';
 
 /** The slice of better-auth's endpoint context the gate reads. It is `null` outside an endpoint. */
 export interface ProviderEmailGateContext {
-  readonly path?: string;
   /** The callback's path parameters: `id`, the sign-in provider's id, on `/callback/:id` (#1016). */
   readonly params?: { readonly id?: string };
+  readonly path?: string;
 }
 
 /**

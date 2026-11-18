@@ -6,7 +6,7 @@ describe('withdrawLoadRecordsBeforeClose', () => {
   /** What happened, in order: the withdrawal settling and the app closing. */
   let seen: string[];
   let recorder: { withdrawLoadRecords: jest.Mock };
-  let app: { get: jest.Mock; close: jest.Mock };
+  let app: { close: jest.Mock; get: jest.Mock };
 
   beforeEach(() => {
     seen = [];

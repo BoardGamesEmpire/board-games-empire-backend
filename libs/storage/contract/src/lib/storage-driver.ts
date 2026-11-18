@@ -21,22 +21,22 @@ import type {
  *  - treat `delete` as idempotent (no error if the key is already absent)
  */
 export interface StorageDriver {
-  /**
-   * Stable identifier (e.g. 'localdisk'). Stamped onto `StoredObject.driverSlug`.
-   */
-  readonly slug: string;
+  delete(key: string): Promise<void>;
 
-  put(key: string, body: Readable | Buffer, meta: ObjectMeta): Promise<StoredObject>;
   get(key: string): Promise<RetrievedObject>;
   head(key: string): Promise<StoredObject>;
-  delete(key: string): Promise<void>;
-  signedUrl(key: string, op: StorageOp, options: SignedUrlOptions): Promise<SignedUrl>;
   list(prefix: string, options?: ListOptions): Promise<ListResult>;
-
   /**
    * Cheap liveness probe for readiness checks. Resolves if the backend is
    * reachable; throws a `StorageError` (typically `StorageUnavailableError`)
    * otherwise. MUST be read-only — no object is created, mutated, or deleted.
    */
   ping(): Promise<void>;
+  put(key: string, body: Readable | Buffer, meta: ObjectMeta): Promise<StoredObject>;
+  signedUrl(key: string, op: StorageOp, options: SignedUrlOptions): Promise<SignedUrl>;
+
+  /**
+   * Stable identifier (e.g. 'localdisk'). Stamped onto `StoredObject.driverSlug`.
+   */
+  readonly slug: string;
 }

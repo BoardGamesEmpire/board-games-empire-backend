@@ -467,7 +467,7 @@ export class EventNotificationListener {
     domainEvent: 'GameAddedToEvent' | 'GameRemovedFromEvent',
     eventId: string,
     platformGameId: string,
-  ): Promise<{ eventTitle: string; gameTitle: string; gameSubtitle: string | null } | null> {
+  ): Promise<{ eventTitle: string; gameSubtitle: string | null; gameTitle: string } | null> {
     const [eventRecord, platformGame] = await Promise.all([
       this.db.event.findUnique({
         where: { id: eventId },

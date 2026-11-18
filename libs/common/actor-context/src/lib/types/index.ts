@@ -24,8 +24,8 @@ export interface AnonymousActor {
 }
 
 export interface ApiKeyActor {
-  readonly kind: 'apiKey';
   readonly apiKeyId: string;
+  readonly kind: 'apiKey';
   readonly userId: string;
 }
 
@@ -35,9 +35,9 @@ export interface SystemActor {
 }
 
 export interface ExternalActor {
+  readonly identifier: string;
   readonly kind: 'external';
   readonly system: string;
-  readonly identifier: string;
 }
 
 /**
@@ -69,21 +69,21 @@ export type PluginUnitScopeType = (typeof PLUGIN_UNIT_SCOPE_TYPES)[number];
 export type PluginUnit = ServerPluginUnit | HouseholdPluginUnit | UserPluginUnit;
 
 export interface ServerPluginUnit {
-  readonly scopeType: 'Server';
   readonly householdId?: never;
+  readonly scopeType: 'Server';
   readonly userId?: never;
 }
 
 export interface HouseholdPluginUnit {
-  readonly scopeType: 'Household';
   readonly householdId: string;
+  readonly scopeType: 'Household';
   readonly userId?: never;
 }
 
 export interface UserPluginUnit {
+  readonly householdId?: never;
   readonly scopeType: 'User';
   readonly userId: string;
-  readonly householdId?: never;
 }
 
 /** The unit-less default every plugin operates as outside a household/user invocation. */
@@ -101,7 +101,7 @@ export function isPluginUnit(value: unknown): value is PluginUnit {
     return false;
   }
 
-  const unit = value as { scopeType?: unknown; householdId?: unknown; userId?: unknown };
+  const unit = value as { householdId?: unknown; scopeType?: unknown; userId?: unknown };
 
   const validId = (id: unknown): id is string => typeof id === 'string' && id.length > 0;
 
@@ -220,13 +220,13 @@ export function actorHasValidPluginUnits(actor: Actor): boolean {
 export interface PluginActor {
   readonly kind: 'plugin';
   readonly pluginId: string;
+  readonly trigger: Actor;
   /**
    * The consent unit the plugin is operating as. Authority-bearing (unlike
    * `trigger`): ability resolution scopes grants and condition templates to
    * these coordinates (#60).
    */
   readonly unit: PluginUnit;
-  readonly trigger: Actor;
 }
 
 export type ActorKind = Actor['kind'];
@@ -243,8 +243,8 @@ export type EventSource = 'http' | 'grpc' | 'queue' | 'ws' | 'system';
  */
 export interface EventMeta {
   readonly auditable: boolean;
-  readonly source: EventSource;
   readonly correlationId?: string;
+  readonly source: EventSource;
 }
 
 export const isUserActor = (actor: Actor): actor is UserActor => actor.kind === 'user';

@@ -41,6 +41,6 @@ export const SECTION_ATTEMPTS = 3;
 export const SECTION_BACKOFF_MS = 60 * 1000;
 
 export interface VocabularySectionJob {
-  gatewayId: string;
   capability: DataGatewayCapability;
+  gatewayId: string;
 }

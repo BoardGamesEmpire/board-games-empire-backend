@@ -737,15 +737,15 @@ export class EventGameNominationService {
     expected: NominationStatus,
     decide: (tx: Prisma.TransactionClient, occurrenceId: string | null) => Promise<Decision>,
   ): Promise<{
-    updated: NominationRow;
-    elevated: LineupAddition | null;
     decision: Decision;
     detail: NominationDetail;
+    elevated: LineupAddition | null;
+    updated: NominationRow;
   }> {
     return this.db.$transaction(async (tx) => {
       const supplier = await lockSupplier(tx, nomination.suppliedFromId);
       await lockEventDates(tx, eventId);
-      const [current] = await tx.$queryRaw<{ status: NominationStatus; occurrenceId: string | null }[]>(Prisma.sql`
+      const [current] = await tx.$queryRaw<{ occurrenceId: string | null; status: NominationStatus }[]>(Prisma.sql`
         SELECT status, occurrence_id AS "occurrenceId" FROM event_game_nominations WHERE id = ${nomination.id} FOR UPDATE
       `);
 
@@ -1096,8 +1096,8 @@ type NominationRow = Prisma.EventGameNominationGetPayload<{ include: typeof NOMI
  * there is none the actor can read (#799).
  */
 export type NominationDetail = Omit<NominationRow, 'votes' | 'suppliedFrom'> & {
-  votes: (Omit<NominationRow['votes'][number], 'attendee'> & { eligible: boolean })[];
+  elevatedTo: { id: string; occurrenceId: string | null } | null;
   nominatedBy: AttendeeSummary | null;
   suppliedFrom: NominationRow['suppliedFrom'] & { attendee: AttendeeSummary | null };
-  elevatedTo: { id: string; occurrenceId: string | null } | null;
+  votes: (Omit<NominationRow['votes'][number], 'attendee'> & { eligible: boolean })[];
 };

@@ -2,8 +2,8 @@ import type { ClsService } from 'nestjs-cls';
 import type { Actor } from '../types';
 
 interface MockClsService {
-  isActive: jest.Mock<boolean>;
   get: jest.Mock<unknown, [string]>;
+  isActive: jest.Mock<boolean>;
 }
 
 const mockCls: MockClsService = {

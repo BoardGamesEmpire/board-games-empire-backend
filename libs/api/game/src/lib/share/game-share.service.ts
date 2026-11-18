@@ -64,8 +64,8 @@ type SharedGame = Prisma.GameGetPayload<{ select: typeof SHARED_GAME_SELECT }>;
  * stores it.
  */
 type RecipientRequest =
-  | { readonly kind: 'user'; readonly userId: string; readonly householdId: null }
-  | { readonly kind: 'household'; readonly userId: null; readonly householdId: string };
+  | { readonly householdId: null; readonly kind: 'user'; readonly userId: string }
+  | { readonly householdId: string; readonly kind: 'household'; readonly userId: null };
 
 /**
  * Shares a game with a named user or a household, lists a game's shares, and

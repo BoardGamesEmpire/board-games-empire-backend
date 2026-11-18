@@ -8,13 +8,13 @@ import type { QuotaResource } from '../constants/quota-resource';
  * cloning across the listener boundary.
  */
 export interface QuotaUpdatedEvent {
+  readonly enforced: boolean;
+  readonly householdId: string | null;
+  readonly limit: string;
+  readonly resource: QuotaResource;
   readonly scope: QuotaScope;
   readonly scopeId: string | null;
-  readonly householdId: string | null;
-  readonly resource: QuotaResource;
-  readonly limit: string;
   readonly softOverage: boolean;
-  readonly enforced: boolean;
 }
 
 /**
@@ -24,10 +24,10 @@ export interface QuotaUpdatedEvent {
  * matching `QuotaUpdatedEvent`.
  */
 export interface QuotaSoftOverageEvent {
+  readonly attemptedAmount: string;
+  readonly currentUsage: string;
+  readonly limit: string;
+  readonly resource: QuotaResource;
   readonly scope: QuotaScope;
   readonly scopeId: string | null;
-  readonly resource: QuotaResource;
-  readonly currentUsage: string;
-  readonly attemptedAmount: string;
-  readonly limit: string;
 }

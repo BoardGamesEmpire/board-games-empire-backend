@@ -42,44 +42,44 @@ export interface CatalogView {
 
 /** Why an entry is refused. */
 export type EntryProblem =
-  | { readonly kind: 'template'; readonly slug: string; readonly detail: string }
-  | { readonly kind: 'shorthand-relation'; readonly slug: string; readonly path: string }
-  | { readonly kind: 'fails-open'; readonly slug: string; readonly role: string }
+  | { readonly detail: string; readonly kind: 'template'; readonly slug: string }
+  | { readonly kind: 'shorthand-relation'; readonly path: string; readonly slug: string }
+  | { readonly kind: 'fails-open'; readonly role: string; readonly slug: string }
   | {
       readonly kind: 'cannot-render';
-      readonly slug: string;
       readonly role: string;
+      readonly slug: string;
       readonly variables: readonly string[];
     }
-  | { readonly kind: 'unbounded-on-floor-role'; readonly slug: string; readonly role: string }
+  | { readonly kind: 'unbounded-on-floor-role'; readonly role: string; readonly slug: string }
   | {
       readonly kind: 'reads-past-reach';
-      readonly slug: string;
-      readonly role: string;
-      readonly subject: string;
       /** How much of the resource type the read reaches: every row, or every row a fixed filter admits. */
       readonly reads: ReadIgnoringReach['reads'];
+      readonly role: string;
+      readonly slug: string;
+      readonly subject: string;
     }
-  | { readonly kind: 'event-spanning'; readonly slug: string; readonly role: string }
+  | { readonly kind: 'event-spanning'; readonly role: string; readonly slug: string }
   | {
       readonly kind: 'names-other-roles';
-      readonly slug: string;
-      readonly role: string;
       readonly named: readonly string[];
+      readonly role: string;
+      readonly slug: string;
     }
   | { readonly kind: 'subject-has-no-model'; readonly slug: string; readonly subject: string }
-  | { readonly kind: 'query-rejected'; readonly slug: string; readonly message: string };
+  | { readonly kind: 'query-rejected'; readonly message: string; readonly slug: string };
 
 /** What an entry is allowed with, but reported. */
 export type EntryWarning =
-  | { readonly kind: 'unconditioned-global'; readonly slug: string; readonly role: string }
+  | { readonly kind: 'unconditioned-global'; readonly role: string; readonly slug: string }
   | {
       readonly kind: 'unpaired';
-      /** The slug the role holds. */
-      readonly slug: string;
-      readonly role: string;
       /** The slugs that would pair it, none of which the role holds. */
       readonly partners: readonly string[];
+      readonly role: string;
+      /** The slug the role holds. */
+      readonly slug: string;
     };
 
 /** A target is a permission (every holder is judged) or one grant. */
@@ -308,8 +308,8 @@ export async function probeConditions(
 }
 
 interface CountArgs {
-  readonly where: unknown;
   readonly take?: number;
+  readonly where: unknown;
 }
 
 interface CountDelegate {

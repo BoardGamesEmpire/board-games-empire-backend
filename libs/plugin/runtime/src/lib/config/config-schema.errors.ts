@@ -12,9 +12,9 @@
 
 /** One schema violation in a submitted config payload. `path` is a JSON pointer into the payload, '' for the root. */
 export interface PluginConfigIssue {
-  readonly path: string;
   readonly keyword: string;
   readonly message: string;
+  readonly path: string;
 }
 
 /** The submitted config payload violates the manifest's `config.schema` — a caller error, collect-all. */

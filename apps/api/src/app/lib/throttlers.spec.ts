@@ -134,7 +134,7 @@ describe('createThrottlers', () => {
 });
 
 describe('throttle configuration', () => {
-  type ThrottleNamespace = { ttlMs: number; limit: number; trustedProxyHops: number };
+  type ThrottleNamespace = { limit: number; trustedProxyHops: number; ttlMs: number };
 
   const read = (env: NodeJS.ProcessEnv): ThrottleNamespace => {
     const previous = process.env;

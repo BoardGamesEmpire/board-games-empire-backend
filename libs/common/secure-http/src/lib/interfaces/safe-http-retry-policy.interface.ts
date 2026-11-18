@@ -24,21 +24,14 @@ export interface SafeHttpRetryPolicy {
    */
   baseDelayMs: number;
 
-  /** Optional cap on backoff. Defaults to `30000` (30s). */
-  maxDelayMs?: number;
-
   /**
    * Apply random jitter (full jitter algorithm: `random(0, computedDelay)`).
    * Defaults to `true` — recommended to avoid thundering-herd retries.
    */
   jitter?: boolean;
 
-  /**
-   * Response status codes that trigger a retry. Defaults to `[408, 429, 502, 503, 504]`.
-   * Other 4xx/5xx codes are returned to the caller without retry — most
-   * application errors are not transient.
-   */
-  retryOnStatusCodes?: readonly number[];
+  /** Optional cap on backoff. Defaults to `30000` (30s). */
+  maxDelayMs?: number;
 
   /**
    * Whether to retry on network-level failures (connection refused, DNS
@@ -48,4 +41,11 @@ export interface SafeHttpRetryPolicy {
    * transient network failures, and retry would always reproduce them.
    */
   retryOnNetworkError?: boolean;
+
+  /**
+   * Response status codes that trigger a retry. Defaults to `[408, 429, 502, 503, 504]`.
+   * Other 4xx/5xx codes are returned to the caller without retry — most
+   * application errors are not transient.
+   */
+  retryOnStatusCodes?: readonly number[];
 }

@@ -41,7 +41,7 @@ const paced: UpstreamFetch = async (url, request) => {
  * IGDB's answers to a query, kept as its fixture with the query beside it.
  * Nothing else is kept: the token endpoint's answer holds a credential (#1082).
  */
-const recordQuery = ({ url, body }: { url: URL; body?: string }, answer: string): void => {
+const recordQuery = ({ url, body }: { body?: string; url: URL }, answer: string): void => {
   if (!url.href.startsWith(`${IGDB_BASE_URL}/`)) {
     return;
   }

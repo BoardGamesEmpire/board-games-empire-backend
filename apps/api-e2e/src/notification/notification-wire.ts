@@ -9,8 +9,8 @@ import { envelopeFailure, isRecord, type HttpResponseLike, type RequestDescripti
 
 export interface UnreadNotificationWire {
   readonly id: string;
-  readonly type: string;
   readonly payload: Record<string, unknown>;
+  readonly type: string;
 }
 
 const fail = envelopeFailure('apps/api-e2e/src/notification/notification-wire.ts');

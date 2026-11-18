@@ -14,8 +14,8 @@ interface LocalHit {
 
 interface SearchFrame {
   readonly correlationId: string;
-  readonly source?: string;
   readonly games?: readonly LocalHit[];
+  readonly source?: string;
 }
 
 /**

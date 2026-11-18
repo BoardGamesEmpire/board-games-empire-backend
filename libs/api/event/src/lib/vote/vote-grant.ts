@@ -14,8 +14,8 @@ type VoteSlug = typeof GAME_VOTE_SLUG | typeof AVAILABILITY_VOTE_SLUG;
  * their event role holds the vote's permission.
  */
 export interface VoterGrant {
-  userId: string | null;
   role: { role: { permissions: { id: string }[] } } | null;
+  userId: string | null;
 }
 
 /**

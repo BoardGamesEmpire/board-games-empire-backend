@@ -92,11 +92,11 @@ class FakeDispatcherFactory implements HttpDispatcherFactory {
 // ─── Wire-up ────────────────────────────────────────────────────────────────
 
 function buildService(opts: {
-  snapshot?: SafeHttpPolicySnapshot;
   dns?: FakeDnsResolver;
   mockAgent: MockAgent;
   observer?: OutboundHttpObserver;
-}): { service: SecureHttpService; pool: Interceptable } {
+  snapshot?: SafeHttpPolicySnapshot;
+}): { pool: Interceptable; service: SecureHttpService } {
   const dns = opts.dns ?? new FakeDnsResolver();
   const policy = new StubPolicyService(opts.snapshot ?? buildSnapshot());
   const ipPolicy = new IpPolicyService(dns);

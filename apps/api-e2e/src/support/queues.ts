@@ -27,13 +27,13 @@ import { redisTlsOptions } from './redis-reset';
  * sequences a real queue cannot be made to produce on demand.
  */
 export interface QueueLike {
-  readonly name: string;
   getJobCounts(...types: string[]): Promise<Record<string, number>>;
+  readonly name: string;
 }
 
 export interface TestQueue {
-  readonly queue: Queue;
   close(): Promise<void>;
+  readonly queue: Queue;
 }
 
 /**
@@ -107,13 +107,13 @@ export async function countPendingJobs(queue: QueueLike): Promise<number> {
 }
 
 export interface WaitForStableJobCountOptions {
-  /** Budget for the count to REACH the expected value. */
-  readonly timeoutMs?: number;
+  readonly pollIntervalMs?: number;
 
   /** How long it must then HOLD at that value. */
   readonly settleMs?: number;
 
-  readonly pollIntervalMs?: number;
+  /** Budget for the count to REACH the expected value. */
+  readonly timeoutMs?: number;
 }
 
 /**
@@ -210,8 +210,8 @@ export interface EventStreamReader {
  */
 export interface DrainableQueue extends QueueLike {
   readonly client: Promise<object>;
-  toKey(type: string): string;
   getJob(jobId: string): Promise<{ readonly failedReason?: string } | undefined>;
+  toKey(type: string): string;
 }
 
 /**
@@ -241,8 +241,8 @@ export async function eventStreamReader(queue: DrainableQueue): Promise<EventStr
  * Carries the queue's name so a mark cannot be spent on another queue.
  */
 export interface QueueEventMark {
-  readonly queueName: string;
   readonly id: string;
+  readonly queueName: string;
 }
 
 /**
@@ -261,13 +261,10 @@ export async function markQueueEvents(queue: DrainableQueue): Promise<QueueEvent
 }
 
 export interface DrainQueueOptions {
-  /** Budget for the expected jobs to finish. */
-  readonly timeoutMs?: number;
+  readonly pollIntervalMs?: number;
 
   /** How long the queue must then hold at zero pending. */
   readonly settleMs?: number;
-
-  readonly pollIntervalMs?: number;
 
   /**
    * The queue's jobs may run in steps: a job moves itself back to `delayed`
@@ -282,6 +279,9 @@ export interface DrainQueueOptions {
    * retry it can't tell from a step.
    */
   readonly steps?: boolean;
+
+  /** Budget for the expected jobs to finish. */
+  readonly timeoutMs?: number;
 }
 
 /**

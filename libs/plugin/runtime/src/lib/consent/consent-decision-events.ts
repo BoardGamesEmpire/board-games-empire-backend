@@ -9,8 +9,8 @@ import {
 
 /** A consent decision a consent act wrote, with the row it replaced. */
 export interface WrittenDecision {
-  readonly before: PluginGrant | null;
   readonly after: PluginGrant;
+  readonly before: PluginGrant | null;
 }
 
 /**

@@ -3,9 +3,9 @@ import { toCategoryList, toMechanicList } from './taxonomy.mapper';
 import { ENTITY_RUN } from './testing/entity-runs';
 
 interface TaxonomyListCase {
-  name: string;
-  list: () => Array<proto.CategoryData | proto.MechanicData>;
   count: number;
+  list: () => Array<proto.CategoryData | proto.MechanicData>;
+  name: string;
   noun: string;
   pinned: Array<proto.CategoryData | proto.MechanicData>;
 }

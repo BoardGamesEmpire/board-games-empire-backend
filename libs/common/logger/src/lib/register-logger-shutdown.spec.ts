@@ -2,10 +2,10 @@ import type { Logger as PinoInstance } from 'pino';
 import { createLoggerShutdown, registerLoggerShutdown, type ShutdownableApp } from './register-logger-shutdown';
 
 interface MockLogger {
-  info: jest.Mock;
-  warn: jest.Mock;
   error: jest.Mock;
   flush: jest.Mock;
+  info: jest.Mock;
+  warn: jest.Mock;
 }
 
 type FlushCallback = (err?: Error) => void;

@@ -19,10 +19,10 @@ import { CACHE_REDIS_CLIENT, QUEUE_REDIS_CLIENT } from './redis.tokens';
 // ---------------------------------------------------------------------------
 
 interface FakeRedisClient {
-  options: RedisOptions;
-  status: 'ready' | 'end' | 'close' | 'connecting';
-  quit: jest.Mock<Promise<'OK'>, []>;
   disconnect: jest.Mock<void, []>;
+  options: RedisOptions;
+  quit: jest.Mock<Promise<'OK'>, []>;
+  status: 'ready' | 'end' | 'close' | 'connecting';
 }
 
 const constructorCalls: RedisOptions[] = [];

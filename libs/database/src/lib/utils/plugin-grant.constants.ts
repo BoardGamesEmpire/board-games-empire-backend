@@ -22,9 +22,9 @@ export const SERVER_SCOPE_SENTINEL = '' as const;
  * the coordinate reads below cast-free.
  */
 export type PluginUnitCoordinates =
-  | { readonly scopeType: 'Server'; readonly householdId?: undefined; readonly userId?: undefined }
-  | { readonly scopeType: 'Household'; readonly householdId: string; readonly userId?: undefined }
-  | { readonly scopeType: 'User'; readonly userId: string; readonly householdId?: undefined };
+  | { readonly householdId?: undefined; readonly scopeType: 'Server'; readonly userId?: undefined }
+  | { readonly householdId: string; readonly scopeType: 'Household'; readonly userId?: undefined }
+  | { readonly householdId?: undefined; readonly scopeType: 'User'; readonly userId: string };
 
 /**
  * The grant-row scope filters a unit's resolution reads (#60): the
@@ -36,7 +36,7 @@ export type PluginUnitCoordinates =
  */
 export function grantScopeCoordinatesForUnit(
   unit: PluginUnitCoordinates,
-): { scopeType: PluginGrantScope; scopeId: string }[] {
+): { scopeId: string; scopeType: PluginGrantScope }[] {
   const serverScope = { scopeType: PluginGrantScope.Server, scopeId: SERVER_SCOPE_SENTINEL };
 
   switch (unit.scopeType) {

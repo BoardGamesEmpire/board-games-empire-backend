@@ -70,8 +70,8 @@ export function defaultProjectRootCandidates(): string[] {
 }
 
 interface ResolvedCli {
-  readonly projectRoot: string;
   readonly cli: string;
+  readonly projectRoot: string;
 }
 
 function resolveCli(projectRoot: string | undefined): ResolvedCli {
@@ -82,9 +82,9 @@ function resolveCli(projectRoot: string | undefined): ResolvedCli {
 }
 
 export interface LineForwarder {
-  write(chunk: Buffer): void;
   /** Emits whatever the last chunk left unterminated. */
   end(): void;
+  write(chunk: Buffer): void;
 }
 
 /**

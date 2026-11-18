@@ -53,6 +53,9 @@ export interface MailpitMessage {
 }
 
 export interface MailpitClient {
+  /** Deletes every message Mailpit holds. */
+  clear(): Promise<void>;
+
   /** Every message Mailpit holds addressed to `address`, newest first. */
   messagesTo(address: string): Promise<MailpitMessage[]>;
 
@@ -61,9 +64,6 @@ export interface MailpitClient {
    * On timeout it throws, naming the address.
    */
   waitForMessagesTo(address: string, timeoutMs: number): Promise<MailpitMessage[]>;
-
-  /** Deletes every message Mailpit holds. */
-  clear(): Promise<void>;
 }
 
 async function requireOk(response: Response, what: string): Promise<Response> {

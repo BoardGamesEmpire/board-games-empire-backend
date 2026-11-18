@@ -5,13 +5,13 @@ import { firstValueFrom, lastValueFrom, toArray } from 'rxjs';
 import { OPERATIONS } from './operations.js';
 
 export interface DataGatewayDriverContractContext {
-  driver: DataGatewayDriver;
-
   /**
    * The operations the driver serves. Its `describe` must declare exactly
    * these, and only their cases run.
    */
   capabilities: proto.Capability[];
+
+  driver: DataGatewayDriver;
 
   /**
    * The search filters its search narrows by. Its `describe` must declare
@@ -19,20 +19,20 @@ export interface DataGatewayDriverContractContext {
    */
   filterableAxes: proto.SearchFilterAxis[];
 
+  /** An externalId the driver can resolve via fetchGame. */
+  knownExternalId: string;
+
+  /** A query expected to stream at least one RESULT frame. */
+  searchQuery: string;
+
+  /** An externalId the driver is guaranteed NOT to resolve. */
+  unknownExternalId: string;
+
   /**
    * The upstream the driver draws from. Its `describe` must declare exactly
    * this, and unset means it declares none (#925).
    */
   upstream?: proto.Upstream;
-
-  /** An externalId the driver can resolve via fetchGame. */
-  knownExternalId: string;
-
-  /** An externalId the driver is guaranteed NOT to resolve. */
-  unknownExternalId: string;
-
-  /** A query expected to stream at least one RESULT frame. */
-  searchQuery: string;
 }
 
 /**

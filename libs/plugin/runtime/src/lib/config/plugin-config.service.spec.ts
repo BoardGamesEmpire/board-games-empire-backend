@@ -52,8 +52,8 @@ describe('PluginConfigService', () => {
     it('deep-freezes nested objects and arrays, not just the top level', () => {
       service.prime('demo-sink', { nested: { deep: { value: 1 } }, list: [{ item: 1 }] });
       const snapshot = service.snapshotFor('demo-sink') as {
-        nested: { deep: { value: number } };
         list: { item: number }[];
+        nested: { deep: { value: number } };
       };
 
       expect(Object.isFrozen(snapshot.nested)).toBe(true);

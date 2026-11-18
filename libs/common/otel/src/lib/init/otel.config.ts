@@ -18,19 +18,12 @@ import type { ActorContextProvider } from '../processors/actor-context-provider'
  */
 export interface OtelInitConfig {
   /**
-   * Logical service identifier, e.g. `'bge-api'`, `'bge-coordinator'`.
+   * Returns the current audit context snapshot for span annotation. The
+   * host application closes over `ClsServiceManager.getClsService()` (or
+   * an equivalent reader) so `@bge/otel` stays decoupled from
+   * `@bge/actor-context` CLS internals.
    */
-  readonly serviceName: string;
-
-  /**
-   * Service version, typically read from the app's `package.json`.
-   */
-  readonly serviceVersion: string;
-
-  /**
-   * Namespace grouping all BGE services on a Resource. Defaults to {@link DEFAULT_SERVICE_NAMESPACE}.
-   */
-  readonly serviceNamespace?: string;
+  readonly actorContextProvider: ActorContextProvider;
 
   /**
    * Deployment environment, e.g. `'production'`, `'staging'`, `'dev'`.
@@ -38,12 +31,19 @@ export interface OtelInitConfig {
   readonly environment?: string;
 
   /**
-   * Returns the current audit context snapshot for span annotation. The
-   * host application closes over `ClsServiceManager.getClsService()` (or
-   * an equivalent reader) so `@bge/otel` stays decoupled from
-   * `@bge/actor-context` CLS internals.
+   * Logical service identifier, e.g. `'bge-api'`, `'bge-coordinator'`.
    */
-  readonly actorContextProvider: ActorContextProvider;
+  readonly serviceName: string;
+
+  /**
+   * Namespace grouping all BGE services on a Resource. Defaults to {@link DEFAULT_SERVICE_NAMESPACE}.
+   */
+  readonly serviceNamespace?: string;
+
+  /**
+   * Service version, typically read from the app's `package.json`.
+   */
+  readonly serviceVersion: string;
 }
 
 /**

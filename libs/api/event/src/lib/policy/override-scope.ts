@@ -10,12 +10,12 @@ import { Http } from '@status/codes';
  * whatever the list holds.
  */
 export interface EventRestrictions {
-  readonly allowedPlatformTypes: readonly PlatformType[];
-  readonly allowedPlatformIds: readonly string[];
   readonly allowedCategoryIds: readonly string[];
-  readonly restrictToGameCategories: boolean;
+  readonly allowedPlatformIds: readonly string[];
+  readonly allowedPlatformTypes: readonly PlatformType[];
   readonly maxAttendees: number | null;
   readonly maxTotalParticipants: number | null;
+  readonly restrictToGameCategories: boolean;
   readonly strictCapacity: boolean;
 }
 
@@ -26,16 +26,16 @@ export interface EventRestrictions {
  * restriction.
  */
 export interface OccurrenceRestrictions {
-  readonly allowedPlatformTypes: readonly PlatformType[];
-  readonly allowedPlatformIds: readonly string[];
   readonly allowedCategoryIds: readonly string[];
-  readonly restrictToGameCategories: boolean | null;
+  readonly allowedPlatformIds: readonly string[];
+  readonly allowedPlatformTypes: readonly PlatformType[];
+  readonly capacityUnrestricted: boolean;
   readonly maxAttendees: number | null;
   readonly maxTotalParticipants: number | null;
-  readonly strictCapacity: boolean | null;
-  readonly platformTypesUnrestricted: boolean;
   readonly platformsUnrestricted: boolean;
-  readonly capacityUnrestricted: boolean;
+  readonly platformTypesUnrestricted: boolean;
+  readonly restrictToGameCategories: boolean | null;
+  readonly strictCapacity: boolean | null;
 }
 
 const invalid = (key: I18nPath) => new CodedHttpException(Http.BadRequest, 'EVENT_POLICY_INVALID', t(key));

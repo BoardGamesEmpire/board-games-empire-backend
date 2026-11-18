@@ -14,8 +14,8 @@ export type I18nValidationPath = Extract<I18nPath, `validation.${string}`>;
  * function accepting it is still assignable to a decorator's `message` option.
  */
 export interface ValidationMessageArguments {
-  readonly value: unknown;
   readonly constraints?: readonly unknown[];
+  readonly value: unknown;
 }
 
 /**

@@ -17,9 +17,9 @@ import { toPluginActorView } from './plugin-actor-view.projection';
 import { buildPluginHttp } from './plugin-http';
 
 export interface PluginContextInput {
+  readonly manifest: PluginManifest;
   readonly pluginId: string;
   readonly slug: string;
-  readonly manifest: PluginManifest;
 }
 
 /**

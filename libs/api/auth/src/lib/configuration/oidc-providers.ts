@@ -4,17 +4,17 @@ import Joi from 'joi';
 
 /** One sign-in provider the operator configured (#912). */
 export interface OidcProviderConfig {
-  readonly id: string;
-  readonly discoveryUrl: string;
-  readonly clientId: string;
-  readonly clientSecret: string;
-  readonly displayName: string;
   /**
    * Whether a first sign-in may create a user from an email this provider
    * does not vouch for (`email_verified` false or missing). Off unless the
    * operator turns it on: such an email may not be the user's own.
    */
   readonly allowUnverifiedEmail: boolean;
+  readonly clientId: string;
+  readonly clientSecret: string;
+  readonly discoveryUrl: string;
+  readonly displayName: string;
+  readonly id: string;
 }
 
 /**

@@ -9,30 +9,30 @@ export interface WsSearchResultPayload {
 }
 
 export interface WsPlatformData {
+  abbreviation?: string;
   externalId: string | undefined;
   name: string;
-  abbreviation?: string;
   platformType: string;
 }
 
 export interface WsLanguageData {
+  iso6391?: string;
+  iso6393?: string;
+  name: string;
   /**
    * Canonical IETF BCP 47 tag ("en-US", "zh-Hant") — the system's preferred
    * language identifier. Always present for local results; may be absent on
    * results from gateways that only publish names or ISO codes.
    */
   tag?: string;
-  iso6393?: string;
-  iso6391?: string;
-  name: string;
 }
 
 export interface WsReleaseData {
   externalId: string;
-  platform: WsPlatformData;
-  status: string;
-  releaseDate?: string;
   languages: WsLanguageData[];
+  platform: WsPlatformData;
+  releaseDate?: string;
+  status: string;
 }
 
 export interface WsGameSearchResult {
@@ -59,13 +59,13 @@ export interface WsGameSearchResult {
   inSystem: boolean;
 
   maxPlayers?: number;
-  minPlayers?: number;
-
   /**
    * Play time in minutes (#869). A game may carry just one of the two, and
    * that one is then its whole play time.
    */
   maxPlayTime?: number;
+
+  minPlayers?: number;
   minPlayTime?: number;
 
   platforms: WsPlatformData[];
@@ -105,8 +105,8 @@ export interface WsSearchErrorPayload {
 export interface WsRateLimitedPayload {
   correlationId: string;
   message: string;
-  source: string;
   retryAfter: number; // seconds
+  source: string;
 }
 
 export interface WsSourceUnavailablePayload {

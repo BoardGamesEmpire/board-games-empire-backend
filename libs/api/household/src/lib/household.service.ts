@@ -165,7 +165,7 @@ export class HouseholdService {
         ...acc,
         [memberId]: gameCollections,
       }),
-      {} as Record<string, { id: string; platformGame: { id: string; game: { id: string; title: string } } }[]>,
+      {} as Record<string, { id: string; platformGame: { game: { id: string; title: string }; id: string } }[]>,
     );
 
     const members = household.members.map((member) => ({

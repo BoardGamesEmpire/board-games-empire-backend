@@ -493,7 +493,7 @@ export class HouseholdPluginsController {
   private actInput(
     householdId: string,
     slug: string,
-    body: { readonly manifestSha256: string; readonly locale?: string },
+    body: { readonly locale?: string; readonly manifestSha256: string },
     answers: readonly ConsentActAnswer[],
   ): ConsentActInput {
     return {

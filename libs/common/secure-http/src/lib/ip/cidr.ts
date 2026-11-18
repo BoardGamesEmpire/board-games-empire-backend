@@ -5,12 +5,12 @@ import { IpFamily, parseIp, type ParsedIp } from './ip';
  * comparisons; `prefixLength` is the number of significant bits.
  */
 export interface ParsedCidr {
-  family: IpFamily;
-
   /**
    * Network base bytes, with all bits beyond `prefixLength` zeroed.
    */
   baseBytes: Uint8Array;
+
+  family: IpFamily;
 
   prefixLength: number;
 }

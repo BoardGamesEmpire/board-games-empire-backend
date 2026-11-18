@@ -16,9 +16,9 @@ const tooLarge = {
 };
 
 interface Answer {
-  readonly status: number;
-  readonly headers: IncomingHttpHeaders;
   readonly body: string;
+  readonly headers: IncomingHttpHeaders;
+  readonly status: number;
 }
 
 /**

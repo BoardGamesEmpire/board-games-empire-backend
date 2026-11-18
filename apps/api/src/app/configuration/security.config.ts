@@ -3,11 +3,11 @@ import { registerAs } from '@nestjs/config';
 import Joi from 'joi';
 
 export interface SecurityConfig {
-  saltRounds: number;
   cors: {
-    origin: string;
     credentials: boolean;
+    origin: string;
   };
+  saltRounds: number;
 }
 
 export default registerAs('security', () =>

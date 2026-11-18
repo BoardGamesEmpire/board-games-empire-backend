@@ -4,20 +4,20 @@ import { ApiProperty } from '@nestjs/swagger';
 /** Public shape of a MediaObject. Excludes the internal storage location
  *  (driverKey/driverSlug) and stringifies the BigInt size for JSON. */
 export interface MediaObjectResponse {
-  id: string;
-  ownerId: string;
-  uploaderId: string;
-  reach: Reach;
-  mimeType: string;
-  sizeBytes: string;
   checksum: string;
-  etag: string | null;
-  originalName: string | null;
   createdAt: string;
-  updatedAt: string;
-  width: number | null;
+  etag: string | null;
   height: number | null;
+  id: string;
+  mimeType: string;
+  originalName: string | null;
+  ownerId: string;
   pageCount: number | null;
+  reach: Reach;
+  sizeBytes: string;
+  updatedAt: string;
+  uploaderId: string;
+  width: number | null;
 }
 
 export function toMediaObjectResponse(media: MediaObject): MediaObjectResponse {

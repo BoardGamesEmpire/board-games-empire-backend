@@ -20,17 +20,17 @@ import {
 
 /** What an interview stores on the DataGateway's row, from its Ping and its Describe. */
 export interface InterviewAnswers {
-  capabilities: DataGatewayCapability[];
-  coveragePlatformTypes: PlatformType[];
-  coverageContentTypes: ContentType[];
-  filterableAxes: SearchFilterAxis[];
   acceptedLanguageCodeFormats: LanguageCodeFormat[];
-  responseLanguageCodeFormat: LanguageCodeFormat | null;
-  passthroughSearchLanguage: boolean | null;
+  capabilities: DataGatewayCapability[];
   contentFormat: ContentFormat | null;
-  gatewayVersion: string | null;
-  upstream: Upstream | null;
+  coverageContentTypes: ContentType[];
+  coveragePlatformTypes: PlatformType[];
   fetchGamesMaxIds: number | null;
+  filterableAxes: SearchFilterAxis[];
+  gatewayVersion: string | null;
+  passthroughSearchLanguage: boolean | null;
+  responseLanguageCodeFormat: LanguageCodeFormat | null;
+  upstream: Upstream | null;
 }
 
 const isStored = <T>(value: T | undefined): value is T => value !== undefined;

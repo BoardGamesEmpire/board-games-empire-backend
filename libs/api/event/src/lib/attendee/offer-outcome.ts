@@ -31,8 +31,8 @@ export const OFFER_REFUSALS: readonly OfferRefusal[] = Object.values(OfferRefusa
  * the response translates.
  */
 export type OfferResult =
-  | { collectionId: string; outcome: 'added' | 'alreadyOffered'; entry: OfferedGame }
-  | { collectionId: string; outcome: 'refused'; reason: OfferRefusal; message: I18nMessage };
+  | { collectionId: string; entry: OfferedGame; outcome: 'added' | 'alreadyOffered' }
+  | { collectionId: string; message: I18nMessage; outcome: 'refused'; reason: OfferRefusal };
 
 /**
  * The message for `reason`, naming `collectionId` where the message does. It

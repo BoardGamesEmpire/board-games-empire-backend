@@ -16,6 +16,55 @@ import type { ActorDeps, AuthenticatedActor, SessionActor } from './types.js';
  */
 export interface Actors {
   /**
+   * A server-scope admin: a plain user additionally granted the
+   * `SystemRole.Admin` catalog role (additive — abilities union across
+   * `UserRole` rows, so the provisioned `User` role stays). This is the
+   * BGE permission-catalog Admin that CASL consumes, NOT better-auth's
+   * admin-plugin `user.role` column; the grant is arranged directly in the
+   * database before the actor's first authenticated request, per the
+   * ordering rule (#256 revised decision 5).
+   */
+  admin(options?: SignupOptions): Promise<SessionActor>;
+
+  /**
+   * An anonymous user — a temporary, account-less guest — signed in through
+   * better-auth's anonymous plugin over the real wire path. Provisioning gives
+   * it `AnonymousUser` INSTEAD of `User` (#484), and this fails loudly on any
+   * other role SET: `User` beside it would hand every anonymous session a
+   * signed-in user's authority, and only an exact-set check sees that.
+   * Implicitly ensures the Owner sentinel first, like every other factory. No
+   * password: an anonymous user has none.
+   *
+   * One per test. The plugin names every anonymous user 'Anonymous' and
+   * `users.username` is unique, so a second anonymous sign-in answers 500
+   * while the first row exists (#489); the between-test sweep clears it.
+   */
+  anonymous(): Promise<AuthenticatedActor>;
+
+  /**
+   * A household with a role-scoped roster, arranged directly in the
+   * database (see {@link createHouseholdWithMembers} for why not via the
+   * endpoints, and for the ordering rule the caller must respect).
+   */
+  householdWithMembers(options: HouseholdWithMembersOptions): Promise<HouseholdFixture>;
+
+  /**
+   * A server-scope moderator: a plain user additionally granted the
+   * `SystemRole.Moderator` catalog role, arranged exactly as {@link admin}
+   * arranges its own — additive, before the actor's first authenticated
+   * request.
+   *
+   * Moderator and Admin are the two roles holding the unconditioned
+   * `read:public_content` grant, which is what used to widen every collection
+   * read to the whole server. A reference implementation that removes that
+   * widening has to be able to name a Moderator to prove it, so this exists
+   * for the assertions rather than for any production promotion path — that
+   * path is #422, and nothing here waits on it, because the factory writes the
+   * `UserRole` row directly.
+   */
+  moderator(options?: SignupOptions): Promise<SessionActor>;
+
+  /**
    * The server-scope Owner sentinel. `UserProvisioningService` elects the
    * first human it provisions while no human holds a role, and grants them
    * the base `SystemRole.User` role plus `SystemRole.Owner` on top; elevation
@@ -42,55 +91,6 @@ export interface Actors {
    * an exact-set check separates the two.
    */
   user(options?: SignupOptions): Promise<SessionActor>;
-
-  /**
-   * A server-scope admin: a plain user additionally granted the
-   * `SystemRole.Admin` catalog role (additive — abilities union across
-   * `UserRole` rows, so the provisioned `User` role stays). This is the
-   * BGE permission-catalog Admin that CASL consumes, NOT better-auth's
-   * admin-plugin `user.role` column; the grant is arranged directly in the
-   * database before the actor's first authenticated request, per the
-   * ordering rule (#256 revised decision 5).
-   */
-  admin(options?: SignupOptions): Promise<SessionActor>;
-
-  /**
-   * A server-scope moderator: a plain user additionally granted the
-   * `SystemRole.Moderator` catalog role, arranged exactly as {@link admin}
-   * arranges its own — additive, before the actor's first authenticated
-   * request.
-   *
-   * Moderator and Admin are the two roles holding the unconditioned
-   * `read:public_content` grant, which is what used to widen every collection
-   * read to the whole server. A reference implementation that removes that
-   * widening has to be able to name a Moderator to prove it, so this exists
-   * for the assertions rather than for any production promotion path — that
-   * path is #422, and nothing here waits on it, because the factory writes the
-   * `UserRole` row directly.
-   */
-  moderator(options?: SignupOptions): Promise<SessionActor>;
-
-  /**
-   * An anonymous user — a temporary, account-less guest — signed in through
-   * better-auth's anonymous plugin over the real wire path. Provisioning gives
-   * it `AnonymousUser` INSTEAD of `User` (#484), and this fails loudly on any
-   * other role SET: `User` beside it would hand every anonymous session a
-   * signed-in user's authority, and only an exact-set check sees that.
-   * Implicitly ensures the Owner sentinel first, like every other factory. No
-   * password: an anonymous user has none.
-   *
-   * One per test. The plugin names every anonymous user 'Anonymous' and
-   * `users.username` is unique, so a second anonymous sign-in answers 500
-   * while the first row exists (#489); the between-test sweep clears it.
-   */
-  anonymous(): Promise<AuthenticatedActor>;
-
-  /**
-   * A household with a role-scoped roster, arranged directly in the
-   * database (see {@link createHouseholdWithMembers} for why not via the
-   * endpoints, and for the ordering rule the caller must respect).
-   */
-  householdWithMembers(options: HouseholdWithMembersOptions): Promise<HouseholdFixture>;
 }
 
 /** How long a factory waits for the asynchronous provisioning listener. */

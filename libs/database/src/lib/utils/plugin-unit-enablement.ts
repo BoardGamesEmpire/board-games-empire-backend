@@ -51,11 +51,11 @@ export type PluginUnitDormancy = (typeof PLUGIN_UNIT_DORMANCY_CODES)[number];
  * {@link PluginActiveManifest}.
  */
 export function derivePluginUnitDormancy(input: {
-  readonly scopeType: PluginUnitCoordinates['scopeType'];
   /** `null` when the stored manifest cannot be read. */
   readonly manifest: PluginActiveManifest | null;
   /** A household unit's document, `{}` when it has no unit enablement. Ignored for Server and User units. */
   readonly retainedConfig: unknown;
+  readonly scopeType: PluginUnitCoordinates['scopeType'];
 }): PluginUnitDormancy | null {
   const { scopeType, manifest, retainedConfig } = input;
 

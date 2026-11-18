@@ -30,7 +30,7 @@ const COND = { id: 'sentinel-condition' };
 const NOW = new Date('2026-10-23T12:00:00Z');
 const LATER = new Date('2026-10-24T12:00:00Z');
 
-type RosterRow = { userId: string; role: { role: { name: string } } | null };
+type RosterRow = { role: { role: { name: string } } | null; userId: string };
 
 const rosterRow = (userId: string, name: SystemRole): RosterRow => ({ userId, role: { role: { name } } });
 

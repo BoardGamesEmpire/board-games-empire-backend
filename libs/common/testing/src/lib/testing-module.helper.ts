@@ -50,10 +50,10 @@ export function createMockCacheManager() {
 }
 
 export interface TestingModuleWithDb {
-  module: TestingModule;
-  db: MockDatabaseService;
-  cls: jest.Mocked<ClsService>;
   cache: CacheMock;
+  cls: jest.Mocked<ClsService>;
+  db: MockDatabaseService;
+  module: TestingModule;
 }
 
 /**

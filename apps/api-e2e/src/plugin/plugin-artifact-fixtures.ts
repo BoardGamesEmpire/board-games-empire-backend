@@ -22,19 +22,19 @@ export const ARTIFACTS_PATH = '/api/plugins/artifacts';
 export const INSTALL_PATH = '/api/plugins/install';
 
 export interface BuiltArtifact {
-  readonly slug: string;
-  readonly version: string;
-
+  readonly bytes: Buffer;
   /** The display name in the server default locale: the name a data-gateway plugin's DataGateway takes. */
   readonly displayName: string;
+
   readonly manifest: PluginManifest;
-  readonly bytes: Buffer;
   readonly sha256: string;
+  readonly slug: string;
+  readonly version: string;
 }
 
 export interface ArtifactOptions {
-  /** Defaults to a fresh `ingress-` slug, so each call is its own plugin. */
-  readonly slug?: string;
+  /** Requested permissions added after the fixture's own. */
+  readonly extraChecks?: PluginManifest['permissions']['checks'];
 
   /** Changes the bytes, so a second artifact of one manifest has its own checksum. */
   readonly indexJs?: string;
@@ -46,8 +46,8 @@ export interface ArtifactOptions {
    */
   readonly manifest?: PluginManifestOverrides;
 
-  /** Requested permissions added after the fixture's own. */
-  readonly extraChecks?: PluginManifest['permissions']['checks'];
+  /** Defaults to a fresh `ingress-` slug, so each call is its own plugin. */
+  readonly slug?: string;
 }
 
 /** A slug no other test uses. */

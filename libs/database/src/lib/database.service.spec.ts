@@ -48,11 +48,11 @@ jest.mock('pg', () => {
 });
 
 interface MockPoolInstance {
-  totalCount: number;
-  idleCount: number;
-  waitingCount: number;
-  options: { max: number };
   end: jest.Mock<Promise<void>, []>;
+  idleCount: number;
+  options: { max: number };
+  totalCount: number;
+  waitingCount: number;
 }
 
 const getPool = (service: DatabaseService): MockPoolInstance =>

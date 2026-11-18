@@ -16,20 +16,20 @@ import { iso6393 as iso6393Registry } from 'iso-639-3';
  * callers map their wire types onto this.
  */
 export interface GatewayLanguageInput {
-  value: string;
   format: LanguageCodeFormat;
   ietfTag?: string;
-  iso6393?: string;
   iso6391?: string;
+  iso6393?: string;
   name?: string;
   nativeName?: string;
+  value: string;
 }
 
 export interface InterviewSummary {
-  resolved: number;
-  pending: number;
-  unresolved: number;
   ignored: number;
+  pending: number;
+  resolved: number;
+  unresolved: number;
 }
 
 interface Resolution {
@@ -161,7 +161,7 @@ export class LanguageLinkService {
    */
   async resolveLanguageData(
     gatewayId: string,
-    data: { ietfTag?: string; iso6393?: string; iso6391?: string; name?: string },
+    data: { ietfTag?: string; iso6391?: string; iso6393?: string; name?: string },
   ): Promise<string | null> {
     const candidates = this.toCandidates(data);
     if (candidates.length === 0) {
@@ -198,8 +198,8 @@ export class LanguageLinkService {
    */
   private toCandidates(data: {
     ietfTag?: string;
-    iso6393?: string;
     iso6391?: string;
+    iso6393?: string;
     name?: string;
   }): GatewayLanguageInput[] {
     const enrichments = {
@@ -343,7 +343,7 @@ export class LanguageLinkService {
    * otherwise answers with the link's current resolution.
    */
   private async writeWhileUnresolved(
-    key: { gatewayId: string; value: string; format: LanguageCodeFormat },
+    key: { format: LanguageCodeFormat; gatewayId: string; value: string },
     resolution: Resolution,
     supplied: Prisma.LanguageGatewayLinkUpdateManyMutationInput,
   ): Promise<Resolution> {

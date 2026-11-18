@@ -4,10 +4,10 @@ import { buildPluginManifestJsonSchema, renderPluginManifestJsonSchemaArtifact }
 interface JsonSchemaObjectShape {
   readonly $id?: string;
   readonly $schema?: string;
-  readonly type?: string;
-  readonly required?: readonly string[];
   readonly additionalProperties?: boolean;
-  readonly properties?: Record<string, { readonly pattern?: string; readonly enum?: readonly string[] }>;
+  readonly properties?: Record<string, { readonly enum?: readonly string[]; readonly pattern?: string }>;
+  readonly required?: readonly string[];
+  readonly type?: string;
 }
 
 describe('buildPluginManifestJsonSchema', () => {

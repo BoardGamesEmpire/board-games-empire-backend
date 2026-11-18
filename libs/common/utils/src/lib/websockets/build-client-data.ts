@@ -8,20 +8,20 @@ import { sessionImpersonatorId } from '../impersonation.js';
 export type WsRefusalReason = 'no-user' | 'anonymous' | 'impersonated';
 
 export interface WsClientDataRefused {
+  /** Log-only. Carries ids that must not be sent to the client. */
+  readonly detail?: string;
   readonly ok: false;
   /**
    * The rule the session broke. The gateway tells the client which, in the
    * connection's locale, so no copy lives here (#180).
    */
   readonly reason: WsRefusalReason;
-  /** Log-only. Carries ids that must not be sent to the client. */
-  readonly detail?: string;
 }
 
 export interface WsClientDataAccepted {
-  readonly ok: true;
   /** Everything but the locale, which the gateway resolves with a lookup. */
   readonly data: Omit<BaseClientData, 'locale'>;
+  readonly ok: true;
 }
 
 export type WsClientDataOutcome = WsClientDataAccepted | WsClientDataRefused;

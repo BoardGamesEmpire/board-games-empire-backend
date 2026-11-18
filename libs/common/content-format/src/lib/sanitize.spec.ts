@@ -4,7 +4,7 @@ import { plainTextToMarkdown } from './plain-text';
 import { sanitizeMarkdown } from './sanitize';
 
 /** Every address in the Markdown a reader could follow or load, and whether any raw HTML is left. */
-function reachable(markdown: string): { urls: string[]; html: boolean } {
+function reachable(markdown: string): { html: boolean; urls: string[] } {
   const urls: string[] = [];
   let html = false;
 

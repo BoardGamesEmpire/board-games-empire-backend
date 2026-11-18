@@ -48,13 +48,13 @@ const LIFECYCLE_TYPE_BY_ROUTING_KEY: ReadonlyMap<string, PluginLifecycleEventTyp
 );
 
 interface LifecycleRowIdentity {
+  readonly manifestVersion: string | null;
+  readonly payload: Record<string, unknown>;
   readonly pluginId: string;
   /** `null` when the event class does not carry the slug — resolved via DB lookup. */
   readonly pluginSlug: string | null;
-  readonly scopeType: PluginGrantScope | null;
   readonly scopeId: string | null;
-  readonly manifestVersion: string | null;
-  readonly payload: Record<string, unknown>;
+  readonly scopeType: PluginGrantScope | null;
 }
 
 /**

@@ -69,7 +69,7 @@ export class GameUpsertService {
   private async upsertGameRecord(
     gameData: GameData,
     gatewayId: string,
-  ): Promise<{ gameId: string; gameCreated: boolean; sourceCreated: boolean }> {
+  ): Promise<{ gameCreated: boolean; gameId: string; sourceCreated: boolean }> {
     const existingSource = await this.findGameSource(gatewayId, gameData.externalId);
     if (existingSource) {
       return this.applyExistingGameUpdate(existingSource, gameData, gatewayId);
@@ -142,10 +142,10 @@ export class GameUpsertService {
    * them (#971). They rarely change, so an unchanged list is not written.
    */
   private async applyExistingGameUpdate(
-    source: { baseExternalIds: string[]; game: { id: string; frozenAt: Date | null } },
+    source: { baseExternalIds: string[]; game: { frozenAt: Date | null; id: string } },
     gameData: GameData,
     gatewayId: string,
-  ): Promise<{ gameId: string; gameCreated: boolean; sourceCreated: boolean }> {
+  ): Promise<{ gameCreated: boolean; gameId: string; sourceCreated: boolean }> {
     const { game } = source;
     const baseExternalIds = gameData.baseGameExternalIds ?? [];
     if (!sameIds(source.baseExternalIds, baseExternalIds)) {

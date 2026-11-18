@@ -37,8 +37,8 @@ import {
  */
 interface Transition {
   readonly before: Event;
-  readonly event: Event;
   readonly changed: boolean;
+  readonly event: Event;
   readonly served: EventWithStatus;
 }
 

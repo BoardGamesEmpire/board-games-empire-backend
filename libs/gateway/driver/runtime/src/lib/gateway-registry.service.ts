@@ -50,23 +50,23 @@ import { remoteConnectionOptions } from './utils/remote-connection-options';
 type DriverOrigin = 'remote' | 'registered' | 'plugin';
 
 interface CachedDriver {
-  gatewayId: string;
-  driver: DataGatewayDriver;
   configHash: string;
-  origin: DriverOrigin;
-
+  driver: DataGatewayDriver;
+  gatewayId: string;
   /**
    * For a driver the plugin driver source built, the install of the plugin
    * it was built from: its `installedAt`, which a reinstall rewrites (#1083).
    */
   installedAt?: Date;
+
+  origin: DriverOrigin;
 }
 
 interface FailureTrack {
   consecutiveFailures: number;
   firstFailureAt: Date;
-  lastFailureAt: Date;
   lastError: string;
+  lastFailureAt: Date;
 }
 
 /**
@@ -74,16 +74,16 @@ interface FailureTrack {
  * DataGateway, of its plugin beside it (#1083).
  */
 interface RoutingRow {
-  enabled: boolean;
-  pluginId: string | null;
-  plugin: RoutedPlugin | null;
-  firstInterviewedAt: Date | null;
   capabilities: DataGatewayCapability[];
-  disabledCapabilities: DataGatewayCapability[];
-  coveragePlatformTypes: PlatformType[];
-  coverageContentTypes: ContentType[];
-  filterableAxes: SearchFilterAxis[];
   contentFormat: ContentFormat | null;
+  coverageContentTypes: ContentType[];
+  coveragePlatformTypes: PlatformType[];
+  disabledCapabilities: DataGatewayCapability[];
+  enabled: boolean;
+  filterableAxes: SearchFilterAxis[];
+  firstInterviewedAt: Date | null;
+  plugin: RoutedPlugin | null;
+  pluginId: string | null;
 }
 
 const ROUTING_FIELDS = {
@@ -110,22 +110,22 @@ export type StoredCoverage = Pick<RoutingRow, 'coveragePlatformTypes' | 'coverag
 export type SearchRoute =
   | { readonly routable: false }
   | {
-      readonly routable: true;
+      /** The content format its results' summaries arrive in, null when it declared none. */
+      readonly contentFormat: ContentFormat | null;
 
       /** Whether its coverage overlaps the search's filter. One that doesn't isn't asked. */
       readonly covers: boolean;
-
-      /** The search filters its search narrows by. The filter it's sent carries only these. */
-      readonly filterableAxes: readonly SearchFilterAxis[];
-
-      /** The content format its results' summaries arrive in, null when it declared none. */
-      readonly contentFormat: ContentFormat | null;
 
       /**
        * Its driver, connecting it first if this process hasn't, for a search
        * that must ask it after all. Its row isn't read again.
        */
       readonly driver: () => Promise<DataGatewayDriver>;
+
+      /** The search filters its search narrows by. The filter it's sent carries only these. */
+      readonly filterableAxes: readonly SearchFilterAxis[];
+
+      readonly routable: true;
     };
 
 /**
@@ -133,8 +133,8 @@ export type SearchRoute =
  * text arrives in, null when it declared none.
  */
 export interface GatewayResolution {
-  readonly driver: DataGatewayDriver;
   readonly contentFormat: ContentFormat | null;
+  readonly driver: DataGatewayDriver;
 }
 
 /** A DataGateway a search will ask, and the search filters its search narrows by. */

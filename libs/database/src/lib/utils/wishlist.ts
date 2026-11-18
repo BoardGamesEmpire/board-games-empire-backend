@@ -19,7 +19,7 @@ import type { Prisma } from '../client';
  */
 export async function readWishlistedPlatformGames(
   db: Pick<Prisma.TransactionClient, 'list' | 'listEntry'>,
-  platformGames: readonly { readonly id: string; readonly gameId: string }[],
+  platformGames: readonly { readonly gameId: string; readonly id: string }[],
   wishlistWhere: Prisma.ListWhereInput,
 ): Promise<ReadonlySet<string> | null> {
   if (platformGames.length === 0) {

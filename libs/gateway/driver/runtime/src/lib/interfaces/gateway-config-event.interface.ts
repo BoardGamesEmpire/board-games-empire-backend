@@ -4,17 +4,17 @@
  * against their cached version to decide whether to invalidate.
  */
 export interface GatewayConfigEvent {
-  gatewayId: string;
+  /**
+   * Categorical change type — informational for listeners
+   */
+  changeType: 'created' | 'updated' | 'deleted' | 'disabled' | 'reconnect-requested';
 
   /**
    * Hash of the new config — receivers compare against their cached hash
    */
   configHash: string;
 
-  /**
-   * Categorical change type — informational for listeners
-   */
-  changeType: 'created' | 'updated' | 'deleted' | 'disabled' | 'reconnect-requested';
+  gatewayId: string;
 
   /**
    * Timestamp in milliseconds since epoch

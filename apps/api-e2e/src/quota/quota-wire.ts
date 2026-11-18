@@ -7,12 +7,12 @@ import { envelopeFailure, isRecord, type HttpResponseLike, type RequestDescripti
 
 /** The fields the assertions read. `limit` travels as a string (a BigInt column). */
 export interface QuotaWire {
+  readonly householdId: string | null;
   readonly id: string;
+  readonly limit: string;
+  readonly resource: string;
   readonly scope: string;
   readonly scopeId: string | null;
-  readonly householdId: string | null;
-  readonly resource: string;
-  readonly limit: string;
 }
 
 const fail = envelopeFailure('apps/api-e2e/src/quota/quota-wire.ts');

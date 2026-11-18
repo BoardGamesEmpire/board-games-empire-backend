@@ -50,53 +50,12 @@ type ForEverySubject<T extends Record<CatalogSubject, unknown>> = T;
 
 /** The Prisma `WhereInput` a subject's conditions are checked against. */
 export type SubjectWhereInput = ForEverySubject<{
-  // System
-  SystemSetting: Prisma.SystemSettingWhereInput;
+  all: never; // the wildcard filters nothing
   AuditLog: Prisma.AuditLogWhereInput;
-  Notification: Prisma.NotificationWhereInput;
-  SafeHttpPolicy: Prisma.SafeHttpPolicyWhereInput;
-  Media: Prisma.MediaWhereInput;
-  MediaObject: Prisma.MediaObjectWhereInput;
-  MediaContribution: Prisma.MediaContributionWhereInput;
-  WebhookSubscription: Prisma.WebhookSubscriptionWhereInput;
-  Quota: Prisma.QuotaWhereInput;
-  Job: Prisma.JobWhereInput;
-  // Plugin
-  Plugin: Prisma.PluginWhereInput;
-  PluginGrant: Prisma.PluginGrantWhereInput;
-  HouseholdPlugin: Prisma.HouseholdPluginWhereInput;
-  UserPlugin: Prisma.UserPluginWhereInput;
-  PluginLifecycleEvent: Prisma.PluginLifecycleEventWhereInput;
-  // User
-  User: Prisma.UserWhereInput;
-  UserProfile: Prisma.UserProfileWhereInput;
-  UserGameCustomization: Prisma.UserGameCustomizationWhereInput;
-  Friendship: Prisma.FriendshipWhereInput;
-  // Feedback
-  FeedbackReport: Prisma.FeedbackReportWhereInput;
-  FeedbackSinkDispatch: never; // no model
   // Game
   Campaign: never; // no model
-  Game: Prisma.GameWhereInput;
-  GameCollection: Prisma.GameCollectionWhereInput;
-  GameCreationRequest: never; // no model
-  GameCustomization: never; // no model
   DataGateway: Prisma.DataGatewayWhereInput;
   DataGatewaySearch: never; // no model (#1076)
-  GamePlayResult: Prisma.GamePlayResultWhereInput;
-  GamePlaySession: Prisma.GamePlaySessionWhereInput;
-  GameShare: Prisma.GameShareWhereInput;
-  List: Prisma.ListWhereInput;
-  Platform: Prisma.PlatformWhereInput;
-  PlatformGame: Prisma.PlatformGameWhereInput;
-  RuleVariant: Prisma.RuleVariantWhereInput;
-  SessionPlayer: Prisma.SessionPlayerWhereInput;
-  // Household
-  Household: Prisma.HouseholdWhereInput;
-  HouseholdMember: Prisma.HouseholdMemberWhereInput;
-  HouseholdRole: Prisma.HouseholdRoleWhereInput;
-  HouseholdBan: Prisma.HouseholdBanWhereInput;
-  Invite: Prisma.InviteWhereInput;
   // Event
   Event: Prisma.EventWhereInput;
   EventAttendee: Prisma.EventAttendeeWhereInput;
@@ -107,62 +66,62 @@ export type SubjectWhereInput = ForEverySubject<{
   EventGameVote: Prisma.EventGameVoteWhereInput;
   EventOccurrence: Prisma.EventOccurrenceWhereInput;
   EventPolicy: Prisma.EventPolicyWhereInput;
+  // Feedback
+  FeedbackReport: Prisma.FeedbackReportWhereInput;
+  FeedbackSinkDispatch: never; // no model
+  Friendship: Prisma.FriendshipWhereInput;
+  Game: Prisma.GameWhereInput;
+  GameCollection: Prisma.GameCollectionWhereInput;
+  GameCreationRequest: never; // no model
+  GameCustomization: never; // no model
+  GamePlayResult: Prisma.GamePlayResultWhereInput;
+  GamePlaySession: Prisma.GamePlaySessionWhereInput;
+  GameShare: Prisma.GameShareWhereInput;
+  // Household
+  Household: Prisma.HouseholdWhereInput;
+  HouseholdBan: Prisma.HouseholdBanWhereInput;
+  HouseholdMember: Prisma.HouseholdMemberWhereInput;
+  HouseholdPlugin: Prisma.HouseholdPluginWhereInput;
+  HouseholdRole: Prisma.HouseholdRoleWhereInput;
+  Invite: Prisma.InviteWhereInput;
+  Job: Prisma.JobWhereInput;
+  List: Prisma.ListWhereInput;
+  Media: Prisma.MediaWhereInput;
+  MediaContribution: Prisma.MediaContributionWhereInput;
+  MediaObject: Prisma.MediaObjectWhereInput;
+  Notification: Prisma.NotificationWhereInput;
   // Permission catalog
   Permission: Prisma.PermissionWhereInput;
+  Platform: Prisma.PlatformWhereInput;
+  PlatformGame: Prisma.PlatformGameWhereInput;
+  // Plugin
+  Plugin: Prisma.PluginWhereInput;
+  PluginGrant: Prisma.PluginGrantWhereInput;
+  PluginLifecycleEvent: Prisma.PluginLifecycleEventWhereInput;
+  Quota: Prisma.QuotaWhereInput;
   Role: Prisma.RoleWhereInput;
   RolePermission: Prisma.RolePermissionWhereInput;
-  all: never; // the wildcard filters nothing
+  RuleVariant: Prisma.RuleVariantWhereInput;
+  SafeHttpPolicy: Prisma.SafeHttpPolicyWhereInput;
+  SessionPlayer: Prisma.SessionPlayerWhereInput;
+  // System
+  SystemSetting: Prisma.SystemSettingWhereInput;
+  // User
+  User: Prisma.UserWhereInput;
+  UserGameCustomization: Prisma.UserGameCustomizationWhereInput;
+  UserPlugin: Prisma.UserPluginWhereInput;
+  UserProfile: Prisma.UserProfileWhereInput;
+  WebhookSubscription: Prisma.WebhookSubscriptionWhereInput;
 }>;
 
 /** The Prisma scalar-field enum a subject's `fields` entries are checked against. */
 export type SubjectScalarField = ForEverySubject<{
-  // System
-  SystemSetting: Prisma.SystemSettingScalarFieldEnum;
+  all: never; // the wildcard filters nothing
   AuditLog: Prisma.AuditLogScalarFieldEnum;
-  Notification: Prisma.NotificationScalarFieldEnum;
-  SafeHttpPolicy: Prisma.SafeHttpPolicyScalarFieldEnum;
-  Media: Prisma.MediaScalarFieldEnum;
-  MediaObject: Prisma.MediaObjectScalarFieldEnum;
-  MediaContribution: Prisma.MediaContributionScalarFieldEnum;
-  WebhookSubscription: Prisma.WebhookSubscriptionScalarFieldEnum;
-  Quota: Prisma.QuotaScalarFieldEnum;
-  Job: Prisma.JobScalarFieldEnum;
-  // Plugin
-  Plugin: Prisma.PluginScalarFieldEnum;
-  PluginGrant: Prisma.PluginGrantScalarFieldEnum;
-  HouseholdPlugin: Prisma.HouseholdPluginScalarFieldEnum;
-  UserPlugin: Prisma.UserPluginScalarFieldEnum;
-  PluginLifecycleEvent: Prisma.PluginLifecycleEventScalarFieldEnum;
-  // User
-  User: Prisma.UserScalarFieldEnum;
-  UserProfile: Prisma.UserProfileScalarFieldEnum;
-  UserGameCustomization: Prisma.UserGameCustomizationScalarFieldEnum;
-  Friendship: Prisma.FriendshipScalarFieldEnum;
-  // Feedback
-  FeedbackReport: Prisma.FeedbackReportScalarFieldEnum;
-  FeedbackSinkDispatch: never; // no model
   // Game
   Campaign: never; // no model
-  Game: Prisma.GameScalarFieldEnum;
-  GameCollection: Prisma.GameCollectionScalarFieldEnum;
-  GameCreationRequest: never; // no model
-  GameCustomization: never; // no model
   DataGateway: Prisma.DataGatewayScalarFieldEnum;
   DataGatewaySearch: never; // no model (#1076)
-  GamePlayResult: Prisma.GamePlayResultScalarFieldEnum;
-  GamePlaySession: Prisma.GamePlaySessionScalarFieldEnum;
-  GameShare: Prisma.GameShareScalarFieldEnum;
-  List: Prisma.ListScalarFieldEnum;
-  Platform: Prisma.PlatformScalarFieldEnum;
-  PlatformGame: Prisma.PlatformGameScalarFieldEnum;
-  RuleVariant: Prisma.RuleVariantScalarFieldEnum;
-  SessionPlayer: Prisma.SessionPlayerScalarFieldEnum;
-  // Household
-  Household: Prisma.HouseholdScalarFieldEnum;
-  HouseholdMember: Prisma.HouseholdMemberScalarFieldEnum;
-  HouseholdRole: Prisma.HouseholdRoleScalarFieldEnum;
-  HouseholdBan: Prisma.HouseholdBanScalarFieldEnum;
-  Invite: Prisma.InviteScalarFieldEnum;
   // Event
   Event: Prisma.EventScalarFieldEnum;
   EventAttendee: Prisma.EventAttendeeScalarFieldEnum;
@@ -173,11 +132,52 @@ export type SubjectScalarField = ForEverySubject<{
   EventGameVote: Prisma.EventGameVoteScalarFieldEnum;
   EventOccurrence: Prisma.EventOccurrenceScalarFieldEnum;
   EventPolicy: Prisma.EventPolicyScalarFieldEnum;
+  // Feedback
+  FeedbackReport: Prisma.FeedbackReportScalarFieldEnum;
+  FeedbackSinkDispatch: never; // no model
+  Friendship: Prisma.FriendshipScalarFieldEnum;
+  Game: Prisma.GameScalarFieldEnum;
+  GameCollection: Prisma.GameCollectionScalarFieldEnum;
+  GameCreationRequest: never; // no model
+  GameCustomization: never; // no model
+  GamePlayResult: Prisma.GamePlayResultScalarFieldEnum;
+  GamePlaySession: Prisma.GamePlaySessionScalarFieldEnum;
+  GameShare: Prisma.GameShareScalarFieldEnum;
+  // Household
+  Household: Prisma.HouseholdScalarFieldEnum;
+  HouseholdBan: Prisma.HouseholdBanScalarFieldEnum;
+  HouseholdMember: Prisma.HouseholdMemberScalarFieldEnum;
+  HouseholdPlugin: Prisma.HouseholdPluginScalarFieldEnum;
+  HouseholdRole: Prisma.HouseholdRoleScalarFieldEnum;
+  Invite: Prisma.InviteScalarFieldEnum;
+  Job: Prisma.JobScalarFieldEnum;
+  List: Prisma.ListScalarFieldEnum;
+  Media: Prisma.MediaScalarFieldEnum;
+  MediaContribution: Prisma.MediaContributionScalarFieldEnum;
+  MediaObject: Prisma.MediaObjectScalarFieldEnum;
+  Notification: Prisma.NotificationScalarFieldEnum;
   // Permission catalog
   Permission: Prisma.PermissionScalarFieldEnum;
+  Platform: Prisma.PlatformScalarFieldEnum;
+  PlatformGame: Prisma.PlatformGameScalarFieldEnum;
+  // Plugin
+  Plugin: Prisma.PluginScalarFieldEnum;
+  PluginGrant: Prisma.PluginGrantScalarFieldEnum;
+  PluginLifecycleEvent: Prisma.PluginLifecycleEventScalarFieldEnum;
+  Quota: Prisma.QuotaScalarFieldEnum;
   Role: Prisma.RoleScalarFieldEnum;
   RolePermission: Prisma.RolePermissionScalarFieldEnum;
-  all: never; // the wildcard filters nothing
+  RuleVariant: Prisma.RuleVariantScalarFieldEnum;
+  SafeHttpPolicy: Prisma.SafeHttpPolicyScalarFieldEnum;
+  SessionPlayer: Prisma.SessionPlayerScalarFieldEnum;
+  // System
+  SystemSetting: Prisma.SystemSettingScalarFieldEnum;
+  // User
+  User: Prisma.UserScalarFieldEnum;
+  UserGameCustomization: Prisma.UserGameCustomizationScalarFieldEnum;
+  UserPlugin: Prisma.UserPluginScalarFieldEnum;
+  UserProfile: Prisma.UserProfileScalarFieldEnum;
+  WebhookSubscription: Prisma.WebhookSubscriptionScalarFieldEnum;
 }>;
 
 /**
@@ -195,10 +195,10 @@ export type SubjectScalarField = ForEverySubject<{
 export type PermissionEntryFor<S extends CatalogSubject, Slug extends string> = Readonly<
   Omit<PermissionSeedDefinition, 'subject' | 'slug' | 'conditions' | 'fields'>
 > & {
-  readonly subject: S;
-  readonly slug: Slug;
   readonly conditions?: SubjectWhereInput[S];
   readonly fields?: readonly SubjectScalarField[S][];
+  readonly slug: Slug;
+  readonly subject: S;
 };
 
 /** `true` when `T` is a union of more than one member. */
@@ -243,9 +243,9 @@ declare const checkedAgainstSubject: unique symbol;
  * over whatever the array holds, but neither checks paths.
  */
 export type DefinedPermission<S extends CatalogSubject, Slug extends string> = Readonly<PermissionSeedDefinition> & {
-  readonly subject: S;
-  readonly slug: Slug;
   readonly [checkedAgainstSubject]: true;
+  readonly slug: Slug;
+  readonly subject: S;
 };
 
 /**

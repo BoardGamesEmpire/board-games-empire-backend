@@ -13,7 +13,7 @@ const TRUSTED = {
   isTrustedOrigin: jest.fn((url: string) => new URL(url).origin === 'https://c.example'),
 };
 
-async function refusalOf(attempt: Promise<unknown>): Promise<{ status: number; code?: string }> {
+async function refusalOf(attempt: Promise<unknown>): Promise<{ code?: string; status: number }> {
   const error = await attempt.then(
     () => {
       throw new Error('expected a refusal, but the request went through');

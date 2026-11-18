@@ -23,12 +23,12 @@ import { PluginConsentCheckClassifier } from './plugin-consent-check-classifier.
 import { writeConsentAct } from './write-consent-act';
 
 export interface ServerConsentActInput {
-  readonly slug: string;
   /** The acting server admin. Verified here. */
   readonly actorId: string;
-  readonly manifestSha256: string;
   readonly answers: readonly ConsentActAnswer[];
   readonly locale?: string;
+  readonly manifestSha256: string;
+  readonly slug: string;
 }
 
 export interface ServerConsentActResult {
@@ -42,15 +42,15 @@ type ServerConsentActKind = 'Toggle' | 'Review';
 
 /** The columns `claimPluginForAct` reads under the plugin row's share lock. */
 interface ServerConsentActClaimRow {
-  readonly uninstalled_at: Date | null;
   readonly installed_sha256: string;
+  readonly uninstalled_at: Date | null;
 }
 
 type ServerActOutcome =
   | { readonly changed: false }
   | {
-      readonly changed: true;
       readonly act: PluginConsentAct;
+      readonly changed: true;
       /** Only the decisions whose row changed: the ones an event announces. */
       readonly changedDecisions: readonly WrittenDecision[];
     };

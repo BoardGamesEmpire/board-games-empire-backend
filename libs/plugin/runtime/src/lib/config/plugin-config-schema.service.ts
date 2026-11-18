@@ -5,12 +5,12 @@ import { createHash } from 'node:crypto';
 import { PluginConfigSchemaUnusableError, type PluginConfigIssue } from './config-schema.errors';
 
 export interface PluginConfigValidationInput {
+  readonly config: Record<string, unknown>;
+  /** The manifest's `config.schema` document, opaque until here. */
+  readonly schema: Record<string, unknown>;
   readonly slug: string;
   /** The ACTIVE manifest version — the cache key half that makes recompiles follow updates. */
   readonly version: string;
-  /** The manifest's `config.schema` document, opaque until here. */
-  readonly schema: Record<string, unknown>;
-  readonly config: Record<string, unknown>;
 }
 
 /**

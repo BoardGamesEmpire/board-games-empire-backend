@@ -46,7 +46,7 @@ describe('GameSearchService', () => {
   let db: MockDatabaseService;
   let abilityService: MockAbilityService;
   let compose: jest.SpyInstance;
-  let coordinator: { searchGames: jest.Mock; fetchExpansions: jest.Mock };
+  let coordinator: { fetchExpansions: jest.Mock; searchGames: jest.Mock };
   let gameService: { readDataGatewayLinks: jest.Mock };
 
   beforeEach(async () => {

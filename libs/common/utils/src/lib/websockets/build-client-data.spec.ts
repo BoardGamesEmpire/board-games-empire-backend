@@ -4,9 +4,9 @@ import { buildWsClientData } from './build-client-data';
 const CORRELATION_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const buildSession = (overrides: {
-  userId?: string;
-  isAnonymous?: boolean;
   impersonatedBy?: string | null;
+  isAnonymous?: boolean;
+  userId?: string;
 }): UserSession =>
   ({
     user: {

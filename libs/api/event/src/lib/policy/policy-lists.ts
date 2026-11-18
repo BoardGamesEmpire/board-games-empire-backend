@@ -12,8 +12,8 @@ export type PolicyLists = Partial<PolicyListsView>;
 
 /** The lists a policy write changes, as they were and as they will be stored. */
 export interface ChangedPolicyLists {
-  before: PolicyLists;
   after: PolicyLists;
+  before: PolicyLists;
 }
 
 const LIST_KEYS = ['allowedPlatformTypes', 'allowedPlatformIds', 'allowedCategoryIds'] as const;
@@ -106,7 +106,7 @@ export function policyChange<Columns extends object>(
  */
 export async function assertPolicyReferencesExist(
   tx: Pick<Prisma.TransactionClient, 'platform' | 'category'>,
-  references: { platformIds?: string[]; categoryIds?: string[] },
+  references: { categoryIds?: string[]; platformIds?: string[] },
 ): Promise<void> {
   const platformIds = [...new Set(references.platformIds)];
   const categoryIds = [...new Set(references.categoryIds)];

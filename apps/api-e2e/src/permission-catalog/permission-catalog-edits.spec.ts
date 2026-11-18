@@ -37,27 +37,27 @@ import { flushPermissionGraphs, reconcileAsAtStart, restoreShippedCatalog } from
 
 /** A permission's row as `GET /permission-catalog` answers it. */
 interface CatalogPermissionWire {
-  readonly slug: string;
   readonly conditions: unknown;
-  readonly reason: string | null;
-  readonly riskLevel: RiskLevel;
-  readonly managedBy: PermissionOwner;
-  readonly retiredAt: string | null;
-  readonly shipped: boolean;
   readonly drift: readonly { readonly field: string; readonly from: unknown; readonly to: unknown }[];
+  readonly managedBy: PermissionOwner;
+  readonly reason: string | null;
+  readonly retiredAt: string | null;
+  readonly riskLevel: RiskLevel;
+  readonly shipped: boolean;
+  readonly slug: string;
 }
 
 /** A role's grant as `GET /permission-catalog` answers it. */
 interface CatalogGrantWire {
-  readonly slug: string;
   readonly managedBy: PermissionOwner;
   readonly revokedAt: string | null;
   readonly shipped: boolean;
+  readonly slug: string;
 }
 
 interface CatalogWire {
   readonly permissions: readonly CatalogPermissionWire[];
-  readonly roles: readonly { readonly name: string; readonly grants: readonly CatalogGrantWire[] }[];
+  readonly roles: readonly { readonly grants: readonly CatalogGrantWire[]; readonly name: string }[];
 }
 
 /** The permission as this version ships it. */

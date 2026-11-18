@@ -31,7 +31,12 @@ export enum WsErrorEvents {
  * ({@link WsStructuredErrorPayload}).
  */
 export interface WsErrorPayload {
-  readonly statusCode: number;
+  /**
+   * The refused frame's `correlationId`, echoed when it carried a string one,
+   * so a client can tell which of its searches was refused. A validation
+   * failure can be about the id itself, so it is echoed as sent.
+   */
+  readonly correlationId?: string;
 
   /** The HTTP body's `error` field: the status's reason phrase, never a custom label (#1260). */
   readonly error: string;
@@ -42,12 +47,7 @@ export interface WsErrorPayload {
   /** The pattern the refused frame was sent on. Absent for a refused connection. */
   readonly pattern?: string;
 
-  /**
-   * The refused frame's `correlationId`, echoed when it carried a string one,
-   * so a client can tell which of its searches was refused. A validation
-   * failure can be about the id itself, so it is echoed as sent.
-   */
-  readonly correlationId?: string;
+  readonly statusCode: number;
 }
 
 /**

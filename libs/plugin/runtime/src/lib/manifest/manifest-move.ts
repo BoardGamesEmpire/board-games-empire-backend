@@ -43,9 +43,9 @@ export type PluginChangeKind = 'reinstalled' | 'version-activated';
  * the document says so.
  */
 export interface ManifestSnapshot {
-  readonly version: string;
   readonly installedAt: Date;
   readonly manifestJson: Prisma.JsonValue;
+  readonly version: string;
 }
 
 /**
@@ -54,10 +54,10 @@ export interface ManifestSnapshot {
  * NULL when nothing was bound.
  */
 export interface ClaimedPluginRow {
-  readonly uninstalled_at: Date | null;
-  readonly version: string;
   readonly installed_at: Date;
   readonly manifest_matches: boolean | null;
+  readonly uninstalled_at: Date | null;
+  readonly version: string;
 }
 
 /**

@@ -9,8 +9,8 @@ import { toStoredContentType, toStoredPlatformType } from './stored-enums';
  * values matches nothing on that axis, rather than not narrowing it.
  */
 export interface CoverageFilter {
-  readonly platformTypes?: ReadonlySet<PlatformType>;
   readonly contentTypes?: ReadonlySet<ContentType>;
+  readonly platformTypes?: ReadonlySet<PlatformType>;
 }
 
 /** The values a list names, in the server's terms, or undefined when it names none. */

@@ -71,10 +71,10 @@ import { initOtel } from './init-otel';
 import type { OtelInitConfig } from './otel.config';
 
 interface CapturedSdkConfig {
-  spanProcessors: SpanProcessor[];
-  resource: { attributes: Record<string, unknown> };
   instrumentations: unknown[];
   metricReader?: MetricReader;
+  resource: { attributes: Record<string, unknown> };
+  spanProcessors: SpanProcessor[];
 }
 
 const NodeSDKMock = NodeSDK as unknown as jest.Mock;
@@ -87,8 +87,8 @@ const HttpMetricExporterMock = jest.requireMock('@opentelemetry/exporter-metrics
 const GrpcMetricExporterMock = jest.requireMock('@opentelemetry/exporter-metrics-otlp-grpc')
   .OTLPMetricExporter as jest.Mock;
 const sdkInstance = jest.requireMock('@opentelemetry/sdk-node').__sdkInstance as {
-  start: jest.Mock;
   shutdown: jest.Mock;
+  start: jest.Mock;
 };
 
 const baseConfig: OtelInitConfig = {

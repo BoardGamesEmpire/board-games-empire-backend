@@ -14,20 +14,20 @@ export interface HouseholdRosterEntry {
 }
 
 export interface HouseholdWithMembersOptions {
-  /** Becomes `createdById` and the household's `HouseholdOwner` member. */
-  readonly owner: SessionActor;
-
-  /** Additional members, in order. The owner must not reappear here. */
-  readonly members?: readonly HouseholdRosterEntry[];
-
-  readonly name?: string;
   readonly description?: string;
 
   /** The household's member invite policy (#166). The schema's default when omitted, as a created household has. */
   readonly memberInvitePolicy?: MemberInvitePolicy;
 
+  /** Additional members, in order. The owner must not reappear here. */
+  readonly members?: readonly HouseholdRosterEntry[];
   /** The household's member share policy (#810). The schema's default when omitted, as a created household has. */
   readonly memberSharePolicy?: MemberSharePolicy;
+
+  readonly name?: string;
+
+  /** Becomes `createdById` and the household's `HouseholdOwner` member. */
+  readonly owner: SessionActor;
 }
 
 export interface HouseholdRosterMember {
@@ -37,19 +37,19 @@ export interface HouseholdRosterMember {
 
 export interface HouseholdFixture {
   readonly household: Household;
-  readonly owner: HouseholdRosterMember;
   /** The non-owner roster, in input order. */
   readonly members: readonly HouseholdRosterMember[];
+  readonly owner: HouseholdRosterMember;
 }
 
 export interface RosterEntryPlan {
-  readonly userId: string;
   readonly role: HouseholdRoleName;
+  readonly userId: string;
 }
 
 export interface RosterPlan {
-  readonly ownerEntry: RosterEntryPlan;
   readonly memberEntries: readonly RosterEntryPlan[];
+  readonly ownerEntry: RosterEntryPlan;
 }
 
 /**

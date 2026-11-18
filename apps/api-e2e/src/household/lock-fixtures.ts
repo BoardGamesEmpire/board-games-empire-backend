@@ -48,8 +48,8 @@ export const FK_PARENT_LOCK = 'SELECT h.id FROM households h WHERE h.id = $1 FOR
 
 export interface LockFixtureMember {
   readonly memberId: string;
-  readonly userId: string;
   readonly role: HouseholdRoleName;
+  readonly userId: string;
 }
 
 export interface LockFixture {

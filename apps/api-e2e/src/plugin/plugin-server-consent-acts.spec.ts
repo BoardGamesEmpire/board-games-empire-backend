@@ -171,7 +171,7 @@ describe('server consent acts (#1336)', () => {
     surface.checks.find((check) => check.slug === slug)?.riskLevel;
 
   const presentedRisk = (presentation: unknown, slug: string) =>
-    (presentation as { checks: { slug: string; riskLevel: string | null }[] }).checks.find(
+    (presentation as { checks: { riskLevel: string | null; slug: string }[] }).checks.find(
       (check) => check.slug === slug,
     )?.riskLevel;
 

@@ -26,13 +26,13 @@ interface BanParty {
  * them is deleted; the ban stands.
  */
 export interface HouseholdBanView {
-  readonly id: string;
-  readonly householdId: string;
-  readonly reason: string | null;
+  readonly bannedBy: BanParty | null;
   readonly createdAt: Date;
+  readonly householdId: string;
+  readonly id: string;
+  readonly reason: string | null;
   readonly updatedAt: Date;
   readonly user: BanParty;
-  readonly bannedBy: BanParty | null;
 }
 
 export function toHouseholdBanView(row: HouseholdBanRow): HouseholdBanView {

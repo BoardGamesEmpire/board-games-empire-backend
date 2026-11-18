@@ -50,7 +50,7 @@ export function ClientRequestIdProperty(subject: string, onReplay?: string): Pro
     // by then, and every object-keyed create by a user would share that one key,
     // the second silently replaying the first. Left as sent, a non-string fails
     // IsString instead.
-    Transform(({ obj, key }: { obj: Record<string, unknown>; key: string }) => {
+    Transform(({ obj, key }: { key: string; obj: Record<string, unknown> }) => {
       const sent = obj[key];
 
       return typeof sent === 'string' ? sent.trim() : sent;

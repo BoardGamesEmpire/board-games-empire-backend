@@ -53,14 +53,14 @@ import { createUserRemovalGate, userRemovalGateDeps } from './user-removal-gate'
 import { createUsernameVariants } from './username-variant';
 
 interface UserCreatedHookDeps {
-  eventEmitter?: EventEmitter2;
   auditContext?: AuditContextService;
-  systemActorScope?: SystemActorScope;
+  eventEmitter?: EventEmitter2;
   /**
    * The username a sign-in asked for when it was replaced by a variant (#912),
    * read with the endpoint context `user.create.before` saw.
    */
   requestedUsername?: (context: object | null) => string | null;
+  systemActorScope?: SystemActorScope;
 }
 
 /**
@@ -97,7 +97,7 @@ export function createUserCreatedHook(
     // better-auth surfaces the DB `username` column as `name` (see the
     // `user.fields` mapping below); `isAnonymous` comes from the anonymous
     // plugin. Tolerate both shapes.
-    const record = user as User & { username?: string; isAnonymous?: boolean | null };
+    const record = user as User & { isAnonymous?: boolean | null; username?: string };
 
     const event = new UserCreatedEvent(
       {

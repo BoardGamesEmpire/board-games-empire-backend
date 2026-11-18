@@ -7,10 +7,10 @@ import {
 import { beforeEach, describe, expect, it } from '@jest/globals';
 
 export interface PluginRegistryContractOptions<TInstance> {
-  /** Fresh, empty registry per test. */
-  readonly createRegistry: () => BasePluginRegistry<TInstance>;
   /** Distinct instances per seed so identity assertions are meaningful. */
   readonly createInstance: (seed: number) => TInstance;
+  /** Fresh, empty registry per test. */
+  readonly createRegistry: () => BasePluginRegistry<TInstance>;
 }
 
 /**

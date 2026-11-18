@@ -38,7 +38,7 @@ export type PluginAbilityRejectionReason =
   | 'invalid-stored-manifest';
 
 const REASON_DETAIL: Readonly<
-  Record<PluginAbilityRejectionReason, (input: { variable?: string; tokenType?: string }) => string>
+  Record<PluginAbilityRejectionReason, (input: { tokenType?: string; variable?: string }) => string>
 > = {
   'out-of-context-variable': ({ variable }) =>
     `condition template references '${variable}', which is outside the unit-coordinate context`,
@@ -84,14 +84,14 @@ export class PluginAbilityRenderRejectionError extends Error {
   readonly unit: PluginUnit;
 
   constructor(input: {
-    reason: PluginAbilityRejectionReason;
+    detail?: string;
+    permissionSlug: string | null;
     pluginId: string;
     pluginSlug: string;
-    permissionSlug: string | null;
-    detail?: string;
-    variable?: string;
+    reason: PluginAbilityRejectionReason;
     tokenType?: string;
     unit: PluginUnit;
+    variable?: string;
   }) {
     super(
       input.permissionSlug === null

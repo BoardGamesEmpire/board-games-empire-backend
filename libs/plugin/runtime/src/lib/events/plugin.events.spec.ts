@@ -302,7 +302,7 @@ describe('plugin lifecycle events', () => {
 
   describe('base invariants', () => {
     it('rejects construction with both snapshots null (inherited MutationEvent guard)', () => {
-      type Snapshot = Readonly<{ id: string; slug: string; enabled: boolean }>;
+      type Snapshot = Readonly<{ enabled: boolean; id: string; slug: string }>;
 
       expect(
         () => new PluginDisabledEvent(null as unknown as Snapshot, null as unknown as Snapshot, initiatedAt),

@@ -14,34 +14,34 @@ export const APP_RETURN_ADDRESS = 'bge://oauth';
 export const APP_USER_AGENT = 'bge-e2e-app/1.0';
 
 /** A fresh PKCE pair, as an app makes one (RFC 7636): a 43-character verifier and its S256 challenge. */
-export function pkcePair(): { readonly verifier: string; readonly challenge: string } {
+export function pkcePair(): { readonly challenge: string; readonly verifier: string } {
   const verifier = randomBytes(32).toString('base64url');
 
   return { verifier, challenge: createHash('sha256').update(verifier).digest('base64url') };
 }
 
 export interface AppSignInRequest {
+  /** The browser's own cookies, sent with every step, as a browser already signed in sends them. */
+  readonly cookies?: string;
+  /** `code_challenge_method`; `S256` unless set. */
+  readonly method?: string;
   /** The listed provider to sign in through; the strict fake unless set. */
   readonly providerId?: string;
+  /** Replaces the whole query the options above build, for a malformed request. */
+  readonly query?: string;
   /** `redirect_uri`; the official app's address unless set. */
   readonly returnAddress?: string;
   /** The app's `state`; none unless set. */
   readonly state?: string;
-  /** `code_challenge_method`; `S256` unless set. */
-  readonly method?: string;
-  /** Replaces the whole query the options above build, for a malformed request. */
-  readonly query?: string;
-  /** The browser's own cookies, sent with every step, as a browser already signed in sends them. */
-  readonly cookies?: string;
 }
 
 /** One redirect the API answered the browser with. */
 export interface BrowserStep {
-  readonly status: number;
+  readonly headers: Headers;
   /** Where it sends the browser. */
   readonly location: URL;
   readonly setCookie: string[];
-  readonly headers: Headers;
+  readonly status: number;
 }
 
 export interface StartedAppSignIn extends BrowserStep {
@@ -99,15 +99,15 @@ export interface AppSignInThroughProvider {
   readonly appLocation: URL;
   /** The provider's authorization URL the start route sent the browser to. */
   readonly authorization: URL;
+  /** The cookies the browser holds once the start route has answered, its own included. */
+  readonly browserCookies: string;
   /** The API's callback response. */
   readonly callback: BrowserStep;
   /** The callback URL the provider sent the browser to, to fetch it again. */
   readonly callbackUrl: URL;
-  /** The cookies the browser holds once the start route has answered, its own included. */
-  readonly browserCookies: string;
-  readonly verifier: string;
   /** The fake's ticket for this sign-in. */
   readonly ticket: string;
+  readonly verifier: string;
 }
 
 /**

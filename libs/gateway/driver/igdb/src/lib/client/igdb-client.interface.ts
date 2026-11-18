@@ -13,10 +13,10 @@ export interface IGDBClient {
   fields(fields: string | readonly string[]): this;
   limit(limit: number): this;
   offset(offset: number): this;
-  search(query: string): this;
-  where(clause: string): this;
-  sort(field: string, direction?: 'asc' | 'desc'): this;
   request<T = unknown>(endpoint: string, signal?: AbortSignal): Promise<{ data: T[] }>;
+  search(query: string): this;
+  sort(field: string, direction?: 'asc' | 'desc'): this;
+  where(clause: string): this;
 }
 
 /**

@@ -2,19 +2,19 @@ import type { UpstreamFetch, UpstreamRequest } from '@boardgamesempire/gateway-d
 
 /** A request a driver made through a {@link FakeFetch}. */
 export interface FakeFetchRequest {
-  url: URL;
-  method: string;
-  headers: Record<string, string>;
   body?: string;
+  headers: Record<string, string>;
+  method: string;
   signal?: AbortSignal;
+  url: URL;
 }
 
 /** What a {@link FakeFetch} answers: 200 OK with an empty body unless it says otherwise. */
 export interface FakeFetchReply {
-  status?: number;
-  statusText?: string;
   body?: string;
   headers?: Record<string, string>;
+  status?: number;
+  statusText?: string;
 }
 
 /** An {@link UpstreamFetch} for tests, which records every request a driver makes. */

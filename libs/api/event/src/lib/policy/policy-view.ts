@@ -2,16 +2,16 @@ import type { EventOccurrencePolicy, EventPolicy, PlatformType, Prisma } from '@
 
 /** A policy's allowed platform types, platforms and categories as plain lists (#1268). */
 export interface PolicyListsView {
-  allowedPlatformTypes: PlatformType[];
-  allowedPlatformIds: string[];
   allowedCategoryIds: string[];
+  allowedPlatformIds: string[];
+  allowedPlatformTypes: PlatformType[];
 }
 
 /** The same lists as a read with a view's embed returns them: join rows. */
 interface PolicyListJoinRows {
-  allowedPlatformTypes: { platformType: PlatformType }[];
-  allowedPlatforms: { platformId: string }[];
   allowedCategories: { categoryId: string }[];
+  allowedPlatforms: { platformId: string }[];
+  allowedPlatformTypes: { platformType: PlatformType }[];
 }
 
 /**

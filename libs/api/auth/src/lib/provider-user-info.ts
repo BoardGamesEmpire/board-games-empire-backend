@@ -11,9 +11,9 @@ const DISCOVERY_FIELDS = ['issuer', 'authorization_endpoint'] as const;
 
 /** What {@link createProviderUserInfo} needs from outside (#993). */
 export interface ProviderUserInfoDeps {
-  readonly logger: Pick<LoggerService, 'warn'>;
   /** Defaults to the global fetch, looked up on each call. */
   readonly fetch?: typeof fetch;
+  readonly logger: Pick<LoggerService, 'warn'>;
 }
 
 /** A sign-in provider's `getUserInfo`: the profile to sign in with, or `null` to refuse (#993). */

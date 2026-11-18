@@ -86,8 +86,8 @@ describe('createRedisAuthStorage', () => {
     setError,
     unlinkError,
   }: {
-    evalResult?: number;
     evalError?: Error;
+    evalResult?: number;
     getdelError?: Error;
     getError?: Error;
     setError?: Error;

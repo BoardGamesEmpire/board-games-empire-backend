@@ -20,11 +20,11 @@ export type GatewayAutoDisableReason = 'repeated_connection_failure' | 'repeated
  * Failure-tracking context carried for admin notifications — not row state.
  */
 export interface GatewayAutoDisableFailure {
-  readonly reason: GatewayAutoDisableReason;
   readonly consecutiveFailures: number;
   readonly firstFailureAt: Date;
-  readonly lastFailureAt: Date;
   readonly lastError: string;
+  readonly lastFailureAt: Date;
+  readonly reason: GatewayAutoDisableReason;
 }
 
 type GatewayDisabledSnapshot = Readonly<Pick<DataGateway, 'id' | 'enabled'>>;

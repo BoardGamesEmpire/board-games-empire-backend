@@ -217,7 +217,7 @@ export abstract class AuthenticatedGateway implements OnGatewayInit, OnGatewayCo
  * `translateException` renders: the body is the marker, or an object whose
  * `message` is one.
  */
-function markedBody(body: unknown): { marker: I18nMessage; fields: Record<string, unknown> } | undefined {
+function markedBody(body: unknown): { fields: Record<string, unknown>; marker: I18nMessage } | undefined {
   if (isI18nMessage(body)) {
     return { marker: body, fields: {} };
   }

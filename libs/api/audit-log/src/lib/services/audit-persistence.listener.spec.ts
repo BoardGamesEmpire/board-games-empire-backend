@@ -12,8 +12,8 @@ import { AuditUnattributedNotifierService } from './audit-unattributed-notifier.
 
 interface SamplePayload {
   id: string;
-  title: string;
   passwordHash: string;
+  title: string;
 }
 
 abstract class SampleEvent extends MutationEvent<SamplePayload> {

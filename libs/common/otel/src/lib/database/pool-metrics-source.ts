@@ -14,16 +14,16 @@
  * `options.max` map onto the fields below.
  */
 export interface DatabasePoolMetricsSnapshot {
-  /** Total connections currently in the pool (`pg.Pool#totalCount`). */
-  readonly open: number;
   /** Connections currently checked out and in use (`total - idle`). */
   readonly busy: number;
   /** Connections currently open but unused (`pg.Pool#idleCount`). */
   readonly idle: number;
-  /** Requests queued waiting for a free connection (`pg.Pool#waitingCount`). */
-  readonly pending: number;
   /** Configured maximum pool size (`pg.Pool#options.max`). */
   readonly max: number;
+  /** Total connections currently in the pool (`pg.Pool#totalCount`). */
+  readonly open: number;
+  /** Requests queued waiting for a free connection (`pg.Pool#waitingCount`). */
+  readonly pending: number;
 }
 
 /**

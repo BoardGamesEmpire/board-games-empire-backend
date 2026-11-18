@@ -6,9 +6,9 @@ export const OIDC_SCOPES = ['openid', 'profile', 'email'] as const;
  * because better-auth 1.7 types what a mapping returns as one (#1016).
  */
 export interface OidcProfileFields extends Record<string, unknown> {
-  name?: string;
   firstName?: string;
   lastName?: string;
+  name?: string;
 }
 
 /** A claim as trimmed text; blank, or not text, counts as absent. */

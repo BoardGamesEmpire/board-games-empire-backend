@@ -8,18 +8,18 @@ import { IgdbLanguageEntry } from '../types';
 
 export interface IgdbLanguage {
   id: number;
-  name: string;
-  nativeName: string;
-  locale: string;
-
   // Canonical BCP 47 tag this IGDB language *means* — the minimal tag that
   // carries the distinction IGDB is making. Region subtags are kept only
   // where IGDB distinguishes variants (en-US vs en-GB); redundant regions
   // are dropped (cs-CZ → cs) and Chinese uses script subtags (zh-Hans).
   ietfTag: string;
-
-  iso6393: string;
   iso6391?: string;
+  iso6393: string;
+
+  locale: string;
+
+  name: string;
+  nativeName: string;
 }
 
 export const IGDB_LANGUAGES: readonly IgdbLanguage[] = [

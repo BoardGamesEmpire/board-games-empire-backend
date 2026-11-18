@@ -2,9 +2,9 @@ import { request as httpRequest, type ClientRequest, type IncomingHttpHeaders } 
 import { requireBaseUrl } from '../support/e2e-env';
 
 interface Answer {
-  readonly status: number;
-  readonly headers: IncomingHttpHeaders;
   readonly body: string;
+  readonly headers: IncomingHttpHeaders;
+  readonly status: number;
 }
 
 const KIB = 1024;

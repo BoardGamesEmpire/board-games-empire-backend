@@ -11,17 +11,17 @@ import type {
  * and EventOccurrencePolicy (via ?? fallback at the call site).
  */
 export interface VotingPolicy {
-  voteThresholdType: VoteThresholdType;
-  voteThresholdValue: number | null;
+  interestedWeight: InterestedWeight;
+  voteEligibility: VoteEligibility;
   voteQuorumType: VoteQuorumType;
   voteQuorumValue: number | null;
-  voteEligibility: VoteEligibility;
-  interestedWeight: InterestedWeight;
+  voteThresholdType: VoteThresholdType;
+  voteThresholdValue: number | null;
 }
 
 export interface VoteTally {
-  forCount: number;
   againstCount: number;
+  forCount: number;
   interestedCount: number;
   totalVotes: number;
 }
@@ -31,9 +31,9 @@ export type ResolvedStatus =
   typeof NominationStatus.Passed | typeof NominationStatus.Failed | typeof NominationStatus.QuorumNotMet;
 
 export interface ResolutionResult {
+  eligibleVoterCount: number;
+  quorumMet: boolean;
   status: ResolvedStatus;
   tally: VoteTally;
-  quorumMet: boolean;
   thresholdMet: boolean;
-  eligibleVoterCount: number;
 }

@@ -5,10 +5,10 @@ import { PLUGIN_CONFIG_UPDATE_CHANNEL } from './plugin-config.constants';
 type MessageHandler = (channel: string, message: string) => void;
 
 interface MockSubscriber {
+  on: jest.Mock;
+  quit: jest.Mock;
   subscribe: jest.Mock;
   unsubscribe: jest.Mock;
-  quit: jest.Mock;
-  on: jest.Mock;
 }
 
 describe('PluginConfigEventsService', () => {

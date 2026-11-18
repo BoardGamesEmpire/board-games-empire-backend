@@ -44,17 +44,17 @@ export const offerGamesPath = (eventId: string, attendeeId: string) =>
   `${attendeeGamesPath(eventId, attendeeId)}/batch`;
 
 export interface EventClient {
+  /** The id of the event `actor` creates, failing the test unless the create answers 201. */
+  createdEventId(actor: AuthenticatedActor, body?: Record<string, unknown>): Promise<string>;
+
   /**
    * `POST /api/events` as `actor`, under a fresh title, with `body` merged
    * over it. Returns the supertest chain, so callers keep `.expect()`.
    */
   createEvent(actor: AuthenticatedActor, body?: Record<string, unknown>): request.Test;
 
-  /** The id of the event `actor` creates, failing the test unless the create answers 201. */
-  createdEventId(actor: AuthenticatedActor, body?: Record<string, unknown>): Promise<string>;
-
   /** `GET /api/events/:eventId/attendees` as `caller`, a session or a key, returning the supertest chain. */
-  listAttendees(caller: Caller, eventId: string, query?: { page?: number; limit?: number }): request.Test;
+  listAttendees(caller: Caller, eventId: string, query?: { limit?: number; page?: number }): request.Test;
 
   /** `GET /api/events/:eventId/offered-games` as `caller`, with `query` as sent, returning the supertest chain. */
   listOfferedGames(caller: Caller, eventId: string, query?: Record<string, string | number | boolean>): request.Test;

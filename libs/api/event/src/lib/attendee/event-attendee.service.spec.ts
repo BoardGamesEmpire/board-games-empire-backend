@@ -1312,7 +1312,7 @@ describe('EventAttendeeService', () => {
     const removedAt = new Date('2026-10-15T12:00:00Z');
 
     /** A collection entry as the batch reads it: its owner, tombstone and game. */
-    const owned = (id: string, gameId: string, overrides: { userId?: string; deletedAt?: Date | null } = {}) => ({
+    const owned = (id: string, gameId: string, overrides: { deletedAt?: Date | null; userId?: string } = {}) => ({
       id,
       userId: 'user-1',
       deletedAt: null,

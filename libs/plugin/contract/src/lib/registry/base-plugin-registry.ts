@@ -4,9 +4,9 @@ import { DuplicatePluginRegistrationError, PluginDisabledError, PluginNotRegiste
  * One registry row as exposed by `list()`.
  */
 export interface PluginRegistryEntry<TInstance> {
-  readonly slug: string;
-  readonly instance: TInstance;
   readonly enabled: boolean;
+  readonly instance: TInstance;
+  readonly slug: string;
 }
 
 export interface RegisterOptions {
@@ -53,7 +53,7 @@ export abstract class BasePluginRegistry<TInstance> {
    */
   protected abstract readonly registryName: string;
 
-  private readonly entries = new Map<string, { instance: TInstance; enabled: boolean }>();
+  private readonly entries = new Map<string, { enabled: boolean; instance: TInstance }>();
 
   /** Number of registered entries, enabled or not. */
   public get size(): number {

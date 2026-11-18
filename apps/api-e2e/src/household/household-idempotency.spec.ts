@@ -15,10 +15,10 @@ import { constraintTargetNames, createEnvelope } from './household-wire';
  * parameter would forbid.
  */
 interface CreateHouseholdPayload {
-  readonly name: string;
+  readonly clientRequestId?: string;
   readonly description?: string;
   readonly language?: string;
-  readonly clientRequestId?: string;
+  readonly name: string;
 }
 
 /**

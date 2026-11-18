@@ -18,7 +18,7 @@ const CHALLENGE = 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM';
  * in memory here and Redis in the api, so better-auth keeps the OAuth state
  * there and signs a `state` cookie, as it does in the api.
  */
-function createInstance(options: { readonly storage?: CompleteAuthStorage; readonly errorURL?: string } = {}) {
+function createInstance(options: { readonly errorURL?: string; readonly storage?: CompleteAuthStorage } = {}) {
   return betterAuth({
     telemetry: { enabled: false },
     logger: { disabled: true },

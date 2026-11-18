@@ -149,10 +149,10 @@ function appWithInvalidConfig(): Type<unknown> {
 }
 
 interface LogRecord {
-  readonly level?: number;
-  readonly msg: string;
   readonly context?: string;
   readonly err?: { readonly message: string; readonly stack?: string };
+  readonly level?: number;
+  readonly msg: string;
 }
 
 /** A real pino logger whose records are kept in memory, in the order they were written. */

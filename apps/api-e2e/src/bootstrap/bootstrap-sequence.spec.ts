@@ -873,7 +873,7 @@ describe('the migration credential against Postgres', () => {
   let admin: Client;
 
   /** The harness's Postgres server, inside this block's database, in the default schema the grants name. */
-  const inDatabase = (credentials?: { user: string; password: string }): string => {
+  const inDatabase = (credentials?: { password: string; user: string }): string => {
     const url = new URL(requireDatabaseUrl());
     if (credentials) {
       url.username = credentials.user;
@@ -936,8 +936,8 @@ describe('the migration credential against Postgres', () => {
   async function boot(options: {
     readonly applicationName: string;
     readonly databaseUrl: string;
-    readonly migrationUrl: string;
     readonly logger?: LoggerService;
+    readonly migrationUrl: string;
   }): Promise<BootstrapSummary> {
     const saved = {
       DATABASE_URL: process.env['DATABASE_URL'],

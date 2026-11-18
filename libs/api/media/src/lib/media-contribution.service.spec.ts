@@ -348,7 +348,7 @@ describe('MediaContributionService', () => {
   });
 
   describe('list (#372)', () => {
-    const query = (init: Partial<{ status: MediaContributionStatus; page: number; limit: number }> = {}) =>
+    const query = (init: Partial<{ limit: number; page: number; status: MediaContributionStatus }> = {}) =>
       plainToInstance(ListContributionsQueryDto, init, { enableImplicitConversion: true });
 
     beforeEach(() => {

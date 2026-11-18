@@ -33,11 +33,11 @@ export type ConsentUngrantableCause =
  * wildcard subject, unbound unit scope.
  */
 export function consentUngrantableCause(input: {
-  readonly check: Pick<NormalizedPermissionRequest, 'canonicalSlug' | 'origin'>;
-  readonly decidingScope: PluginGrantScope;
-  readonly corePermission: ConsentCatalogPermission | undefined;
   /** The catalog's risk for the slug; undefined when it has no row. */
   readonly catalogRisk: RiskLevel | undefined;
+  readonly check: Pick<NormalizedPermissionRequest, 'canonicalSlug' | 'origin'>;
+  readonly corePermission: ConsentCatalogPermission | undefined;
+  readonly decidingScope: PluginGrantScope;
   /** A staged manifest's new declared permission has no catalog row until activation, and is grantable. */
   readonly source: ConsentManifestSource;
 }): ConsentUngrantableCause | null {

@@ -31,7 +31,7 @@ describe('GET /api/events/:eventId/attendees pages (#373)', () => {
 
   const { createdEventId, listAttendees } = createEventClient(baseUrl);
 
-  const listedPage = async (host: AuthenticatedActor, eventId: string, query: { page?: number; limit?: number }) =>
+  const listedPage = async (host: AuthenticatedActor, eventId: string, query: { limit?: number; page?: number }) =>
     listAttendeesEnvelope(
       await listAttendees(host, eventId, query).expect(200),
       'GET /api/events/:eventId/attendees as the host',

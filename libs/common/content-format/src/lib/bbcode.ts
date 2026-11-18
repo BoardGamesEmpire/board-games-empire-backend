@@ -21,10 +21,10 @@ const KNOWN_TAGS: ReadonlySet<string> = new Set(['b', 'i', 'u', 's', 'url', 'quo
 const MAX_NESTING = 32;
 
 interface BbElement {
-  readonly kind: 'element';
-  readonly name: string;
   readonly attribute: string | undefined;
   readonly children: BbNode[];
+  readonly kind: 'element';
+  readonly name: string;
 }
 
 interface BbText {

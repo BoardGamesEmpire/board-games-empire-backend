@@ -338,14 +338,14 @@ describe('applyReconcilePlan — a batch statement that writes fewer rows than p
    * the one named. An `updateMany` guarded on `Admin` is the entry check's
    * (#772), and is named apart from the `System` one beside it.
    */
-  function fakeTx(short: { readonly statement: string; readonly by: number } | undefined = undefined): FakeTx {
+  function fakeTx(short: { readonly by: number; readonly statement: string } | undefined = undefined): FakeTx {
     const calls: string[] = [];
     const count = (statement: string, asked: number) => {
       calls.push(statement);
       return { count: short?.statement === statement ? asked - short.by : asked };
     };
 
-    const ids = (rows: { slug?: string; name?: string }[]) => rows.map((row, i) => ({ ...row, id: `id-${i}` }));
+    const ids = (rows: { name?: string; slug?: string }[]) => rows.map((row, i) => ({ ...row, id: `id-${i}` }));
     const checked = (statement: string, where: { managedBy: PermissionOwner }) =>
       where.managedBy === PermissionOwner.Admin ? `${statement} (entry check)` : statement;
 
@@ -353,7 +353,7 @@ describe('applyReconcilePlan — a batch statement that writes fewer rows than p
       permission: {
         createMany: async ({ data }: { data: unknown[] }) => count('permission.createMany', data.length),
         update: async () => void calls.push('permission.update'),
-        updateMany: async ({ where }: { where: { slug: { in: string[] }; managedBy: PermissionOwner } }) =>
+        updateMany: async ({ where }: { where: { managedBy: PermissionOwner; slug: { in: string[] } } }) =>
           count(checked('permission.updateMany', where), where.slug.in.length),
         findMany: async ({ where }: { where: { slug: { in: string[] } } }) =>
           ids(where.slug.in.map((slug) => ({ slug }))),
@@ -367,7 +367,7 @@ describe('applyReconcilePlan — a batch statement that writes fewer rows than p
       rolePermission: {
         deleteMany: async ({ where }: { where: { OR: unknown[] } }) =>
           count('rolePermission.deleteMany', where.OR.length),
-        updateMany: async ({ where }: { where: { OR: unknown[]; managedBy: PermissionOwner } }) =>
+        updateMany: async ({ where }: { where: { managedBy: PermissionOwner; OR: unknown[] } }) =>
           count(checked('rolePermission.updateMany', where), where.OR.length),
         createMany: async ({ data }: { data: unknown[] }) => count('rolePermission.createMany', data.length),
       },

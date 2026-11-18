@@ -31,11 +31,11 @@ type PlainPayload = Record<string, unknown>;
 
 /** Convenience type for assembling valid-shaped fixtures. */
 interface BreadcrumbInput {
-  timestamp: string;
   level: BreadcrumbLogLevel;
   loggerName: string;
   message: string;
   sanitizedContext?: Record<string, unknown> | null;
+  timestamp: string;
 }
 
 function breadcrumb(overrides: Partial<BreadcrumbInput> = {}): BreadcrumbInput {

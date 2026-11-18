@@ -18,16 +18,16 @@ import type {
 import { RedactionService } from './services/redaction.service';
 
 interface RedactionOutcome {
+  readonly redactedBreadcrumbs: BreadcrumbDto[] | null;
+  readonly redactedDeviceInfo: Record<string, unknown> | null;
   readonly redactedMessage: string;
   readonly redactedStackTrace: string | null;
-  readonly redactedDeviceInfo: Record<string, unknown> | null;
-  readonly redactedBreadcrumbs: BreadcrumbDto[] | null;
   readonly serverRedacted: boolean;
 }
 
 interface BreadcrumbsScrubResult {
-  readonly value: BreadcrumbDto[] | null;
   readonly mutated: boolean;
+  readonly value: BreadcrumbDto[] | null;
 }
 
 /**

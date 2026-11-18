@@ -506,7 +506,7 @@ describe('InviteService', () => {
 
       await service.createWithin(asTx(tx), { ...params, inviteeEmail: '  Sam@Example.TEST ', message: 'come play' });
 
-      const [probe] = tx.invite.findUnique.mock.calls[0] as [{ where: { token: string }; select: unknown }];
+      const [probe] = tx.invite.findUnique.mock.calls[0] as [{ select: unknown; where: { token: string } }];
       expect(probe.where.token).toMatch(BASE64URL_43);
       expect(probe.select).toEqual({ id: true });
 
@@ -1831,8 +1831,8 @@ describe('InviteService', () => {
      * call finds follows from the earlier calls' writes rather than from a
      * stubbed answer.
      */
-    const useTable = <Row extends { id: string; status: InviteStatus; expiresAt: Date }>(table: Row[]) => {
-      type Where = { status: InviteStatus; expiresAt: { lte: Date }; id?: { in: string[] } };
+    const useTable = <Row extends { expiresAt: Date; id: string; status: InviteStatus }>(table: Row[]) => {
+      type Where = { expiresAt: { lte: Date }; id?: { in: string[] }; status: InviteStatus };
       const matching = (where: Where) =>
         table.filter(
           (row) =>
@@ -1840,11 +1840,11 @@ describe('InviteService', () => {
             row.expiresAt <= where.expiresAt.lte &&
             (!where.id || where.id.in.includes(row.id)),
         );
-      tx.invite.findMany.mockImplementation((async ({ where, take }: { where: Where; take: number }) =>
+      tx.invite.findMany.mockImplementation((async ({ where, take }: { take: number; where: Where }) =>
         matching(where)
           .slice(0, take)
           .map(({ id }) => ({ id }))) as never);
-      tx.invite.updateManyAndReturn.mockImplementation((async ({ where, data }: { where: Where; data: object }) =>
+      tx.invite.updateManyAndReturn.mockImplementation((async ({ where, data }: { data: object; where: Where }) =>
         matching(where).map((row) => ({ ...Object.assign(row, data) }))) as never);
 
       return table;

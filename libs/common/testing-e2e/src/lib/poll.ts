@@ -7,11 +7,11 @@ export interface PollOptions {
    */
   readonly description: string | (() => string);
 
-  /** Total budget before failing. Default {@link DEFAULT_POLL_TIMEOUT_MS}. */
-  readonly timeoutMs?: number;
-
   /** Pause between retries. Default {@link DEFAULT_POLL_INTERVAL_MS}. */
   readonly intervalMs?: number;
+
+  /** Total budget before failing. Default {@link DEFAULT_POLL_TIMEOUT_MS}. */
+  readonly timeoutMs?: number;
 }
 
 export const DEFAULT_POLL_TIMEOUT_MS = 15_000;

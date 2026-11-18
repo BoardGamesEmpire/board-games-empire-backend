@@ -74,8 +74,8 @@ function runPrisma(args: readonly string[], databaseUrl: string): void {
 }
 
 interface LaunchedApi {
-  readonly child: ChildProcess;
   readonly baseUrl: string;
+  readonly child: ChildProcess;
 }
 
 const apiBaseUrl = (port: number): string => `http://127.0.0.1:${port}`;

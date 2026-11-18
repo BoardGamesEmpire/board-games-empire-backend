@@ -623,7 +623,7 @@ export class GatewayGameSearchService {
   private resolveDedup(
     gatewayId: string,
     externalId: string,
-  ): Observable<{ inSystem: boolean; gameId: string | undefined }> {
+  ): Observable<{ gameId: string | undefined; inSystem: boolean }> {
     return from(
       this.db.gameSource.findUnique({
         where: { gatewayId_externalId: { gatewayId, externalId } },

@@ -1589,7 +1589,7 @@ function lockedSupplier(overrides: Partial<LockedSupplier> = {}): LockedSupplier
 function mockSettleLocks(
   db: MockDatabaseService,
   supplier: LockedSupplier,
-  nomination: { status: NominationStatus; occurrenceId?: string | null },
+  nomination: { occurrenceId?: string | null; status: NominationStatus },
 ): void {
   db.$queryRaw
     .mockResolvedValueOnce([supplier] as never)
@@ -1634,8 +1634,8 @@ function openNomination() {
  */
 function nominationRow(
   overrides: Partial<EventGameNomination> & {
+    suppliedFrom?: { attendeeId: string; id: string };
     votes?: ReturnType<typeof voteRow>[];
-    suppliedFrom?: { id: string; attendeeId: string };
   } = {},
 ): EventGameNomination {
   return {

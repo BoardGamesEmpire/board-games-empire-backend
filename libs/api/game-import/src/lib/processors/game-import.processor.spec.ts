@@ -17,7 +17,7 @@ const extractMock = extractGameDataFromChildren as jest.MockedFunction<typeof ex
 
 describe('GameImportProcessor', () => {
   let processor: GameImportProcessor;
-  let db: { job: { update: jest.Mock; updateMany: jest.Mock }; dataGateway: { findUnique: jest.Mock } };
+  let db: { dataGateway: { findUnique: jest.Mock }; job: { update: jest.Mock; updateMany: jest.Mock } };
   let gameUpsert: jest.Mocked<Pick<GameUpsertService, 'upsert'>>;
   let events: { emit: jest.Mock };
   let batchCompletion: { checkAndEmit: jest.Mock };
@@ -36,7 +36,7 @@ describe('GameImportProcessor', () => {
     origin: ImportJobOrigin.Requested,
   };
 
-  const makeJob = (name: string, payload: object, over: { attemptsMade?: number; attempts?: number } = {}): Job =>
+  const makeJob = (name: string, payload: object, over: { attempts?: number; attemptsMade?: number } = {}): Job =>
     ({
       name,
       id: '1',

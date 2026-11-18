@@ -47,8 +47,8 @@ export async function signIn(baseUrl: string, email: string, password: string): 
 }
 
 export interface SessionUser {
-  readonly id: string;
   readonly email: string;
+  readonly id: string;
 }
 
 export async function currentUser(baseUrl: string, session: Session): Promise<SessionUser | undefined> {
@@ -59,9 +59,9 @@ export async function currentUser(baseUrl: string, session: Session): Promise<Se
 }
 
 export interface GatewayRegistration {
-  readonly dataGateway: { readonly id: string; readonly enabled: boolean };
   readonly connection_attempt: boolean;
-  readonly connection_response: { readonly success: boolean; readonly message?: string } | null;
+  readonly connection_response: { readonly message?: string; readonly success: boolean } | null;
+  readonly dataGateway: { readonly enabled: boolean; readonly id: string };
 }
 
 /** How long a new account's roles may take to land: the api grants them after sign-up answers. */
@@ -83,7 +83,7 @@ const PROVISIONING_INTERVAL_MS = 2_000;
 export async function registerGateway(
   baseUrl: string,
   session: Session,
-  gateway: { readonly name: string; readonly connectionUrl: string; readonly connectionPort: number },
+  gateway: { readonly connectionPort: number; readonly connectionUrl: string; readonly name: string },
 ): Promise<GatewayRegistration> {
   let refusal: string | undefined;
 
@@ -116,16 +116,16 @@ export async function registerGateway(
 
 /** A game as a search reports it, by source. */
 export interface SearchHit {
-  readonly externalId: string;
-  readonly title: string;
   readonly contentType: string;
-  readonly inSystem: boolean;
+  readonly externalId: string;
   readonly gameId?: string;
+  readonly inSystem: boolean;
+  readonly title: string;
 }
 
 export interface SearchResponse {
-  readonly resultsBySource: Readonly<Record<string, readonly SearchHit[]>>;
   readonly errors?: Readonly<Record<string, { readonly message: string }>>;
+  readonly resultsBySource: Readonly<Record<string, readonly SearchHit[]>>;
   readonly unavailableSources?: readonly string[];
   /** The DataGateways not asked, because they can't apply a player-count or play-time range the search gave (#869). */
   readonly unfilterableSources?: readonly string[];
@@ -137,12 +137,12 @@ export interface SearchResponse {
  * value.
  */
 export interface SearchFilterParams {
-  readonly platformTypes?: string;
   readonly contentTypes?: string;
-  readonly publishYearMin?: string;
+  readonly platformTypes?: string;
   readonly playerCountMin?: string;
-  readonly playTimeMax?: string;
   readonly playTimeIncludeUnknown?: string;
+  readonly playTimeMax?: string;
+  readonly publishYearMin?: string;
 }
 
 /** A search of one gateway only, over HTTP. The api caches the answer per URL for a few minutes. */
@@ -236,17 +236,17 @@ export interface ImportStarted {
 }
 
 export interface ImportJob {
-  readonly status: string;
+  readonly error?: string;
+  readonly errorCode?: string;
   readonly externalId: string;
   readonly gameId?: string;
   readonly gameTitle?: string;
-  readonly errorCode?: string;
-  readonly error?: string;
+  readonly status: string;
 }
 
 export interface ImportBatch {
-  readonly status: string;
   readonly jobs: readonly ImportJob[];
+  readonly status: string;
 }
 
 export async function startImport(

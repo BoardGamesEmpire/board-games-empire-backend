@@ -8,9 +8,9 @@ import type { EventWithStatus } from './event-status.util';
  */
 export interface EventAttendance {
   readonly attendeeId: string;
-  readonly status: EventParticipationStatus;
   readonly role: string | null;
   readonly rsvpDate: Date | null;
+  readonly status: EventParticipationStatus;
 }
 
 /** Selects {@link EventAttendanceRow} from an attendee read. */

@@ -18,9 +18,9 @@ describe('BaseGameLinkService', () => {
   const GATEWAY_ID = 'gw-bgg';
 
   /** DataGateway links by external id, as the game catalog holds them. */
-  let catalog: Record<string, { gameId: string; contentType?: ContentType }>;
+  let catalog: Record<string, { contentType?: ContentType; gameId: string }>;
   /** DataGateway links whose stored base game ids name another game. */
-  let addOns: { gameId: string; baseExternalIds: string[]; contentType: ContentType }[];
+  let addOns: { baseExternalIds: string[]; contentType: ContentType; gameId: string }[];
 
   beforeEach(async () => {
     const { module, db: mockDb } = await createTestingModuleWithDb({ providers: [BaseGameLinkService] });

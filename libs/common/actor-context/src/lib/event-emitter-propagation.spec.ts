@@ -50,8 +50,8 @@ const TEST_TRACE_KEY = createContextKey('event-propagation-spec-marker');
 interface CapturedSnapshot {
   readonly actor: Actor | null;
   readonly correlationId: string | null;
-  readonly source: EventSource | null;
   readonly otelMarker: string | undefined;
+  readonly source: EventSource | null;
 }
 
 /**

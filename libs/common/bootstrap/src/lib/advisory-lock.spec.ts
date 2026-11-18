@@ -48,8 +48,8 @@ const LOCK_TIMED_OUT = Buffer.concat([
 ]);
 
 interface Holder {
-  pid: number;
   application_name: string;
+  pid: number;
   state: string;
 }
 

@@ -7,18 +7,18 @@ import { parseSearch, parseThings } from './bgg-xml';
 export const BGG_BASE_URL = 'https://boardgamegeek.com/xmlapi2';
 
 export interface BggClientOptions {
-  /** How the client reaches BGG; it has no other way (#1082). */
-  fetch: UpstreamFetch;
+  /** How many times to ask again after a 202 before giving up. Defaults to 5. */
+  acceptedRetries?: number;
+  /** How long to wait before asking again after a 202. Defaults to 6 seconds. */
+  acceptedRetryMs?: number;
+
   apiKey: string;
 
   /** Defaults to {@link BGG_BASE_URL}. */
   baseUrl?: string;
 
-  /** How long to wait before asking again after a 202. Defaults to 6 seconds. */
-  acceptedRetryMs?: number;
-
-  /** How many times to ask again after a 202 before giving up. Defaults to 5. */
-  acceptedRetries?: number;
+  /** How the client reaches BGG; it has no other way (#1082). */
+  fetch: UpstreamFetch;
 }
 
 type QueryValue = string | number | readonly (string | number)[] | undefined;

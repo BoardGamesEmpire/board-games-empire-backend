@@ -3,12 +3,12 @@ import { gzipSync } from 'node:zlib';
 import { pack } from 'tar-stream';
 
 export interface PluginTarballEntry {
-  readonly name: string;
-  readonly type?: 'file' | 'directory' | 'symlink' | 'link';
   readonly content?: string;
   readonly linkname?: string;
+  readonly name: string;
   /** Pax extended-header records, which override the header's own fields. */
   readonly pax?: Record<string, string>;
+  readonly type?: 'file' | 'directory' | 'symlink' | 'link';
 }
 
 /**

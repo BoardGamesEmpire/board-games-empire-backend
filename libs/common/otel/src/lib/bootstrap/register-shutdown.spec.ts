@@ -3,9 +3,9 @@ import type { OtelBootstrapHandle } from '../init/init-otel';
 import { createShutdown, registerShutdownHandlers, type ShutdownableApp } from './register-shutdown';
 
 interface MockLogger {
+  error: jest.Mock;
   info: jest.Mock;
   warn: jest.Mock;
-  error: jest.Mock;
 }
 
 const buildMockLogger = (): MockLogger => ({

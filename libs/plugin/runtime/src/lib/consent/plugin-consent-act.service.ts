@@ -41,13 +41,13 @@ import { PluginConsentCheckClassifier } from './plugin-consent-check-classifier.
 import { writeConsentAct } from './write-consent-act';
 
 export interface ConsentActInput {
-  readonly slug: string;
-  readonly unit: ConsentActUnit;
   /** The acting user: a household admin for a household unit, the user themself for a user unit. Verified here. */
   readonly actorId: string;
-  readonly manifestSha256: string;
   readonly answers: readonly ConsentActAnswer[];
   readonly locale?: string;
+  readonly manifestSha256: string;
+  readonly slug: string;
+  readonly unit: ConsentActUnit;
 }
 
 export interface SwitchOnInput extends ConsentActInput {
@@ -59,50 +59,50 @@ export interface ConsentActResult {
   /** Null when the act would have changed nothing: no act, no event (ADR 0002). */
   readonly act: PluginConsentAct | null;
   readonly changed: boolean;
-  readonly unit: HouseholdPlugin | UserPlugin;
   /**
    * A review refuses a required permission, so the unit is switched off: by
    * this act, or already, when the unit was off and the denial stood before
    * the review arrived (`changed` is then false).
    */
   readonly switchedOff: boolean;
+  readonly unit: HouseholdPlugin | UserPlugin;
 }
 
 type UnitEnablement = HouseholdPlugin | UserPlugin;
 
 /** The manifest the act's sha names, as the request first read it. */
 interface NamedManifest {
-  readonly source: ConsentManifestSource;
-  readonly version: string;
-  readonly validated: PluginManifestValidationResult;
   /** The ACTIVE manifest, which a staged review's answers are judged against too. */
   readonly active: PluginManifestValidationResult;
+  readonly source: ConsentManifestSource;
+  readonly validated: PluginManifestValidationResult;
+  readonly version: string;
 }
 
 /** The columns `claimPluginForAct` reads under the plugin row's share lock. */
 interface ConsentActClaimRow {
-  readonly uninstalled_at: Date | null;
-  readonly scope: PluginScope;
   readonly installed_sha256: string;
   readonly pending_sha256: string | null;
   readonly pending_staging_id: string | null;
+  readonly scope: PluginScope;
+  readonly uninstalled_at: Date | null;
 }
 
 /** What a written act did to its unit enablement besides leaving it as `unit`. */
 interface UnitEffects {
-  readonly switchedOff: boolean;
   readonly configWritten: boolean;
+  readonly switchedOff: boolean;
 }
 
 type ActOutcome =
-  | { readonly changed: false; readonly unit: UnitEnablement; readonly switchedOff: boolean }
+  | { readonly changed: false; readonly switchedOff: boolean; readonly unit: UnitEnablement }
   | (UnitEffects & {
-      readonly changed: true;
       readonly act: PluginConsentAct;
+      readonly changed: true;
       /** Only the decisions whose row changed: the ones an event announces. */
       readonly changedDecisions: readonly WrittenDecision[];
-      readonly unitBefore: UnitEnablement | null;
       readonly unit: UnitEnablement;
+      readonly unitBefore: UnitEnablement | null;
     });
 
 /**
@@ -460,12 +460,12 @@ export class PluginConsentActService {
     pluginId: string,
     pluginSlug: string,
     expected: {
-      readonly source: ConsentManifestSource;
-      readonly manifestSha256: string;
-      /** `installedSha256` of the plugin row read before the transaction. */
-      readonly installedSha256: string;
       /** A household switch-on writes a household surface, which the plugin's scope must still admit. */
       readonly householdSurface: boolean;
+      /** `installedSha256` of the plugin row read before the transaction. */
+      readonly installedSha256: string;
+      readonly manifestSha256: string;
+      readonly source: ConsentManifestSource;
     },
   ): Promise<string | null> {
     const rows = await tx.$queryRaw<ConsentActClaimRow[]>`SELECT uninstalled_at, scope, installed_sha256,

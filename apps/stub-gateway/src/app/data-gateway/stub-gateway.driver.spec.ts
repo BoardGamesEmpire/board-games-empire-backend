@@ -14,7 +14,7 @@ import { StubGatewayDriver } from './stub-gateway.driver';
 
 const collect = <T>(source: Observable<T>) => lastValueFrom(source.pipe(toArray()));
 
-const search = (query: string, options: { limit?: number; offset?: number; filter?: proto.SearchFilter } = {}) =>
+const search = (query: string, options: { filter?: proto.SearchFilter; limit?: number; offset?: number } = {}) =>
   collect(new StubGatewayDriver().searchGames({ correlationId: 'search-1', query, ...options }));
 
 const titlesOf = (frames: readonly proto.GatewaySearchResult[]) =>

@@ -105,7 +105,7 @@ describe('invite expiry', () => {
      * status (or a list of them), an expiry bound, an `OR`. Anything else fails
      * the test, so a new shape cannot pass by being ignored.
      */
-    const matches = (where: Prisma.InviteWhereInput, row: { status: InviteStatus; expiresAt: Date }): boolean =>
+    const matches = (where: Prisma.InviteWhereInput, row: { expiresAt: Date; status: InviteStatus }): boolean =>
       Object.entries(where).every(([key, value]) => {
         if (key === 'OR') {
           return (value as Prisma.InviteWhereInput[]).some((branch) => matches(branch, row));

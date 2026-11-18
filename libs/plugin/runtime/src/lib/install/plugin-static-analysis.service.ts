@@ -69,8 +69,8 @@ export interface StaticAnalysisOptions {
 
 /** Minimal structural view of an ESTree node — meriyah's AST walked without type assertions. */
 interface EstreeNode {
-  readonly type: string;
   readonly [key: string]: unknown;
+  readonly type: string;
 }
 
 interface CollectedFiles {

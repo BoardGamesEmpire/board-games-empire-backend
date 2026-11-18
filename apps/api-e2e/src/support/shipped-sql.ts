@@ -7,11 +7,11 @@ import { join, resolve } from 'node:path';
  * expressions that stood in them kept for the caller to pin.
  */
 export interface ShippedStatement {
-  /** The statement text, with `$1`, `$2`, … where the template interpolated. */
-  readonly text: string;
-
   /** The interpolated expressions, verbatim and in the order they appeared. */
   readonly params: readonly string[];
+
+  /** The statement text, with `$1`, `$2`, … where the template interpolated. */
+  readonly text: string;
 }
 
 /**
@@ -64,8 +64,8 @@ const VALUE_TEMPLATE = /[=(,]\s*`/;
  * and whether its surrounding whitespace is formatting or content.
  */
 interface TemplateForm {
-  readonly pattern: RegExp;
   readonly noun: string;
+  readonly pattern: RegExp;
 
   /**
    * SQL is laid out across lines, so its indentation is formatting and `pg`

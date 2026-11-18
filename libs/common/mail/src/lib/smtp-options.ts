@@ -34,6 +34,6 @@ export function smtpTransportOptions(settings: MailSettings, password: string | 
 }
 
 /** The sender of every outgoing mail: the server's name at the configured From address. */
-export function mailFrom(settings: MailSettings): { name: string; address: string } {
+export function mailFrom(settings: MailSettings): { address: string; name: string } {
   return { name: settings.name, address: settings.mailFromAddress ?? '' };
 }

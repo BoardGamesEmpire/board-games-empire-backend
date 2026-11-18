@@ -4,14 +4,20 @@ import { decisionStands } from './consent-decision-stands';
 import type { ConsentActDecision, ConsentActPresentation } from './plugin-consent-act.types';
 
 export interface ConsentActWrite {
+  readonly actorId: string;
+  readonly correlationId: string | null;
+  readonly decidedAt: Date;
+  /** In permission order: the order every writer takes the rows in. */
+  readonly decisions: readonly ConsentActDecision[];
+  readonly kind: PluginConsentActKind;
+  readonly manifestSha256: string;
+  readonly manifestVersion: string;
   readonly pluginId: string;
   readonly pluginSlug: string;
-  readonly scopeType: PluginGrantScope;
+  readonly presentation: ConsentActPresentation;
   /** Household.id or User.id; SERVER_SCOPE_SENTINEL for the Server unit. */
   readonly scopeId: string;
-  readonly kind: PluginConsentActKind;
-  readonly manifestVersion: string;
-  readonly manifestSha256: string;
+  readonly scopeType: PluginGrantScope;
   /**
    * The staged update the act answered: the plugin row's `pendingStagingId`
    * when `manifestSha256` names the staged manifest, null for an act on the
@@ -19,22 +25,16 @@ export interface ConsentActWrite {
    * it (#1152).
    */
   readonly stagingId: string | null;
-  readonly presentation: ConsentActPresentation;
-  /** In permission order: the order every writer takes the rows in. */
-  readonly decisions: readonly ConsentActDecision[];
   /** The rows read before the write, by permission slug; a missing slug had no decision. */
   readonly standingBySlug: ReadonlyMap<string, PluginGrant>;
-  readonly actorId: string;
-  readonly decidedAt: Date;
-  readonly correlationId: string | null;
 }
 
 export interface WrittenConsentAct {
   readonly act: PluginConsentAct;
-  /** Every decision's row after the write, in `decisions` order. */
-  readonly rows: readonly PluginGrant[];
   /** The decisions whose row changed (`decisionStands` false), a fresh row included: `before` is null there. */
   readonly changed: readonly WrittenDecision[];
+  /** Every decision's row after the write, in `decisions` order. */
+  readonly rows: readonly PluginGrant[];
 }
 
 /**

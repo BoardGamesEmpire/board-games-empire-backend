@@ -58,9 +58,9 @@ export type ConsentManifestSource = 'active' | 'staged';
 export type ConsentCheckDecision = 'granted' | 'denied' | 'pending';
 
 export interface ClassifiedConsentCheck {
-  readonly decision: ConsentCheckDecision;
   /** Risk recorded on the deciding row — `Granted` or `Denied`; `null` when no row exists. */
   readonly decidedRiskLevel: RiskLevel | null;
+  readonly decision: ConsentCheckDecision;
   /** A `Granted` row exists but its `decidedRiskLevel` no longer covers today's risk (#59): reported pending, re-consent re-stamps. */
   readonly staleRisk: boolean;
   /**
@@ -72,16 +72,16 @@ export interface ClassifiedConsentCheck {
 
 export interface ConsentCheckClassification {
   /**
+   * Today's catalog risk for EVERY input check, addressable or not — the
+   * presentation surface shows risk for checks other principals decide.
+   * Absent = no catalog row.
+   */
+  readonly currentRiskBySlug: ReadonlyMap<string, RiskLevel>;
+  /**
    * Keyed by canonical slug; ONLY unit-addressable checks appear
    * (`unitConsumesConsentScope`). A check absent here is decided per-unit on
    * another axis — the classifier refuses to answer for a decision these
    * coordinates cannot address, rather than reporting a false `pending`.
    */
   readonly decisions: ReadonlyMap<string, ClassifiedConsentCheck>;
-  /**
-   * Today's catalog risk for EVERY input check, addressable or not — the
-   * presentation surface shows risk for checks other principals decide.
-   * Absent = no catalog row.
-   */
-  readonly currentRiskBySlug: ReadonlyMap<string, RiskLevel>;
 }

@@ -11,8 +11,8 @@ export interface SearchedUserWire {
 }
 
 export interface UserSearchPageWire {
-  readonly users: readonly SearchedUserWire[];
   readonly total: number;
+  readonly users: readonly SearchedUserWire[];
 }
 
 const fail = envelopeFailure('apps/api-e2e/src/user/user-wire.ts');

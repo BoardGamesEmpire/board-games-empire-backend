@@ -40,11 +40,6 @@ export interface ManifestValidationOptions {
   readonly defaultLocale: string;
 
   /**
-   * Minimum trimmed length for permission `reason` values.
-   */
-  readonly minReasonLength?: number;
-
-  /**
    * When false, the bgeCompat SATISFACTION check is skipped (the range's
    * shape is still validated). Consent-time re-validation uses this
    * (`revalidateStoredManifest` in the plugin runtime): whether the plugin
@@ -54,6 +49,11 @@ export interface ManifestValidationOptions {
    * not even a denial could be recorded otherwise. Default true.
    */
   readonly enforceBgeCompat?: boolean;
+
+  /**
+   * Minimum trimmed length for permission `reason` values.
+   */
+  readonly minReasonLength?: number;
 }
 
 /**

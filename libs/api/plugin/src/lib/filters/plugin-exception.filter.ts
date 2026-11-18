@@ -110,10 +110,10 @@ import { PluginArtifactUploadInvalidError } from '../upload/plugin-artifact-uplo
  * level.
  */
 interface PluginErrorRendering {
-  status: Http;
-  message: I18nMessage;
   fields?: Record<string, unknown>;
+  message: I18nMessage;
   operatorActionable?: boolean;
+  status: Http;
 }
 
 type ErrorCtor<E extends Error> = new (...args: never[]) => E;

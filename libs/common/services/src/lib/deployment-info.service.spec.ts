@@ -8,9 +8,9 @@ import { DEPLOYMENT_SIGNALS, DeploymentInfoService, type DeploymentSignals } fro
  */
 
 interface SignalsOverrides {
+  cgroup?: string;
   env?: NodeJS.ProcessEnv;
   files?: ReadonlySet<string>;
-  cgroup?: string;
 }
 
 function makeSignals({ env = {}, files = new Set(), cgroup = '' }: SignalsOverrides = {}): DeploymentSignals {

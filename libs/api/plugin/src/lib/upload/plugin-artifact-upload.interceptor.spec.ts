@@ -28,7 +28,7 @@ import type { PluginArtifactUploadedFile } from './plugin-artifact-upload.storag
 
 const GZIP = Buffer.from([0x1f, 0x8b, 0x08, 0x00, 0x01, 0x02]);
 
-let seen: { file?: PluginArtifactUploadedFile; body?: unknown; existedInHandler?: boolean } = {};
+let seen: { body?: unknown; existedInHandler?: boolean; file?: PluginArtifactUploadedFile } = {};
 let handlerFails = false;
 let handlerReplacesFileWithDirectory = false;
 

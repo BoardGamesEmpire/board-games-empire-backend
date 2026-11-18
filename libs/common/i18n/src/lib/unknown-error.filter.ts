@@ -11,10 +11,10 @@ import { I18nExceptionFilter } from './i18n-exception.filter';
  * such as better-auth's `APIError` (#527).
  */
 interface HttpError {
-  readonly statusCode: number;
-  readonly message: string;
   /** `false` when the error's text must not reach the client. */
   readonly expose: boolean;
+  readonly message: string;
+  readonly statusCode: number;
 }
 
 /**

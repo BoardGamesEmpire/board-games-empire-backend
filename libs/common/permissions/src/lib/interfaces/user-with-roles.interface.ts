@@ -1,11 +1,11 @@
 import type { Permission, UserPermission } from '@bge/database';
 
 export interface UserWithRoles {
-  id: string;
-  householdMember: HouseholdMemberWithRole[];
   eventsAttended: EventAttendWithRole[];
-  roles: RoleWithPermissions[];
+  householdMember: HouseholdMemberWithRole[];
+  id: string;
   permissions: UserPermissionWithPermission[];
+  roles: RoleWithPermissions[];
 }
 
 export interface EventAttendWithRole {

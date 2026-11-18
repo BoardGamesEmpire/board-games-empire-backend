@@ -18,12 +18,6 @@ export interface GrpcListenAddress {
 export type GrpcAddressConfig = ConfigFactory<GrpcListenAddress> & Pick<ConfigFactoryKeyHost, 'KEY'>;
 
 export interface GrpcMicroserviceBootstrapConfig {
-  /** The service's root Nest module. */
-  readonly appModule: Type<unknown>;
-
-  /** Human-readable name for the startup banner. */
-  readonly displayName: string;
-
   /**
    * The app's config for the address it listens on, such as a gateway's
    * `gatewayConfig`. It must be one the app's root module loads. The address
@@ -34,11 +28,34 @@ export interface GrpcMicroserviceBootstrapConfig {
   readonly addressConfig: GrpcAddressConfig;
 
   /**
-   * The gRPC package, or packages, declared in the served protos, e.g.
-   * `PROTO_PACKAGE_NAME` (gateways). The coordinator serves two: its own and,
-   * for the plugin DataGateways it hosts, the gateway's (#1083).
+   * Runs once the server listens, before the startup line is logged. Nest
+   * runs the app's bootstrap hooks before the server listens, so this is the
+   * first moment the service can say it is reachable: the coordinator marks
+   * its plugin load records ready here, which a gateway worker reads before
+   * it dials (#1083). A rejection fails the boot.
    */
-  readonly protoPackage: string | readonly string[];
+  readonly afterListen?: (app: INestMicroservice) => Promise<void>;
+
+  /** The service's root Nest module. */
+  readonly appModule: Type<unknown>;
+
+  /**
+   * The `bootstrap`-tagged child logger, shared with the app's `LoggerModule`
+   * so pre-Nest and shutdown lines flow through the same transport.
+   */
+  readonly bootstrapLogger: PinoLogger;
+
+  /** Human-readable name for the startup banner. */
+  readonly displayName: string;
+
+  /**
+   * Bootstrap-failure handler. When the bootstrap calls it, the error is
+   * already logged and `process.exitCode` is already 1; this only performs the
+   * host-specific flush/shutdown before `process.exit(1)` (pino flush for
+   * gateways, `otel.shutdown()` for the coordinator). If that exit is never
+   * reached, a process left with nothing to do still ends with code 1.
+   */
+  readonly onBootstrapError: (error: unknown) => void;
 
   /**
    * Absolute directory the service's `.proto` assets are copied into at build.
@@ -55,10 +72,11 @@ export interface GrpcMicroserviceBootstrapConfig {
   readonly protoExclude?: readonly RegExp[];
 
   /**
-   * The `bootstrap`-tagged child logger, shared with the app's `LoggerModule`
-   * so pre-Nest and shutdown lines flow through the same transport.
+   * The gRPC package, or packages, declared in the served protos, e.g.
+   * `PROTO_PACKAGE_NAME` (gateways). The coordinator serves two: its own and,
+   * for the plugin DataGateways it hosts, the gateway's (#1083).
    */
-  readonly bootstrapLogger: PinoLogger;
+  readonly protoPackage: string | readonly string[];
 
   /**
    * Installs the flush-then-exit signal handlers. Each host passes its own so
@@ -68,24 +86,6 @@ export interface GrpcMicroserviceBootstrapConfig {
    * flush pino via `@bge/logger`'s `registerLoggerShutdown`.
    */
   readonly registerShutdown: (app: INestMicroservice) => void;
-
-  /**
-   * Runs once the server listens, before the startup line is logged. Nest
-   * runs the app's bootstrap hooks before the server listens, so this is the
-   * first moment the service can say it is reachable: the coordinator marks
-   * its plugin load records ready here, which a gateway worker reads before
-   * it dials (#1083). A rejection fails the boot.
-   */
-  readonly afterListen?: (app: INestMicroservice) => Promise<void>;
-
-  /**
-   * Bootstrap-failure handler. When the bootstrap calls it, the error is
-   * already logged and `process.exitCode` is already 1; this only performs the
-   * host-specific flush/shutdown before `process.exit(1)` (pino flush for
-   * gateways, `otel.shutdown()` for the coordinator). If that exit is never
-   * reached, a process left with nothing to do still ends with code 1.
-   */
-  readonly onBootstrapError: (error: unknown) => void;
 }
 
 /**

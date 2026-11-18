@@ -36,8 +36,8 @@ import { PERMISSIONS_CACHE } from './permissions-cache';
  * with the version token its key held before the load began.
  */
 interface VersionedEntry<T> {
-  version: string;
   value: T;
+  version: string;
 }
 
 @Injectable()
@@ -816,7 +816,7 @@ export class PermissionsService {
    * `null` when this process registers no reader.
    */
   private readActiveManifest(
-    plugin: { id: string; slug: string; version: string; manifestJson: unknown },
+    plugin: { id: string; manifestJson: unknown; slug: string; version: string },
     unit: PluginUnit,
   ): PluginActiveManifest | null {
     if (!this.activeManifestReader) {

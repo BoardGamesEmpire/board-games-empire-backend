@@ -28,7 +28,7 @@ const makeJob = (attemptsMade = 0, attempts = 3) =>
 describe('VocabularySectionProcessor', () => {
   let registry: { resolve: jest.Mock };
   let interviews: { runSection: jest.Mock };
-  let sections: { load: jest.Mock; recordLoaded: jest.Mock; recordFailed: jest.Mock };
+  let sections: { load: jest.Mock; recordFailed: jest.Mock; recordLoaded: jest.Mock };
   let runWith: jest.Mock;
   let processor: VocabularySectionProcessor;
   let driver: InMemoryGatewayDriver;

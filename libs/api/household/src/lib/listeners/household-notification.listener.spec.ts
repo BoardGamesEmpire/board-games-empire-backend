@@ -76,11 +76,11 @@ const transferred = () =>
   );
 
 interface UserRow {
-  id: string;
   email: string;
   emailVerified: boolean;
-  username: string;
+  id: string;
   profile: { displayName: string | null } | null;
+  username: string;
 }
 
 const RILEY: UserRow = {
@@ -116,7 +116,7 @@ describe('HouseholdNotificationListener', () => {
    * vouched address and the display name.
    */
   const seedUsers = (...rows: UserRow[]) =>
-    db.user.findUnique.mockImplementation((({ where }: { where: { id?: string; email?: string } }) =>
+    db.user.findUnique.mockImplementation((({ where }: { where: { email?: string; id?: string } }) =>
       Promise.resolve(rows.find((row) => row.id === where.id || row.email === where.email) ?? null)) as never);
 
   beforeEach(async () => {

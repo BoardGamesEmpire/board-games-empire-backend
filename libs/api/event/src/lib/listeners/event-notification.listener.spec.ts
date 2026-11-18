@@ -147,8 +147,8 @@ describe('EventNotificationListener', () => {
       await listener.onEventCreated(makeCreatedEvent({}, ['user-b']));
 
       const allNotifications = notifications.createMany.mock.calls[0][0] as Array<{
-        userId: string;
         type: string;
+        userId: string;
       }>;
 
       // user-a gets EventCreated, user-b gets EventInviteReceived

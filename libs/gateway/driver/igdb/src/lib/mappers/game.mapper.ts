@@ -308,7 +308,7 @@ function toGameReleaseDataList(
   gameStatus: number | undefined,
   languages: proto.LanguageData[],
 ): proto.GameReleaseData[] {
-  const byPlatform = new Map<number, { platform: IgdbPlatform; entries: IgdbReleaseDate[] }>();
+  const byPlatform = new Map<number, { entries: IgdbReleaseDate[]; platform: IgdbPlatform }>();
 
   for (const rd of releaseDates) {
     const existing = byPlatform.get(rd.platform.id);

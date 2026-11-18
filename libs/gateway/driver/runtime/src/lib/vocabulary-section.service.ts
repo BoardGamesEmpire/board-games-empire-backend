@@ -145,7 +145,7 @@ export class VocabularySectionService {
   private async record(
     gatewayId: string,
     capability: DataGatewayCapability,
-    data: { lastLoadedAt?: Date; lastFailedAt?: Date; lastFailure?: DataGatewaySectionFailure },
+    data: { lastFailedAt?: Date; lastFailure?: DataGatewaySectionFailure; lastLoadedAt?: Date },
   ): Promise<void> {
     const live = await this.db.dataGateway.findFirst({
       where: { id: gatewayId, enabled: true, deletedAt: null },

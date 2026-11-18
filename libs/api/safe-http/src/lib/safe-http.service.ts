@@ -106,7 +106,7 @@ export class SafeHttpService {
 
     const wildcardsIn = (list: readonly string[]): string[] => list.filter((entry) => entry.startsWith('*.'));
 
-    const offenders: { field: string; entries: string[] }[] = [];
+    const offenders: { entries: string[]; field: string }[] = [];
     const allowedWildcards = wildcardsIn(effective.allowedHosts);
     const blockedWildcards = wildcardsIn(effective.blockedHosts);
 

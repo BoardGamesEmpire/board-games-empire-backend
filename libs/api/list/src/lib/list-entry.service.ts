@@ -56,7 +56,7 @@ const LIST_ENTRY_UNIQUE_SPELLINGS = [
 /** What a new entry names: a game on any platform, or one platform game. */
 type EntryTarget =
   | { readonly gameId: string; readonly platformGameId?: never }
-  | { readonly platformGameId: string; readonly gameId?: never };
+  | { readonly gameId?: never; readonly platformGameId: string };
 
 /**
  * The one thing a new entry names, or `LIST_ENTRY_ONE_TARGET` (#1241). A JSON

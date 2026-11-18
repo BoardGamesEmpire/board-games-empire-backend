@@ -41,7 +41,7 @@ export const FETCH_JOB_OPTS: JobsOptions = {
  * retries (idempotent re-add) and `bullmqJobId` equals the row id.
  */
 function buildImportFlow(
-  names: { readonly import: JobNames; readonly fetch: JobNames },
+  names: { readonly fetch: JobNames; readonly import: JobNames },
   payload: GameImportJobPayload,
   meta: JobActorMeta,
 ): FlowJob {

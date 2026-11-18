@@ -2,9 +2,9 @@ import type { DataMigrationEntry, DataMigrationLedgerRow } from './data-migratio
 
 /** An applied entry the ledger and the build hold at different revisions; which side is higher says what happened. */
 export interface RevisionMismatch {
-  readonly name: string;
   readonly codeRevision: number;
   readonly ledgerRevision: number;
+  readonly name: string;
 }
 
 /** One mismatch, worded the same in the refusal, the warning and `db:plan`. */
@@ -13,8 +13,13 @@ export function describeMismatch({ name, codeRevision, ledgerRevision }: Revisio
 }
 
 export interface DataMigrationsPlan {
-  /** Registry entries without a ledger row, in apply (name) order. */
-  readonly pending: readonly DataMigrationEntry[];
+  /**
+   * Registry entries the ledger records at a revision above this build's: a
+   * newer build ran them, and this build is a rollback across that edit. Left
+   * alone, as unknown rows and an ahead schema are; the newer build owns the
+   * data.
+   */
+  readonly ahead: readonly RevisionMismatch[];
   /** Registry entries the ledger records at the same revision. */
   readonly applied: readonly string[];
   /**
@@ -23,13 +28,8 @@ export interface DataMigrationsPlan {
    * ran, without a new entry; any one of them refuses boot.
    */
   readonly edited: readonly RevisionMismatch[];
-  /**
-   * Registry entries the ledger records at a revision above this build's: a
-   * newer build ran them, and this build is a rollback across that edit. Left
-   * alone, as unknown rows and an ahead schema are; the newer build owns the
-   * data.
-   */
-  readonly ahead: readonly RevisionMismatch[];
+  /** Registry entries without a ledger row, in apply (name) order. */
+  readonly pending: readonly DataMigrationEntry[];
   /** Ledger rows the registry does not know: a newer build applied them, or an entry was removed. */
   readonly unknown: readonly string[];
 }

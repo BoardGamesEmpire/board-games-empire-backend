@@ -10,20 +10,20 @@ const UNAUTHORIZED = 401;
 const TOO_MANY_REQUESTS = 429;
 
 export interface IgdbCallerOptions {
-  /** How the caller reaches IGDB and Twitch; it has no other way (#1082). */
-  fetch: UpstreamFetch;
+  /** IGDB's API. Defaults to `https://api.igdb.com/v4`. */
+  baseUrl?: string;
   clientId: string;
   clientSecret: string;
 
-  /** Where the access token comes from. Defaults to Twitch's endpoint. */
-  tokenUrl?: string;
+  /** How the caller reaches IGDB and Twitch; it has no other way (#1082). */
+  fetch: UpstreamFetch;
 
-  /** IGDB's API. Defaults to `https://api.igdb.com/v4`. */
-  baseUrl?: string;
   logger: DriverLogger;
-
   /** The wait before retrying a 429. Defaults to 1 second. */
   rateLimitRetryMs?: number;
+
+  /** Where the access token comes from. Defaults to Twitch's endpoint. */
+  tokenUrl?: string;
 }
 
 /**

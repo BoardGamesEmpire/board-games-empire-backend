@@ -63,11 +63,11 @@ describe('plugin row share lock (FOR SHARE)', () => {
   const NO_SNAPSHOT = null;
 
   interface PluginRow {
-    readonly uninstalled_at: Date | null;
-    readonly scope: string;
-    readonly version: string;
     readonly installed_at: Date;
     readonly manifest_matches: boolean | null;
+    readonly scope: string;
+    readonly uninstalled_at: Date | null;
+    readonly version: string;
   }
 
   let db: TestDatabase;

@@ -63,18 +63,18 @@ type StagedUpdateColumns = Pick<
  */
 export function stagedUpdateColumns(
   overrides: {
-    readonly version?: string;
     readonly manifest?: PluginManifest;
+    /** The registry the staged artifact came from (#1096). Defaults to null, as for an upload. */
+    readonly registrySlug?: string;
     readonly sha256?: string;
-    readonly stagingId?: string;
     /** When the update was staged. Defaults to now. */
     readonly since?: Date;
+    readonly stagingId?: string;
 
     /** The link the staged artifact was fetched from (#1096). Defaults to null, as for an upload. */
     readonly url?: string;
 
-    /** The registry the staged artifact came from (#1096). Defaults to null, as for an upload. */
-    readonly registrySlug?: string;
+    readonly version?: string;
   } = {},
 ): StagedUpdateColumns {
   const version = overrides.version ?? overrides.manifest?.version ?? '1.3.0';
