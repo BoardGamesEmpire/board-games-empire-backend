@@ -97,4 +97,35 @@ Not in scope:
 **Enforced by:** `perfectionist/sort-interfaces` and
 `perfectionist/sort-object-types`, with autofix, using the root config's
 `sortedMemberOptions` (#1374). Blank lines don't split the sort, and the sort
-leaves them alone; the blank lines between members are set separately.
+leaves them alone; the next section sets them.
+
+## Blank lines between members
+
+In an interface, an object type literal or a class's property list, a member is
+_special_ when it carries a comment above it (a doc comment, a block comment or
+a line comment) or spans more than one line, its decorators included. A blank
+line goes before a special member and before the member after one. Between two
+plain one-line members there is no blank line. The first member is never
+checked. With the members sorted, their order alone decides every blank line.
+
+```ts
+interface DataGatewaySectionView {
+  capability: DataGatewayCapability;
+
+  /** The last failure, only while it's current. */
+  failure: SectionFailure | null;
+
+  lastLoadedAt: Date | null;
+}
+```
+
+A comment on the same line as a member trails that member; it doesn't make the
+member below special. A decorated class property with its decorator on its own
+line is multi-line, so DTO fields get the same separation.
+
+Class methods are out of scope: in a class body, a pair with a method on either
+side keeps whatever spacing it has. Members that share one line are left to
+Prettier.
+
+**Enforced by:** `bge/member-blank-lines`, with autofix, defined in the root
+`eslint.config.mjs` (#1318).
