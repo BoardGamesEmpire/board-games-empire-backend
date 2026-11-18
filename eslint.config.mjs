@@ -532,6 +532,7 @@ export default [
       '@stylistic/padding-line-between-statements': ['error', { blankLine: 'always', prev: 'block-like', next: '*' }],
       'perfectionist/sort-interfaces': ['error', sortedMemberOptions],
       'perfectionist/sort-object-types': ['error', sortedMemberOptions],
+      'bge/member-blank-lines': 'error',
       'bge/no-nested-ceiling': 'error',
       'bge/no-uncoded-exception-body': 'error',
     },
