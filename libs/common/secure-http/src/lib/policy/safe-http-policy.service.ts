@@ -142,9 +142,9 @@ function makeDefaultSnapshot(): SafeHttpPolicySnapshot {
     defaultTimeoutMs: SAFE_HTTP_DEFAULT_TIMEOUT_MS,
     defaultMaxRedirects: SAFE_HTTP_DEFAULT_MAX_REDIRECTS,
     strictMode: SAFE_HTTP_DEFAULT_STRICT_MODE,
-    allowedHosts: Object.freeze([] as readonly string[]),
-    allowedCidrs: Object.freeze([] as readonly string[]),
-    blockedHosts: Object.freeze([] as readonly string[]),
-    blockedCidrs: Object.freeze([] as readonly string[]),
+    allowedHosts: Object.freeze<string[]>([]),
+    allowedCidrs: Object.freeze<string[]>([]),
+    blockedHosts: Object.freeze<string[]>([]),
+    blockedCidrs: Object.freeze<string[]>([]),
   });
 }

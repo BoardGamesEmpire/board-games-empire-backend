@@ -594,6 +594,7 @@ export class SecureHttpService {
           body = null;
         } else {
           try {
+            // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- data from outside the process; parse it through a schema (#1322)
             body = JSON.parse(rawString) as T;
           } catch {
             body = null;
@@ -605,13 +606,15 @@ export class SecureHttpService {
 
       case 'text': {
         raw = rawString ?? '';
-        body = (rawString ?? '') as unknown as T;
+        // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- the caller's `T` names what its `responseType` returns, which TypeScript can't tie to this switch (#1321)
+        body = (rawString ?? '') as T;
         break;
       }
 
       case 'arraybuffer': {
         raw = rawArrayBuffer ?? new ArrayBuffer(0);
-        body = (rawArrayBuffer ?? new ArrayBuffer(0)) as unknown as T;
+        // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- the caller's `T` names what its `responseType` returns, which TypeScript can't tie to this switch (#1321)
+        body = (rawArrayBuffer ?? new ArrayBuffer(0)) as T;
         break;
       }
     }
@@ -893,6 +896,7 @@ export class SecureHttpService {
   private async notify(method: 'onSsrfRejection', event: SsrfRejectionEvent): Promise<void>;
   private async notify(method: 'onRedirectDenied', event: RedirectDeniedEvent): Promise<void>;
   private async notify(method: keyof OutboundHttpObserver, event: unknown): Promise<void> {
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- indexing the observer by a union of method names gives a union of handlers whose event parameters TypeScript intersects; the overloads above pair each method with its event (#1321)
     const handler = this.observer[method] as ((e: unknown) => void | Promise<void>) | undefined;
     if (!handler) {
       return;
