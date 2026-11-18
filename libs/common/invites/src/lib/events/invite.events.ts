@@ -92,6 +92,7 @@ export function toInviteSnapshot(row: InviteSnapshot): InviteSnapshot {
 
   // Every field of the interface is in the list (pinned by the spec), so the
   // partial is whole by the time it is returned.
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- TypeScript can't tell that a loop over the field list filled every field of the partial (#1321)
   return snapshot as InviteSnapshot;
 }
 

@@ -58,9 +58,10 @@ export class MailDispatcherService {
    * passes in; connection options with no live client count as ready.
    */
   private connectionReady(): boolean {
-    const connection = this.queue.opts?.connection as { status?: unknown } | undefined;
+    const connection = this.queue.opts?.connection;
+    const status: unknown = connection && 'status' in connection ? connection.status : undefined;
 
-    return typeof connection?.status !== 'string' || connection.status === 'ready';
+    return typeof status !== 'string' || status === 'ready';
   }
 
   private unattributedActor(): Actor {

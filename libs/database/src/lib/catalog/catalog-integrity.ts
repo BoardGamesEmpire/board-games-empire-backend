@@ -103,7 +103,7 @@ function describeValue(value: unknown): string {
   if (typeof value === 'object' && value !== null) {
     // A prototype chain that never reaches Object.prototype has no
     // `constructor`; the message must not throw on the value it reports.
-    const name: unknown = (value as { constructor?: { name?: unknown } }).constructor?.name;
+    const name: unknown = value.constructor?.name;
     return typeof name === 'string' && name !== '' ? name : 'object';
   }
 

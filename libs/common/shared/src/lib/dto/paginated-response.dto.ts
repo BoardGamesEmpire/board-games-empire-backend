@@ -85,6 +85,7 @@ export function paginated<K extends string, T>(
     hasMore: page * pageSize < total,
   };
 
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- a computed key of generic type `K` widens to a string index, which TypeScript can't relate to the mapped `PaginatedResponse<K, T>` (#1321)
   return { [resourceKey]: rows, pagination } as PaginatedResponse<K, T>;
 }
 
@@ -193,7 +194,7 @@ function claimSchemaName(candidate: string): string {
  * second, unrelated `SearchQueryDto` the first one's schema.
  */
 export function PaginatedResponseDto<T>(model: NestType<T>, resourceKey: string): NestType<unknown> {
-  const perKey = responseDtoCache.get(model as NestType<unknown>) ?? new Map<string, NestType<unknown>>();
+  const perKey = responseDtoCache.get(model) ?? new Map<string, NestType<unknown>>();
   const cached = perKey.get(resourceKey);
 
   if (cached) {
@@ -214,7 +215,7 @@ export function PaginatedResponseDto<T>(model: NestType<T>, resourceKey: string)
   });
 
   perKey.set(resourceKey, PaginatedResponseModel);
-  responseDtoCache.set(model as NestType<unknown>, perKey);
+  responseDtoCache.set(model, perKey);
 
   return PaginatedResponseModel;
 }

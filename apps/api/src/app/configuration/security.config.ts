@@ -32,14 +32,13 @@ export default registerAs('security', () =>
         defaultValue: '*',
       },
     ],
-    (record: Record<string, any>) =>
-      <SecurityConfig>{
-        saltRounds: record.saltRounds,
-        cors: {
-          origin: record.corsOrigin,
-          credentials: record.corsCredentials,
-        },
+    (record: Record<string, any>): SecurityConfig => ({
+      saltRounds: record.saltRounds,
+      cors: {
+        origin: record.corsOrigin,
+        credentials: record.corsCredentials,
       },
+    }),
   ),
 );
 

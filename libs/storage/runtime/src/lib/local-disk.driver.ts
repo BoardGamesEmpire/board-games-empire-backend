@@ -53,8 +53,10 @@ type ResolvedMountCheck = 'st_dev' | 'sentinel' | 'off';
 // jest runs specs in a VM realm whose `Error` differs from the host `Error`
 // that node core modules (fs) throw, so `instanceof Error` is unreliable here.
 // Detect the errno by duck-typing `.code` instead.
-const isENOENT = (error: unknown): boolean =>
-  typeof error === 'object' && error !== null && (error as NodeJS.ErrnoException).code === 'ENOENT';
+const errnoCode = (error: unknown): unknown =>
+  typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined;
+
+const isENOENT = (error: unknown): boolean => errnoCode(error) === 'ENOENT';
 
 /**
  * Raised by `withProbeTimeout` when a reachability probe exceeds its budget —
@@ -372,7 +374,7 @@ export class LocalDiskDriver implements StorageDriver {
    * from an unmounted volume).
    */
   private classify(error: unknown, key: string): InsufficientStorageError | StorageUnavailableError | undefined {
-    switch ((error as NodeJS.ErrnoException | null)?.code) {
+    switch (errnoCode(error)) {
       case 'ENOSPC':
       case 'EDQUOT':
         return new InsufficientStorageError(`No space left while accessing '${key}'`, { cause: error });
@@ -788,7 +790,7 @@ export class LocalDiskDriver implements StorageDriver {
 
       // Non-ENOENT (EACCES/EPERM/EIO, …): the marker may exist but isn't readable
       // or the volume is unhealthy — don't send the operator to `touch`.
-      const code = (error as NodeJS.ErrnoException | null)?.code ?? 'unknown error';
+      const code = errnoCode(error) ?? 'unknown error';
       throw new StorageMisconfiguredError(
         `media.mountCheck is 'sentinel' but the sentinel file '${sentinelPath}' could not be read (${code}); ` +
           `check the storage volume's health and permissions`,

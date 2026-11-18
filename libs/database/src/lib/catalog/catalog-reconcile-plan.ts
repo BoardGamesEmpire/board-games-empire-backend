@@ -664,9 +664,10 @@ function sortKeys(value: unknown): unknown {
 
   if (typeof value === 'object' && value !== null) {
     return Object.fromEntries(
-      Object.keys(value)
-        .sort()
-        .map((key) => [key, sortKeys((value as Record<string, unknown>)[key])]),
+      // The comparison `.sort()` makes on keys: UTF-16 code units, not locale.
+      Object.entries(value)
+        .sort(([left], [right]) => (left < right ? -1 : 1))
+        .map(([key, item]) => [key, sortKeys(item)]),
     );
   }
 

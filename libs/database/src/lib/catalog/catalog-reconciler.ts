@@ -531,6 +531,7 @@ function shippedRow(wanted: PermissionSeedDefinition): PermissionSnapshotRow {
     action: wanted.action,
     subject: wanted.subject,
     fields: [...(wanted.fields ?? [])],
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Prisma types JSON to write (InputJsonObject: optional members, readonly arrays) apart from JSON it reads (JsonValue) (#1321)
     conditions: (wanted.conditions ?? null) as Prisma.JsonValue,
     inverted: false,
     reason: wanted.reason,

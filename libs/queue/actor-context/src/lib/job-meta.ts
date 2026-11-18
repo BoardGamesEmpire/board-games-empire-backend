@@ -51,11 +51,12 @@ export function extractJobMeta(data: unknown): JobActorMeta | null {
     return null;
   }
 
-  const candidate = (data as Record<string, unknown>)[JOB_META_KEY];
+  const candidate = JOB_META_KEY in data ? data[JOB_META_KEY] : undefined;
   if (!candidate || typeof candidate !== 'object') {
     return null;
   }
 
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- data from outside the process; parse it through a schema (#1322)
   const meta = candidate as Partial<JobActorMeta>;
   if (!meta.actor || typeof meta.correlationId !== 'string') {
     return null;

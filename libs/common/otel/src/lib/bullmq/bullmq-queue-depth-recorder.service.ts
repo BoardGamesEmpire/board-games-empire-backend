@@ -86,7 +86,7 @@ export class BullMQQueueDepthRecorder implements OnApplicationBootstrap, OnAppli
   private discoverQueues(): Queue[] {
     return this.discovery
       .getProviders()
-      .map((wrapper) => wrapper.instance as unknown)
+      .map((wrapper): unknown => wrapper.instance)
       .filter((instance): instance is Queue => instance instanceof Queue);
   }
 }

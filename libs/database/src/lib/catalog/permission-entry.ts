@@ -302,5 +302,6 @@ export function permission<S extends CatalogSubject, const Slug extends string>(
 export function permission<S extends CatalogSubject, const Slug extends string>(
   entry: PermissionEntryFor<S, Slug>,
 ): DefinedPermission<S, Slug> {
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- a subject's WhereInput isn't JSON to the compiler, and the brand has no value; assertJsonConditions makes the cast true as the Permission catalog loads, as above (#1321)
   return entry as DefinedPermission<S, Slug>;
 }

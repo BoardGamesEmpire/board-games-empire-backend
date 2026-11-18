@@ -59,6 +59,7 @@ export function reasonPhrase(status: number): string {
  * `PLUGIN_SDK_VERSION`) (#1260).
  */
 export function toErrorCode(name: string): ErrorCode {
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- `toUpperCase()` returns `string`, which TypeScript doesn't type as `Uppercase<string>` (#1321)
   return name
     .replace(/Error$/, '')
     .replace(/([a-z\d])([A-Z])/g, '$1_$2')

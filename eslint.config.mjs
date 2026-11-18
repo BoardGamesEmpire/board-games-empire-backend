@@ -670,9 +670,7 @@ export default [
     // block's globs at the repo root, so `apps/*-e2e/**` means the same thing
     // from every project.
     basePath: import.meta.dirname,
-    // Turned on lib group by lib group as the triage lands: libs/plugin and
-    // libs/api so far; everything else follows (#1321).
-    files: ['libs/plugin/**/*.{ts,tsx,cts,mts}', 'libs/api/**/*.{ts,tsx,cts,mts}'],
+    files: ['**/*.ts', '**/*.tsx', '**/*.cts', '**/*.mts'],
     ignores: castExemptFiles,
     rules: { '@typescript-eslint/consistent-type-assertions': ['error', { assertionStyle: 'never' }] },
   },

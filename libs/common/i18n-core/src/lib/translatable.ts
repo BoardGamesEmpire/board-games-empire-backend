@@ -95,10 +95,11 @@ export function isI18nMessage(value: unknown): value is I18nMessage {
     return false;
   }
 
-  const record = value as Record<string, unknown>;
   return (
-    Object.prototype.hasOwnProperty.call(record, I18N_MESSAGE_BRAND) &&
-    record[I18N_MESSAGE_BRAND] === true &&
-    typeof record.key === 'string'
+    Object.prototype.hasOwnProperty.call(value, I18N_MESSAGE_BRAND) &&
+    I18N_MESSAGE_BRAND in value &&
+    value[I18N_MESSAGE_BRAND] === true &&
+    'key' in value &&
+    typeof value.key === 'string'
   );
 }

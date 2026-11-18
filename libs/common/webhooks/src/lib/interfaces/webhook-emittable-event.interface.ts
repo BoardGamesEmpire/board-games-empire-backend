@@ -71,10 +71,11 @@ export function isWebhookEmittableEvent(value: unknown): value is WebhookEmittab
     return false;
   }
 
-  const candidate = value as Record<string, unknown>;
   return (
-    typeof candidate['subjectId'] === 'string' &&
-    (typeof candidate['householdId'] === 'string' || candidate['householdId'] === null) &&
-    'data' in candidate
+    'subjectId' in value &&
+    typeof value.subjectId === 'string' &&
+    'householdId' in value &&
+    (typeof value.householdId === 'string' || value.householdId === null) &&
+    'data' in value
   );
 }

@@ -98,6 +98,7 @@ export function renderErrorBody(
   }
 
   if (body !== null && typeof body === 'object') {
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- TypeScript has no narrowing from `object` to an indexable record, and the rest takes every other field (#1321)
     const { message, ...fields } = body as Record<string, unknown>;
     return errorEnvelope(status, renderMessage(status, message, i18n, locale), fields);
   }

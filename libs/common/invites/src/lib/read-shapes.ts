@@ -144,6 +144,7 @@ export const INVITE_SCALARS_PARTY_ONLY = {
  * domain event and the returned view from one row. `token` is not in the list
  * and must never be; `read-shapes.spec.ts` pins it.
  */
+// eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Object.fromEntries types its keys as string, so it can't return a record keyed by the snapshot fields (#1321)
 export const INVITE_SNAPSHOT_SELECT = Object.fromEntries(INVITE_SNAPSHOT_FIELDS.map((field) => [field, true])) as {
   readonly [Field in InviteSnapshotField]: true;
 };

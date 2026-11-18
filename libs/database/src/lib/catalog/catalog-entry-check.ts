@@ -293,6 +293,8 @@ export async function probeConditions(
     return [{ kind: 'template', slug, detail: `render-failed: ${describeError(error)}` }];
   }
 
+  // The subject names its delegate at runtime, and PRISMA_MODELS checked it above.
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- the client has a property per model and no index signature, and its $-methods aren't count delegates, so a direct cast is refused and the record view goes through unknown (#1321)
   const models = client as unknown as Readonly<Record<string, CountDelegate>>;
 
   await client.$executeRawUnsafe(`SAVEPOINT ${PROBE_SAVEPOINT}`);
@@ -463,10 +465,15 @@ function sampleContext(variables: readonly string[]): Record<string, unknown> {
 
   for (const variable of variables) {
     const keys = variable.split('.');
-    const leaf = keys.pop() as string;
+    const leaf = keys[keys.length - 1];
     let node = context;
-    for (const key of keys) {
-      node = (node[key] ??= {}) as Record<string, unknown>;
+    for (const key of keys.slice(0, -1)) {
+      const child = (node[key] ??= {});
+      if (!isObject(child)) {
+        throw new TypeError(`Template variable '${variable}' runs through '${key}', which holds a sample value`);
+      }
+
+      node = child;
     }
 
     node[leaf] = PROBE_SAMPLE_VALUES[variable] ?? PROBE_SAMPLE_ID;
@@ -690,10 +697,12 @@ function describeTemplateDefect(defect: TemplateDefect): string {
 function asDefinition(row: PermissionSnapshotRow): PermissionSeedDefinition {
   return {
     action: row.action,
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Permission.subject is a plain string column, wider than the Permission catalog's ResourceType | 'all' (#1321)
     subject: row.subject as PermissionSeedDefinition['subject'],
     slug: row.slug,
     riskLevel: row.riskLevel,
     reason: row.reason ?? '',
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Prisma reads a Json column as JsonValue, which can't say a stored condition is an object, and writes one as InputJsonObject (#1321)
     ...(row.conditions === null ? {} : { conditions: row.conditions as Prisma.InputJsonObject }),
     ...(row.fields.length === 0 ? {} : { fields: row.fields }),
   };

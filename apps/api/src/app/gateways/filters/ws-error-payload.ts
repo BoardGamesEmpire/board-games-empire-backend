@@ -88,6 +88,6 @@ function correlationIdOf(data: unknown): string | undefined {
     return undefined;
   }
 
-  const { correlationId } = data as { correlationId?: unknown };
+  const correlationId = 'correlationId' in data ? data.correlationId : undefined;
   return typeof correlationId === 'string' ? correlationId : undefined;
 }

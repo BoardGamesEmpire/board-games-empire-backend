@@ -17,7 +17,9 @@ export const QUOTA_RESOURCES = [
 export type QuotaResource = (typeof QUOTA_RESOURCES)[number];
 
 export function isQuotaResource(value: string): value is QuotaResource {
-  return (QUOTA_RESOURCES as readonly string[]).includes(value);
+  const resources: readonly string[] = QUOTA_RESOURCES;
+
+  return resources.includes(value);
 }
 
 /**

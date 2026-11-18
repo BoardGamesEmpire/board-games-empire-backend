@@ -101,7 +101,11 @@ export function isPluginUnit(value: unknown): value is PluginUnit {
     return false;
   }
 
-  const unit = value as { householdId?: unknown; scopeType?: unknown; userId?: unknown };
+  const unit = {
+    householdId: 'householdId' in value ? value.householdId : undefined,
+    scopeType: 'scopeType' in value ? value.scopeType : undefined,
+    userId: 'userId' in value ? value.userId : undefined,
+  };
 
   const validId = (id: unknown): id is string => typeof id === 'string' && id.length > 0;
 

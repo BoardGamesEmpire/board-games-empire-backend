@@ -1,3 +1,4 @@
+import type { TemplateSpans } from 'mustache';
 import * as Mustache from 'mustache';
 import { hasBoundingConditions } from '../utils/permission-conditions';
 import type { PermissionSeedDefinition, RoleScope } from './seed-definitions';
@@ -154,7 +155,7 @@ export function parseTemplate(conditions: unknown): ParsedTemplate {
     return { variables: [], problems: [] };
   }
 
-  let tokens: unknown[];
+  let tokens: TemplateSpans;
   try {
     tokens = Mustache.parse(JSON.stringify(conditions));
   } catch (error) {
@@ -167,8 +168,8 @@ export function parseTemplate(conditions: unknown): ParsedTemplate {
   // Mustache token tuples: [type, name, start, end, subTokens?]. A whitelist,
   // like the factory's: 'text' carries no variable; anything not listed is a
   // problem, because `name` is then a partial name or comment text, not a path.
-  const walk = (tokens: unknown[]): void => {
-    for (const [type, name, , , subTokens] of tokens as [string, string, number, number, unknown[]?][]) {
+  const walk = (tokens: TemplateSpans): void => {
+    for (const [type, name, , , subTokens] of tokens) {
       if (type === 'text') {
         continue;
       }

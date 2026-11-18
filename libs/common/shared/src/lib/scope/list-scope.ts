@@ -68,11 +68,11 @@ export function Unscoped(reason: string): UnscopedList {
  * programmer error, and it should read as one.
  */
 export function isUnscoped(scope: ListScope): scope is UnscopedList {
-  if (typeof scope !== 'object' || scope === null || (scope as UnscopedList).kind !== 'unscoped') {
+  if (typeof scope !== 'object' || scope === null || scope.kind !== 'unscoped') {
     return false;
   }
 
-  assertReason((scope as UnscopedList).reason);
+  assertReason(scope.reason);
 
   return true;
 }

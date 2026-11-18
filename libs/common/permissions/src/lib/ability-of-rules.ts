@@ -14,5 +14,5 @@ type AbilityRule = ReturnType<AppAbility['rulesFor']>[number];
  * would otherwise lose the denials that made it.
  */
 export function abilityOfRules(rules: readonly AbilityRule[]): AppAbility {
-  return createPrismaAbility(rules.map((rule) => ({ ...rule.origin, fields: undefined })).reverse()) as AppAbility;
+  return createPrismaAbility<AppAbility>(rules.map((rule) => ({ ...rule.origin, fields: undefined })).reverse());
 }

@@ -1,4 +1,4 @@
-import { AuthType, Prisma } from '@bge/database';
+import { AuthType } from '@bge/database';
 import { GatewayRegistryService, GatewayRoutingRefusedError } from '@bge/gateway-registry';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { Injectable, Logger } from '@nestjs/common';
@@ -11,14 +11,14 @@ import { z } from 'zod';
  * sends them as JSON text, so valid JSON that isn't an object (a number,
  * null, an array) is refused here rather than stored (#1322).
  */
-const authParametersSchema = z.record(z.string(), z.unknown());
+const authParametersSchema = z.record(z.string(), z.json());
 
 /**
  * Parses the api's auth parameters. Invalid JSON throws its own SyntaxError,
  * and JSON that isn't an object throws a plain error; the caller answers
  * either one as a failed connect (#1322).
  */
-function parseAuthParameters(authParametersJson: string): Record<string, unknown> {
+function parseAuthParameters(authParametersJson: string): z.infer<typeof authParametersSchema> {
   const parsed = authParametersSchema.safeParse(JSON.parse(authParametersJson));
 
   if (!parsed.success) {
@@ -46,9 +46,9 @@ export class CoordinatorService {
   ) {}
 
   async connectGateway(request: proto.ConnectGatewayRequest): Promise<proto.ConnectGatewayResponse> {
-    const authType = request.authType as AuthType;
+    const authType = Object.values(AuthType).find((each) => each === request.authType);
 
-    if (!Object.values(AuthType).includes(authType)) {
+    if (authType === undefined) {
       return { success: false, error: `Unknown auth type: '${request.authType}'` };
     }
 
@@ -60,7 +60,7 @@ export class CoordinatorService {
         connectionUrl: request.connectionUrl,
         connectionPort: request.connectionPort,
         authType,
-        authParameters: authParameters as Prisma.JsonValue,
+        authParameters,
       });
 
       return { success: true };

@@ -81,6 +81,7 @@ export function isEmptyContainer(node: Nodes): boolean {
 
 /** Removes empty containers under `parent`, innermost first, so a list of empty items goes too. */
 function dropEmpty(parent: Parents): void {
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- `parent` is a union of mdast parents, so `filter` returns the union of their children, which TypeScript can't relate back to this parent's own (#1321)
   parent.children = parent.children.filter((child) => {
     if ('children' in child) {
       dropEmpty(child);

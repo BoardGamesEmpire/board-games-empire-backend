@@ -43,9 +43,10 @@ export class CodedHttpException extends HttpException {
    * log line and stack.
    */
   override initMessage(): void {
-    const marker = (this.getResponse() as { readonly message?: { readonly message?: unknown } }).message;
+    const response = this.getResponse();
+    const marker = typeof response === 'object' && 'message' in response ? response.message : undefined;
 
-    if (typeof marker?.message === 'string') {
+    if (typeof marker === 'object' && marker !== null && 'message' in marker && typeof marker.message === 'string') {
       this.message = marker.message;
       return;
     }

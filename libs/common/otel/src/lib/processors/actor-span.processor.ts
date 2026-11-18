@@ -43,7 +43,9 @@ export class ActorSpanProcessor implements SpanProcessor {
     try {
       snapshot = this.provider();
     } catch (error) {
-      return this.logger.warn(`Actor context provider threw — span will not be annotated: ${(error as Error).message}`);
+      const reason = error instanceof Error ? error.message : String(error);
+
+      return this.logger.warn(`Actor context provider threw — span will not be annotated: ${reason}`);
     }
 
     const { actor, correlationId, householdId } = snapshot;

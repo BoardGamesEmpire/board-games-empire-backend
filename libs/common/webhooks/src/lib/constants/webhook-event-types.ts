@@ -125,5 +125,7 @@ export const WEBHOOK_EVENT_TYPES: readonly WebhookEventType[] = Object.freeze(Ob
 
 /** Runtime narrowing from an arbitrary emitted event name to the eligible union. */
 export function isWebhookEventType(name: string): name is WebhookEventType {
-  return (WEBHOOK_EVENT_TYPES as readonly string[]).includes(name);
+  const eventTypes: readonly string[] = WEBHOOK_EVENT_TYPES;
+
+  return eventTypes.includes(name);
 }

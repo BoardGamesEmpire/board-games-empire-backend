@@ -100,13 +100,15 @@ function isHttpError(error: unknown): error is HttpError {
     return false;
   }
 
-  const { statusCode, message, expose } = error as Record<string, unknown>;
   return (
-    typeof statusCode === 'number' &&
-    Number.isInteger(statusCode) &&
-    statusCode >= 400 &&
-    statusCode < 600 &&
-    typeof message === 'string' &&
-    typeof expose === 'boolean'
+    'statusCode' in error &&
+    typeof error.statusCode === 'number' &&
+    Number.isInteger(error.statusCode) &&
+    error.statusCode >= 400 &&
+    error.statusCode < 600 &&
+    'message' in error &&
+    typeof error.message === 'string' &&
+    'expose' in error &&
+    typeof error.expose === 'boolean'
   );
 }

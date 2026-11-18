@@ -792,6 +792,7 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
     }
 
     // routingRefusal refuses an absent row, so there is one.
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- refusalFor's verdict on an absent row is a link between two values TypeScript can't follow (#1321)
     return row as RoutingRow;
   }
 

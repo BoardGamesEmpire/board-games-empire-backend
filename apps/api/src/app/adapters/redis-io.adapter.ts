@@ -29,7 +29,7 @@ export class RedisIoAdapter extends IoAdapter {
   }
 
   override createIOServer(port: number, options?: ServerOptions): any {
-    const serverOptions = <ServerOptions>{
+    const serverOptions: Partial<ServerOptions> = {
       ...options,
       // engine.io answers `/socket.io/` ahead of Express, so the Host check on
       // the Express app never sees these handshakes (#977).

@@ -25,6 +25,7 @@ const parser = new XMLParser({
 });
 
 const asElement = (node: unknown): XmlElement | undefined =>
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- data from outside the process; parse it through a schema (#1322)
   typeof node === 'object' && node !== null && !Array.isArray(node) ? (node as XmlElement) : undefined;
 
 const elements = (node: unknown): XmlElement[] =>

@@ -114,6 +114,7 @@ export const mediaConfig = registerAs('media', () =>
     {
       keyTo: 'mountCheck',
       key: 'MEDIA_LOCAL_DISK_MOUNT_CHECK',
+      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- data from outside the process; parse it through a schema (#1322)
       mutators: (v: unknown) => String(v) as MountCheckMode,
       defaultValue: 'auto',
     },

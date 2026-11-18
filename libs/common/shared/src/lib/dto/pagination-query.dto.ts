@@ -74,8 +74,9 @@ const DEFAULT_OFFSET = 0;
 @ValidatorConstraint({ name: 'skipWithinCeiling' })
 class SkipWithinCeiling implements ValidatorConstraintInterface {
   validate(_page: unknown, args: ValidationArguments): boolean {
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- class-validator types the object under validation as `object`; this constraint is registered only on PaginationQueryDto (#1321)
     const { page, limit, skip } = args.object as PaginationQueryDto;
-    const [maxOffset] = args.constraints as [number];
+    const [maxOffset]: number[] = args.constraints;
 
     if (!Number.isInteger(page) || (limit !== undefined && !Number.isInteger(limit))) {
       return true;

@@ -37,7 +37,8 @@ const queryString = (params: Readonly<Record<string, QueryValue>>): string =>
         return [];
       }
 
-      const values: readonly (string | number)[] = Array.isArray(value) ? value : [value as string | number];
+      const values: readonly (string | number)[] =
+        typeof value === 'string' || typeof value === 'number' ? [value] : value;
       return [`${name}=${values.map((each) => encodeURIComponent(each)).join(',')}`];
     })
     .join('&');
