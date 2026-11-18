@@ -207,3 +207,57 @@ What a failed parse does:
 **Enforced by:** review (#1322): no lint rule can tell a cast of outside data
 from any other cast. The no-casts rule (#1321) catches the cast that a missing
 schema usually leaves behind.
+
+## No casts outside tests
+
+Outside tests, code doesn't cast. Where a value has to match a type,
+`satisfies`, a type annotation or a narrowing says so, and the compiler checks
+it. `as const` is not a cast and stays allowed.
+
+```ts
+// no
+const body = { code, message } as ErrorBody;
+
+// yes
+const body = { code, message } satisfies ErrorBody;
+```
+
+Tests may cast. The exemption covers spec files (`*.spec.ts`,
+`*.e2e-spec.ts`), the e2e apps (`apps/*-e2e`), the image smoke test, the test
+support libs (`@bge/testing`, `testing-e2e`, the DataGateway driver contract
+tests) and `*.fixture.ts` files.
+
+Every cast that remains is one of three kinds:
+
+1. **The compiler can check it.** Rewrite it, with no disable comment:
+
+   ```ts
+   // libs/api/gateway-coordinator-client/src/lib/coordinator.module.ts
+   channelOptions: {
+     interceptors: [createOutboundActorMetadataInterceptor()],
+   } satisfies ChannelOptions,
+   ```
+
+2. **Data from outside the process.** It belongs in a schema (see above). Until
+   it has one, the cast stays with a comment that cites #1322:
+
+   ```ts
+   // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- data from outside the process; parse it through a schema (#1322)
+   return (await response.json()) as TokenResponse;
+   ```
+
+3. **Truly necessary.** Narrowing TypeScript can't follow, Prisma's JSON
+   types, a generic the compiler can't relate. The cast stays with a reason
+   that names the actual gap. An `as unknown as` says why both steps are
+   needed.
+
+   ```ts
+   // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- LocalSearchScope's brand is declared and never present at runtime; this is the one place that mints it (#472)
+   return this.scopeComposer.compose(ResourceType.Game, Action.read, gameListScope(userId)) as LocalSearchScope;
+   ```
+
+Every `eslint-disable` comment, for any rule, gives its reason after `--`.
+
+**Enforced by:** `@typescript-eslint/consistent-type-assertions` with
+`assertionStyle: 'never'` outside the exempt files, and
+`@eslint-community/eslint-comments/require-description` everywhere (#1321).
