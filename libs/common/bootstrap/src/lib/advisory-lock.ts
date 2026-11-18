@@ -404,7 +404,7 @@ export function attemptWithin(attemptMs: number, remainingMs: number): number {
 }
 
 function isLockNotAvailable(error: unknown): boolean {
-  return typeof error === 'object' && error !== null && (error as { code?: unknown }).code === PG.LockNotAvailable;
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === PG.LockNotAvailable;
 }
 
 /** node-postgres destroys the socket with exactly this message when `connectionTimeoutMillis` expires; there is no code. */
