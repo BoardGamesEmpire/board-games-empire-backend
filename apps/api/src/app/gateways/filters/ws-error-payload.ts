@@ -13,8 +13,8 @@ const AUTH_ERROR_FLUSH_MS = 100;
 
 /** The frame an error answers, as the exception host reports it. */
 export interface WsFrame {
-  readonly pattern: string;
   readonly data: unknown;
+  readonly pattern: string;
 }
 
 /**

@@ -10,9 +10,9 @@ import { createTestDatabase, type TestDatabase } from '../support/test-db';
 type ConnectError = Error & { readonly data?: WsErrorPayload };
 
 interface SignedIn {
-  readonly credentials: SessionCredentials;
   /** The `Cookie` header a browser holding this session sends. */
   readonly cookie: string;
+  readonly credentials: SessionCredentials;
 }
 
 const SIGN_IN_PATH = '/api/auth/sign-in/email';

@@ -3,12 +3,12 @@ import { randomUUID } from 'node:crypto';
 
 /** What a spec may choose about a list it arranges; the rest takes the schema's defaults. */
 export interface ArrangeListOptions {
+  readonly description?: string;
   readonly kind?: ListKind;
-  readonly reach?: Reach;
   /** Defaults to a unique name for a Custom list and to none for a Wishlist, which may go unnamed (#1241). */
   readonly name?: string | null;
-  readonly description?: string;
   readonly position?: number;
+  readonly reach?: Reach;
 }
 
 /** The ids a spec needs from an arranged platform game. */

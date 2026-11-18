@@ -318,8 +318,8 @@ export class HouseholdInviteService {
       tx: Prisma.TransactionClient,
       scope: { readonly householdId: string },
     ) => Promise<{
-      readonly invite: InviteContextView;
       readonly event: InviteDomainEvent;
+      readonly invite: InviteContextView;
       readonly softOverages?: readonly QuotaSoftOverageEvent[];
     }>,
   ): Promise<InviteContextView | InviteAuthorityView> {
@@ -581,8 +581,8 @@ export class HouseholdInviteService {
     householdId: string,
     action: typeof Action.read | typeof Action.update,
     existing?: {
-      readonly inviteId: string;
       readonly field: Prisma.InviteScalarFieldEnum;
+      readonly inviteId: string;
       readonly role: { readonly name: string };
     },
   ): Promise<RosterRow[]> {

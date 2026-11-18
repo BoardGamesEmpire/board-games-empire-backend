@@ -11,8 +11,8 @@ const MESSAGE: I18nPath = 'errors.auth.user_removal_blocked';
 
 /** One foreign key that refuses a user's delete while a row on it still reaches the user. */
 export interface UserRemovalBlocker {
-  readonly table: string;
   readonly column: string;
+  readonly table: string;
   /** Matches a user with at least one such row. */
   readonly where: Prisma.UserWhereInput;
 }

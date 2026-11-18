@@ -49,18 +49,18 @@ export type WebhookEventType = (typeof WebhookEventType)[keyof typeof WebhookEve
 /** The routing/authorization facts a descriptor carries, minus its own name. */
 export type WebhookEventMeta = {
   /**
-   * CASL subject the event concerns. Drives the coarse create-time
-   * `can(requiredAction, subject)` check and the per-instance
-   * `accessibleBy(ability, requiredAction)` check at creation and dispatch.
-   */
-  readonly subject: ResourceType;
-  /**
    * Action a subscriber must hold on the subject instance to receive it,
    * checked at creation and again at every dispatch. `read` by default:
    * visibility, not mutation, is the gate, so a read-only member still
    * receives `event.updated.v1`.
    */
   readonly requiredAction: Action;
+  /**
+   * CASL subject the event concerns. Drives the coarse create-time
+   * `can(requiredAction, subject)` check and the per-instance
+   * `accessibleBy(ability, requiredAction)` check at creation and dispatch.
+   */
+  readonly subject: ResourceType;
   /**
    * The event fires after its subject's soft delete has committed, so dispatch
    * checks the deleted row rather than refusing it: the audience is whoever can

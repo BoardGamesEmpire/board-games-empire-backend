@@ -142,13 +142,13 @@ function requestedSlugsDropped(
 
 /** A staged update resolved and compared, as the approval and the staged-update read both see it. */
 interface ResolvedPendingUpdate {
-  readonly plugin: Plugin;
   readonly active: PluginManifestValidationResult;
-  readonly next: PluginManifestValidationResult;
-  readonly corePermissions: ReadonlyMap<string, Permission>;
   readonly comparison: UpdateEscalationComparison;
+  readonly corePermissions: ReadonlyMap<string, Permission>;
   /** Every consent decision of the plugin, all scopes, as the comparison read them. */
   readonly decisions: readonly PluginGrant[];
+  readonly next: PluginManifestValidationResult;
+  readonly plugin: Plugin;
 }
 
 /** What a guarded write on a plugin's staged update was doing when it matched no row (#1116). */
@@ -186,6 +186,12 @@ interface ResolvedPendingApproval extends ResolvedPendingUpdate {
 }
 
 export interface PluginUpdateStageInput {
+  /** Exact re-entry of every forbidden import specifier analysis reported on the NEW version — the same acknowledgement install demands. */
+  readonly acknowledgeForbiddenImports?: readonly string[];
+
+  /** Admin opt-in: extend static analysis into node_modules; findings advisory only. */
+  readonly deepScan?: boolean;
+
   /**
    * The NEW version's plugin artifact directory. Its checksum is the one the
    * staging records as `pendingSha256` (#224), beside the link and registry
@@ -194,32 +200,31 @@ export interface PluginUpdateStageInput {
    */
   readonly directory: PluginArtifactDirectory;
 
+  /** The staging admin — server-admin authority is verified, never assumed, exactly as install verifies it. */
+  readonly initiatorId: string;
+  /** `PluginRegistrySource.slug` the plugin artifact was discovered through (#1096). */
+  readonly registrySlug?: string;
   /**
    * The link the plugin artifact was fetched from (#1096). Omitted for a
    * manual upload, which has a checksum but no link, and then the activated
    * plugin names no link, not the one its first install came from.
    */
   readonly url?: string;
-
-  /** `PluginRegistrySource.slug` the plugin artifact was discovered through (#1096). */
-  readonly registrySlug?: string;
-
-  /** The staging admin — server-admin authority is verified, never assumed, exactly as install verifies it. */
-  readonly initiatorId: string;
-  /** Admin opt-in: extend static analysis into node_modules; findings advisory only. */
-  readonly deepScan?: boolean;
-  /** Exact re-entry of every forbidden import specifier analysis reported on the NEW version — the same acknowledgement install demands. */
-  readonly acknowledgeForbiddenImports?: readonly string[];
 }
 
 export interface PluginUpdateStageResult {
-  readonly plugin: Plugin;
+  readonly acknowledgedForbiddenImports: readonly string[];
   /** True when no server-gating escalation existed and the update activated immediately. */
   readonly activated: boolean;
-  readonly comparison: UpdateEscalationComparison;
   readonly analysis: StaticAnalysisReport;
-  readonly warnings: readonly ManifestWarning[];
-  readonly acknowledgedForbiddenImports: readonly string[];
+  readonly comparison: UpdateEscalationComparison;
+  /**
+   * The assessment's DataGateway name conflict when the update was staged
+   * (#1096, #1083): the name is taken now and may be freed before the update
+   * approval. Null when the update was activated, which a taken name refuses.
+   */
+  readonly dataGatewayNameConflict: string | null;
+  readonly plugin: Plugin;
   /**
    * The server-scope consent decisions the activation wrote. Empty on both
    * paths `stage()` takes: an update that activates without approval writes
@@ -227,32 +232,11 @@ export interface PluginUpdateStageResult {
    */
   readonly seededGrants: readonly PluginGrant[];
 
-  /**
-   * The assessment's DataGateway name conflict when the update was staged
-   * (#1096, #1083): the name is taken now and may be freed before the update
-   * approval. Null when the update was activated, which a taken name refuses.
-   */
-  readonly dataGatewayNameConflict: string | null;
+  readonly warnings: readonly ManifestWarning[];
 }
 
 export interface PluginUpdateApproveInput {
-  readonly slug: string;
   readonly approverId: string;
-  /**
-   * The staging this approval answers, as the staged-update read reported it
-   * (#357). Any other current staging refuses with
-   * `PluginUpdateStagingReplacedError`, so an approval never activates a
-   * staging its approver didn't review.
-   */
-  readonly stagingId: string;
-  /**
-   * The risk the staged-update read showed for each server-scope permission
-   * the staged manifest requests (#1336). A missing one, or one that is not
-   * today's, refuses the approval as stale: it grants at today's risk. The
-   * HTTP route always sends it; a caller that showed nothing omits it and is
-   * not checked.
-   */
-  readonly shownRisks?: readonly ShownRisk[];
   /**
    * Exact re-entry of every Critical permission slug this approval newly
    * confers: one with no consent decision, a denied one, or one granted at a
@@ -266,6 +250,22 @@ export interface PluginUpdateApproveInput {
    * (#1336). Defaults to the server's default locale.
    */
   readonly locale?: string;
+  /**
+   * The risk the staged-update read showed for each server-scope permission
+   * the staged manifest requests (#1336). A missing one, or one that is not
+   * today's, refuses the approval as stale: it grants at today's risk. The
+   * HTTP route always sends it; a caller that showed nothing omits it and is
+   * not checked.
+   */
+  readonly shownRisks?: readonly ShownRisk[];
+  readonly slug: string;
+  /**
+   * The staging this approval answers, as the staged-update read reported it
+   * (#357). Any other current staging refuses with
+   * `PluginUpdateStagingReplacedError`, so an approval never activates a
+   * staging its approver didn't review.
+   */
+  readonly stagingId: string;
 }
 
 /** One household unit an approval told it owes re-consent, with the slugs it has not yet granted (#321, #1149). */
@@ -276,21 +276,15 @@ export interface PluginUpdateReconsentHouseholdUnit {
 
 /** One user unit an approval told it owes re-consent — the household shape's user-axis mirror (#225). */
 export interface PluginUpdateReconsentUserUnit {
-  readonly userId: string;
   readonly outstanding: readonly string[];
+  readonly userId: string;
 }
 
 export interface PluginUpdateApproveResult {
-  readonly plugin: Plugin;
-  readonly comparison: UpdateEscalationComparison;
   /** The `UpdateApprove` consent act this approval recorded for the Server unit (#1336). */
   readonly act: PluginConsentAct;
-  /**
-   * Every server-scope consent decision this approval wrote, each naming the
-   * act: the required permissions at today's risk and the optional ones the
-   * Server unit had not decided (#1336).
-   */
-  readonly seededGrants: readonly PluginGrant[];
+  readonly comparison: UpdateEscalationComparison;
+  readonly plugin: Plugin;
   /**
    * Enabled units that do not cover every re-consent slug of their scope
    * under the new manifest, per axis (#321, #1149). Nothing was written to
@@ -302,11 +296,17 @@ export interface PluginUpdateApproveResult {
    */
   readonly reconsentHouseholdUnits: readonly PluginUpdateReconsentHouseholdUnit[];
   readonly reconsentUserUnits: readonly PluginUpdateReconsentUserUnit[];
+  /**
+   * Every server-scope consent decision this approval wrote, each naming the
+   * act: the required permissions at today's risk and the optional ones the
+   * Server unit had not decided (#1336).
+   */
+  readonly seededGrants: readonly PluginGrant[];
 }
 
 export interface PluginUpdateRejectInput {
-  readonly slug: string;
   readonly rejectorId: string;
+  readonly slug: string;
   /** The staging this rejection answers, as the staged-update read reported it (#357). */
   readonly stagingId: string;
 }
@@ -335,10 +335,14 @@ export interface PluginUpdateDeclaresDiff {
  * screen and the approval itself cannot disagree.
  */
 export interface PluginUpdatePendingDescription {
-  readonly plugin: Plugin;
   readonly comparison: UpdateEscalationComparison;
-  /** `Plugin.pendingSince` verbatim — nullable because the column is; every staging write this service makes sets it. */
-  readonly pendingSince: Date | null;
+  /**
+   * The DataGateway name the update's move into data-gateway would take, when
+   * another row holds it (#1083). Worked out when read, not at staging: the
+   * name can be freed or taken between the staging and the update approval
+   * (#1096).
+   */
+  readonly dataGatewayNameConflict: string | null;
   readonly declares: PluginUpdateDeclaresDiff;
   /**
    * The requested permissions the update stops requesting (#577). Approving
@@ -348,6 +352,10 @@ export interface PluginUpdatePendingDescription {
    * `declares.removed` instead.
    */
   readonly noLongerRequested: readonly string[];
+  /** `Plugin.pendingSince` verbatim — nullable because the column is; every staging write this service makes sets it. */
+  readonly pendingSince: Date | null;
+  readonly plugin: Plugin;
+
   /**
    * Per scope, how many units have the plugin switched on and how many of
    * them approving would ask nothing of (#1336). Worked out by the read
@@ -358,22 +366,14 @@ export interface PluginUpdatePendingDescription {
     readonly household: PluginUpdateUnitCoverage;
     readonly user: PluginUpdateUnitCoverage;
   };
-
-  /**
-   * The DataGateway name the update's move into data-gateway would take, when
-   * another row holds it (#1083). Worked out when read, not at staging: the
-   * name can be freed or taken between the staging and the update approval
-   * (#1096).
-   */
-  readonly dataGatewayNameConflict: string | null;
 }
 
 /** How one scope's switched-on units stand against a staged update (#1336). */
 export interface PluginUpdateUnitCoverage {
-  /** Units with the plugin switched on at this scope. */
-  readonly switchedOn: number;
   /** Of those, the units that would be asked nothing on activation. */
   readonly covered: number;
+  /** Units with the plugin switched on at this scope. */
+  readonly switchedOn: number;
 }
 
 /** Every staging refusal an assessment can name, for the API layer to list without a second copy (#1096). */
@@ -405,19 +405,19 @@ export type PluginUpdateStagingRefusal = (typeof PLUGIN_UPDATE_STAGING_REFUSALS)
 
 /** What an update would change, as staging, the artifact step and the staged-update read all report it. */
 export interface PluginUpdateChanges {
-  readonly comparison: UpdateEscalationComparison;
-
   /**
    * True when nothing server-gates: staging activates the update at once,
    * unless activation then finds a required server-scope permission denied
    * under its claim and stages it for approval instead (#1336).
    */
   readonly activatesAtOnce: boolean;
-  readonly declares: PluginUpdateDeclaresDiff;
-  readonly noLongerRequested: readonly string[];
 
+  readonly comparison: UpdateEscalationComparison;
   /** The DataGateway name a move into data-gateway would take, when another row holds it (#1083). */
   readonly dataGatewayNameConflict: string | null;
+  readonly declares: PluginUpdateDeclaresDiff;
+
+  readonly noLongerRequested: readonly string[];
 }
 
 /**
@@ -433,6 +433,9 @@ function dataGatewayNameRefusedOver(changes: PluginUpdateChanges): string | null
 export interface PluginUpdateAssessment {
   readonly activeVersion: string;
 
+  /** Null when nothing can be compared: the artifact is the active version, or the active manifest cannot be read. */
+  readonly changes: PluginUpdateChanges | null;
+
   /**
    * Why staging this artifact would stage nothing as things stand, else null
    * (#1096). For `active_version` and `staged_update_waiting`, the very
@@ -441,9 +444,6 @@ export interface PluginUpdateAssessment {
    * other artifact is refused with 409.
    */
   readonly refusal: PluginUpdateStagingRefusal | null;
-
-  /** Null when nothing can be compared: the artifact is the active version, or the active manifest cannot be read. */
-  readonly changes: PluginUpdateChanges | null;
 }
 
 /**
@@ -471,8 +471,8 @@ const NO_CATALOG_ROW: Omit<ConsentCheckDecisionInput, 'grant'> = {
 
 /** One enabled unit that owes re-consent under the activated manifest, with the slugs it has not yet granted. */
 interface ReconsentCandidate<TUnit> {
-  readonly unit: TUnit;
   readonly outstanding: readonly string[];
+  readonly unit: TUnit;
 }
 
 /**
@@ -481,8 +481,8 @@ interface ReconsentCandidate<TUnit> {
  * read and none was counted.
  */
 interface ScopeReconsent<TUnit> {
-  readonly switchedOn: number | null;
   readonly owing: ReconsentCandidate<TUnit>[];
+  readonly switchedOn: number | null;
 }
 
 /** Who owes re-consent under a manifest, at both unit scopes (#225, #1336). */
@@ -505,21 +505,8 @@ interface ActivationApproval {
  * `activateInTransaction()` so the two cannot drift apart (#1116).
  */
 interface ActivationInput {
-  readonly plugin: Plugin;
   readonly active: PluginManifestValidationResult;
-  readonly next: PluginManifestValidationResult;
-
-  /**
-   * The provenance of the plugin artifact being activated, which becomes the
-   * plugin's own: `installedSha256` (#224), `installedFromUrl` and
-   * `registrySlug` (#1096).
-   */
-  readonly provenance: PluginProvenance;
-  readonly comparison: UpdateEscalationComparison;
-  readonly corePermissions: ReadonlyMap<string, Permission>;
   readonly actorId: string;
-  readonly initiatedAt: Date;
-
   /**
    * `approve()`'s Critical confirmation and locale. Absent on the immediate
    * `stage()` path, which activates without approval: nothing server-gated,
@@ -529,10 +516,22 @@ interface ActivationInput {
    * `stage()` to be staged.
    */
   readonly approval?: ActivationApproval;
+
+  readonly comparison: UpdateEscalationComparison;
+  readonly corePermissions: ReadonlyMap<string, Permission>;
+  readonly initiatedAt: Date;
+  readonly next: PluginManifestValidationResult;
+  readonly plugin: Plugin;
+
+  /**
+   * The provenance of the plugin artifact being activated, which becomes the
+   * plugin's own: `installedSha256` (#224), `installedFromUrl` and
+   * `registrySlug` (#1096).
+   */
+  readonly provenance: PluginProvenance;
 }
 
 interface ActivationOutcome {
-  readonly plugin: Plugin;
   /**
    * The server-scope requested permissions the approval granted, worked out
    * inside the transaction from the decisions read there (#1336). Empty when
@@ -541,6 +540,8 @@ interface ActivationOutcome {
   readonly acceptedChecks: readonly NormalizedPermissionRequest[];
   /** The consent decisions written for `acceptedChecks`, in permission order. */
   readonly acceptedGrants: readonly PluginGrant[];
+  /** The approval's `UpdateApprove` consent act; null when the update activated without approval. */
+  readonly act: PluginConsentAct | null;
   /**
    * The accepted decisions that changed a row that already stood: a denial
    * the approval overturned, or a grant it re-stamped at today's risk. Each
@@ -549,8 +550,7 @@ interface ActivationOutcome {
    * event (#1336).
    */
   readonly changedDecisions: readonly WrittenDecision[];
-  /** The approval's `UpdateApprove` consent act; null when the update activated without approval. */
-  readonly act: PluginConsentAct | null;
+  readonly plugin: Plugin;
   /** Enabled household units that owe re-consent — announced after commit, never written (#1149). */
   readonly reconsentHouseholdUnits: readonly ReconsentCandidate<HouseholdPlugin>[];
   /** The user-scope mirror (#225). */
@@ -1048,9 +1048,9 @@ export class PluginUpdateService {
     next: PluginManifestValidationResult,
   ): Promise<{
     readonly active: PluginManifestValidationResult;
-    readonly corePermissions: ReadonlyMap<string, Permission>;
-    readonly comparison: UpdateEscalationComparison;
     readonly changes: PluginUpdateChanges;
+    readonly comparison: UpdateEscalationComparison;
+    readonly corePermissions: ReadonlyMap<string, Permission>;
   }> {
     this.assertNoForbiddenPermissions(next);
 
@@ -1704,7 +1704,7 @@ export class PluginUpdateService {
       // first in the transaction, ahead of the grant rows the approval
       // writes: every writer of consent decisions takes the plugin row
       // before them.
-      const [current] = await tx.$queryRaw<{ config: Prisma.JsonValue; category: PluginCategory }[]>`
+      const [current] = await tx.$queryRaw<{ category: PluginCategory; config: Prisma.JsonValue }[]>`
         SELECT config, category FROM plugins WHERE id = ${plugin.id} FOR UPDATE`;
 
       if (current === undefined) {
@@ -2176,15 +2176,15 @@ export class PluginUpdateService {
    * at a covering risk, owes nothing.
    */
   private reconsentCandidates<TUnit>(args: {
-    readonly units: readonly TUnit[];
-    readonly scopeIdOf: (unit: TUnit) => string;
+    readonly coverage: ReadonlyMap<string, Omit<ConsentCheckDecisionInput, 'grant'>>;
     readonly granted: readonly {
-      readonly scopeId: string;
-      readonly permissionSlug: string;
       readonly decidedRiskLevel: RiskLevel;
+      readonly permissionSlug: string;
+      readonly scopeId: string;
     }[];
     readonly reconsentSlugs: readonly string[];
-    readonly coverage: ReadonlyMap<string, Omit<ConsentCheckDecisionInput, 'grant'>>;
+    readonly scopeIdOf: (unit: TUnit) => string;
+    readonly units: readonly TUnit[];
   }): ReconsentCandidate<TUnit>[] {
     const decidedByUnit = new Map<string, Map<string, RiskLevel>>();
 

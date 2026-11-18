@@ -8,17 +8,17 @@ import { INVENTORY_STAGING_ID, pluginRowData, stagedUpdateColumns } from './plug
 export { INVENTORY_STAGING_ID };
 
 export interface InventoryPluginOptions {
-  /** Columns written over the installed defaults: `uninstalledAt`, `scope`, and so on. */
-  readonly row?: Record<string, unknown>;
+  /** Requested permissions the manifest asks for beside its own required server-scope `manage:digest`. */
+  readonly checks?: readonly Check[];
   /**
    * The manifest's scope and config section. A household unit's dormancy is
    * worked out from these, not from the row's `scope` column (#1151), so a
    * test that reads a household unit's state sets them here. The row's
    * `scope` follows the manifest's unless `row` names one.
    */
-  readonly manifest?: { readonly scope?: PluginManifest['scope']; readonly config?: PluginManifest['config'] };
-  /** Requested permissions the manifest asks for beside its own required server-scope `manage:digest`. */
-  readonly checks?: readonly Check[];
+  readonly manifest?: { readonly config?: PluginManifest['config']; readonly scope?: PluginManifest['scope'] };
+  /** Columns written over the installed defaults: `uninstalledAt`, `scope`, and so on. */
+  readonly row?: Record<string, unknown>;
   /** Stages an update to this version: the same manifest, pending approval. */
   readonly stagedVersion?: string;
 }

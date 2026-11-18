@@ -5,13 +5,13 @@ import { IgdbHttpError } from './igdb-http.error';
 export const IGDB_BASE_URL = 'https://api.igdb.com/v4';
 
 export interface IgdbQueryOptions {
-  /** How the query reaches IGDB; it has no other way (#1082). */
-  fetch: UpstreamFetch;
-  clientId: string;
   accessToken: string;
-
   /** Defaults to {@link IGDB_BASE_URL}. */
   baseUrl?: string;
+  clientId: string;
+
+  /** How the query reaches IGDB; it has no other way (#1082). */
+  fetch: UpstreamFetch;
 }
 
 /** The clauses a query can set once, by name. */

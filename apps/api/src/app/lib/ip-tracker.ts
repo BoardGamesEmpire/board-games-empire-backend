@@ -79,8 +79,8 @@ export const createIpTracker = (trustedHops: number): ThrottlerGetTrackerFunctio
 
 /** The parts of a request {@link createClientIpResolver} reads. */
 export interface ClientIpSource {
-  readonly socket?: { readonly remoteAddress?: string } | null;
   readonly headers?: Readonly<Record<string, string | string[] | undefined>>;
+  readonly socket?: { readonly remoteAddress?: string } | null;
 }
 
 /**

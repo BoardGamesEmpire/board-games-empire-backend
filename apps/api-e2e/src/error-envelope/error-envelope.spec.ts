@@ -108,7 +108,7 @@ describe('every HTTP error leaves in one envelope (#1260)', () => {
 
     // A body declaring more than the 64 KiB limit is refused before it is
     // read, so only the headers are sent.
-    const response = await new Promise<{ status: number; body: unknown }>((resolve, reject) => {
+    const response = await new Promise<{ body: unknown; status: number }>((resolve, reject) => {
       const sent = httpRequest({
         hostname,
         port,

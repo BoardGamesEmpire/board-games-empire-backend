@@ -14,18 +14,18 @@ const CODE_PREFIX = 'app-sign-in-code:';
 
 /** A native app's sign-in request, kept while the person signs in at the provider (#1019). */
 export interface AppSignInFlow {
-  /** The return address the app asked for, parsed: one the server sends sign-ins to. */
-  readonly returnAddress: URL;
   /** The app's PKCE challenge, which the code is bound to. */
   readonly codeChallenge: string;
+  /** The return address the app asked for, parsed: one the server sends sign-ins to. */
+  readonly returnAddress: URL;
   /** The app's `state`, sent back to it unchanged. Absent when the app sent none. */
   readonly state?: string;
 }
 
 /** The record a code stands for: the user who signed in, and the challenge the app's verifier must match. */
 export interface AppSignInCodeRecord {
-  readonly userId: string;
   readonly codeChallenge: string;
+  readonly userId: string;
 }
 
 /**
@@ -34,22 +34,22 @@ export interface AppSignInCodeRecord {
  * `consumeVerificationValue`, once, and one past its expiry reads as gone.
  */
 export interface VerificationStore {
-  createVerificationValue(data: { identifier: string; value: string; expiresAt: Date }): Promise<unknown>;
   consumeVerificationValue(identifier: string): Promise<{ readonly value: string } | null>;
+  createVerificationValue(data: { expiresAt: Date; identifier: string; value: string }): Promise<unknown>;
 }
 
 export interface AppSignInStore {
+  /** Records a single-use code standing for `record`, and returns the code. Only its hash is stored. */
+  issueCode(record: AppSignInCodeRecord): Promise<string>;
   /** Records the app's request, and returns the flow's id. */
   openFlow(flow: AppSignInFlow): Promise<string>;
+  /** The record a code stands for, once: a second redeem, an unknown code or one that expired finds nothing. */
+  redeemCode(code: string): Promise<AppSignInCodeRecord | null>;
   /**
    * The flow, once: a second take, or one after it expired, finds nothing.
    * So does a flow whose address is no longer one the server sends sign-ins to.
    */
   takeFlow(flowId: string): Promise<AppSignInFlow | null>;
-  /** Records a single-use code standing for `record`, and returns the code. Only its hash is stored. */
-  issueCode(record: AppSignInCodeRecord): Promise<string>;
-  /** The record a code stands for, once: a second redeem, an unknown code or one that expired finds nothing. */
-  redeemCode(code: string): Promise<AppSignInCodeRecord | null>;
 }
 
 const sha256Hex = (value: string): string => createHash('sha256').update(value).digest('hex');

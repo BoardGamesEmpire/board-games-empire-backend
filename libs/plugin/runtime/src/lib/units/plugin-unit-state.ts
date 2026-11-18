@@ -41,12 +41,12 @@ const STATE_OF_DORMANCY: { readonly [D in PluginUnitDormancy]: D & PluginUnitSta
  */
 export function derivePluginUnitState(input: {
   readonly anchored: boolean;
-  readonly enabled: boolean;
-  /** The plugin's server switch, under which the unit's own switch sits. */
-  readonly serverEnabled: boolean;
   /** What `derivePluginUnitDormancy` worked out for the unit on this read (#1151). */
   readonly dormancy: PluginUnitDormancy | null;
+  readonly enabled: boolean;
   readonly outstandingCount: number;
+  /** The plugin's server switch, under which the unit's own switch sits. */
+  readonly serverEnabled: boolean;
 }): PluginUnitStateCode {
   if (!input.anchored || !input.enabled) {
     return 'off';

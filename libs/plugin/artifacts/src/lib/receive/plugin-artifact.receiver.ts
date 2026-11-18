@@ -61,8 +61,8 @@ export const PLUGIN_ARTIFACT_DOWNLOAD_TIMEOUT_MS = 15 * 60 * 1000;
  */
 export interface PluginArtifactReceipt {
   readonly artifact: PluginArtifact;
-  readonly directory: PluginArtifactDirectory;
   readonly assessment: PluginInstallAssessment;
+  readonly directory: PluginArtifactDirectory;
   /** The plugin row with the artifact's slug, if any; `version` is that row's. */
   readonly installedPlugin: {
     readonly state: 'none' | 'installed' | 'uninstalled';
@@ -78,21 +78,21 @@ export interface PluginArtifactReceipt {
 }
 
 export interface ReceivePluginArtifactByLinkInput {
-  readonly url: string;
+  readonly actorId: string;
   /** The checksum the server admin expects, in either case, with or without spaces around it. */
   readonly expectedSha256: string;
-  readonly actorId: string;
+  readonly url: string;
 }
 
 export interface ReceivePluginArtifactUploadInput {
+  readonly actorId: string;
   /** Where the upload storage wrote the archive. Once called, the receiver owns it and removes it. */
   readonly archivePath: string;
-  /** The archive's checksum and size, which the upload storage counted as the bytes arrived. */
-  readonly sha256: string;
   readonly bytes: number;
   /** The checksum the server admin expects, in either case, with or without spaces around it. */
   readonly expectedSha256: string;
-  readonly actorId: string;
+  /** The archive's checksum and size, which the upload storage counted as the bytes arrived. */
+  readonly sha256: string;
 }
 
 /**
@@ -114,8 +114,8 @@ export const normalizeExpectedSha256 = (raw: string): PluginArtifactSha256 => {
 /** A received archive, once its bytes are counted. */
 interface ReceivedArchive {
   readonly archivePath: string;
-  readonly sha256: string;
   readonly bytes: number;
+  readonly sha256: string;
   /** The link it came from; null for an upload. */
   readonly url: string | null;
 }
@@ -397,7 +397,7 @@ export class PluginArtifactReceiver {
   private async download(
     url: string,
     destination: string,
-  ): Promise<{ readonly sha256: string; readonly bytes: number }> {
+  ): Promise<{ readonly bytes: number; readonly sha256: string }> {
     const result = await this.http
       .download(url, {
         destination,

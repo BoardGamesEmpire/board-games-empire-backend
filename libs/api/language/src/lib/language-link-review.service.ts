@@ -7,26 +7,26 @@ import { LanguageLinkService } from './language-link.service';
 
 export interface LanguageLinkTagView {
   id: string;
-  tag: string;
   name: string;
+  tag: string;
 }
 
 /** A language link as the review routes return it (#715). */
 export interface LanguageLinkView {
-  id: string;
-  gatewayId: string;
-  value: string;
+  createdAt: Date;
   format: LanguageCodeFormat;
-  status: LanguageLinkStatus;
+  gatewayId: string;
+  id: string;
   origin: LanguageLinkOrigin;
-  tag: LanguageLinkTagView | null;
+  status: LanguageLinkStatus;
   suppliedIetfTag: string | null;
-  suppliedIso6393: string | null;
   suppliedIso6391: string | null;
+  suppliedIso6393: string | null;
   suppliedName: string | null;
   suppliedNativeName: string | null;
-  createdAt: Date;
+  tag: LanguageLinkTagView | null;
   updatedAt: Date;
+  value: string;
 }
 
 /** The worklist an admin reviews: the links still waiting on a decision. */
@@ -76,7 +76,7 @@ export class LanguageLinkReviewService {
   async list(
     gatewayId: string,
     statuses: readonly LanguageLinkStatus[],
-    paging: { skip: number; pageSize: number },
+    paging: { pageSize: number; skip: number },
   ): Promise<PaginatedRows<LanguageLinkView>> {
     const where: Prisma.LanguageGatewayLinkWhereInput = { gatewayId, status: { in: [...statuses] } };
 

@@ -99,11 +99,11 @@ describe('the server config PATCH claims the plugin row (FOR NO KEY UPDATE, #578
   const EXCLUSIVE_CLAIM = 'SELECT id FROM plugins WHERE id = $1 FOR UPDATE';
 
   interface ClaimedRow {
+    readonly config: unknown;
+    readonly installed_at: Date;
+    readonly manifest_matches: boolean | null;
     readonly uninstalled_at: Date | null;
     readonly version: string;
-    readonly installed_at: Date;
-    readonly config: unknown;
-    readonly manifest_matches: boolean | null;
   }
 
   let db: TestDatabase;

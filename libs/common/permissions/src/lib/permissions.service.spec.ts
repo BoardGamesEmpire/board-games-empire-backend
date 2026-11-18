@@ -378,9 +378,9 @@ describe('PermissionsService', () => {
 
       const { select } = db.user.findUnique.mock.calls[0][0] as {
         select: {
-          roles: { select: { role: { select: { permissions: { where: unknown } } } } };
-          householdMember: { select: { role: { select: { role: { select: { permissions: { where: unknown } } } } } } };
           eventsAttended: { select: { role: { select: { role: { select: { permissions: { where: unknown } } } } } } };
+          householdMember: { select: { role: { select: { role: { select: { permissions: { where: unknown } } } } } } };
+          roles: { select: { role: { select: { permissions: { where: unknown } } } } };
         };
       };
       const hops = [
@@ -709,7 +709,7 @@ describe('PermissionsService', () => {
      * `read`. `started` settles once the load has begun, so the version token
      * it is tagged with has already been read or written.
      */
-    function pauseNextUserLoad(read: UserWithRoles): { started: Promise<void>; release: () => void } {
+    function pauseNextUserLoad(read: UserWithRoles): { release: () => void; started: Promise<void> } {
       let begin!: () => void;
       let release!: () => void;
       const started = new Promise<void>((resolve) => (begin = resolve));
@@ -822,7 +822,7 @@ describe('PermissionsService', () => {
         expect(db.pluginGrant.findMany).not.toHaveBeenCalled();
       });
 
-      it.each<[string, { enabled: boolean; config: unknown } | null, PluginActiveManifestReading]>([
+      it.each<[string, { config: unknown; enabled: boolean } | null, PluginActiveManifestReading]>([
         ['the household unit enablement is missing', null, activeManifestReading([])],
         ['the household unit is disabled', { enabled: false, config: {} }, activeManifestReading([])],
         // Dormancy is independent of the household's own `enabled` intent

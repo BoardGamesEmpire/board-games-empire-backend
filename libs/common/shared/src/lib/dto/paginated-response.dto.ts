@@ -139,7 +139,7 @@ export function paginatedEnvelopeSchema(resourceKey: string) {
  */
 export function ApiPaginatedEnvelope(
   resourceKey: string,
-  { status = 200, description = `Paginated ${resourceKey}` }: { status?: number; description?: string } = {},
+  { status = 200, description = `Paginated ${resourceKey}` }: { description?: string; status?: number } = {},
 ): MethodDecorator & ClassDecorator {
   return applyDecorators(
     ApiExtraModels(PaginationMetaDto),

@@ -32,10 +32,10 @@ import {
 } from './unit.errors';
 
 export interface HouseholdUnitActionInput {
-  readonly slug: string;
-  readonly householdId: string;
   /** The acting household admin — resolved from CLS at the API edge, verified here, never taken from a request body. */
   readonly actorId: string;
+  readonly householdId: string;
+  readonly slug: string;
 }
 
 export interface HouseholdUnitConfigInput extends HouseholdUnitActionInput {

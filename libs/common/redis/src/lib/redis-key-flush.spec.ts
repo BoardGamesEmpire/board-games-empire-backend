@@ -7,14 +7,14 @@ import { CacheFlushError, RedisKeyFlush } from './redis-key-flush';
 // go from a Valkey is apps/api-e2e/src/bootstrap/cache-flush.spec.ts.
 
 function fakeClient(batches: Record<string, string[][] | Error>) {
-  const scans: { match: string; count?: number }[] = [];
+  const scans: { count?: number; match: string }[] = [];
   const unlinked: string[][] = [];
   const closed: string[] = [];
   return {
     scans,
     unlinked,
     closed,
-    scanStream(options: { match: string; count?: number }): AsyncIterable<string[]> {
+    scanStream(options: { count?: number; match: string }): AsyncIterable<string[]> {
       scans.push(options);
       const pages = batches[options.match] ?? [];
       if (pages instanceof Error) {

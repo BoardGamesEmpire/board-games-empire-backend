@@ -243,8 +243,8 @@ export class PlatformUpsertService {
    * second pass via applyParentHierarchy after all releases are persisted.
    */
   private async upsertSingleRelease(args: {
-    platformGameId: string;
     editionKey: string;
+    platformGameId: string;
     region: ReturnType<typeof toReleaseRegion>;
     release: GameReleaseData;
   }): Promise<{ id: string }> {
@@ -349,12 +349,12 @@ export class PlatformUpsertService {
     platformType: PlatformType,
     gameData: GameData,
   ): {
-    supportsSolo: boolean;
-    supportsLocal: boolean;
-    supportsOnline: boolean;
     hasAsyncPlay: boolean;
     hasRealtime: boolean;
     hasTutorial: boolean;
+    supportsLocal: boolean;
+    supportsOnline: boolean;
+    supportsSolo: boolean;
   } {
     const supportsSolo = gameData.minPlayers != null && gameData.minPlayers <= 1;
 

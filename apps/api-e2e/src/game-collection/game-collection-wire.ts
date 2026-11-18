@@ -27,8 +27,8 @@ export type CollectionRowGameWire = Wire<
 export type CollectionRowPlatformGameWire = Wire<
   Pick<PlatformGame, 'id' | 'image' | 'thumbnail' | PlayerAndPlayTimeField>
 > & {
-  readonly platform: Pick<Platform, 'id' | 'name' | 'slug' | 'platformType'>;
   readonly game: CollectionRowGameWire;
+  readonly platform: Pick<Platform, 'id' | 'name' | 'slug' | 'platformType'>;
 };
 
 export interface ListCollectionsEnvelope {

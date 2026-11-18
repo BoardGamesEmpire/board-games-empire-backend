@@ -58,9 +58,9 @@ describe('household-bound writes racing a soft-delete (#552)', () => {
   });
 
   interface Arrangement {
+    readonly admin: SessionActor;
     readonly householdId: string;
     readonly owner: SessionActor;
-    readonly admin: SessionActor;
   }
 
   const arrange = async (): Promise<Arrangement> => {

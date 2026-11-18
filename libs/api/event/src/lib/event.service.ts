@@ -876,16 +876,16 @@ export function eventWebhookIds(event: Pick<Event, 'id' | 'householdId'>): {
  */
 export type EventDetail = Prisma.EventGetPayload<{
   include: {
-    occurrences: true;
     attendees: { include: typeof ATTENDEE_USER_AND_ROLE_INCLUDE };
+    occurrences: true;
   };
 }> & {
-  policy: EventPolicyView | null;
+  attendance: EventAttendance | null;
   /**
    * Each served date that has a policy row, under the event policy's ceiling; a date without one inherits
    * everything. `[]` when `policy` is `null` (#1211).
    */
   occurrencePolicies: OccurrencePolicyView[];
+  policy: EventPolicyView | null;
   status: EventStatus;
-  attendance: EventAttendance | null;
 };

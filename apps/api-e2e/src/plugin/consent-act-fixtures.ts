@@ -23,15 +23,15 @@ export type ConsentAnswerStatus = typeof PluginGrantStatus.Granted | typeof Plug
 /** One answer in an act body, as the act DTOs accept it. */
 export interface ConsentAnswerBody {
   readonly permissionSlug: string;
-  readonly status: ConsentAnswerStatus;
   readonly riskLevel: RiskLevel;
+  readonly status: ConsentAnswerStatus;
 }
 
 /** The parts of a consent surface an act body is built from. */
 export interface ConsentSurface {
-  readonly manifestSha256: string;
-  readonly stagedUpdate: { readonly manifestVersion: string; readonly manifestSha256: string } | null;
   readonly checks: readonly ConsentSurfaceCheck[];
+  readonly manifestSha256: string;
+  readonly stagedUpdate: { readonly manifestSha256: string; readonly manifestVersion: string } | null;
 }
 
 /**
@@ -40,15 +40,15 @@ export interface ConsentSurface {
  * presentation against (#1150).
  */
 export interface ConsentSurfaceCheck {
-  readonly slug: string;
-  readonly required: boolean;
-  readonly feature: string | null;
-  readonly riskLevel: RiskLevel | null;
   readonly decidableByUnit: boolean;
-  readonly grantable: boolean;
-  readonly stagedOnly: boolean;
   readonly decision: string;
+  readonly feature: string | null;
+  readonly grantable: boolean;
   readonly reason: { readonly value: string };
+  readonly required: boolean;
+  readonly riskLevel: RiskLevel | null;
+  readonly slug: string;
+  readonly stagedOnly: boolean;
 }
 
 /**
@@ -214,9 +214,9 @@ export interface ShownRiskBody {
 
 /** A requested permission as an install or approval read lists it: the fields `shownRisks` is built from. */
 export interface ReadCheck {
-  readonly slug: string;
   readonly consentScope: string;
   readonly riskLevel: RiskLevel | null;
+  readonly slug: string;
 }
 
 /**

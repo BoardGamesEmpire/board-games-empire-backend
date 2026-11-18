@@ -16,11 +16,14 @@ import type { Permission } from '@bge/database';
  * regardless of what was granted.
  */
 export interface PluginGrantSnapshot {
+  /** Core `Permission` rows whose grants survived the guards, in full (conditions/fields/inverted). */
+  readonly corePermissions: Permission[];
+  /** Canonical `plugin|<slug>|<bare>` slugs of surviving own-namespace grants. */
+  readonly ownGrantSlugs: string[];
   readonly plugin: {
     readonly id: string;
     readonly slug: string;
   };
-  readonly unit: PluginUnit;
   /**
    * The serving predicate at resolution time: the plugin is enabled and not
    * uninstalled, AND the unit's enablement (Household/User scopes) exists and
@@ -32,8 +35,5 @@ export interface PluginGrantSnapshot {
    * `corePermissions` simply omits the slug it has not granted.
    */
   readonly servable: boolean;
-  /** Core `Permission` rows whose grants survived the guards, in full (conditions/fields/inverted). */
-  readonly corePermissions: Permission[];
-  /** Canonical `plugin|<slug>|<bare>` slugs of surviving own-namespace grants. */
-  readonly ownGrantSlugs: string[];
+  readonly unit: PluginUnit;
 }

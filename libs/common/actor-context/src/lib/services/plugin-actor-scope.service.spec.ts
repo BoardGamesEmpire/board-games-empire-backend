@@ -68,7 +68,7 @@ describe('PluginActorScope', () => {
   });
 
   it('stores a detached copy of the unit — caller-side mutation cannot retarget the scope', () => {
-    const unit = { scopeType: 'Household', householdId: 'hh-1' } as { scopeType: 'Household'; householdId: string };
+    const unit = { scopeType: 'Household', householdId: 'hh-1' } as { householdId: string; scopeType: 'Household' };
 
     scope.run('plugin-1', unit, 'reason', () => undefined);
     unit.householdId = 'hh-other';

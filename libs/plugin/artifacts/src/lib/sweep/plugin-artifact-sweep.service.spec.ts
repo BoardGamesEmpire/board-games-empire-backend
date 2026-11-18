@@ -37,15 +37,15 @@ type Row = Record<string, unknown>;
 type Where = Record<string, unknown>;
 type Select = Record<string, boolean>;
 
-type ArtifactRow = { sha256: string; slug: string; expiresAt: Date };
-type PluginRow = { slug: string; installedSha256: string; pendingSha256: string | null; uninstalledAt: Date | null };
-type LoadRow = { processId: string; slug: string; sha256: string; heartbeatAt: Date };
+type ArtifactRow = { expiresAt: Date; sha256: string; slug: string };
+type PluginRow = { installedSha256: string; pendingSha256: string | null; slug: string; uninstalledAt: Date | null };
+type LoadRow = { heartbeatAt: Date; processId: string; sha256: string; slug: string };
 
 /** A mocked Prisma delegate, as far as the in-memory fake below drives it. */
 interface FakeableDelegate {
+  deleteMany: { mockImplementation(fn: never): unknown };
   findMany: { mockImplementation(fn: never): unknown };
   findUnique: { mockImplementation(fn: never): unknown };
-  deleteMany: { mockImplementation(fn: never): unknown };
   updateMany: { mockImplementation(fn: never): unknown };
 }
 
@@ -67,7 +67,7 @@ const matches = (row: Row, where: Where = {}): boolean =>
       return value instanceof Date && value.getTime() === condition.getTime();
     }
 
-    const { lte, gt, ...rest } = condition as { lte?: Date; gt?: Date };
+    const { lte, gt, ...rest } = condition as { gt?: Date; lte?: Date };
     if (Object.keys(rest).length > 0 || (lte === undefined && gt === undefined) || !(value instanceof Date)) {
       throw new Error(`The fake database cannot judge ${column} against ${JSON.stringify(condition)}`);
     }
@@ -97,7 +97,7 @@ describe('PluginArtifactSweepService (#1094)', () => {
 
   let root: string;
   let db: MockDatabaseService;
-  let tables: { artifacts: ArtifactRow[]; plugins: PluginRow[]; loads: LoadRow[] };
+  let tables: { artifacts: ArtifactRow[]; loads: LoadRow[]; plugins: PluginRow[] };
   /** What the fake database saw, in order: each delete, and each read's start and end. */
   let events: string[];
   /** Runs once a read has taken its result, before returning it: a change a test makes land there. */
@@ -116,7 +116,7 @@ describe('PluginArtifactSweepService (#1094)', () => {
 
   /** Backs a mocked delegate with an in-memory table, for the queries the sweep and the store send. */
   const backWithTable = (delegate: FakeableDelegate, table: string, rows: Row[]) => {
-    delegate.findMany.mockImplementation((async ({ where, select }: { where?: Where; select?: Select } = {}) => {
+    delegate.findMany.mockImplementation((async ({ where, select }: { select?: Select; where?: Where } = {}) => {
       events.push(`start read ${table}`);
       // A tick, so reads issued at once would show as interleaved starts.
       await Promise.resolve();
@@ -135,7 +135,7 @@ describe('PluginArtifactSweepService (#1094)', () => {
       events.push(`delete ${table}`);
       return { count: doomed.length };
     }) as never);
-    delegate.updateMany.mockImplementation((async ({ where, data }: { where?: Where; data: Row }) => {
+    delegate.updateMany.mockImplementation((async ({ where, data }: { data: Row; where?: Where }) => {
       const hit = rows.filter((row) => matches(row, where));
       for (const row of hit) {
         Object.assign(row, data);
@@ -685,7 +685,7 @@ describe('PluginArtifactSweepService (#1094)', () => {
   describe('removing an artifact directory', () => {
     it('moves it aside first, so its checksum path is gone the moment the rename lands (#1094)', async () => {
       const dir = await artifactDirectory('demo-sink', sha('a'), AGED);
-      const seen: { aside: string; checksumPathThere: boolean; asideComplete: boolean }[] = [];
+      const seen: { aside: string; asideComplete: boolean; checksumPathThere: boolean }[] = [];
       jest.mocked(rm).mockImplementation(async (path, options) => {
         if (String(path).endsWith('.swept')) {
           seen.push({

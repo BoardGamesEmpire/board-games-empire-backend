@@ -21,9 +21,9 @@ export class CacheFlushError extends Error {
 
 /** What the flush needs of a client; iovalkey's `Redis` satisfies it. */
 export interface FlushClient {
-  scanStream(options: { match: string; count?: number }): AsyncIterable<string[]>;
-  unlink(...keys: string[]): Promise<number>;
   disconnect(): void;
+  scanStream(options: { count?: number; match: string }): AsyncIterable<string[]>;
+  unlink(...keys: string[]): Promise<number>;
 }
 
 /**

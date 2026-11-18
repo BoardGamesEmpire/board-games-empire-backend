@@ -3,12 +3,12 @@ import { registerAs } from '@nestjs/config';
 import Joi from 'joi';
 
 export interface PrometheusConfig {
+  collectDefaultMetrics: boolean;
   defaultMetrics: {
     enabled: boolean;
     prefix: string;
     timeout: number;
   };
-  collectDefaultMetrics: boolean;
 }
 
 export default registerAs('prometheus', () =>

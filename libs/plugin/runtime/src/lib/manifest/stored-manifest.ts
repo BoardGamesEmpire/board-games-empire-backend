@@ -10,9 +10,9 @@ import type { PluginModuleOptions } from '../plugin-module.options';
  * The `Plugin` columns the re-validation cross-checks — pass `pendingVersion`/`pendingManifestJson` to validate a staged manifest.
  */
 export interface StoredManifestRow {
+  readonly manifestJson: unknown;
   readonly slug: string;
   readonly version: string;
-  readonly manifestJson: unknown;
 }
 
 /**

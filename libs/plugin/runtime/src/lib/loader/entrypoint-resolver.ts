@@ -8,9 +8,9 @@ import { isContained, realpathOrNull } from './path-containment';
  * pipeline's job (#84), not the boot path's.
  */
 export interface PluginPackageDescriptor {
-  readonly name?: string;
-  readonly main?: string;
   readonly exports?: PackageExportsField;
+  readonly main?: string;
+  readonly name?: string;
 }
 
 /**

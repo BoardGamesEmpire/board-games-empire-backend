@@ -6,8 +6,8 @@ import { gamePoolEntryScope } from './game-pool-scope';
 
 /** A random sample of the game pool, and how many distinct games it holds (#960). */
 export interface GamePoolSample {
-  games: GameSummary[];
   gameCount: number;
+  games: GameSummary[];
 }
 
 @Injectable()

@@ -2,8 +2,8 @@ import type { MemberSharePolicy } from '../client';
 
 /** A household member as the household share grants' role clause reads one. */
 interface ShareRosterRow {
-  readonly userId: string;
   readonly role: { readonly role: { readonly name: string } } | null;
+  readonly userId: string;
 }
 
 /**
@@ -19,8 +19,8 @@ export interface HouseholdShareAuthority {
 
 /** The game a share is of, as the share grants read it. */
 export interface SharedGameState {
-  readonly deletedAt: Date | null;
   readonly createdById: string | null;
+  readonly deletedAt: Date | null;
 }
 
 /**

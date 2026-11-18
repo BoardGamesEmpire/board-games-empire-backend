@@ -38,7 +38,7 @@ import { Throttle, type ThrottlerGetTrackerFunction, type ThrottlerOptions } fro
  *
  * MILLISECONDS, as `@nestjs/throttler` reads it (#293).
  */
-export const throttleWindow = (ttlMs: number): { ttl: number; blockDuration: number } => ({
+export const throttleWindow = (ttlMs: number): { blockDuration: number; ttl: number } => ({
   ttl: ttlMs,
   blockDuration: ttlMs,
 });
@@ -136,7 +136,7 @@ export const createUserThrottler = (ttlMs: number): ThrottlerOptions => ({
  * Any future route reaching for `@Throttle` directly wants this helper rather
  * than two literals, for the same reason.
  */
-export const FeedbackSubmissionThrottle = (opts: { userLimit: number; ipLimit: number; ttlMs: number }) =>
+export const FeedbackSubmissionThrottle = (opts: { ipLimit: number; ttlMs: number; userLimit: number }) =>
   applyDecorators(
     SetMetadata(PER_USER_THROTTLE_KEY, true),
     Throttle({

@@ -65,9 +65,9 @@ export interface UngrantedLock {
 }
 
 export interface BarrierTimeouts {
+  readonly idleInTransactionTimeoutMs: number;
   readonly lockTimeoutMs: number;
   readonly statementTimeoutMs: number;
-  readonly idleInTransactionTimeoutMs: number;
 }
 
 /**
@@ -78,6 +78,9 @@ export interface BarrierTimeouts {
  */
 export interface PendingStatement<TRow extends QueryResultRow = QueryResultRow> {
   readonly description: string;
+
+  /** The failure, if it has already failed. For diagnostics only. */
+  failure(): unknown;
 
   /**
    * The backend that issued it — the one whose wait is under test.
@@ -90,28 +93,19 @@ export interface PendingStatement<TRow extends QueryResultRow = QueryResultRow> 
    */
   readonly pid: number;
 
-  /** True once the statement has completed OR failed. */
-  settled(): boolean;
-
   /** The rows, or a rejection carrying whatever Postgres said. */
   result(): Promise<TRow[]>;
 
-  /** The failure, if it has already failed. For diagnostics only. */
-  failure(): unknown;
+  /** True once the statement has completed OR failed. */
+  settled(): boolean;
 }
 
 export interface BarrierConnection {
-  /** Appears in failure messages — `holder`, `waiter`, `observer`. */
-  readonly label: string;
-
-  /** This connection's backend pid, as `pg_locks` reports it. */
-  readonly pid: number;
-
-  query<TRow extends QueryResultRow = QueryResultRow>(sql: string, params?: readonly unknown[]): Promise<TRow[]>;
-
   begin(): Promise<void>;
+
+  close(): Promise<void>;
+
   commit(): Promise<void>;
-  rollback(): Promise<void>;
 
   /** Issues a statement WITHOUT awaiting it. See {@link PendingStatement}. */
   issue<TRow extends QueryResultRow = QueryResultRow>(
@@ -119,14 +113,20 @@ export interface BarrierConnection {
     params?: readonly unknown[],
     description?: string,
   ): PendingStatement<TRow>;
+  /** Appears in failure messages — `holder`, `waiter`, `observer`. */
+  readonly label: string;
+  /** This connection's backend pid, as `pg_locks` reports it. */
+  readonly pid: number;
 
-  close(): Promise<void>;
+  query<TRow extends QueryResultRow = QueryResultRow>(sql: string, params?: readonly unknown[]): Promise<TRow[]>;
+
+  rollback(): Promise<void>;
 }
 
 export interface Barrier {
   readonly holder: BarrierConnection;
-  readonly waiter: BarrierConnection;
   readonly observer: BarrierConnection;
+  readonly waiter: BarrierConnection;
 }
 
 /** Quotes an identifier, or refuses. `search_path` cannot be parameterized. */
@@ -468,11 +468,11 @@ export async function expectLockWaiter(barrier: Barrier, options: WaiterSearch):
 
 /** What {@link expectAdvisoryWaiter} and {@link expectLockWaiter} are asked. */
 export interface WaiterSearch {
-  readonly heldBy: number;
   readonly description: string;
-  readonly timeoutMs?: number;
   readonly exclude?: readonly number[];
+  readonly heldBy: number;
   readonly settledEarly?: () => string | undefined;
+  readonly timeoutMs?: number;
 }
 
 /**
@@ -569,9 +569,9 @@ export async function backendsQueuedBehind(
 export async function expectBackendsQueuedBehind(
   barrier: Barrier,
   options: {
-    readonly heldBy: number;
     readonly count: number;
     readonly description: string;
+    readonly heldBy: number;
     readonly timeoutMs?: number;
   },
 ): Promise<QueuedBackend[]> {
@@ -614,8 +614,8 @@ export async function ungrantedLocks(observer: BarrierConnection, pid: number): 
 async function backendActivity(observer: BarrierConnection, pid: number): Promise<string> {
   const rows = await observer.query<{
     state: string | null;
-    wait_event_type: string | null;
     wait_event: string | null;
+    wait_event_type: string | null;
   }>(`SELECT state, wait_event_type, wait_event FROM pg_stat_activity WHERE pid = $1`, [pid]);
 
   const row = rows[0];

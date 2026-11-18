@@ -40,9 +40,9 @@ const underUpdateCeiling = (args: { where: { AND?: unknown } }) =>
 
 /** The lists stored on the policy, as the ids and types they hold. */
 interface StoredLists {
-  types: PlatformType[];
-  platformIds: string[];
   categoryIds: string[];
+  platformIds: string[];
+  types: PlatformType[];
 }
 
 /** A policy row as a read with the view's embed returns it: the lists as join rows. */

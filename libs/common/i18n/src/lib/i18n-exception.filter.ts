@@ -10,9 +10,9 @@ import { translateException, type EdgeLocaleSource } from './translate-exception
 
 /** What the filter reads from the request. */
 interface EdgeRequest {
+  readonly headers?: { readonly 'accept-language'?: string };
   /** Set by Express exactly when a route matched. */
   readonly route?: unknown;
-  readonly headers?: { readonly 'accept-language'?: string };
 }
 
 /**

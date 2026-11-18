@@ -19,23 +19,21 @@ import { PluginArtifactStore } from '../store/plugin-artifact.store';
 import { removeArtifactRowBestEffort } from '../store/remove-artifact-row';
 
 export interface StagePluginArtifactInput {
-  /** The plugin the update is for. */
-  readonly slug: string;
-
-  /** The checksum of a received plugin artifact, as its receipt names it, in either case. */
-  readonly sha256: string;
-  readonly actorId: string;
-
   /** Exact re-entry of every forbidden import static analysis reported on the new version. */
   readonly acknowledgeForbiddenImports?: readonly string[];
 
+  readonly actorId: string;
   /** Extend static analysis into node_modules; its findings only advise. */
   readonly deepScan?: boolean;
+
+  /** The checksum of a received plugin artifact, as its receipt names it, in either case. */
+  readonly sha256: string;
+
+  /** The plugin the update is for. */
+  readonly slug: string;
 }
 
 export interface PluginArtifactStagingResult {
-  readonly plugin: Plugin;
-
   /** True when the plugin now runs this checksum; false when the update waits for approval. */
   readonly activated: boolean;
 
@@ -44,6 +42,8 @@ export interface PluginArtifactStagingResult {
    * take, when another row holds it (#1096, #1083); null once activated.
    */
   readonly dataGatewayNameConflict: string | null;
+
+  readonly plugin: Plugin;
 }
 
 /**

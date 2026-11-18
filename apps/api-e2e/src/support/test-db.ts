@@ -12,9 +12,9 @@ export function requireDatabaseUrl(): string {
 
 export interface TestDatabase {
   readonly client: PrismaClient;
+  close(): Promise<void>;
   /** The schema this database URL targets — the scope `resetDatabase` sweeps. */
   readonly schema: string;
-  close(): Promise<void>;
 }
 
 /**

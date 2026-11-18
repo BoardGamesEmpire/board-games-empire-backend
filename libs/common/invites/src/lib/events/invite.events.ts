@@ -35,19 +35,19 @@ import { InviteEvents } from '../constants/invite-events.constant';
  * with no reader.
  */
 export interface InviteSnapshot {
+  readonly eventId: string | null;
+  readonly expiresAt: Date;
+  readonly householdId: string | null;
   readonly id: string;
-  readonly type: InviteType;
-  readonly status: InviteStatus;
-  readonly inviterId: string;
-  readonly inviteeId: string | null;
-  readonly inviteeName: string | null;
   /** Stripped from persisted audit rows; in-process listeners still receive it. */
   readonly inviteeEmail: string | null;
-  readonly householdId: string | null;
-  readonly eventId: string | null;
-  readonly roleId: string | null;
-  readonly expiresAt: Date;
+  readonly inviteeId: string | null;
+  readonly inviteeName: string | null;
+  readonly inviterId: string;
   readonly respondedAt: Date | null;
+  readonly roleId: string | null;
+  readonly status: InviteStatus;
+  readonly type: InviteType;
 }
 
 /**

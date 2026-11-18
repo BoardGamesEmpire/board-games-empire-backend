@@ -16,10 +16,10 @@ import { FeedbackService } from './feedback.service';
 import { FeedbackSubmissionThrottle } from './throttling/feedback-throttler';
 
 interface SubmitFeedbackResponse {
+  readonly feedbackReport: FeedbackReceiptDto;
   // Wire contract is a plain string; the return site assigns an I18nMessage marker
   // that I18nResponseInterceptor renders to a localized string before serialization.
   readonly message: string;
-  readonly feedbackReport: FeedbackReceiptDto;
 }
 
 @ApiBearerAuth()

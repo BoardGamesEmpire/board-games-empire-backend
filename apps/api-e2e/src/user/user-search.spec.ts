@@ -248,7 +248,7 @@ describe('user search', () => {
   });
 
   describe('through an API key', () => {
-    const keyOf = (owner: SessionActor, pins: { userId?: string; profileId?: string } = {}) =>
+    const keyOf = (owner: SessionActor, pins: { profileId?: string; userId?: string } = {}) =>
       mintApiKey(baseUrl, db.client, owner, [
         { slugs: ['read:user:searchable'], resourceType: ResourceType.User, resourceId: pins.userId },
         { slugs: ['read:user:profile:public'], resourceType: ResourceType.UserProfile, resourceId: pins.profileId },

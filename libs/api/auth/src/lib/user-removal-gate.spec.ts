@@ -9,7 +9,7 @@ import {
 /** What a refusal carries on the wire, read off the rejected `APIError`. */
 async function refusalOf(
   attempt: () => Promise<void>,
-): Promise<{ status: number; code?: string; message?: string } | undefined> {
+): Promise<{ code?: string; message?: string; status: number } | undefined> {
   try {
     await attempt();
   } catch (error) {

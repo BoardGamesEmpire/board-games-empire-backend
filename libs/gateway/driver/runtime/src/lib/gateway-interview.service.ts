@@ -56,9 +56,9 @@ const withFirstInterview = (answers: InterviewData, before: StoredState, intervi
 
 /** An interview under way: the driver it asks through, and how to abandon it. */
 interface InterviewAttempt {
-  readonly driver: DataGatewayDriver;
   readonly abandonment: AbortController;
   readonly done: Promise<void>;
+  readonly driver: DataGatewayDriver;
 }
 
 /**
@@ -67,9 +67,9 @@ interface InterviewAttempt {
  * and driver it asks through, and how to abandon it.
  */
 interface PendingStart {
-  readonly gatewayId: string;
-  readonly driver: DataGatewayDriver;
   readonly abandonment: AbortController;
+  readonly driver: DataGatewayDriver;
+  readonly gatewayId: string;
 }
 
 /**

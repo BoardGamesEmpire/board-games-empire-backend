@@ -33,7 +33,6 @@ import { buildOtelPinoOptions } from '../pino/otel-pino.options';
  * transport, so there is no double-shipping.
  */
 export interface BootstrapObservabilityResult {
-  readonly otel: OtelBootstrapHandle;
   /**
    * Runtime base logger. Pass this to
    * `LoggerModule.forRoot({ pinoHttp: { logger: baseLogger } })`.
@@ -41,6 +40,7 @@ export interface BootstrapObservabilityResult {
    * layer its own per-context bindings on top.
    */
   readonly baseLogger: PinoInstance;
+  readonly otel: OtelBootstrapHandle;
 }
 
 /**

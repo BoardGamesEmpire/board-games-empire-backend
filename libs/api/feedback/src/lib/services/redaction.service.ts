@@ -49,8 +49,8 @@ const KNOWN_SENSITIVE_KEYS: ReadonlySet<string> = new Set([
 ]);
 
 export interface RedactionResult<T> {
-  readonly value: T;
   readonly mutated: boolean;
+  readonly value: T;
 }
 
 @Injectable()

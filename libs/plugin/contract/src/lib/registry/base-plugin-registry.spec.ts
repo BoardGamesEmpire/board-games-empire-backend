@@ -7,8 +7,8 @@ import {
 } from './registry.errors.js';
 
 interface TestDriver {
-  readonly seed: number;
   ping(): string;
+  readonly seed: number;
 }
 
 const createTestDriver = (seed: number): TestDriver => ({

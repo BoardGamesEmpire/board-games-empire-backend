@@ -79,7 +79,7 @@ describe('game shares', () => {
     gameShareEnvelope(await shareGame(actor, gameId, body).expect(201), `POST /api/games/:id/shares`).share;
 
   /** A refusal's status and message, so a 404 can be told apart by the id it names. */
-  const refusal = (response: { status: number; body: unknown }) => ({
+  const refusal = (response: { body: unknown; status: number }) => ({
     status: response.status,
     message: (response.body as { message?: unknown } | null)?.message ?? null,
   });

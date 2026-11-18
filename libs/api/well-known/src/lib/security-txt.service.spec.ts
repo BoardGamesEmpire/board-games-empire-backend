@@ -8,13 +8,13 @@ const FIXED_NOW = DateTime.now().toUTC().endOf('day').toJSDate();
 const FIXED_EXPIRES = DateTime.now().toUTC().plus({ years: 1 }).startOf('day').toISO();
 
 interface MockSecurityConfig {
-  contact?: string[];
-  expires?: string;
-  policy?: string;
-  encryption?: string;
   acknowledgments?: string;
-  preferredLanguages?: string;
+  contact?: string[];
+  encryption?: string;
+  expires?: string;
   hiring?: string;
+  policy?: string;
+  preferredLanguages?: string;
 }
 
 function buildMockConfigService(config: MockSecurityConfig): jest.Mocked<Pick<ConfigService, 'get'>> {

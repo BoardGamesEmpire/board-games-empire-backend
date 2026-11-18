@@ -17,9 +17,9 @@ export type ConsentCatalogPermission = Pick<
  * server-consented checks are exempt.
  */
 export function consentCatalogFlags(input: {
-  readonly origin: NormalizedPermissionRequest['origin'];
-  readonly decidingScope: PluginGrantScope;
   readonly corePermission: ConsentCatalogPermission | undefined;
+  readonly decidingScope: PluginGrantScope;
+  readonly origin: NormalizedPermissionRequest['origin'];
 }): Pick<ConsentCheckDecisionInput, 'wildcardSubject' | 'unboundedUnitScope'> {
   const { origin, decidingScope, corePermission } = input;
 

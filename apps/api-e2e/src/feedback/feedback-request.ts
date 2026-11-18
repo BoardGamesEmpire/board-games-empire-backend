@@ -30,10 +30,10 @@ export const FEEDBACK_REPORTS_PATH = '/api/feedback/reports';
  */
 export interface SubmitFeedbackPayload {
   readonly category?: string;
+  readonly clientRequestId?: string;
   readonly message?: string;
   readonly severity?: string;
   readonly title?: string;
-  readonly clientRequestId?: string;
 }
 
 /**

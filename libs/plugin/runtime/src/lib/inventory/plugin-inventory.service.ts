@@ -38,8 +38,8 @@ import {
  * posture as the runtime's transport-agnostic errors.
  */
 export interface PluginInventoryPaging {
-  readonly skip: number;
   readonly pageSize: number;
+  readonly skip: number;
 }
 
 /**
@@ -97,7 +97,6 @@ export interface PluginServerInventoryOptions extends PluginInventoryOptions {
 
 /** A staged update awaiting consent, as the list surfaces it. */
 export interface PluginInventoryPendingUpdate {
-  readonly version: string;
   /** `pendingSince`, never `updatedAt` — the latter moves on any row touch. */
   readonly since: Date;
   /**
@@ -108,6 +107,7 @@ export interface PluginInventoryPendingUpdate {
    * rejected with this id.
    */
   readonly stagingId: string;
+  readonly version: string;
 }
 
 /**
@@ -126,10 +126,8 @@ export interface PluginInventoryPendingUpdate {
  * ungated audience by inheritance.
  */
 export interface PluginInventoryIdentity {
-  readonly id: string;
-  readonly slug: string;
   readonly category: PluginCategory;
-  readonly scope: PluginScope;
+  readonly description: string | null;
   /**
    * Localized manifest `displayName` / `description`, or `null` when the
    * stored manifest could not be read (D-CG). Nullable rather than absent so
@@ -137,7 +135,7 @@ export interface PluginInventoryIdentity {
    * unambiguous discriminator.
    */
   readonly displayName: string | null;
-  readonly description: string | null;
+  readonly id: string;
   /**
    * The D-CG marker: this row's stored manifest failed re-validation, so its
    * localized fields are missing and nothing manifest-derived about it can be
@@ -150,6 +148,8 @@ export interface PluginInventoryIdentity {
    * this is discovered at read time by whoever read the row.
    */
   readonly manifestUnreadable: boolean;
+  readonly scope: PluginScope;
+  readonly slug: string;
 }
 
 /**
@@ -161,10 +161,10 @@ export interface PluginInventoryIdentity {
  * anyone and is left out instead.
  */
 export interface RunningServerPlugin {
-  readonly slug: string;
   readonly category: PluginCategory;
   /** The plugin manifest's `displayName` in the requested locale, else the default locale's. */
   readonly displayName: string;
+  readonly slug: string;
 }
 
 /**
@@ -172,24 +172,24 @@ export interface RunningServerPlugin {
  * provenance picture an admin manages the install from.
  */
 export interface PluginInventoryEntry extends PluginInventoryIdentity {
-  /** Currently ACTIVE manifest version. */
-  readonly version: string;
   /** The server-level kill switch. Unit enablement layers under it. */
   readonly enabled: boolean;
-  /** Non-null only when the caller opted into tombstones (D-CH). */
-  readonly uninstalledAt: Date | null;
-  readonly restartRequired: boolean;
+  readonly installedAt: Date;
+  readonly pendingUpdate: PluginInventoryPendingUpdate | null;
+  readonly provenance: PluginProvenance;
 
   /**
    * The process roles to restart so the server runs what it has recorded:
    * empty unless {@link restartRequired} (#1096).
    */
   readonly restartProcessRoles: readonly PluginProcessRole[];
-  readonly installedAt: Date;
-  readonly provenance: PluginProvenance;
-  readonly pendingUpdate: PluginInventoryPendingUpdate | null;
+  readonly restartRequired: boolean;
+  /** Non-null only when the caller opted into tombstones (D-CH). */
+  readonly uninstalledAt: Date | null;
   /** The Server unit's own standing (#1336). */
   readonly unit: PluginInventoryServerUnitState;
+  /** Currently ACTIVE manifest version. */
+  readonly version: string;
 }
 
 /**
@@ -201,20 +201,20 @@ export interface PluginInventoryEntry extends PluginInventoryIdentity {
  * `null` and owes nothing.
  */
 export interface PluginInventoryServerUnitState {
-  /** `off`, `on`, `review_pending` or `unavailable`, as the feature-state read reports for the Server unit. */
-  readonly state: PluginUnitStateCode;
-  /**
-   * `unavailable` when the stored manifest cannot be read, `null` for every
-   * other row: the dormancy rule judges no configuration for the Server unit,
-   * which holds no document of its own (#697).
-   */
-  readonly dormancy: PluginUnitDormancy | null;
   /**
    * What the server still owes the plugin for the manifest's server-scope
    * requested permissions. Empty for a row whose manifest cannot be read,
    * since nothing manifest-derived about it can be trusted.
    */
   readonly consent: PluginConsentStanding;
+  /**
+   * `unavailable` when the stored manifest cannot be read, `null` for every
+   * other row: the dormancy rule judges no configuration for the Server unit,
+   * which holds no document of its own (#697).
+   */
+  readonly dormancy: PluginUnitDormancy | null;
+  /** `off`, `on`, `review_pending` or `unavailable`, as the feature-state read reports for the Server unit. */
+  readonly state: PluginUnitStateCode;
 }
 
 /**
@@ -229,16 +229,12 @@ export interface PluginInventoryUnitState {
    * unanchored on it — which is why this is distinct from `enabled: false`.
    */
   readonly anchored: boolean;
-  readonly enabled: boolean;
   /**
-   * The one code a client announces for this unit: `off`, `on`,
-   * `review_pending`, `needs_configuration` or `unavailable`. It carries the
-   * unit's dormancy, its consent standing (#1149) and the server switch: a
-   * switched-on unit under a plugin a server admin switched off reads
-   * `unavailable`, as does a dormant one whose `dormancy` is `unavailable`;
-   * `serverEnabled` and `dormancy` say which cause applies.
+   * What this unit still owes the plugin, for the manifest's checks the unit
+   * consumes. Empty for a row whose manifest cannot be read, since nothing
+   * manifest-derived about it can be trusted ({@link PluginInventoryIdentity.manifestUnreadable}).
    */
-  readonly state: PluginUnitStateCode;
+  readonly consent: PluginConsentStanding;
   /**
    * What keeps the unit from running apart from the two switches, its own
    * and the Server switch (#1151): `unavailable` when the server cannot run
@@ -253,12 +249,16 @@ export interface PluginInventoryUnitState {
    * when it brings none, whatever the rule says about `{}`.
    */
   readonly dormancy: PluginUnitDormancy | null;
+  readonly enabled: boolean;
   /**
-   * What this unit still owes the plugin, for the manifest's checks the unit
-   * consumes. Empty for a row whose manifest cannot be read, since nothing
-   * manifest-derived about it can be trusted ({@link PluginInventoryIdentity.manifestUnreadable}).
+   * The one code a client announces for this unit: `off`, `on`,
+   * `review_pending`, `needs_configuration` or `unavailable`. It carries the
+   * unit's dormancy, its consent standing (#1149) and the server switch: a
+   * switched-on unit under a plugin a server admin switched off reads
+   * `unavailable`, as does a dormant one whose `dormancy` is `unavailable`;
+   * `serverEnabled` and `dormancy` say which cause applies.
    */
-  readonly consent: PluginConsentStanding;
+  readonly state: PluginUnitStateCode;
 }
 
 export interface PluginUnitInventoryEntry extends PluginInventoryIdentity {
@@ -299,9 +299,9 @@ export interface PluginInventoryDetail extends PluginInventoryEntry {
 }
 
 export interface PluginInventoryFeature {
-  readonly name: string;
-  readonly displayName: string;
   readonly description: string;
+  readonly displayName: string;
+  readonly name: string;
 }
 
 /**

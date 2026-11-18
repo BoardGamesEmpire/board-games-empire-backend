@@ -16,7 +16,7 @@ import { GameFetchProcessor } from './game-fetch.processor';
 
 describe('GameFetchProcessor', () => {
   let processor: GameFetchProcessor;
-  let db: { job: { updateMany: jest.Mock; update: jest.Mock; findFirst: jest.Mock } };
+  let db: { job: { findFirst: jest.Mock; update: jest.Mock; updateMany: jest.Mock } };
   let gatewayRegistry: jest.Mocked<Pick<GatewayRegistryService, 'resolve' | 'reportSuccess' | 'reportFailure'>>;
   let events: { emit: jest.Mock };
   let batchCompletion: { checkAndEmit: jest.Mock };
@@ -36,7 +36,7 @@ describe('GameFetchProcessor', () => {
   };
   const meta: JobActorMeta = { actor: { kind: 'user', userId: 'user-7' }, correlationId: 'corr-1' };
 
-  const makeJob = (over: { attemptsMade?: number; attempts?: number } = {}): Job<GameFetchJobPayload> =>
+  const makeJob = (over: { attempts?: number; attemptsMade?: number } = {}): Job<GameFetchJobPayload> =>
     ({
       name: 'GameFetch',
       id: '1',

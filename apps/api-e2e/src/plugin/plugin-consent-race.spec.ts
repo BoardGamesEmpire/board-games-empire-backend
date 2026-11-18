@@ -238,7 +238,7 @@ describe('consent decisions under concurrency (#360)', () => {
 
     expect(winner).toBeDefined();
 
-    const presentation = winner?.presentation as { checks: { slug: string; outcome: string }[] } | undefined;
+    const presentation = winner?.presentation as { checks: { outcome: string; slug: string }[] } | undefined;
     const answered = presentation?.checks.find((check) => check.slug === OPTIONAL_HOUSEHOLD_CHECK.slug);
 
     expect(answered?.outcome).toBe(decision?.status === PluginGrantStatus.Granted ? 'granted' : 'refused');

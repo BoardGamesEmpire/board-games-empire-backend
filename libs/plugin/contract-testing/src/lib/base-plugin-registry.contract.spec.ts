@@ -2,8 +2,8 @@ import { BasePluginRegistry } from '@boardgamesempire/plugin-contract';
 import { describePluginRegistryContract } from './base-plugin-registry.contract.js';
 
 interface TestDriver {
-  readonly seed: number;
   ping(): string;
+  readonly seed: number;
 }
 
 const createTestDriver = (seed: number): TestDriver => ({

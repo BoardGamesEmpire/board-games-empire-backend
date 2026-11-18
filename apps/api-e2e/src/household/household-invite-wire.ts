@@ -42,8 +42,8 @@ export type ContextInviteWire = Wire<
 
 /** A context invite with the `role` and `inviter` embeds, as #297 shapes it. */
 export interface ContextInviteProjection extends ContextInviteWire {
-  readonly role: HouseholdRoleProjection['role'] | null;
   readonly inviter: ActorProjection;
+  readonly role: HouseholdRoleProjection['role'] | null;
 }
 
 /** The two columns the party shape adds; the authority shape adds the address alone (#167). */
@@ -63,8 +63,8 @@ export interface InviteAuthorityRowWire extends ContextInviteProjection, Wire<Pi
 export type ListedInviteWire = ContextInviteProjection | InviteAuthorityRowWire | InvitePartyRowWire;
 
 export interface CreateInviteEnvelope {
-  readonly message: string;
   readonly invite: InvitePartyRowWire;
+  readonly message: string;
 }
 
 export interface ListInvitesEnvelope {
@@ -108,8 +108,8 @@ export function inviteEnvelope(response: HttpResponseLike, request: RequestDescr
 }
 
 export interface RevokeInviteEnvelope {
-  readonly message: string;
   readonly invite: ContextInviteProjection | InviteAuthorityRowWire;
+  readonly message: string;
 }
 
 /**
@@ -176,9 +176,9 @@ export interface ReceivedInvitesEnvelope {
 }
 
 export interface AcceptInviteEnvelope {
-  readonly message: string;
   readonly invite: InvitePartyRowWire;
   readonly member: HouseholdMemberProjection;
+  readonly message: string;
 }
 
 /**
@@ -243,13 +243,13 @@ export interface BanPartyWire {
 export interface HouseholdBanWire extends Wire<
   Pick<HouseholdBan, 'id' | 'householdId' | 'reason' | 'createdAt' | 'updatedAt'>
 > {
-  readonly user: BanPartyWire;
   readonly bannedBy: BanPartyWire | null;
+  readonly user: BanPartyWire;
 }
 
 export interface BanEnvelope {
-  readonly message: string;
   readonly ban: HouseholdBanWire;
+  readonly message: string;
 }
 
 export interface BansPage {

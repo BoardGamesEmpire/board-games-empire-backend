@@ -81,21 +81,21 @@ const DEFAULT_MAX_BACKOFF_MS = 30_000;
  * current policy snapshot. Internal — never exposed past the request method.
  */
 interface ResolvedOptions {
-  method: SafeHttpMethod;
-  headers: Record<string, string>;
+  /** The caller's host rule, asked on every hop. `download()` never sets it. */
+  allowHost?: (hostname: string) => boolean;
   body?: SafeHttpRequestBody;
-  timeoutMs: number;
-  maxRedirects: number;
-  responseType: SafeHttpResponseType;
-  retry?: SafeHttpRetryPolicy;
-  signal?: AbortSignal;
   /**
    * One time limit shared by every hop. `download()` sets it; `request()`
    * leaves it out, so each hop gets its own `timeoutMs`.
    */
   deadline?: AbortSignal;
-  /** The caller's host rule, asked on every hop. `download()` never sets it. */
-  allowHost?: (hostname: string) => boolean;
+  headers: Record<string, string>;
+  maxRedirects: number;
+  method: SafeHttpMethod;
+  responseType: SafeHttpResponseType;
+  retry?: SafeHttpRetryPolicy;
+  signal?: AbortSignal;
+  timeoutMs: number;
 }
 
 /** Where a terminal 2xx body goes instead of memory. */
@@ -113,20 +113,20 @@ class DestinationError extends Error {
 
 /** The terminal answer of a redirect chain, before it is shaped for a caller. */
 interface TerminalHop {
-  hop: HopResult;
-  finalUrl: string;
-  redirectCount: number;
   durationMs: number;
+  finalUrl: string;
+  hop: HopResult;
+  redirectCount: number;
 }
 
 interface HopResult {
-  status: number;
-  /** The status line's reason phrase; empty over HTTP/2. */
-  statusText: string;
+  bodyBytes: Buffer;
   headers: Record<string, string>;
   /** Each Set-Cookie header by itself; `headers` holds them joined. */
   setCookie: string[];
-  bodyBytes: Buffer;
+  status: number;
+  /** The status line's reason phrase; empty over HTTP/2. */
+  statusText: string;
   /** Set when the body was streamed to a `DownloadSink`. */
   written?: { bytes: number; sha256: string };
 }
@@ -751,7 +751,7 @@ export class SecureHttpService {
     // The first stream to fail is the cause: pipeline then destroys the rest
     // with that same error, so a file stream that merely received a source or
     // cap error must not be mistaken for a destination failure (#1094).
-    let firstFailure: { stream: unknown; error: unknown } | undefined;
+    let firstFailure: { error: unknown; stream: unknown } | undefined;
     for (const stream of [body, counter, file]) {
       stream.once('error', (error) => {
         firstFailure ??= { stream, error };

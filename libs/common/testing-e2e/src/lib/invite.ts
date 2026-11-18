@@ -5,26 +5,26 @@ import type { AuthenticatedActor } from './types.js';
 const DAY_MS = 24 * 60 * 60 * 1_000;
 
 export interface InviteArrangement {
-  readonly inviter: Pick<AuthenticatedActor, 'user'>;
+  readonly approvedAt?: Date | null;
 
-  /** The context: a household, or an event when `eventId` is set instead. */
-  readonly householdId?: string | null;
   readonly eventId?: string | null;
-
-  /** Who it is to: an account by id, an address, or both, as the suite needs. */
-  readonly inviteeId?: string | null;
-  readonly inviteeEmail?: string | null;
-
-  /** `Pending` when omitted. */
-  readonly status?: InviteStatus;
-
   /** A day from now when omitted. */
   readonly expiresAt?: Date;
 
-  readonly withheld?: boolean;
+  /** The context: a household, or an event when `eventId` is set instead. */
+  readonly householdId?: string | null;
+  readonly inviteeEmail?: string | null;
+
+  /** Who it is to: an account by id, an address, or both, as the suite needs. */
+  readonly inviteeId?: string | null;
+
+  readonly inviter: Pick<AuthenticatedActor, 'user'>;
+
   readonly needsApproval?: boolean;
-  readonly approvedAt?: Date | null;
   readonly roleId?: string | null;
+  /** `Pending` when omitted. */
+  readonly status?: InviteStatus;
+  readonly withheld?: boolean;
 }
 
 /**

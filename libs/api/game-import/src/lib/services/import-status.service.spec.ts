@@ -22,8 +22,8 @@ describe('GameImportStatusService', () => {
    * so the batch list's one interactive transaction executes.
    */
   let db: {
-    job: { findMany: jest.Mock; count: jest.Mock };
     $transaction: jest.Mock;
+    job: { count: jest.Mock; findMany: jest.Mock };
   };
   let ability: MockAbilityService;
   let compose: jest.SpyInstance;

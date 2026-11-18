@@ -31,8 +31,8 @@ import type { MediaConfig, MountCheckMode } from './media.config.js';
 const SIDECAR_SUFFIX = '.meta.json';
 
 interface Sidecar {
-  readonly contentType: string;
   readonly checksum: string;
+  readonly contentType: string;
   readonly etag: string;
   readonly originalName?: string;
 }
@@ -638,7 +638,7 @@ export class LocalDiskDriver implements StorageDriver {
     requested: MountCheckMode,
     rootStats: Stats,
     sentinelFile: string,
-  ): { mode: ResolvedMountCheck; baseline?: number; sentinelPath?: string } {
+  ): { baseline?: number; mode: ResolvedMountCheck; sentinelPath?: string } {
     switch (requested) {
       case 'off':
         this.logger.debug('Mount check disabled (off)');
@@ -669,7 +669,7 @@ export class LocalDiskDriver implements StorageDriver {
    * differ. Operators on NFS/overlay/bind, where `st_dev` is unreliable, should
    * select `sentinel` explicitly.
    */
-  private resolveAuto(rootStats: Stats): { mode: 'st_dev' | 'off'; baseline?: number } {
+  private resolveAuto(rootStats: Stats): { baseline?: number; mode: 'st_dev' | 'off' } {
     let parentDev: number;
     try {
       parentDev = statSync(dirname(this.root)).dev;

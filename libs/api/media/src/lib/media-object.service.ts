@@ -129,7 +129,7 @@ export class MediaObjectService {
   private async writeBytes(
     file: UploadedMediaFile,
     userId: string,
-  ): Promise<{ id: string; key: string; stored: StoredObject; dimensions: { width: number; height: number } | null }> {
+  ): Promise<{ dimensions: { height: number; width: number } | null; id: string; key: string; stored: StoredObject }> {
     const id = createId();
     const key = `users/${userId}/${id}`;
     const stored = await this.storage.put(key, file.buffer, {
@@ -147,12 +147,12 @@ export class MediaObjectService {
   private async storeOwnedObjectWithin(
     tx: Prisma.TransactionClient,
     params: {
+      dimensions: { height: number; width: number } | null;
       id: string;
       key: string;
-      userId: string;
-      stored: StoredObject;
-      dimensions: { width: number; height: number } | null;
       originalName: string | null;
+      stored: StoredObject;
+      userId: string;
     },
   ): Promise<{ media: MediaObject; softOverages: readonly QuotaSoftOverageEvent[] }> {
     const { id, key, userId, stored, dimensions, originalName } = params;
@@ -403,7 +403,7 @@ export class MediaObjectService {
     }
   }
 
-  private probeImageDimensions(file: UploadedMediaFile): { width: number; height: number } | null {
+  private probeImageDimensions(file: UploadedMediaFile): { height: number; width: number } | null {
     if (!file.mimetype.startsWith('image/')) {
       return null;
     }

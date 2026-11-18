@@ -48,23 +48,23 @@ export async function arrangeListEntry(
 
 /** The facts of an offered game a spec arranges, each left to the schema's default when not given. */
 export interface OfferedGameFacts {
-  readonly title?: string;
-  readonly subtitle?: string | null;
   readonly contentType?: ContentType;
-  readonly minPlayers?: number | null;
   readonly maxPlayers?: number | null;
-  readonly minPlayTime?: number | null;
   readonly maxPlayTime?: number | null;
-  readonly publishYear?: number | null;
   readonly medium?: GameMedium;
+  readonly minPlayers?: number | null;
+  readonly minPlayTime?: number | null;
   /** The offered copy's platform type: the seeded Tabletop platform, or a platform of that type made for the suite. */
   readonly platformType?: PlatformType;
+  readonly publishYear?: number | null;
+  readonly subtitle?: string | null;
+  readonly title?: string;
 }
 
 /** What {@link arrangeOfferedGame} made, so a spec can name each row it touches. */
 export interface ArrangedOfferedGame {
-  readonly entryId: string;
   readonly collectionId: string;
+  readonly entryId: string;
   readonly gameId: string;
   readonly platformGameId: string;
 }
@@ -100,7 +100,7 @@ export async function platformOfType(prisma: PrismaClient, platformType: Platfor
  */
 export async function arrangeOfferedGame(
   prisma: PrismaClient,
-  options: { eventId: string; ownerId: string; attendeeId?: string } & OfferedGameFacts,
+  options: { attendeeId?: string; eventId: string; ownerId: string } & OfferedGameFacts,
 ): Promise<ArrangedOfferedGame> {
   const { eventId, ownerId, medium = GameMedium.Physical, platformType = PlatformType.Tabletop, ...facts } = options;
   const game = await prisma.game.create({

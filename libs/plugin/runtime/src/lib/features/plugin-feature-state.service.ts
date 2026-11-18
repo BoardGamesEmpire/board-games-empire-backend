@@ -39,16 +39,13 @@ import {
 export type PluginFeatureBlockReason = 'denied' | 'pending';
 
 export interface PluginFeatureState {
-  /** Manifest `features[].name` — the stable identifier. */
-  readonly name: string;
-  /** Localized per the requested locale with the manifest fallback chain. */
-  readonly displayName: string;
-  readonly description: string;
-  readonly state: 'active' | 'disabled';
-  /** `null` exactly when `state` is `active`. */
-  readonly reason: PluginFeatureBlockReason | null;
   /** Canonical slugs of the bound checks blocking activation (empty when active). */
   readonly blockingSlugs: readonly string[];
+  readonly description: string;
+  /** Localized per the requested locale with the manifest fallback chain. */
+  readonly displayName: string;
+  /** Manifest `features[].name` — the stable identifier. */
+  readonly name: string;
   /**
    * Bound checks decided on a DIFFERENT unit axis, which this unit's
    * resolution never consumes (the read path's grant scoping, #60) and whose state is therefore
@@ -60,14 +57,33 @@ export interface PluginFeatureState {
    * A "degraded anywhere?" answer (#67) must ask the owning units.
    */
   readonly perUnitSlugs: readonly string[];
+  /** `null` exactly when `state` is `active`. */
+  readonly reason: PluginFeatureBlockReason | null;
+  readonly state: 'active' | 'disabled';
 }
 
 export interface PluginFeatureUnitState {
+  /** Required permissions the unit still owes and optional ones switched off. */
+  readonly consent: PluginConsentStanding;
+  /**
+   * What keeps the unit from running apart from the two switches, its own
+   * and the Server switch (#1151): `unavailable` when the server cannot run it
+   * for this unit whatever its settings say, `needs_configuration` when the
+   * household's settings do not fit the active schema, `null` when nothing
+   * does. Worked out on every read from the active manifest and the unit's
+   * document, and reported whether or not the unit is switched on, so a
+   * client can say what a switch-on would meet. It leaves one refusal out:
+   * a first switch-on the manifest requires a document for
+   * (`requiresHouseholdConfig`) is refused when it brings none, whatever the
+   * rule says about `{}`. `null` for an uninstalled plugin, for which nothing
+   * is worked out.
+   */
+  readonly dormancy: PluginUnitDormancy | null;
+  readonly features: readonly PluginFeatureState[];
   readonly plugin: {
     readonly id: string;
     readonly slug: string;
   };
-  readonly unit: PluginUnit;
   /**
    * The full operational predicate: plugin enabled and not tombstoned, AND
    * the unit's enablement is on with no dormancy. Consent never enters it: a
@@ -88,23 +104,7 @@ export interface PluginFeatureUnitState {
    * dormancy and consent each add.
    */
   readonly state: PluginUnitStateCode;
-  /**
-   * What keeps the unit from running apart from the two switches, its own
-   * and the Server switch (#1151): `unavailable` when the server cannot run it
-   * for this unit whatever its settings say, `needs_configuration` when the
-   * household's settings do not fit the active schema, `null` when nothing
-   * does. Worked out on every read from the active manifest and the unit's
-   * document, and reported whether or not the unit is switched on, so a
-   * client can say what a switch-on would meet. It leaves one refusal out:
-   * a first switch-on the manifest requires a document for
-   * (`requiresHouseholdConfig`) is refused when it brings none, whatever the
-   * rule says about `{}`. `null` for an uninstalled plugin, for which nothing
-   * is worked out.
-   */
-  readonly dormancy: PluginUnitDormancy | null;
-  /** Required permissions the unit still owes and optional ones switched off. */
-  readonly consent: PluginConsentStanding;
-  readonly features: readonly PluginFeatureState[];
+  readonly unit: PluginUnit;
 }
 
 /**

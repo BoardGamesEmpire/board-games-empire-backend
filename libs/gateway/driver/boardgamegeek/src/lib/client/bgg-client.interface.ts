@@ -11,8 +11,8 @@ import type { BggSearchResult, BggThing } from '../types';
  */
 export interface BggThingQueryParams {
   id: number | number[];
-  type?: string | string[];
   stats?: 0 | 1;
+  type?: string | string[];
   versions?: 0 | 1;
 }
 
@@ -25,9 +25,9 @@ export interface BggThingQueryParams {
  * match (useful for disambiguation flows).
  */
 export interface BggSearchQueryParams {
+  exact?: 0 | 1;
   query: string;
   type?: string | string[];
-  exact?: 0 | 1;
 }
 
 /**
@@ -36,12 +36,12 @@ export interface BggSearchQueryParams {
  * aborts the call (#1082).
  */
 export interface BggClientLike {
-  thing: {
-    query(params: BggThingQueryParams, signal?: AbortSignal): Promise<BggThing[]>;
-  };
-
   search: {
     query(params: BggSearchQueryParams, signal?: AbortSignal): Promise<BggSearchResult[]>;
+  };
+
+  thing: {
+    query(params: BggThingQueryParams, signal?: AbortSignal): Promise<BggThing[]>;
   };
 }
 

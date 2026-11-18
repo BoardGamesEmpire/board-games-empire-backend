@@ -100,7 +100,7 @@ export class OccurrenceStatusChangedEvent extends MutationEvent<EventOccurrence>
      * Context for listeners, kept out of the audit entry: the date's label, and
      * the user who acted, or `null` when the actor is not a user (#802).
      */
-    context: { occurrenceLabel: string | null; actingUserId: string | null },
+    context: { actingUserId: string | null; occurrenceLabel: string | null },
     initiatedAt: Date,
   ) {
     super(before, after, initiatedAt);

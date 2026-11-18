@@ -65,7 +65,7 @@ describe('webhook dispatch from the API (#538)', () => {
   };
 
   /** The one waiting delivery, once the count has held at one. */
-  const onlyDelivery = async (): Promise<{ id: string | undefined; data: WebhookDeliveryJob }> => {
+  const onlyDelivery = async (): Promise<{ data: WebhookDeliveryJob; id: string | undefined }> => {
     await waitForStableJobCount(webhookQueue(), 1);
     const [job] = await webhookQueue().getJobs(['waiting']);
 

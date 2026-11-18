@@ -19,20 +19,20 @@ import type { MailFailureCode } from '@bge/mail';
 
 /** A base/expansion game reached the system for the first time via import. */
 export interface GameImportedPayload {
+  batchId: string;
   gameId: string;
   gameTitle: string;
-  thumbnail: string | null;
   jobId: string;
-  batchId: string;
+  thumbnail: string | null;
 }
 
 /** A watched base game gained an expansion — carries both game + base game. */
 export interface WatchedExpansionImportedPayload {
+  baseGameId: string;
+  baseGameTitle: string;
   gameId: string;
   gameTitle: string;
   thumbnail: string | null;
-  baseGameId: string;
-  baseGameTitle: string;
 }
 
 /**
@@ -50,36 +50,36 @@ export interface WatchedExpansionImportedPayload {
  * it for its recipient.
  */
 export interface ImportFailedPayload {
-  jobType: JobType;
-  jobId: string;
   batchId: string;
-  gatewayId: string;
+  error: I18nMessage;
+  errorCode: string;
   externalId: string;
+  gatewayId: string;
+  jobId: string;
+  jobType: JobType;
   /**
    * Why the job was in its import batch: `Requested`, `ChosenExpansion` or
    * `AddedBaseGame` (#971).
    */
   origin: string;
-  errorCode: string;
-  error: I18nMessage;
 }
 
 /** A media contribution was rejected; the contributor may reclaim it until the deadline. */
 export interface MediaContributionRejectedPayload {
   contributionId: string;
   mediaObjectId: string;
-  subjectType: ResourceType;
-  subjectId: string;
-  rejectionReason: string | null;
   reclaimDeadline: string | null;
+  rejectionReason: string | null;
+  subjectId: string;
+  subjectType: ResourceType;
 }
 
 /** A rejected contribution's reclaim window lapsed and the object was purged. */
 export interface MediaContributionReclaimExpiredPayload {
   contributionId: string;
   mediaObjectId: string;
-  subjectType: ResourceType;
   subjectId: string;
+  subjectType: ResourceType;
 }
 
 /**
@@ -90,8 +90,8 @@ export interface MediaContributionReclaimExpiredPayload {
  */
 export interface AuditUnattributedEventPayload {
   eventName: string;
-  subject: string;
   source: string | null;
+  subject: string;
 }
 
 /** The DataGateway a server-admin notification is about (#763). */
@@ -110,11 +110,11 @@ export interface DataGatewayRefPayload {
  * can't store in JSON. Times are ISO 8601.
  */
 export interface DataGatewayAutoDisabledPayload extends DataGatewayRefPayload {
-  reason: string;
   consecutiveFailures: number;
   firstFailureAt: string;
-  lastFailureAt: string;
   lastError: string;
+  lastFailureAt: string;
+  reason: string;
 }
 
 /**
@@ -146,29 +146,29 @@ export interface EventRsvpReceivedPayload extends EventRefPayload {
 
 /** Someone else changed the recipient's RSVP to an event (#802). */
 export interface EventRsvpChangedPayload extends EventRefPayload {
-  status: EventParticipationStatus;
   /** `null` when the person who changed it is not a user, and the client words it. */
   changedByName: string | null;
+  status: EventParticipationStatus;
 }
 
 /** A game was nominated for an event (sent to fellow attendees). */
 export interface GameNominatedPayload extends EventRefPayload {
-  nominationId: string;
   nominatedGameTitle: string;
+  nominationId: string;
 }
 
 /** A nomination the recipient created was resolved (approved/rejected/passed/failed/short of quorum). */
 export interface NominationOutcomePayload {
   eventId: string;
-  nominationId: string;
   nominatedGameTitle: string;
+  nominationId: string;
 }
 
 /** A game was added to an event's play list. */
 export interface GameAddedToEventPayload extends EventRefPayload {
-  nominatedGameTitle: string;
   /** Tells apart two editions that share a title (#1271). */
   nominatedGameSubtitle: string | null;
+  nominatedGameTitle: string;
 }
 
 /** Why a game left an event's lineup (#769). */
@@ -192,11 +192,11 @@ export type LineupRemovalReason = (typeof LineupRemovalReason)[keyof typeof Line
  * `occurrenceId` is `null` for a game in the event's own lineup.
  */
 export interface GameRemovedFromEventPayload extends EventRefPayload {
-  lineupGameId: string;
-  occurrenceId: string | null;
-  gameTitle: string;
   /** Tells apart two editions that share a title (#1271). */
   gameSubtitle: string | null;
+  gameTitle: string;
+  lineupGameId: string;
+  occurrenceId: string | null;
   reason: LineupRemovalReason;
 }
 
@@ -219,9 +219,9 @@ export interface HouseholdRefPayload {
  * an address.
  */
 export interface InviteeAsInvitedPayload {
+  inviteeEmail: string | null;
   inviteeId: string | null;
   inviteeName: string | null;
-  inviteeEmail: string | null;
 }
 
 /** A user was invited to a household; sent to the invitee (#167). */
@@ -239,8 +239,8 @@ export interface HouseholdInviteAwaitingApprovalPayload extends HouseholdRefPayl
 /** An invitee accepted and became a member of the household; sent to its other members (#682). */
 export interface HouseholdInviteAcceptedPayload extends HouseholdRefPayload {
   inviteId: string;
-  memberUserId: string;
   memberName: string;
+  memberUserId: string;
 }
 
 /** An invitee declined a household invite; sent to the inviter and to household owners and admins (#682). */
@@ -254,10 +254,10 @@ export interface HouseholdInviteDeclinedPayload extends HouseholdRefPayload, Inv
  * owner's user was deleted before the notification was written.
  */
 export interface HouseholdOwnershipTransferredPayload extends HouseholdRefPayload {
-  previousOwnerMemberId: string;
-  previousOwnerName: string | null;
   newOwnerMemberId: string;
   newOwnerName: string;
+  previousOwnerMemberId: string;
+  previousOwnerName: string | null;
 }
 
 /**
@@ -267,9 +267,9 @@ export interface HouseholdOwnershipTransferredPayload extends HouseholdRefPayloa
  * an address.
  */
 export interface GameShareReceivedPayload {
-  shareId: string;
   gameId: string;
   gameTitle: string;
+  shareId: string;
   sharerName: string;
 }
 
@@ -279,9 +279,9 @@ export interface GameShareReceivedPayload {
  * A household share that takes effect on create tells nobody.
  */
 export interface GameShareAwaitingApprovalPayload extends HouseholdRefPayload {
-  shareId: string;
   gameId: string;
   gameTitle: string;
+  shareId: string;
   sharerName: string;
 }
 
@@ -292,8 +292,8 @@ export interface GameShareAwaitingApprovalPayload extends HouseholdRefPayload {
  * the notification was sent, so a client can offer the change or say it is off.
  */
 export interface UsernameVariantAssignedPayload {
-  username: string;
   requestedUsername: string;
+  username: string;
   usernameChangeAllowed: boolean;
 }
 
@@ -304,9 +304,9 @@ export interface UsernameVariantAssignedPayload {
  * renders in the reader's language on `GET /notifications/unread`.
  */
 export interface MailTestResultPayload {
-  outcome: 'sent' | 'failed';
   code: MailFailureCode | null;
   message: I18nMessage;
+  outcome: 'sent' | 'failed';
 }
 
 /**
@@ -317,47 +317,47 @@ export interface MailTestResultPayload {
  * here is caught by {@link _assertPayloadMapExhaustive} below.
  */
 export type NotificationPayloadMap = {
-  [NotificationType.GameImported]: GameImportedPayload;
-  [NotificationType.ExpansionImported]: GameImportedPayload;
-  [NotificationType.WatchedExpansionImported]: WatchedExpansionImportedPayload;
-  [NotificationType.ImportFailed]: ImportFailedPayload;
-  [NotificationType.MediaContributionRejected]: MediaContributionRejectedPayload;
-  [NotificationType.MediaContributionReclaimExpired]: MediaContributionReclaimExpiredPayload;
   [NotificationType.AuditUnattributedEvent]: AuditUnattributedEventPayload;
   [NotificationType.DataGatewayAutoDisabled]: DataGatewayAutoDisabledPayload;
   [NotificationType.DataGatewayCapabilitiesLost]: DataGatewayCapabilitiesLostPayload;
-  [NotificationType.HouseholdInviteReceived]: HouseholdInviteReceivedPayload;
-  [NotificationType.HouseholdInviteAwaitingApproval]: HouseholdInviteAwaitingApprovalPayload;
-  [NotificationType.HouseholdInviteAccepted]: HouseholdInviteAcceptedPayload;
-  [NotificationType.HouseholdInviteDeclined]: HouseholdInviteDeclinedPayload;
-  [NotificationType.HouseholdOwnershipTransferred]: HouseholdOwnershipTransferredPayload;
-  [NotificationType.GameShareReceived]: GameShareReceivedPayload;
-  [NotificationType.GameShareAwaitingApproval]: GameShareAwaitingApprovalPayload;
-  [NotificationType.UsernameVariantAssigned]: UsernameVariantAssignedPayload;
-  [NotificationType.MailTestResult]: MailTestResultPayload;
-  [NotificationType.EventInviteReceived]: EventRefPayload;
-  [NotificationType.EventCreated]: EventRefPayload;
-  [NotificationType.EventCancelled]: EventCancelledPayload;
-  [NotificationType.EventReopened]: EventRefPayload;
-  [NotificationType.EventRsvpReceived]: EventRsvpReceivedPayload;
-  [NotificationType.EventRsvpChanged]: EventRsvpChangedPayload;
-  [NotificationType.EventDeleted]: EventRefPayload;
   [NotificationType.EventAttendeeRemoved]: EventRefPayload;
-  [NotificationType.GameNominated]: GameNominatedPayload;
-  [NotificationType.GameNominationApproved]: NominationOutcomePayload;
-  [NotificationType.GameNominationRejected]: NominationOutcomePayload;
-  [NotificationType.GameNominationPassed]: NominationOutcomePayload;
-  [NotificationType.GameNominationFailed]: NominationOutcomePayload;
-  [NotificationType.GameNominationQuorumNotMet]: NominationOutcomePayload;
-  [NotificationType.GameAddedToEvent]: GameAddedToEventPayload;
-  [NotificationType.GameRemovedFromEvent]: GameRemovedFromEventPayload;
+  [NotificationType.EventCancelled]: EventCancelledPayload;
+  [NotificationType.EventCreated]: EventRefPayload;
+  [NotificationType.EventDeleted]: EventRefPayload;
+  [NotificationType.EventInviteReceived]: EventRefPayload;
+  [NotificationType.EventOccurrenceCanceled]: OccurrenceChangePayload;
+  [NotificationType.EventOccurrenceConfirmed]: OccurrenceChangePayload;
+  [NotificationType.EventOccurrenceDeclined]: OccurrenceChangePayload;
   // Occurrence lifecycle — Confirmed/Canceled/Declined are emitted today;
   // Proposed/Rescheduled are not yet, but share the same shape.
   [NotificationType.EventOccurrenceProposed]: OccurrenceChangePayload;
-  [NotificationType.EventOccurrenceConfirmed]: OccurrenceChangePayload;
-  [NotificationType.EventOccurrenceCanceled]: OccurrenceChangePayload;
-  [NotificationType.EventOccurrenceDeclined]: OccurrenceChangePayload;
   [NotificationType.EventOccurrenceRescheduled]: OccurrenceChangePayload;
+  [NotificationType.EventReopened]: EventRefPayload;
+  [NotificationType.EventRsvpChanged]: EventRsvpChangedPayload;
+  [NotificationType.EventRsvpReceived]: EventRsvpReceivedPayload;
+  [NotificationType.ExpansionImported]: GameImportedPayload;
+  [NotificationType.GameAddedToEvent]: GameAddedToEventPayload;
+  [NotificationType.GameImported]: GameImportedPayload;
+  [NotificationType.GameNominated]: GameNominatedPayload;
+  [NotificationType.GameNominationApproved]: NominationOutcomePayload;
+  [NotificationType.GameNominationFailed]: NominationOutcomePayload;
+  [NotificationType.GameNominationPassed]: NominationOutcomePayload;
+  [NotificationType.GameNominationQuorumNotMet]: NominationOutcomePayload;
+  [NotificationType.GameNominationRejected]: NominationOutcomePayload;
+  [NotificationType.GameRemovedFromEvent]: GameRemovedFromEventPayload;
+  [NotificationType.GameShareAwaitingApproval]: GameShareAwaitingApprovalPayload;
+  [NotificationType.GameShareReceived]: GameShareReceivedPayload;
+  [NotificationType.HouseholdInviteAccepted]: HouseholdInviteAcceptedPayload;
+  [NotificationType.HouseholdInviteAwaitingApproval]: HouseholdInviteAwaitingApprovalPayload;
+  [NotificationType.HouseholdInviteDeclined]: HouseholdInviteDeclinedPayload;
+  [NotificationType.HouseholdInviteReceived]: HouseholdInviteReceivedPayload;
+  [NotificationType.HouseholdOwnershipTransferred]: HouseholdOwnershipTransferredPayload;
+  [NotificationType.ImportFailed]: ImportFailedPayload;
+  [NotificationType.MailTestResult]: MailTestResultPayload;
+  [NotificationType.MediaContributionReclaimExpired]: MediaContributionReclaimExpiredPayload;
+  [NotificationType.MediaContributionRejected]: MediaContributionRejectedPayload;
+  [NotificationType.UsernameVariantAssigned]: UsernameVariantAssignedPayload;
+  [NotificationType.WatchedExpansionImported]: WatchedExpansionImportedPayload;
 };
 
 /**

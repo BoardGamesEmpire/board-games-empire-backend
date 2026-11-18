@@ -31,17 +31,17 @@ import type { UpdateEscalation } from '../update/update-escalation.types';
  * read share one shape.
  */
 export interface PluginProvenance {
+  readonly registrySlug: string | null;
   readonly sha256: PluginArtifactSha256;
   readonly url: string | null;
-  readonly registrySlug: string | null;
 }
 
 /** One consent decision captured at install time — `reason` is resolved to the server default locale. */
 export interface GrantedPermissionRecord {
-  readonly slug: string;
-  readonly required: boolean;
   readonly consentScope: PluginConsentScopeValue;
   readonly reason: string;
+  readonly required: boolean;
+  readonly slug: string;
 }
 
 /**
@@ -49,9 +49,9 @@ export interface GrantedPermissionRecord {
  * Shape intentionally small; #84 owns the full report and may extend this.
  */
 export interface NpmAuditFinding {
+  readonly advisoryUrl: string;
   readonly module: string;
   readonly severity: 'low' | 'moderate' | 'high' | 'critical';
-  readonly advisoryUrl: string;
 }
 
 type PluginInstalledSnapshot = Readonly<Pick<Plugin, 'id' | 'slug' | 'version' | 'category' | 'scope' | 'enabled'>>;
@@ -65,14 +65,6 @@ type PluginInstalledSnapshot = Readonly<Pick<Plugin, 'id' | 'slug' | 'version' |
  * Reads stay flat (`event.provenance`), so consumers are unaffected.
  */
 export interface PluginInstallAuditContext {
-  /** Ingress provenance — context for the lifecycle table, not row state. */
-  readonly provenance: PluginProvenance;
-  /** Server-consentable permissions granted by the installing admin. */
-  readonly grantedPermissions: readonly GrantedPermissionRecord[];
-  /** npm advisory findings acknowledged at install, `null` when no lockfile was present (#84). */
-  readonly auditFindings: readonly NpmAuditFinding[] | null;
-  /** Everything static analysis reported: warnings, deep-scan advisories, and any overridden forbidden imports. */
-  readonly staticAnalysis: readonly StaticAnalysisFinding[];
   /**
    * Forbidden import specifiers the installing admin explicitly accepted to
    * get past the static-analysis gate — empty on an ordinary install.
@@ -86,6 +78,17 @@ export interface PluginInstallAuditContext {
    */
   readonly acknowledgedForbiddenImports: readonly string[];
   /**
+   * The `InstallAccept` consent act the install recorded (#1336), so the
+   * lifecycle row names the act that holds what the server admin was shown.
+   */
+  readonly actId: string;
+  /** npm advisory findings acknowledged at install, `null` when no lockfile was present (#84). */
+  readonly auditFindings: readonly NpmAuditFinding[] | null;
+  /** Server-consentable permissions granted by the installing admin. */
+  readonly grantedPermissions: readonly GrantedPermissionRecord[];
+  /** Ingress provenance — context for the lifecycle table, not row state. */
+  readonly provenance: PluginProvenance;
+  /**
    * A reinstall over a tombstone found the retained server config invalid
    * under the NEW manifest's `config.schema` and reset it to `{}` —
    * "did my old settings survive the reinstall" is answered here, not
@@ -93,11 +96,8 @@ export interface PluginInstallAuditContext {
    * so pre-reinstall construction sites need no churn.
    */
   readonly retainedConfigReset?: boolean;
-  /**
-   * The `InstallAccept` consent act the install recorded (#1336), so the
-   * lifecycle row names the act that holds what the server admin was shown.
-   */
-  readonly actId: string;
+  /** Everything static analysis reported: warnings, deep-scan advisories, and any overridden forbidden imports. */
+  readonly staticAnalysis: readonly StaticAnalysisFinding[];
 }
 
 export class PluginInstalledEvent extends MutationEvent<Plugin> {
@@ -214,8 +214,8 @@ export class PluginConfigUpdatedEvent extends MutationEvent<Plugin> {
  * the change: a switch-off or a config write through the unit lifecycle.
  */
 export interface PluginConsentActEventContext {
-  readonly manifestVersion: string;
   readonly actId: string;
+  readonly manifestVersion: string;
 }
 
 type HouseholdPluginConfigSnapshot = Readonly<Pick<HouseholdPlugin, 'id' | 'householdId' | 'pluginId' | 'config'>>;
@@ -500,10 +500,10 @@ type PluginGrantSnapshot = Readonly<
  * with the consent act that wrote the decision.
  */
 export interface PluginGrantEventContext {
-  /** Version of the manifest the decision was made against. */
-  readonly manifestVersion: string;
   /** The consent act that wrote the decision; every decision has one, the Server unit's included (#1336). */
   readonly actId: string;
+  /** Version of the manifest the decision was made against. */
+  readonly manifestVersion: string;
 }
 
 /**

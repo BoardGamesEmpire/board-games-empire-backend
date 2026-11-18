@@ -3,9 +3,9 @@ import { AuditExclude, Auditable, MutationEvent } from './mutation-event';
 
 interface SamplePayload {
   id: string;
-  title: string;
   passwordHash: string;
   secretKey: string;
+  title: string;
 }
 
 abstract class SampleEvent extends MutationEvent<SamplePayload> {

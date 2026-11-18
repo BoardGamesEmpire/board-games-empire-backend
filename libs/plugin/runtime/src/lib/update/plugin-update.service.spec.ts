@@ -206,7 +206,7 @@ describe('PluginUpdateService', () => {
    * the plugin's kept row the one answering both lookups instead.
    */
   const dataGatewayNameHeld = ({ ownRow = false } = {}): void => {
-    db.dataGateway.findUnique.mockImplementation((({ where }: { where: { pluginId?: string; name?: string } }) => {
+    db.dataGateway.findUnique.mockImplementation((({ where }: { where: { name?: string; pluginId?: string } }) => {
       if (where.pluginId !== undefined) {
         return Promise.resolve(ownRow ? { id: 'gw-own' } : null);
       }
@@ -274,7 +274,7 @@ describe('PluginUpdateService', () => {
     // answers with `pluginConfigLockRow` (settable per test, defaults to an
     // empty retained config). Activation takes no raw lock on the grants
     // table (#1336), so any other raw query is a failure.
-    let pluginConfigLockRow: { config: unknown; category: PluginCategory } = {
+    let pluginConfigLockRow: { category: PluginCategory; config: unknown } = {
       config: {},
       category: PluginCategory.FeedbackSink,
     };
@@ -3412,7 +3412,7 @@ describe('PluginUpdateService', () => {
         // Routed by the read's scope, as the database would answer it, so the
         // read and the approval below see the same rows.
         db.pluginGrant.findMany.mockImplementation(((args: {
-          where: { scopeType?: PluginGrantScope; scopeId?: string | { in: string[] } };
+          where: { scopeId?: string | { in: string[] }; scopeType?: PluginGrantScope };
         }) => {
           const all = [makeGrant(), preConsent];
           const { scopeType, scopeId } = args.where;

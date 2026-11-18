@@ -2,9 +2,9 @@ import { countMutations, type ReconcilePlan } from './catalog-reconcile-plan';
 import { describeConflicts, describeDrift, describeWrites, summarizePlan } from './catalog-reconciler';
 
 export interface PlanReport {
-  readonly lines: readonly string[];
   /** 0 converged, 1 a reconcile would write, 2 a reconcile would refuse. */
   readonly exitCode: 0 | 1 | 2;
+  readonly lines: readonly string[];
 }
 
 /** Two spaces, the one indent of every list `db:plan` prints, the ledger half's included. */

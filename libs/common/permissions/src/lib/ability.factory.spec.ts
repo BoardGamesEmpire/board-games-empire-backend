@@ -1583,7 +1583,7 @@ describe('AbilityFactory', () => {
     const event = (
       id: string,
       createdById: string,
-      { householdId = null, attendees = [] }: { householdId?: string | null; attendees?: [string, SystemRole][] } = {},
+      { householdId = null, attendees = [] }: { attendees?: [string, SystemRole][]; householdId?: string | null } = {},
     ) =>
       subject(ResourceType.Event, {
         id,
@@ -1666,7 +1666,7 @@ describe('AbilityFactory', () => {
       );
     // Offering the member role, as the create route's instance always names
     // the role an invite offers; an admin is refused the admin offer (#168).
-    const inviteInto = (householdId: string, members: { userId: string; role: string }[]) =>
+    const inviteInto = (householdId: string, members: { role: string; userId: string }[]) =>
       subject(ResourceType.Invite, {
         householdId,
         role: { name: SystemRole.HouseholdMember },
@@ -1748,10 +1748,10 @@ describe('AbilityFactory', () => {
         offers = SystemRole.HouseholdMember,
         householdId = 'hh-1',
       }: {
-        policy: MemberInvitePolicy;
+        householdId?: string;
         needsApproval: boolean;
         offers?: SystemRole;
-        householdId?: string;
+        policy: MemberInvitePolicy;
       },
     ) =>
       subject(ResourceType.Invite, {

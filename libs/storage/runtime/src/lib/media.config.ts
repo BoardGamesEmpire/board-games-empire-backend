@@ -43,6 +43,11 @@ export type MountCheckMode = 'auto' | 'st_dev' | 'sentinel' | 'off';
 
 export interface MediaConfig {
   /**
+   * Absolute base URL the streaming controller is reachable at (no trailing slash).
+   */
+  baseUrl: string;
+
+  /**
    * Active storage driver slug. v1 supports 'localdisk' only.
    */
   driver: string;
@@ -51,19 +56,6 @@ export interface MediaConfig {
    * Filesystem root for LocalDiskDriver.
    */
   localDiskRoot: string;
-
-  /** Default TTL for minted signed GET URLs. Keep short — leaked URLs expire fast. */
-  signedUrlTtlSeconds: number;
-
-  /**
-   * Absolute base URL the streaming controller is reachable at (no trailing slash).
-   */
-  baseUrl: string;
-
-  /**
-   * Path of the internal streaming route signed GET URLs point at.
-   */
-  streamPath: string;
 
   /**
    * Runtime unmount-detection strategy for LocalDiskDriver. Boot-time only — the
@@ -74,10 +66,11 @@ export interface MediaConfig {
   mountCheck: MountCheckMode;
 
   /**
-   * Sentinel marker filename, resolved under `localDiskRoot`. Used only when
-   * `mountCheck` is `sentinel`.
+   * Number of consecutive probe timeouts after which the process self-exits so
+   * the orchestrator restarts it and clears the (likely exhausted) libuv
+   * threadpool. `0` disables the watchdog. See the runtime README.
    */
-  sentinelFile: string;
+  probeTimeoutFatalThreshold: number;
 
   /**
    * Upper bound (ms) on a single storage reachability probe. A probe that
@@ -87,11 +80,18 @@ export interface MediaConfig {
   probeTimeoutMs: number;
 
   /**
-   * Number of consecutive probe timeouts after which the process self-exits so
-   * the orchestrator restarts it and clears the (likely exhausted) libuv
-   * threadpool. `0` disables the watchdog. See the runtime README.
+   * Sentinel marker filename, resolved under `localDiskRoot`. Used only when
+   * `mountCheck` is `sentinel`.
    */
-  probeTimeoutFatalThreshold: number;
+  sentinelFile: string;
+
+  /** Default TTL for minted signed GET URLs. Keep short — leaked URLs expire fast. */
+  signedUrlTtlSeconds: number;
+
+  /**
+   * Path of the internal streaming route signed GET URLs point at.
+   */
+  streamPath: string;
 }
 
 export const mediaConfig = registerAs('media', () =>

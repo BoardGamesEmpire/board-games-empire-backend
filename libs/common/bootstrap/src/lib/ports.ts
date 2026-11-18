@@ -88,8 +88,8 @@ export interface SeedsPhase {
  */
 export interface DataMigrationsSummary {
   readonly applied: readonly string[];
-  readonly unknown: readonly string[];
   readonly cachesFlushed: boolean;
+  readonly unknown: readonly string[];
 }
 
 /**
@@ -114,8 +114,8 @@ export interface DataMigrationsPhase {
  * is over, used or not.
  */
 export interface CacheFlush {
-  flush(): Promise<number>;
   close(): Promise<void>;
+  flush(): Promise<number>;
 }
 
 /**

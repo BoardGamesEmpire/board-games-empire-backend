@@ -16,11 +16,11 @@ import { SET_AUTH_TOKEN_HEADER, SIGN_IN_ANONYMOUS_PATH } from './signup.js';
  * rather than against itself.
  */
 interface FakeWorld {
-  readonly prisma: PrismaClient;
-  readonly fetchFn: typeof fetch;
-  signupCount(): number;
-  ownerCount(): number;
   clearUsers(): void;
+  readonly fetchFn: typeof fetch;
+  ownerCount(): number;
+  readonly prisma: PrismaClient;
+  signupCount(): number;
 }
 
 /** Prisma's "at least one related row" filter, `{ some: {} }`, and nothing narrower. */
@@ -65,6 +65,9 @@ function matchesWhere(row: object, where: Readonly<Record<string, unknown>>): bo
 
 function createFakeWorld(
   options: {
+    anonymousRoles?: readonly SystemRole[];
+    firstHumanRoles?: readonly SystemRole[];
+    laterHumanRoles?: readonly SystemRole[];
     preexistingHumans?: number;
     // Rows already in the database, for the cases a plain human cannot
     // arrange: a leftover guest, a NULL anonymous flag. Like the humans above,
@@ -73,9 +76,6 @@ function createFakeWorld(
     // Human rows that exist but that provisioning has not reached yet: a
     // signup whose row committed and whose handler has not run (#430).
     unprovisionedHumans?: number;
-    firstHumanRoles?: readonly SystemRole[];
-    laterHumanRoles?: readonly SystemRole[];
-    anonymousRoles?: readonly SystemRole[];
   } = {},
 ): FakeWorld {
   // What "provisioning" grants. Both branches are overridable so a spec can
@@ -140,7 +140,7 @@ function createFakeWorld(
       });
     }
 
-    const body = JSON.parse(String(init?.body)) as { name: string; email: string };
+    const body = JSON.parse(String(init?.body)) as { email: string; name: string };
     signups += 1;
 
     const user = makeUser({ id: `usr_${signups}`, username: body.name, email: body.email });

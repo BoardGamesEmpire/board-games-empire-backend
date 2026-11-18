@@ -314,7 +314,7 @@ describe('P2002 payload shape (#298 characterization)', () => {
       );
     }
 
-    const indexes = await db.client.$queryRaw<{ name: string; isPrimary: boolean }[]>`
+    const indexes = await db.client.$queryRaw<{ isPrimary: boolean; name: string }[]>`
       SELECT i.relname::text AS name, ix.indisprimary AS "isPrimary"
       FROM pg_index ix
       JOIN pg_class i ON i.oid = ix.indexrelid
@@ -379,7 +379,7 @@ describe('P2002 payload shape (#298 characterization)', () => {
 
     // One row per (index, column). `indkey` is the ordered column list, so
     // `attnum = ANY(indkey)` expands a composite rule into its members.
-    const columns = await db.client.$queryRaw<{ index: string; column: string }[]>`
+    const columns = await db.client.$queryRaw<{ column: string; index: string }[]>`
       SELECT i.relname::text AS index, a.attname::text AS column
       FROM pg_index ix
       JOIN pg_class i ON i.oid = ix.indexrelid

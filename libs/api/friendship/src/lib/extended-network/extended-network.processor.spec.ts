@@ -15,7 +15,7 @@ describe('ExtendedNetworkProcessor (#497)', () => {
   const processor = new ExtendedNetworkProcessor(extendedNetwork as unknown as ExtendedNetworkService);
 
   const meta = { actor: { kind: 'system', reason: 'extended-network-rebuild' }, correlationId: 'c-1' };
-  let job: { updateData: jest.Mock; moveToDelayed: jest.Mock };
+  let job: { moveToDelayed: jest.Mock; updateData: jest.Mock };
 
   const run = (name: string, data: ExtendedNetworkJob) =>
     (processor as unknown as { processJob: (job: Job<JobData>, token?: string) => Promise<unknown> }).processJob(

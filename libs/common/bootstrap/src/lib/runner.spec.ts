@@ -1024,7 +1024,7 @@ describe('the data-migrations phase', () => {
   /** Records the order the DML phases ran in, shared with the seeder built beside it. */
   function orderedPhases(
     events: string[],
-    dataMigrations: { applied?: readonly string[]; unknown?: readonly string[]; error?: Error } = {},
+    dataMigrations: { applied?: readonly string[]; error?: Error; unknown?: readonly string[] } = {},
   ) {
     const seeder: SeedsPhase = {
       run: async () => {

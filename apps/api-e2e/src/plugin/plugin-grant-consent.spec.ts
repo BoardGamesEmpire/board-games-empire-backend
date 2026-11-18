@@ -156,7 +156,7 @@ describe('plugin consent acts + consent surface (#322, #1150, #1336)', () => {
   const seedServerDecision = async (
     plugin: Plugin,
     permissionSlug: string,
-    decision: { readonly status: PluginGrantStatus; readonly decidedRiskLevel: RiskLevel; readonly decidedAt: Date },
+    decision: { readonly decidedAt: Date; readonly decidedRiskLevel: RiskLevel; readonly status: PluginGrantStatus },
   ) => {
     const act = await db.client.pluginConsentAct.create({
       data: {
@@ -654,7 +654,7 @@ describe('plugin consent acts + consent surface (#322, #1150, #1336)', () => {
       );
 
       const response = await readHouseholdConsent(ownerA, fixtureA.household.id, plugin.slug).expect(200);
-      const checks: { slug: string; decision: string; decidableByUnit: boolean }[] = response.body.presentation.checks;
+      const checks: { decidableByUnit: boolean; decision: string; slug: string }[] = response.body.presentation.checks;
       const household = checks.find((check) => check.slug === 'read:game:public');
       expect(household).toMatchObject({ decision: 'denied', decidableByUnit: true });
       // A SERVER check from the household viewpoint is not per-unit: the
@@ -683,7 +683,7 @@ describe('plugin consent acts + consent surface (#322, #1150, #1336)', () => {
       await switchOnUser(user, plugin.slug, { 'read:game_collection:public': PluginGrantStatus.Granted }, 200);
 
       const response = await readUserConsent(user, plugin.slug).expect(200);
-      const checks: { slug: string; decision: string }[] = response.body.presentation.checks;
+      const checks: { decision: string; slug: string }[] = response.body.presentation.checks;
       expect(checks.find((check) => check.slug === 'read:game_collection:public')).toMatchObject({
         decision: 'granted',
         decidableByUnit: true,

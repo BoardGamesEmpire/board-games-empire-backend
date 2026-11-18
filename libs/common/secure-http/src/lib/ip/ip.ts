@@ -8,15 +8,15 @@ export type IpFamily = 4 | 6;
  * representation (4 bytes for IPv4, 16 for IPv6) used by CIDR matching.
  */
 export interface ParsedIp {
-  family: IpFamily;
+  /** Canonical bytes. Length 4 for IPv4, 16 for IPv6. */
+  bytes: Uint8Array;
 
   /**
    * Original string form, lower-cased. IPv4 addresses are dot-quad; IPv6 is canonical compact form.
    */
   canonical: string;
 
-  /** Canonical bytes. Length 4 for IPv4, 16 for IPv6. */
-  bytes: Uint8Array;
+  family: IpFamily;
 
   /**
    * True when this IP was an IPv4-mapped IPv6 (`::ffff:x.x.x.x`) that the

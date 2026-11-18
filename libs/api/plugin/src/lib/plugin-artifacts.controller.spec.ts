@@ -89,7 +89,7 @@ const UPLOADED = { path: '/plugins/.incoming/x.tgz', size: 4096, sha256: 'b'.rep
 
 describe('PluginArtifactsController (#1094)', () => {
   let controller: PluginArtifactsController;
-  let receiver: { receiveByLink: jest.Mock; receiveUpload: jest.Mock; read: jest.Mock };
+  let receiver: { read: jest.Mock; receiveByLink: jest.Mock; receiveUpload: jest.Mock };
   let installer: { install: jest.Mock };
   let inventory: jest.Mocked<Pick<PluginInventoryService, 'getBySlug' | 'existsUnderCeiling'>>;
   let auditContext: jest.Mocked<Pick<AuditContextService, 'getLocale'>>;

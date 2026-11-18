@@ -2,7 +2,7 @@ import { isAPIError } from 'better-auth/api';
 import { createIdTokenGate, SIGN_IN_PROVIDER_ID_TOKEN_REFUSED } from './id-token-gate';
 
 /** What a refusal carries on the wire, read off the thrown `APIError`. */
-function refusalOf(attempt: () => void): { status: number; code?: string; message?: string } | undefined {
+function refusalOf(attempt: () => void): { code?: string; message?: string; status: number } | undefined {
   try {
     attempt();
   } catch (error) {

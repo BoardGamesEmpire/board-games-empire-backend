@@ -483,7 +483,7 @@ describe('PluginInstallerService', () => {
       await service.install(input({ locale: 'fr' }));
 
       const [[{ data }]] = db.pluginConsentAct.create.mock.calls as unknown as [
-        [{ data: { presentation: { locale: string; checks: { usedFallback: boolean }[] } } }],
+        [{ data: { presentation: { checks: { usedFallback: boolean }[]; locale: string } } }],
       ];
       expect(data.presentation.locale).toBe('fr');
       // The fixture's reasons are English only, so each fell back.
@@ -1208,8 +1208,8 @@ describe('PluginInstallerService', () => {
 
   describe('the DataGateway row of a data-gateway plugin', () => {
     /** The rows the unique lookups find: by the plugin that owns one, and by the name one holds. */
-    const dataGatewayRows = (found: { readonly byPluginId?: string; readonly byName?: string }): void => {
-      db.dataGateway.findUnique.mockImplementation(((args: { where: { pluginId?: string; name?: string } }) => {
+    const dataGatewayRows = (found: { readonly byName?: string; readonly byPluginId?: string }): void => {
+      db.dataGateway.findUnique.mockImplementation(((args: { where: { name?: string; pluginId?: string } }) => {
         const id = args.where.pluginId !== undefined ? found.byPluginId : found.byName;
 
         return Promise.resolve(id === undefined ? null : { id });

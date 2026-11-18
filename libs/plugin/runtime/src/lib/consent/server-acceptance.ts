@@ -13,12 +13,12 @@ import type {
 export interface ServerAcceptanceInput {
   /** The server-scope requested permissions this acceptance grants, in manifest order. */
   readonly accepted: readonly NormalizedPermissionRequest[];
+  readonly defaultLocale: string;
+  readonly locale: string;
+  readonly riskOf: (check: NormalizedPermissionRequest) => RiskLevel;
   /** Every server-scope requested permission of the manifest shown, in manifest order. */
   readonly shown: readonly NormalizedPermissionRequest[];
-  readonly riskOf: (check: NormalizedPermissionRequest) => RiskLevel;
   readonly source: ConsentManifestSource;
-  readonly locale: string;
-  readonly defaultLocale: string;
 }
 
 export interface ServerAcceptance {
@@ -69,10 +69,10 @@ export function planServerAcceptance(input: ServerAcceptanceInput): ServerAccept
 }
 
 export interface ServerApprovalInput {
-  /** Every requested permission of the staged manifest, in manifest order; the rule reads the server-scope ones. */
-  readonly requested: readonly NormalizedPermissionRequest[];
   /** The Server unit's consent decisions on record for the plugin. */
   readonly decisions: readonly ConsentActDecision[];
+  /** Every requested permission of the staged manifest, in manifest order; the rule reads the server-scope ones. */
+  readonly requested: readonly NormalizedPermissionRequest[];
   /** Today's catalog risk of a requested permission. */
   readonly riskOf: (check: NormalizedPermissionRequest) => RiskLevel;
 }

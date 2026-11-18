@@ -241,7 +241,7 @@ describe('GameService', () => {
     // Reads as Prisma's cursor does: `skip` games on from the cursor's game,
     // or from the first game without one.
     const walkOver = (ids: string[]) =>
-      (async (args: { skip: number; cursor?: { id: string } }) => {
+      (async (args: { cursor?: { id: string }; skip: number }) => {
         const id = ids[(args.cursor ? ids.indexOf(args.cursor.id) : 0) + args.skip];
 
         return id === undefined ? null : { id };
@@ -297,7 +297,7 @@ describe('GameService', () => {
     it('walks the offsets in id order, each read starting from the game the last one found', async () => {
       await sampleOf(10);
 
-      const calls = tx.game.findFirst.mock.calls as [{ skip: number; cursor?: { id: string } }][];
+      const calls = tx.game.findFirst.mock.calls as [{ cursor?: { id: string }; skip: number }][];
       const found = (await Promise.all(tx.game.findFirst.mock.results.map((result) => result.value))) as {
         id: string;
       }[];

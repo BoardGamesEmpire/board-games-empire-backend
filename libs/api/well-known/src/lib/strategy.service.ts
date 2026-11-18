@@ -15,9 +15,9 @@ import { OidcStrategyDto } from './dto/oidc-strategy.dto';
  * The client id and secret are not part of it, so they are never in reach.
  */
 interface ListedSignInProvider {
-  readonly id: string;
-  readonly displayName: string;
   readonly discoveryUrl: string;
+  readonly displayName: string;
+  readonly id: string;
 }
 
 /** The two settings that decide what discovery says about password resets (#654). */

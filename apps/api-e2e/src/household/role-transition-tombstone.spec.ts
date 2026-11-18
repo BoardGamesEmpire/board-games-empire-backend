@@ -66,9 +66,9 @@ describe('role transitions racing a soft-delete (#386)', () => {
 
   interface Arrangement {
     readonly householdId: string;
-    readonly owner: SessionActor;
     readonly member: SessionActor;
     readonly memberId: string;
+    readonly owner: SessionActor;
   }
 
   /** An owner and one plain member, which is all any of the four needs. */

@@ -43,9 +43,9 @@ export class DataGatewayThrottledError extends Error {
  * that isn't usable is no time given (#925).
  */
 export function throttledError(answer: {
-  status: proto.ResultStatus;
-  retryAfterMs?: number;
   game?: unknown;
+  retryAfterMs?: number;
+  status: proto.ResultStatus;
 }): DataGatewayThrottledError | undefined {
   if (answer.status !== proto.ResultStatus.RESULT_STATUS_RATE_LIMITED || answer.game) {
     return undefined;

@@ -50,8 +50,8 @@ export function catalogPermission(slug: PermissionSlug): Permission {
 
 /** A subject and conditions for a rule row, to spread into `makePermission`. */
 interface UnitRule {
-  readonly subject: string;
   readonly conditions: Prisma.JsonObject;
+  readonly subject: string;
 }
 
 /**

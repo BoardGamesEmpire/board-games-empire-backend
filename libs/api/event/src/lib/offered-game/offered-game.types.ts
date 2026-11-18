@@ -15,8 +15,8 @@ type EntryPlatformGame = EntryCollection['platformGame'];
  * "none that you can see" never reads as "none".
  */
 export interface OfferedGameSupplies {
-  nominations: number | null;
   lineup: number | null;
+  nominations: number | null;
 }
 
 /**
@@ -29,13 +29,13 @@ export type OfferedGame = Omit<OfferedGameEntry, 'collection'> & {
       game: EntryPlatformGame['game'] & { baseGames: ExpansionLink[] };
     };
   };
-  supplies: OfferedGameSupplies;
   /**
    * Whether the game is on the acting user's wishlist (#1241); `null` for an
    * actor with no wishlist they can read, so "none that you can see" never
    * reads as "not wanted".
    */
   onWishlist: boolean | null;
+  supplies: OfferedGameSupplies;
 };
 
 /** An offered game's attendee: the one summary every record that names an attendee serves. */

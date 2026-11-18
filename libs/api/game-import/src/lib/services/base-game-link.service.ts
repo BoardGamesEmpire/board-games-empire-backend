@@ -2,20 +2,20 @@ import { ContentType, DatabaseService, ExpansionType, isPrismaUniqueConstraintEr
 import { Injectable, Logger } from '@nestjs/common';
 
 export interface LinkBaseGamesInput {
-  /** The game just imported. */
-  gameId: string;
-  gatewayId: string;
-  /** The game's external id on `gatewayId`. */
-  externalId: string;
-  /** The game's content type, as stored. */
-  contentType: ContentType;
   /** Every base game its DataGateway names for it, primary first. */
   baseExternalIds: string[];
+  /** The game's content type, as stored. */
+  contentType: ContentType;
+  /** The game's external id on `gatewayId`. */
+  externalId: string;
   /**
    * The requested game of the import batch, for an expansion chosen with it.
    * Linked only when the DataGateway names no base game (#971).
    */
   fallbackBaseExternalId?: string;
+  /** The game just imported. */
+  gameId: string;
+  gatewayId: string;
 }
 
 export interface LinkBaseGamesResult {

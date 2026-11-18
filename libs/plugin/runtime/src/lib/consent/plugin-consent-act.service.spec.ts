@@ -142,11 +142,11 @@ describe('PluginConsentActService', () => {
     });
 
   interface ClaimRow {
-    readonly uninstalled_at: Date | null;
-    readonly scope: PluginScope;
     readonly installed_sha256: string;
     readonly pending_sha256: string | null;
     readonly pending_staging_id: string | null;
+    readonly scope: PluginScope;
+    readonly uninstalled_at: Date | null;
   }
 
   const claimRow = (overrides: Partial<ClaimRow> = {}): ClaimRow => ({

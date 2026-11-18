@@ -64,11 +64,11 @@ describe('PluginConsentPresentationService', () => {
   const pluginRow = (
     overrides: Partial<{
       enabled: boolean;
-      uninstalledAt: Date | null;
       manifestJson: unknown;
-      pendingVersion: string | null;
       pendingManifestJson: unknown;
       pendingSha256: string | null;
+      pendingVersion: string | null;
+      uninstalledAt: Date | null;
     }> = {},
   ) => ({
     id: 'plg_1',
@@ -85,10 +85,10 @@ describe('PluginConsentPresentationService', () => {
   });
 
   const grantRow = (input: {
-    slug: string;
-    scopeType?: PluginGrantScope;
-    status?: PluginGrantStatus;
     decidedRiskLevel?: RiskLevel;
+    scopeType?: PluginGrantScope;
+    slug: string;
+    status?: PluginGrantStatus;
   }) => ({
     permissionSlug: input.slug,
     scopeType: input.scopeType ?? PluginGrantScope.Household,

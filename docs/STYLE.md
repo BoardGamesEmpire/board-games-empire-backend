@@ -58,3 +58,43 @@ const view = toView(row);
 `{ blankLine: 'always', prev: 'block-like', next: '*' }`, with autofix (#1319).
 `block-like` also matches an immediately invoked function statement. Prettier
 keeps blank lines, so the two don't conflict.
+
+## Members in alphabetical order
+
+The members of an interface or an object type literal are in alphabetical
+order by name: natural order and case-insensitive, so `field2` comes before
+`field10`. There are no exceptions such as `id` first. A member's doc comment
+moves with it.
+
+```ts
+// no
+interface DataGatewaySectionView {
+  lastLoadedAt: Date | null;
+  capability: DataGatewayCapability;
+  failure: SectionFailure | null;
+}
+
+// yes
+interface DataGatewaySectionView {
+  capability: DataGatewayCapability;
+  failure: SectionFailure | null;
+  lastLoadedAt: Date | null;
+}
+```
+
+Overloads of one name keep their order, and call and construct signatures stay
+where they are, because overload order decides which signature TypeScript
+picks.
+
+Not in scope:
+
+- **Class properties, DTOs included.** Their order reaches runtime: some
+  initializers read `this.x`, and a DTO's property order sets the OpenAPI
+  property order and the order of its validation messages.
+- **Enums.** A numeric enum's values follow its member order.
+- **Object literals.** These are values, not field declarations.
+
+**Enforced by:** `perfectionist/sort-interfaces` and
+`perfectionist/sort-object-types`, with autofix, using the root config's
+`sortedMemberOptions` (#1374). Blank lines don't split the sort, and the sort
+leaves them alone; the blank lines between members are set separately.

@@ -40,9 +40,9 @@ const toHouseholdWaiting = () => created({ householdId: HOUSEHOLD_ID, approvedAt
 /** What the listener reads of the stored share: the game, the sharer's name and the household. */
 interface ShareRow {
   approvedAt: Date | null;
-  game: { title: string; deletedAt: Date | null };
-  sharedBy: { username: string; profile: { displayName: string | null } | null } | null;
-  household: { name: string; deletedAt: Date | null } | null;
+  game: { deletedAt: Date | null; title: string };
+  household: { deletedAt: Date | null; name: string } | null;
+  sharedBy: { profile: { displayName: string | null } | null; username: string } | null;
 }
 
 const RILEY = { username: 'riley', profile: { displayName: 'Riley' } };

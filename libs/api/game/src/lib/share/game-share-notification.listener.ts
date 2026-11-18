@@ -34,8 +34,8 @@ const HOUSEHOLD_AUTHORITY_ROLES: readonly SystemRole[] = [SystemRole.HouseholdOw
 
 /** A stored share whose game and sharer still exist, as a notification names it. */
 interface LiveShare {
+  readonly approvedAt: Date | null;
   readonly gameTitle: string;
-  readonly sharerName: string;
   /**
    * The household the share is into, while it is not deleted. Null means
    * either a share to a user or a household that is gone, so only
@@ -43,7 +43,7 @@ interface LiveShare {
    * it as gone.
    */
   readonly household: { readonly name: string } | null;
-  readonly approvedAt: Date | null;
+  readonly sharerName: string;
 }
 
 /**

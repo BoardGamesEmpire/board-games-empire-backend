@@ -1,11 +1,11 @@
 import type { ResourceType } from '@bge/database';
 
 export interface MediaContributionRejectedEvent {
+  contributedById: string;
   contributionId: string;
   mediaObjectId: string;
-  contributedById: string;
-  subjectType: ResourceType;
-  subjectId: string;
-  rejectionReason: string | null;
   reclaimDeadline: string | null;
+  rejectionReason: string | null;
+  subjectId: string;
+  subjectType: ResourceType;
 }

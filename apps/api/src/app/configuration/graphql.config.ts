@@ -5,10 +5,10 @@ import * as path from 'node:path';
 import process from 'node:process';
 
 export interface GraphQLConfig {
+  autoSchemaFile: boolean | string;
   debug: boolean;
   playground: boolean;
   sortSchema: boolean;
-  autoSchemaFile: boolean | string;
 }
 
 export default registerAs('graphql', () =>

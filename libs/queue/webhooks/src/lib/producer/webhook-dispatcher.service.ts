@@ -32,8 +32,8 @@ import type { WebhookDeliveryJob } from '../interfaces/webhook-delivery-job.inte
 
 /** One matching webhook subscription, and the API key it was made through. */
 interface CandidateSubscription {
-  readonly id: string;
   readonly apiKeyId: string | null;
+  readonly id: string;
 }
 
 /**
@@ -42,8 +42,8 @@ interface CandidateSubscription {
  * they made webhook subscriptions through.
  */
 interface Subscriber {
-  readonly graph: UserWithRoles;
   ability?: AppAbility;
+  readonly graph: UserWithRoles;
 }
 
 /**

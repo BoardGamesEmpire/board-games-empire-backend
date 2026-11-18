@@ -4,10 +4,10 @@
  * `rolled_back_at` is a migration that began and never completed.
  */
 export interface AppliedMigrationRow {
-  readonly migration_name: string;
-  readonly started_at: Date;
   readonly finished_at: Date | null;
+  readonly migration_name: string;
   readonly rolled_back_at: Date | null;
+  readonly started_at: Date;
 }
 
 /**
@@ -33,14 +33,6 @@ export interface AppliedMigrationRow {
 export type MigrationStateKind = 'in-sync' | 'behind' | 'ahead' | 'diverged' | 'failed';
 
 export interface MigrationState {
-  readonly kind: MigrationStateKind;
-
-  /** Expected by this build, not finished in the database; apply order. */
-  readonly pending: readonly string[];
-
-  /** Finished in the database, unknown to this build. */
-  readonly unknown: readonly string[];
-
   /**
    * The unknown migrations applied by a run before the last run that applied
    * migrations this build knows: the history was rewritten (#1148). A subset
@@ -50,6 +42,14 @@ export interface MigrationState {
 
   /** Started, and neither finished nor rolled back. */
   readonly failed: readonly string[];
+
+  readonly kind: MigrationStateKind;
+
+  /** Expected by this build, not finished in the database; apply order. */
+  readonly pending: readonly string[];
+
+  /** Finished in the database, unknown to this build. */
+  readonly unknown: readonly string[];
 }
 
 /**

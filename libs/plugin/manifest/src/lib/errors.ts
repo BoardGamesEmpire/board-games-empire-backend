@@ -52,15 +52,15 @@ export enum ManifestWarningCode {
 
 export interface ManifestIssue {
   readonly code: ManifestErrorCode;
+  readonly message: string;
   /** JSON-pointer-ish path into the manifest document, e.g. `permissions.checks[2].reason.de`. */
   readonly path: string;
-  readonly message: string;
 }
 
 export interface ManifestWarning {
   readonly code: ManifestWarningCode;
-  readonly path: string;
   readonly message: string;
+  readonly path: string;
 }
 
 /**

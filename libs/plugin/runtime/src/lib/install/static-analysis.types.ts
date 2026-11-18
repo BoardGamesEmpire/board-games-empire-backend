@@ -40,18 +40,18 @@ export interface StaticAnalysisFinding {
   /** Path relative to the plugin root (or the descriptor filename for dependency findings). */
   readonly file: string;
   readonly kind: StaticAnalysisFindingKind;
+  readonly scanScope: StaticAnalysisScanScope;
+  readonly severity: StaticAnalysisSeverity;
   /** The matched specifier / package name; `null` where none exists (non-literal, read or parse failure). */
   readonly specifier: string | null;
-  readonly severity: StaticAnalysisSeverity;
-  readonly scanScope: StaticAnalysisScanScope;
 }
 
 export interface StaticAnalysisReport {
+  /** Files scanned by the opt-in deep pass; 0 when deep scan was off. */
+  readonly deepScannedFileCount: number;
   readonly findings: readonly StaticAnalysisFinding[];
   /** Files scanned by the default pass (plugin code, `node_modules` excluded). */
   readonly scannedFileCount: number;
-  /** Files scanned by the opt-in deep pass; 0 when deep scan was off. */
-  readonly deepScannedFileCount: number;
   /**
    * True when advisory findings were dropped at the cap below. Surfaced on
    * the install response so a truncated report never reads as a complete

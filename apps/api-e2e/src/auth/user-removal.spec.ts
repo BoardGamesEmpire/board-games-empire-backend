@@ -210,7 +210,7 @@ describe('removing a user', () => {
     // that cascades from one already in it. Bound to `db.schema`, not
     // `current_schema()`: raw SQL runs against the connection default, which
     // is not the schema under the `?schema=` escape hatch.
-    const rows = await db.client.$queryRaw<{ table: string; column: string }[]>`
+    const rows = await db.client.$queryRaw<{ column: string; table: string }[]>`
       WITH RECURSIVE doomed(oid) AS (
         SELECT users.oid
         FROM pg_class users

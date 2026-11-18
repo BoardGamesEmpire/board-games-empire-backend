@@ -432,7 +432,7 @@ export class EventAttendeeService {
         // unchanged and tell nobody (#802). An RSVP that lost a race to the
         // attendee's removal answers 404, as one arriving second would, so a
         // failed update after this read is the grant refusing it (#1064).
-        const [previous] = await tx.$queryRaw<{ status: EventParticipationStatus; removedAt: Date | null }[]>(
+        const [previous] = await tx.$queryRaw<{ removedAt: Date | null; status: EventParticipationStatus }[]>(
           Prisma.sql`SELECT status, removed_at AS "removedAt" FROM event_attendees WHERE id = ${attendeeId} FOR NO KEY UPDATE`,
         );
         assert(
@@ -606,7 +606,7 @@ export class EventAttendeeService {
     // `alreadyOffered` and writes nothing.
     const offered = (collectionId: string) => listedByCollection.get(collectionId)?.removedAt === null;
 
-    const judged: { collectionId: string; baseId?: string; refusal: OfferRefusal | null }[] = [];
+    const judged: { baseId?: string; collectionId: string; refusal: OfferRefusal | null }[] = [];
     for (const item of dto.items) {
       const game = collectionById.get(item.collectionId);
       const gameRefusal = offered(item.collectionId) ? null : judgeCollectionEntry(attendee, game);
@@ -634,7 +634,7 @@ export class EventAttendeeService {
     const refusedAtWrite = new Set<string>();
     const settled: (
       | { collectionId: string; refusal: OfferRefusal }
-      | { collectionId: string; outcome: 'added' | 'alreadyOffered'; entry: OfferedGameEntry }
+      | { collectionId: string; entry: OfferedGameEntry; outcome: 'added' | 'alreadyOffered' }
     )[] = [];
     for (const { collectionId, baseId, refusal } of judged) {
       const settledRefusal =
@@ -869,7 +869,7 @@ export class EventAttendeeService {
     collectionId: string,
     listed: (OfferedGameEntry & Pick<EventAttendeeGameList, 'collectionId' | 'removedAt'>) | undefined,
     initiatedAt: Date,
-  ): Promise<{ outcome: 'added' | 'alreadyOffered'; entry: OfferedGameEntry } | { refusal: OfferRefusal }> {
+  ): Promise<{ entry: OfferedGameEntry; outcome: 'added' | 'alreadyOffered' } | { refusal: OfferRefusal }> {
     if (listed && listed.removedAt === null) {
       const { id, attendeeId: listedBy, createdAt, collection } = listed;
 

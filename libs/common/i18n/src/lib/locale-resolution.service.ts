@@ -5,15 +5,15 @@ import { FALLBACK_LOCALE } from './locale.constants';
 import { SupportedLocalesService } from './supported-locales.service';
 
 export interface LocaleResolutionInput {
+  /** Raw `Accept-Language` header value, when the transport has one. */
+  readonly acceptLanguage?: string | null;
+
   /**
    * The acting user whose stored preference takes precedence. Any
    * userId-bearing actor qualifies (`user`, `anonymous`, `apiKey` — anonymous
    * users are real User rows and API keys act for their owner).
    */
   readonly userId?: string | null;
-
-  /** Raw `Accept-Language` header value, when the transport has one. */
-  readonly acceptLanguage?: string | null;
 }
 
 /**
@@ -48,7 +48,7 @@ export class LocaleResolutionService {
 
   private readonly logger = new Logger(LocaleResolutionService.name);
 
-  private readonly preferenceCache = new Map<string, { tag: string | null; expiresAt: number }>();
+  private readonly preferenceCache = new Map<string, { expiresAt: number; tag: string | null }>();
 
   constructor(
     private readonly db: DatabaseService,

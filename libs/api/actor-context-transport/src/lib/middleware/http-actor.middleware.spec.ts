@@ -22,7 +22,7 @@ type AuthMock = jest.Mocked<
 >;
 
 /** A key's owner as `findUserById` returns one; unbanned unless the test says otherwise. */
-const owner = (ban: { banned?: boolean; banExpires?: Date | null } = {}): AuthUser =>
+const owner = (ban: { banExpires?: Date | null; banned?: boolean } = {}): AuthUser =>
   ({ id: 'user-9', banned: false, banExpires: null, ...ban }) as unknown as AuthUser;
 
 const buildAuthMock = (): AuthMock =>
@@ -41,8 +41,8 @@ const buildResponse = (): Response => ({}) as unknown as Response;
 interface Captured {
   readonly actor: unknown;
   readonly correlationId: unknown;
-  readonly source: unknown;
   readonly nextArg: unknown;
+  readonly source: unknown;
 }
 
 describe('HttpActorMiddleware', () => {

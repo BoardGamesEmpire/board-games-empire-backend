@@ -75,25 +75,25 @@ export const LINEUP_GAME_SNAPSHOT_SELECT = {
 export type LineupGameSnapshot = Prisma.EventGameGetPayload<{ select: typeof LINEUP_GAME_SNAPSHOT_SELECT }>;
 
 interface NominationStatusChange {
-  id: string;
   from: NominationStatus;
+  id: string;
   to: NominationStatus;
 }
 
 /** What {@link syncSuppliedGames} changed, for the caller to emit once it commits. */
 export interface SuppliedGameChanges {
   paused: NominationStatusChange[];
-  resumed: NominationStatusChange[];
   removedGames: LineupGameSnapshot[];
+  resumed: NominationStatusChange[];
 }
 
 /** A game-list entry as a supply check reads it: whose it is, which game, and whether either was removed. */
 export interface LockedSupplier {
+  attendeeRemovedAt: Date | null;
+  entryRemovedAt: Date | null;
   eventId: string;
   platformGameId: string;
   status: EventParticipationStatus;
-  attendeeRemovedAt: Date | null;
-  entryRemovedAt: Date | null;
 }
 
 /**
@@ -250,7 +250,7 @@ export async function writeEventDates<T>(
   eventId: string,
   now: Date,
   write: () => Promise<T>,
-): Promise<{ written: T; removedGames: LineupGameSnapshot[] }> {
+): Promise<{ removedGames: LineupGameSnapshot[]; written: T }> {
   await tx.$queryRaw(Prisma.sql`SELECT id FROM events WHERE id = ${eventId} FOR NO KEY UPDATE`);
 
   const written = await write();

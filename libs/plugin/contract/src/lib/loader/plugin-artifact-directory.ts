@@ -34,15 +34,15 @@ export function parsePluginArtifactSha256(value: string): PluginArtifactSha256 |
  * `main` fallback — see `entrypoint-resolver.ts`).
  */
 export interface PluginArtifactDirectory {
-  readonly slug: string;
-  /** The artifact's SHA-256 (64 lowercase hex characters): the directory's name and its identity. */
-  readonly sha256: PluginArtifactSha256;
-  /** Absolute path to the artifact's directory. */
-  readonly rootDir: string;
   /** Absolute path to `manifest.json` (always at the root). */
   readonly manifestPath: string;
   /** Absolute path to `package.json` (always at the root). */
   readonly packageJsonPath: string;
+  /** Absolute path to the artifact's directory. */
+  readonly rootDir: string;
+  /** The artifact's SHA-256 (64 lowercase hex characters): the directory's name and its identity. */
+  readonly sha256: PluginArtifactSha256;
+  readonly slug: string;
 }
 
 export const PLUGIN_MANIFEST_FILENAME = 'manifest.json';

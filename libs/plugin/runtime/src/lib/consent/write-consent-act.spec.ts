@@ -137,9 +137,9 @@ describe('writeConsentAct', () => {
     const written = await write({ decisions });
 
     const upserts = db.pluginGrant.upsert.mock.calls.map(([args]) => args) as unknown as {
-      where: { pluginId_scopeType_scopeId_permissionSlug: Record<string, string> };
       create: Record<string, unknown>;
       update: Record<string, unknown>;
+      where: { pluginId_scopeType_scopeId_permissionSlug: Record<string, string> };
     }[];
 
     expect(upserts.map((upsert) => upsert.where.pluginId_scopeType_scopeId_permissionSlug.permissionSlug)).toEqual(

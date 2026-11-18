@@ -4,8 +4,8 @@ import { nestLoggerFromPino, type PinoLike } from './nest-logger';
 // context; `main.ts` owns a pino instance. This adapter is the bridge, and
 // what it must preserve is the context and the structured summary fields.
 
-function recorder(): PinoLike & { calls: { level: string; obj: unknown; msg: string | undefined }[] } {
-  const calls: { level: string; obj: unknown; msg: string | undefined }[] = [];
+function recorder(): PinoLike & { calls: { level: string; msg: string | undefined; obj: unknown }[] } {
+  const calls: { level: string; msg: string | undefined; obj: unknown }[] = [];
   const at = (level: string) => (obj: unknown, msg?: string) => void calls.push({ level, obj, msg });
   return {
     calls,

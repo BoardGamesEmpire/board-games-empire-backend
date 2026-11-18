@@ -18,7 +18,7 @@ const ALL_OPEN: SettingSwitches = {
 };
 
 /** What a refusal carries on the wire, read off the thrown `APIError`. */
-async function refusalOf(attempt: Promise<unknown>): Promise<{ status: number; code?: string; message?: string }> {
+async function refusalOf(attempt: Promise<unknown>): Promise<{ code?: string; message?: string; status: number }> {
   const error = await attempt.then(
     () => {
       throw new Error('expected a refusal, but the gate let the request through');

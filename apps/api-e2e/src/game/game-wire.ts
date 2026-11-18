@@ -49,8 +49,8 @@ export interface RandomGamesEnvelope {
 }
 
 export interface GamePoolSampleEnvelope {
-  readonly games: readonly GameWire[];
   readonly gameCount: number;
+  readonly games: readonly GameWire[];
 }
 
 const fail = envelopeFailure('apps/api-e2e/src/game/game-wire.ts');
@@ -218,7 +218,7 @@ export function listRowBaseGames(
 export function gameExpansionLinks(
   response: HttpResponseLike,
   request: RequestDescription,
-): { readonly expansions: readonly LinkedExpansionWire[]; readonly baseGames: readonly LinkedBaseGameWire[] } {
+): { readonly baseGames: readonly LinkedBaseGameWire[]; readonly expansions: readonly LinkedExpansionWire[] } {
   const { game } = gameEnvelope(response, request);
   const { expansions, baseGames } = game as unknown as Record<string, unknown>;
   if (!Array.isArray(expansions)) {

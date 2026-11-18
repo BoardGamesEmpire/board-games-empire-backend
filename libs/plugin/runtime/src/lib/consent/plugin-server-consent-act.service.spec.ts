@@ -108,8 +108,8 @@ describe('PluginServerConsentActService', () => {
   });
 
   interface ClaimRow {
-    readonly uninstalled_at: Date | null;
     readonly installed_sha256: string;
+    readonly uninstalled_at: Date | null;
   }
 
   const serverRow = (permissionSlug: string, status: PluginGrantStatus, decidedRiskLevel: RiskLevel): PluginGrant => ({
@@ -370,9 +370,9 @@ describe('PluginServerConsentActService', () => {
       });
 
       const upserts = db.pluginGrant.upsert.mock.calls.map(([args]) => args) as unknown as {
-        where: Record<string, unknown>;
         create: Record<string, unknown>;
         update: Record<string, unknown>;
+        where: Record<string, unknown>;
       }[];
       expect(upserts).toHaveLength(2);
 

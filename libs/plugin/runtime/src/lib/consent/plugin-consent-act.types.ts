@@ -21,9 +21,9 @@ export type ConsentActKind = 'SwitchOn' | 'Toggle' | 'Review';
 export interface ConsentActAnswer {
   /** Canonical slug. */
   readonly permissionSlug: string;
-  readonly status: PluginGrantStatus;
   /** The risk the consent surface showed for this requested permission. */
   readonly riskLevel: RiskLevel;
+  readonly status: PluginGrantStatus;
 }
 
 /**
@@ -38,13 +38,13 @@ export interface ShownRisk {
 }
 
 export interface ConsentActPresentationCheck {
-  readonly slug: string;
-  readonly required: boolean;
   readonly feature: string | null;
-  readonly riskLevel: RiskLevel | null;
-  readonly reason: string;
-  readonly usedFallback: boolean;
   readonly outcome: 'granted' | 'refused' | 'unanswered';
+  readonly reason: string;
+  readonly required: boolean;
+  readonly riskLevel: RiskLevel | null;
+  readonly slug: string;
+  readonly usedFallback: boolean;
 }
 
 /**
@@ -52,23 +52,23 @@ export interface ConsentActPresentationCheck {
  * permission the unit itself decides under the manifest the act named.
  */
 export interface ConsentActPresentation {
+  /** Manifest order. */
+  readonly checks: readonly ConsentActPresentationCheck[];
   readonly locale: string;
   /** Which manifest the act's sha named: the installed one or the staged update. */
   readonly source: ConsentManifestSource;
-  /** Manifest order. */
-  readonly checks: readonly ConsentActPresentationCheck[];
 }
 
 export interface ConsentActDecision {
+  readonly decidedRiskLevel: RiskLevel;
   readonly permissionSlug: string;
   readonly status: PluginGrantStatus;
-  readonly decidedRiskLevel: RiskLevel;
 }
 
 export interface ConsentActPlan {
   /** Consent decisions to write, sorted by permissionSlug ascending (the lock order). */
   readonly decisions: readonly ConsentActDecision[];
+  readonly presentation: ConsentActPresentation;
   /** A review refused a required permission, so the unit is switched off in the same transaction. */
   readonly switchesOff: boolean;
-  readonly presentation: ConsentActPresentation;
 }

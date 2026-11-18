@@ -27,8 +27,8 @@ export type FeedbackSubmissionWire = Wire<FeedbackSubmission>;
 export type FeedbackReceiptWire = Wire<Pick<FeedbackReport, 'id' | 'createdAt'>>;
 
 export interface SubmitFeedbackEnvelope {
-  readonly message: string;
   readonly feedbackReport: FeedbackReceiptWire;
+  readonly message: string;
 }
 
 const fail = envelopeFailure('apps/api-e2e/src/feedback/feedback-wire.ts');

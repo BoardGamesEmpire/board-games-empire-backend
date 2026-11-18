@@ -36,8 +36,8 @@ export interface AnonymousActorView {
 
 /** Authenticated via API key; carries both the key id and the owning user. */
 export interface ApiKeyActorView {
-  readonly kind: 'apiKey';
   readonly apiKeyId: string;
+  readonly kind: 'apiKey';
   readonly userId: string;
 }
 
@@ -49,9 +49,9 @@ export interface SystemActorView {
 
 /** Foreign system identified by `system` + `identifier` (e.g. remote gateways). */
 export interface ExternalActorView {
+  readonly identifier: string;
   readonly kind: 'external';
   readonly system: string;
-  readonly identifier: string;
 }
 
 /**
@@ -71,21 +71,21 @@ export interface ExternalActorView {
 export type PluginUnitView = ServerPluginUnitView | HouseholdPluginUnitView | UserPluginUnitView;
 
 export interface ServerPluginUnitView {
-  readonly scopeType: 'Server';
   readonly householdId?: never;
+  readonly scopeType: 'Server';
   readonly userId?: never;
 }
 
 export interface HouseholdPluginUnitView {
-  readonly scopeType: 'Household';
   readonly householdId: string;
+  readonly scopeType: 'Household';
   readonly userId?: never;
 }
 
 export interface UserPluginUnitView {
+  readonly householdId?: never;
   readonly scopeType: 'User';
   readonly userId: string;
-  readonly householdId?: never;
 }
 
 /**
@@ -97,6 +97,6 @@ export interface UserPluginUnitView {
 export interface PluginChainActorView {
   readonly kind: 'plugin';
   readonly pluginId: string;
-  readonly unit: PluginUnitView;
   readonly trigger: PluginActorView;
+  readonly unit: PluginUnitView;
 }

@@ -294,7 +294,7 @@ describe('PluginLoaderService', () => {
       // Captured, not asserted, inside the mock: the loader catches and logs
       // whatever the recorder throws, so an expect failing in there would
       // never fail the test.
-      const atRecord: { resolved: number; imported: number; registered: boolean }[] = [];
+      const atRecord: { imported: number; registered: boolean; resolved: number }[] = [];
       recorder.record.mockImplementation(() => {
         atRecord.push({
           resolved: directories.resolve.mock.calls.length,

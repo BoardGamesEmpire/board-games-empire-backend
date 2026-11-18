@@ -28,11 +28,11 @@ export const REBUILD_ALL_BATCH_SIZE = 200;
 
 /** The counts the statement returns. Postgres counts in `bigint`. */
 interface RebuildCounts {
-  readonly removed: bigint;
-  readonly written: bigint;
   /** From a batch of a full rebuild: its last source, and how many sources it had. */
   readonly last_user_id?: string | null;
+  readonly removed: bigint;
   readonly sources?: bigint;
+  readonly written: bigint;
 }
 
 /** The advisory lock every rebuild holds for its transaction. */

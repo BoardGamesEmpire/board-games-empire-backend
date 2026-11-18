@@ -61,7 +61,7 @@ describe('request body rate guard (#1094)', () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   });
 
-  function client(): { socket: Socket; received: () => string; closed: Promise<void> } {
+  function client(): { closed: Promise<void>; received: () => string; socket: Socket } {
     const socket = connect(port, '127.0.0.1');
     sockets.add(socket);
     let text = '';

@@ -110,7 +110,7 @@ describe('status changes racing on one date or nomination (#621)', () => {
    * statuses, in firing order.
    */
   const race = (
-    row: { readonly sql: string; readonly lockedBy: RegExp },
+    row: { readonly lockedBy: RegExp; readonly sql: string },
     id: string,
     first: () => request.Test,
     second: () => request.Test,

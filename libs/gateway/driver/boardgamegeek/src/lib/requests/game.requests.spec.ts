@@ -417,13 +417,13 @@ describe('chunk', () => {
 
 interface MockClientFixture {
   client: BggClientLike;
-  thing: jest.Mock<Promise<BggThing[]>, [BggThingQueryParams, AbortSignal?]>;
   search: jest.Mock<Promise<BggSearchResult[]>, [BggSearchQueryParams, AbortSignal?]>;
+  thing: jest.Mock<Promise<BggThing[]>, [BggThingQueryParams, AbortSignal?]>;
 }
 
 function buildMockClient(options?: {
-  thingResults?: BggThing[];
   searchResults?: BggSearchResult[];
+  thingResults?: BggThing[];
 }): MockClientFixture {
   const thing = jest.fn<Promise<BggThing[]>, [BggThingQueryParams, AbortSignal?]>();
   const search = jest.fn<Promise<BggSearchResult[]>, [BggSearchQueryParams, AbortSignal?]>();

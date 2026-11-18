@@ -4,12 +4,12 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsIn, IsString, ValidateIf } from 'class-validator';
 
 export interface ReachPropertyOptions<TReach extends string> {
-  /** The rungs the field accepts: those a read rule serves for the model. */
-  readonly reaches: readonly TReach[];
-  /** Who each accepted rung admits, for the API reference. */
-  readonly description: string;
   /** The column default, published on a create. An update names none. */
   readonly default?: TReach;
+  /** Who each accepted rung admits, for the API reference. */
+  readonly description: string;
+  /** The rungs the field accepts: those a read rule serves for the model. */
+  readonly reaches: readonly TReach[];
 }
 
 /**

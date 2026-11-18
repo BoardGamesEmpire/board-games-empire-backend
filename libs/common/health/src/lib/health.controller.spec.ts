@@ -84,13 +84,13 @@ function makeHttpIndicator(): MockHttpHealthIndicator {
 }
 
 interface BuildResult {
-  controller: HealthController;
-  module: TestingModule;
-  db: MockDatabaseService;
-  configService: jest.Mocked<Pick<ConfigService, 'get'>>;
   cacheRedis: MockRedis | null;
-  queueRedis: MockRedis | null;
+  configService: jest.Mocked<Pick<ConfigService, 'get'>>;
+  controller: HealthController;
+  db: MockDatabaseService;
   http: MockHttpHealthIndicator;
+  module: TestingModule;
+  queueRedis: MockRedis | null;
 }
 
 async function buildController(options: BuildOptions = {}): Promise<BuildResult> {

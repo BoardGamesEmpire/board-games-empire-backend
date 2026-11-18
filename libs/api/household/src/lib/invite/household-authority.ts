@@ -93,7 +93,7 @@ export async function senderCouldStillSend(
   abilities: AbilityService,
   tx: Prisma.TransactionClient,
   householdId: string,
-  invite: { readonly inviterId: string; readonly role: AssignableHouseholdRole; readonly needsApproval: boolean },
+  invite: { readonly inviterId: string; readonly needsApproval: boolean; readonly role: AssignableHouseholdRole },
   authority: InviteAuthority,
 ): Promise<boolean> {
   const senderCan = await abilities.userAbilityWithin(tx, invite.inviterId);

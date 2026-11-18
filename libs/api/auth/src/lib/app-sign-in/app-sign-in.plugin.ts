@@ -59,10 +59,10 @@ const looseBody = z.unknown();
 const JSON_MEDIA_TYPE = 'application/json';
 
 export interface AppSignInOptions {
-  /** Renders a key from the message catalog, in the fallback locale. */
-  readonly render: (key: I18nPath) => string;
   /** This server's issuer, the `auth.url` discovery publishes, sent to the app as `iss` (RFC 9207). */
   readonly issuer: string;
+  /** Renders a key from the message catalog, in the fallback locale. */
+  readonly render: (key: I18nPath) => string;
 }
 
 type Query = Readonly<Record<string, unknown>>;

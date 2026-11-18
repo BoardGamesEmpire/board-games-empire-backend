@@ -12,8 +12,8 @@ const FIRST = '20260901000000_first_backfill';
 const SECOND = '20260902000000_second_remap';
 
 interface FakeTx {
+  readonly created: Array<{ durationMs: number; name: string; revision: number }>;
   readonly id: number;
-  readonly created: Array<{ name: string; revision: number; durationMs: number }>;
 }
 
 /** Records every transaction and what was created inside it; `run` sees the same object the row is written on. */

@@ -178,13 +178,13 @@ export class VoteResolver {
 }
 
 export interface AttendeeStub extends VoterGrant {
-  status: EventParticipationStatus;
-  removedAt: Date | null;
   /** The games they offer, without the ones taken back. */
   availableGames: { id: string }[];
+  removedAt: Date | null;
+  status: EventParticipationStatus;
 }
 
 export interface VoteStub {
-  voteType: VoteType;
   voter: AttendeeStub;
+  voteType: VoteType;
 }

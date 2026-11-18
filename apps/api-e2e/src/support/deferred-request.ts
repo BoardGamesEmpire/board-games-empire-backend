@@ -10,8 +10,8 @@ import type { Response, Test } from 'supertest';
  * `Test` unsent, because resolving a promise with a thenable sends it.
  */
 export interface DeferredTest extends PromiseLike<Response> {
-  set(field: string, value: string): DeferredTest;
   expect(status: number): DeferredTest;
+  set(field: string, value: string): DeferredTest;
 }
 
 export function deferredRequest<T>(read: () => Promise<T>, build: (value: T) => Test): DeferredTest {

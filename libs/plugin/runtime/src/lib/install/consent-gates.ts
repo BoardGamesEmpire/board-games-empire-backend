@@ -27,8 +27,8 @@ import type { StaticAnalysisFinding } from './static-analysis.types';
  */
 
 export interface ForbiddenPermissionViolation {
-  readonly permissionSlug: string;
   readonly detail: string;
+  readonly permissionSlug: string;
 }
 
 /**
@@ -160,9 +160,9 @@ export const criticalConfirmationExpectation = (
     .sort();
 
 export interface ExactReentryComparison {
+  readonly exact: boolean;
   readonly expected: readonly string[];
   readonly received: readonly string[];
-  readonly exact: boolean;
 }
 
 /** EXACT re-entry: every expected entry present, nothing else — set equality on distinct, sorted values. */

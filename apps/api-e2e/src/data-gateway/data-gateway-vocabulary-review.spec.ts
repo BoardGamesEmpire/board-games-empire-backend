@@ -12,9 +12,9 @@ type Kind = 'platform' | 'category' | 'mechanic';
 
 interface LinkSeed {
   externalId?: string;
+  recordId?: string | null;
   status?: VocabularyLinkStatus;
   suppliedName?: string;
-  recordId?: string | null;
 }
 
 /**
@@ -116,7 +116,7 @@ describe.each(['platform', 'category', 'mechanic'] as const)('DataGateway %s lin
   };
 
   /** The link as stored: its status and record. */
-  const storedLink = async (linkId: string): Promise<{ status: VocabularyLinkStatus; recordId: string | null }> => {
+  const storedLink = async (linkId: string): Promise<{ recordId: string | null; status: VocabularyLinkStatus }> => {
     switch (kind) {
       case 'platform': {
         const row = await db.client.platformGatewayLink.findUniqueOrThrow({ where: { id: linkId } });

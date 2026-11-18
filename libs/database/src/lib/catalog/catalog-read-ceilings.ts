@@ -109,10 +109,10 @@ export function deriveReadCeilings(
  * its owner's choice.
  */
 export interface ReadIgnoringReach {
-  slug: string;
-  role: string;
-  subject: string;
   reads: Exclude<ReadReach, `binds ${string}`>;
+  role: string;
+  slug: string;
+  subject: string;
 }
 
 /**

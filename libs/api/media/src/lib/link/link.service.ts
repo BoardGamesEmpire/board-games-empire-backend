@@ -7,17 +7,17 @@ import { linkKey, mediaKindForMime } from '../constants/media-link.constants';
 import { type AttachContext, LINK_HANDLERS } from './link.registry';
 
 export interface AttachTarget {
-  subjectType: ModelResourceType;
-  subjectId: string;
   context?: AttachContext;
-  presentation?: { title?: string; caption?: string; altText?: string; thumbnailUrl?: string };
+  presentation?: { altText?: string; caption?: string; thumbnailUrl?: string; title?: string };
+  subjectId: string;
+  subjectType: ModelResourceType;
 }
 
 export interface LinkResult {
-  mediaId: string;
   attachmentId: string;
-  subjectType: ModelResourceType;
+  mediaId: string;
   subjectId: string;
+  subjectType: ModelResourceType;
 }
 
 @Injectable()
@@ -110,7 +110,7 @@ export class MediaLinkService {
 
   async detach(
     mediaObjectId: string,
-    target: { subjectType: ModelResourceType; subjectId: string },
+    target: { subjectId: string; subjectType: ModelResourceType },
   ): Promise<{ removed: number }> {
     const media = await this.db.mediaObject.findUnique({
       where: {

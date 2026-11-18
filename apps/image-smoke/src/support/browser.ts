@@ -24,20 +24,20 @@ const SETTLED_PATHS = new Set(['/auth', '/error']);
 const SETTLE_TIMEOUT_MS = 60_000;
 
 export interface ClientVisit {
+  /** The names of the IndexedDB databases the page holds once settled. */
+  readonly databases: readonly string[];
+
   /** The status the navigation itself got. */
   readonly documentStatus: number | undefined;
 
   /** The status of the client's own fetch of the identity document, if it made one. */
   readonly identityStatus: number | undefined;
 
-  /** The path the client settled on. */
-  readonly settledPath: string;
-
-  /** The names of the IndexedDB databases the page holds once settled. */
-  readonly databases: readonly string[];
-
   /** Console errors, CSP violations, uncaught exceptions and the client's own error lines. */
   readonly problems: readonly string[];
+
+  /** The path the client settled on. */
+  readonly settledPath: string;
 }
 
 function describeMessage(message: ConsoleMessage): string {

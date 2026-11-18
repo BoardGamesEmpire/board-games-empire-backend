@@ -143,12 +143,12 @@ describe('household plugin writes racing a soft-delete (#548)', () => {
    * their transaction with the same household share lock.
    */
   const WRITES: readonly {
-    readonly name: string;
     readonly code: string;
     readonly hiddenCode: string;
+    readonly name: string;
+    readonly send: (a: Arrangement, caller: Caller) => request.Test;
     /** Whether the household's unit enablement is arranged switched on first. */
     readonly switchedOn: boolean;
-    readonly send: (a: Arrangement, caller: Caller) => request.Test;
     readonly written: (a: Arrangement) => Promise<number>;
   }[] = [
     {

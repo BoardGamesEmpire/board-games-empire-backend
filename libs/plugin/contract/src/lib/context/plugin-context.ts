@@ -18,13 +18,13 @@ import type { PluginHttp } from './plugin-http.js';
  * untestable speculative binding helps nobody.
  */
 export interface PluginContext {
-  readonly pluginId: string;
-  readonly slug: string;
-  readonly logger: PluginLogger;
+  readonly actor: PluginActorAccessor;
   readonly config: PluginConfigAccessor;
   readonly events: PluginEventPublisher;
-  readonly actor: PluginActorAccessor;
   readonly http: PluginHttp;
+  readonly logger: PluginLogger;
+  readonly pluginId: string;
+  readonly slug: string;
 }
 
 /**
@@ -36,9 +36,9 @@ export interface PluginContext {
  */
 export interface PluginLogger {
   debug(message: string): void;
+  error(message: string): void;
   info(message: string): void;
   warn(message: string): void;
-  error(message: string): void;
 }
 
 /**

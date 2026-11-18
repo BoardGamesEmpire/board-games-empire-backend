@@ -16,9 +16,9 @@ import {
 
 /** The columns of a permission that decide whether a consent decision on it confers anything. */
 export type ConsentEffectColumns = PermissionRuleColumns & {
-  readonly slug: string;
-  readonly riskLevel: RiskLevel;
   readonly retiredAt: Date | null;
+  readonly riskLevel: RiskLevel;
+  readonly slug: string;
 };
 
 /** A plugin's consent decision on a core permission, as far as conferring goes. */

@@ -853,7 +853,7 @@ async function grantNextStart(
 ): Promise<HandBackDto> {
   const failing = await findFailingEditedEntries(tx, CATALOG_MANIFEST, snapshot);
   const { restore, delete: removed, withheld } = planReconcile(CATALOG_MANIFEST, snapshot, failing).rolePermissions;
-  const isThisGrant = (edge: { roleName: string; permissionSlug: string }) =>
+  const isThisGrant = (edge: { permissionSlug: string; roleName: string }) =>
     edge.roleName === roleName && edge.permissionSlug === slug;
 
   const held = withheld.find(isThisGrant);
@@ -905,7 +905,7 @@ async function readGrant(
   tx: Prisma.TransactionClient,
   roleName: string,
   slug: string,
-): Promise<{ role: { id: string }; permission: { id: string; retiredAt: Date | null }; grant: GrantRow | null }> {
+): Promise<{ grant: GrantRow | null; permission: { id: string; retiredAt: Date | null }; role: { id: string } }> {
   const role = await readEditableRole(tx, roleName);
 
   const permission = await tx.permission.findUnique({

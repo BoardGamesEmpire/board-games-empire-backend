@@ -8,17 +8,17 @@ type Where = Readonly<Record<string, unknown>>;
  * which the fake doesn't narrow by. An include names relations the same way.
  */
 interface Query {
-  where?: Where;
-  select?: Readonly<Record<string, boolean | object>>;
   include?: Readonly<Record<string, boolean | object>>;
+  select?: Readonly<Record<string, boolean | object>>;
+  where?: Where;
 }
 
 /** A stored row, with the plugin a read may select beside it: null for a remote DataGateway. */
 type StoredRow = DataGateway & { plugin: RoutedPlugin | null };
 
 interface Update {
-  where: Where;
   data: Readonly<Record<string, unknown>>;
+  where: Where;
 }
 
 const isOperator = (value: unknown): value is Record<string, unknown> =>

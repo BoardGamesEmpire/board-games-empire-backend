@@ -64,7 +64,7 @@ describe('HouseholdGamePoolService', () => {
     tx.game.count.mockResolvedValue(POOL.length);
     // Reads as Prisma's cursor does: `skip` games on from the cursor's game,
     // or from the first game without one.
-    tx.game.findFirst.mockImplementation((async (args: { skip: number; cursor?: { id: string } }) => {
+    tx.game.findFirst.mockImplementation((async (args: { cursor?: { id: string }; skip: number }) => {
       const id = POOL[(args.cursor ? POOL.indexOf(args.cursor.id) : 0) + args.skip];
 
       return id === undefined ? null : { id };

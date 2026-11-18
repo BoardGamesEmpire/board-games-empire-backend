@@ -40,19 +40,19 @@ const AUTH_BASE = AUTH_BASE_PATH;
 
 /** A sign-in provider as the auth config holds it, secret included, as discovery receives it (#912). */
 interface ProviderConfig {
-  id: string;
-  discoveryUrl: string;
   clientId: string;
   clientSecret: string;
+  discoveryUrl: string;
   displayName: string;
+  id: string;
 }
 
 interface MockAuthConfig {
+  maxClientVersion?: string;
+  minClientVersion?: string;
+  oidcProviders?: ProviderConfig[];
   url?: string;
   useEmailPasswordAuth?: boolean;
-  oidcProviders?: ProviderConfig[];
-  minClientVersion?: string;
-  maxClientVersion?: string;
 }
 
 function buildMockConfigService(config: MockAuthConfig): Pick<ConfigService, 'get' | 'getOrThrow'> {

@@ -174,9 +174,6 @@ describe('waitForStableJobCount', () => {
 type StreamEvent = Readonly<Record<string, string>> & { readonly event: string };
 
 interface ScriptedStreamOptions {
-  /** Entries already on the stream before the test takes its mark. */
-  readonly before?: readonly StreamEvent[];
-
   /**
    * What lands between reads: batch N is appended just before the Nth
    * `xrange`, and reads past the end find nothing new. A single batch holding
@@ -185,11 +182,14 @@ interface ScriptedStreamOptions {
    */
   readonly arrivals?: readonly (readonly StreamEvent[])[];
 
-  /** The pending count `getJobCounts` reports, scripted as in `scriptedQueue`. */
-  readonly pending?: readonly number[];
+  /** Entries already on the stream before the test takes its mark. */
+  readonly before?: readonly StreamEvent[];
 
   /** `failedReason` per job id, as a retried job's hash carries it. */
   readonly failedReasons?: Readonly<Record<string, string>>;
+
+  /** The pending count `getJobCounts` reports, scripted as in `scriptedQueue`. */
+  readonly pending?: readonly number[];
 }
 
 /**

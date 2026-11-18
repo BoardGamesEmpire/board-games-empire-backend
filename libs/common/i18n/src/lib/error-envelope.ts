@@ -20,11 +20,11 @@ export type ErrorCode = Uppercase<string>;
  * beside these.
  */
 export interface ErrorEnvelope<M = string | string[]> {
-  readonly statusCode: number;
+  readonly code?: ErrorCode;
   readonly error: string;
   readonly message: M;
-  readonly code?: ErrorCode;
   readonly [field: string]: unknown;
+  readonly statusCode: number;
 }
 
 /** The keys the envelope owns. No extra field of the same name reaches the wire. */

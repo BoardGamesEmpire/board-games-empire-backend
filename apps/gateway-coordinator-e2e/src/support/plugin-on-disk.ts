@@ -31,35 +31,35 @@ const WORKSPACE_SOURCE_CONDITION = '@board-games-empire/backend';
 export type FixtureEntry = 'index' | 'not-a-factory';
 
 export interface FixturePlacement {
+  /** What the entry is built with: {@link FIRST_BUILD} unless set. */
+  readonly build?: FixtureBuild;
+
   readonly entry: FixtureEntry;
 
   /** The plugin's slug, which names its directory under the plugins root and its rows. */
   readonly slug: string;
-
-  /** What the entry is built with: {@link FIRST_BUILD} unless set. */
-  readonly build?: FixtureBuild;
 }
 
 /** One version of the fixture plugin as it lies under a plugins root, in its artifact directory. */
 export interface PlacedPlugin {
-  readonly slug: string;
-  readonly version: string;
-
+  /** The plugin manifest written beside its code. */
+  readonly manifest: Record<string, unknown>;
   /** The checksum its artifact directory is named for, which its row records as `installedSha256`. */
   readonly sha256: string;
 
-  /** The plugin manifest written beside its code. */
-  readonly manifest: Record<string, unknown>;
+  readonly slug: string;
+
+  readonly version: string;
 }
 
 export interface SeededPlugin {
-  readonly pluginId: string;
-
   /** The plugin's DataGateway row. */
   readonly gatewayId: string;
 
   /** The install the rows name. */
   readonly installedAt: Date;
+
+  readonly pluginId: string;
 }
 
 /**

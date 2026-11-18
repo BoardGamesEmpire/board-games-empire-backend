@@ -60,9 +60,9 @@ const vote = (
   id: string,
   occurrenceId: string,
   attendee: {
-    status?: EventParticipationStatus;
     removedAt?: Date | null;
     role?: ReturnType<typeof makeVoterRole> | null;
+    status?: EventParticipationStatus;
   } = {},
 ) => ({
   id,

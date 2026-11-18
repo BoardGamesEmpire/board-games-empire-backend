@@ -13,10 +13,10 @@ const LINK_SOCIAL_PATH = '/link-social';
 const GET_SESSION = getSession();
 
 export interface ProviderLinkFreshnessDeps {
-  /** Renders the refusal's catalog key. */
-  readonly render: (key: I18nPath) => string;
   /** The clock, in epoch milliseconds; `Date.now` unless set. */
   readonly now?: () => number;
+  /** Renders the refusal's catalog key. */
+  readonly render: (key: I18nPath) => string;
 }
 
 export interface ProviderLinkFreshness {

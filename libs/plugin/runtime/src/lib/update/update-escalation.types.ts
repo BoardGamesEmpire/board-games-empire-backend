@@ -11,16 +11,16 @@ import type { PluginConsentScopeValue } from '@boardgamesempire/plugin-manifest'
 export type UpdateEscalation =
   /** The next manifest requests a permission the active one does not. */
   | {
-      readonly kind: 'new-permission';
-      readonly slug: string;
       readonly consentScope: PluginConsentScopeValue;
+      readonly kind: 'new-permission';
       readonly required: boolean;
+      readonly slug: string;
     }
   /** A permission requested by both versions flips `required: false → true`. */
   | {
+      readonly consentScope: PluginConsentScopeValue;
       readonly kind: 'permission-promoted-to-required';
       readonly slug: string;
-      readonly consentScope: PluginConsentScopeValue;
     }
   /**
    * A permission with an existing consent decision now carries a HIGHER
@@ -28,14 +28,14 @@ export type UpdateEscalation =
    * `decidedRiskLevel` is the comparison baseline, never a reconstruction.
    */
   | {
-      readonly kind: 'risk-escalated';
-      readonly slug: string;
-      readonly scopeType: PluginGrantScope;
-      readonly decidedRiskLevel: RiskLevel;
       readonly currentRiskLevel: RiskLevel;
+      readonly decidedRiskLevel: RiskLevel;
+      readonly kind: 'risk-escalated';
+      readonly scopeType: PluginGrantScope;
+      readonly slug: string;
     }
   /** A domain joins `network.outboundDomains`. */
-  | { readonly kind: 'outbound-domain-added'; readonly domain: string }
+  | { readonly domain: string; readonly kind: 'outbound-domain-added' }
   /**
    * `network.outboundDomains` moves from an explicit list to the literal
    * `'configured'` — a BROADENING: reach delegates from an enumerated
@@ -53,36 +53,57 @@ export type UpdateEscalation =
    * requested it at `to` counts again, with no act.
    */
   | {
-      readonly kind: 'consent-scope-changed';
-      readonly slug: string;
       readonly from: PluginConsentScopeValue;
-      readonly to: PluginConsentScopeValue;
+      readonly kind: 'consent-scope-changed';
       readonly required: boolean;
+      readonly slug: string;
+      readonly to: PluginConsentScopeValue;
     }
   /** A core model joins `storage.writesCore`. */
   | { readonly kind: 'writes-core-added'; readonly model: string };
 
 /** The comparator's view of one manifest version — prepared by the update service from a validation result. */
 export interface ManifestComparisonView {
-  readonly outboundDomains: readonly string[] | 'configured';
-  readonly writesCore: readonly string[];
   readonly checks: readonly {
     readonly canonicalSlug: string;
     readonly consentScope: PluginConsentScopeValue;
     readonly required: boolean;
   }[];
+  readonly outboundDomains: readonly string[] | 'configured';
+  readonly writesCore: readonly string[];
 }
 
 /** One existing grant row, reduced to the fields the comparison consumes. */
 export interface GrantComparisonView {
+  readonly decidedRiskLevel: RiskLevel;
   readonly permissionSlug: string;
   readonly scopeType: PluginGrantScope;
   readonly status: PluginGrantStatus;
-  readonly decidedRiskLevel: RiskLevel;
 }
 
 export interface UpdateEscalationComparison {
+  /**
+   * Server-scope `Denied` rows on permissions the next manifest marks
+   * required. Non-empty gates the update on approval, and approving it grants
+   * each of them at today's risk, under the approval's consent act (#1336):
+   * the server admin who approves a version that requires a permission
+   * consents to it.
+   */
+  readonly deniedRequiredSlugs: readonly string[];
   readonly escalations: readonly UpdateEscalation[];
+  /**
+   * Household-scope slugs a unit must decide again: newly required, promoted
+   * to required, risk-escalated above the risk the unit consented under, or
+   * newly moved to household consent. On activation every enabled household
+   * unit lacking a covering `Granted` row for all of these is told it owes
+   * re-consent and keeps running on its existing grants; its answer stamps
+   * the decision at today's risk (#59, #1149).
+   *
+   * Named for re-consent rather than for `required` because risk escalation
+   * qualifies regardless of the flag: consent given for a Low permission is
+   * not consent for the Critical one it became.
+   */
+  readonly householdReconsentSlugs: readonly string[];
   /**
    * True when activation needs the server admin's explicit approval: a new
    * server-consentable permission, a permission moving TO server consent, a
@@ -99,27 +120,6 @@ export interface UpdateEscalationComparison {
    * re-consent it owes instead (#1149).
    */
   readonly serverGating: boolean;
-  /**
-   * Server-scope `Denied` rows on permissions the next manifest marks
-   * required. Non-empty gates the update on approval, and approving it grants
-   * each of them at today's risk, under the approval's consent act (#1336):
-   * the server admin who approves a version that requires a permission
-   * consents to it.
-   */
-  readonly deniedRequiredSlugs: readonly string[];
-  /**
-   * Household-scope slugs a unit must decide again: newly required, promoted
-   * to required, risk-escalated above the risk the unit consented under, or
-   * newly moved to household consent. On activation every enabled household
-   * unit lacking a covering `Granted` row for all of these is told it owes
-   * re-consent and keeps running on its existing grants; its answer stamps
-   * the decision at today's risk (#59, #1149).
-   *
-   * Named for re-consent rather than for `required` because risk escalation
-   * qualifies regardless of the flag: consent given for a Low permission is
-   * not consent for the Critical one it became.
-   */
-  readonly householdReconsentSlugs: readonly string[];
   /**
    * Server-scope slugs whose catalog risk now exceeds the risk recorded on
    * their granted consent decision. Approval re-writes a required one at

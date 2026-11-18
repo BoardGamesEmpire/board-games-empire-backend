@@ -26,17 +26,11 @@ import { presentedRiskLevel } from './presented-risk-level';
  * entry point without a cast.
  */
 export interface PresentablePluginRow {
-  readonly id: string;
-  readonly slug: string;
-  readonly version: string;
   readonly enabled: boolean;
-  readonly uninstalledAt: Date | null;
-  readonly manifestJson: unknown;
+  readonly id: string;
   /** The installed artifact's sha, which the active consent surface names (#1150). */
   readonly installedSha256: string;
-  readonly pendingVersion: string | null;
-  /** The staged artifact's sha, which the staged consent surface names; `null` when nothing is staged (#1150). */
-  readonly pendingSha256: string | null;
+  readonly manifestJson: unknown;
   /**
    * Nullable column — `null` means no staged update. Typed `unknown` like
    * `manifestJson` because stored manifests are distrusted (re-validated on
@@ -44,6 +38,12 @@ export interface PresentablePluginRow {
    * shape would claim structure this service deliberately does not trust.
    */
   readonly pendingManifestJson: unknown;
+  /** The staged artifact's sha, which the staged consent surface names; `null` when nothing is staged (#1150). */
+  readonly pendingSha256: string | null;
+  readonly pendingVersion: string | null;
+  readonly slug: string;
+  readonly uninstalledAt: Date | null;
+  readonly version: string;
 }
 
 const PRESENTABLE_PLUGIN_SELECT = {
@@ -244,7 +244,7 @@ export class PluginConsentPresentationService {
 
   private revalidate(
     plugin: PresentablePluginRow,
-    source: { readonly version: string; readonly manifestJson: unknown },
+    source: { readonly manifestJson: unknown; readonly version: string },
   ): PluginManifestValidationResult {
     return revalidateStoredManifest(
       {

@@ -8,12 +8,12 @@ import type { PluginManifest } from '../manifest.types.js';
 export interface PluginManifestOverrides extends Partial<
   Omit<PluginManifest, 'permissions' | 'events' | 'network' | 'storage' | 'jobs' | 'config'>
 > {
-  readonly permissions?: Partial<PluginManifest['permissions']>;
-  readonly events?: Partial<PluginManifest['events']>;
-  readonly network?: Partial<PluginManifest['network']>;
-  readonly storage?: Partial<PluginManifest['storage']>;
-  readonly jobs?: Partial<PluginManifest['jobs']>;
   readonly config?: Partial<PluginManifest['config']>;
+  readonly events?: Partial<PluginManifest['events']>;
+  readonly jobs?: Partial<PluginManifest['jobs']>;
+  readonly network?: Partial<PluginManifest['network']>;
+  readonly permissions?: Partial<PluginManifest['permissions']>;
+  readonly storage?: Partial<PluginManifest['storage']>;
 }
 
 /**

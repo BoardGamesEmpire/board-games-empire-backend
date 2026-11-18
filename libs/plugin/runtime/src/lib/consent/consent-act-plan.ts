@@ -23,19 +23,19 @@ import type {
 import { presentedRiskLevel } from './presented-risk-level';
 
 export interface PlanConsentActInput {
-  readonly kind: ConsentActKind;
-  readonly pluginSlug: string;
-  readonly unit: PluginUnit;
-  readonly source: ConsentManifestSource;
-  /** permissionChecks of the manifest the sha names. */
-  readonly checks: readonly NormalizedPermissionRequest[];
   /** The ACTIVE manifest's permissionChecks; consulted only when source is 'staged'. */
   readonly activeChecks: readonly NormalizedPermissionRequest[];
+  readonly answers: readonly ConsentActAnswer[];
+  /** permissionChecks of the manifest the sha names. */
+  readonly checks: readonly NormalizedPermissionRequest[];
   /** classify() of `checks` for this unit, read inside the act's transaction. */
   readonly classification: ConsentCheckClassification;
-  readonly answers: readonly ConsentActAnswer[];
-  readonly locale: string;
   readonly defaultLocale: string;
+  readonly kind: ConsentActKind;
+  readonly locale: string;
+  readonly pluginSlug: string;
+  readonly source: ConsentManifestSource;
+  readonly unit: PluginUnit;
 }
 
 /**

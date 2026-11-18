@@ -105,13 +105,13 @@ export function isAdmissibleMembershipOrigin(origin: HouseholdMembershipOrigin):
  * caller silently drop the provenance the column exists to hold.
  */
 export interface AddMemberParams {
-  readonly householdId: string;
-  readonly userId: string;
-  /** Defaults to `HouseholdMember`. `HouseholdOwner` is not assignable here. */
-  readonly role?: AssignableHouseholdRole;
-  readonly origin: AdmissibleMembershipOrigin;
   /** The acting principal on the household's side; `origin` says in what capacity. */
   readonly addedById: string;
+  readonly householdId: string;
+  readonly origin: AdmissibleMembershipOrigin;
+  /** Defaults to `HouseholdMember`. `HouseholdOwner` is not assignable here. */
+  readonly role?: AssignableHouseholdRole;
+  readonly userId: string;
 }
 
 /**
@@ -123,7 +123,6 @@ export interface AddMemberParams {
  * shape is fixed now so #159 fills a field instead.
  */
 export interface AddMemberResult {
-  readonly member: HouseholdMemberWithRelations;
   /**
    * Whether this call wrote the membership. False when the user was a member
    * already, at the pre-read or by a rival admission that landed while this
@@ -133,6 +132,7 @@ export interface AddMemberResult {
    * the second case.
    */
   readonly admitted: boolean;
+  readonly member: HouseholdMemberWithRelations;
   /**
    * Soft caps this admission crossed (#159). The caller MUST forward these to
    * `QuotaService.emitSoftOverages(...)` only AFTER its transaction commits —
@@ -173,9 +173,9 @@ interface ScopedMemberDenials {
  * shares ended with it to announce (#747, #782, #810).
  */
 export interface RemovedMembership {
+  readonly endedShares: readonly GameShare[];
   readonly removed: HouseholdMemberWithRelations;
   readonly revoked: readonly InviteDomainEvent[];
-  readonly endedShares: readonly GameShare[];
 }
 
 @Injectable()
@@ -592,8 +592,8 @@ export class HouseholdMemberService {
           after: { householdId, ownerMemberId: target.id, ownerUserId: target.userId },
           result: { owner, previousOwner },
         } satisfies {
-          before: HouseholdOwnershipSnapshot;
           after: HouseholdOwnershipSnapshot;
+          before: HouseholdOwnershipSnapshot;
           result: OwnershipTransferResult;
         };
       });

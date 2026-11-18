@@ -1,10 +1,10 @@
 export interface UserSearchResult {
-  id: string;
-  username: string;
   firstName: string | null;
+  id: string;
   lastName: string | null;
   profile: {
-    displayName: string | null;
     avatarUrl: string | null;
+    displayName: string | null;
   } | null;
+  username: string;
 }

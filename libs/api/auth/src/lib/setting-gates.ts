@@ -24,9 +24,9 @@ export interface SettingGateDeps {
 }
 
 interface Gate {
-  readonly switch: keyof SettingSwitches;
   readonly code: string;
   readonly message: I18nPath;
+  readonly switch: keyof SettingSwitches;
 }
 
 const REGISTRATION: Gate = {
@@ -86,14 +86,16 @@ const UNCHANGED_NAME = { data: { name: undefined } } as const;
 
 /** The slice of better-auth's endpoint context the gates read. It is `null` outside an endpoint. */
 export interface SettingGateContext {
-  readonly path?: string;
   readonly context?: {
     /** Set by the route's session middleware. */
     readonly session?: { readonly user: { readonly id: string } } | null;
   };
+  readonly path?: string;
 }
 
 export interface SettingGates {
+  /** `hooks.before`, wrapped in `createAuthMiddleware`. */
+  beforeRoute(context: SettingGateContext): Promise<void>;
   /**
    * `databaseHooks.user.create.before`. Every account better-auth creates
    * passes through it: email sign-up, anonymous sign-in, a first OIDC login
@@ -113,8 +115,6 @@ export interface SettingGates {
     data: { readonly name?: unknown; readonly [field: string]: unknown },
     context: SettingGateContext | null,
   ): Promise<typeof UNCHANGED_NAME | undefined>;
-  /** `hooks.before`, wrapped in `createAuthMiddleware`. */
-  beforeRoute(context: SettingGateContext): Promise<void>;
 }
 
 /**

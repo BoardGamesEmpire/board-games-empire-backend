@@ -73,7 +73,6 @@ export interface ReconcileLogger {
 }
 
 export interface ReconcileCatalogOptions {
-  readonly logger?: ReconcileLogger;
   /**
    * Called exactly once with the applied plan when the apply wrote anything,
    * never when it wrote nothing. Who to evict is the caller's decision — the
@@ -81,14 +80,15 @@ export interface ReconcileCatalogOptions {
    * and passes nothing, and a warning says the caches were not touched.
    */
   readonly invalidate?: (plan: ReconcilePlan) => Promise<void>;
+  readonly logger?: ReconcileLogger;
 }
 
 export interface ReconcileResult {
-  readonly plan: ReconcilePlan;
-  /** Rows written; zero means the database already matched the manifest. */
-  readonly mutations: number;
   /** Whether the invalidation port was called and resolved. False when nothing was written, no port was given, or the port threw. */
   readonly invalidated: boolean;
+  /** Rows written; zero means the database already matched the manifest. */
+  readonly mutations: number;
+  readonly plan: ReconcilePlan;
 }
 
 /**
@@ -380,8 +380,8 @@ export async function findFailingEditedEntries(
 /** A grant judged at a start: one the Owner edited, or one the permission catalog ships (`shipped`). */
 interface GrantTarget {
   readonly roleName: string;
-  readonly slug: string;
   readonly shipped?: true;
+  readonly slug: string;
 }
 
 /**
@@ -661,7 +661,7 @@ export async function applyReconcilePlan(
       })
     ).map((permission) => [permission.slug, permission.id]),
   );
-  const resolve = (edge: RolePermissionEdge): { roleId: string; permissionId: string } => ({
+  const resolve = (edge: RolePermissionEdge): { permissionId: string; roleId: string } => ({
     roleId: requireDefined(roleIds.get(edge.roleName), 'role', edge.roleName),
     permissionId: requireDefined(permissionIds.get(edge.permissionSlug), 'permission', edge.permissionSlug),
   });
@@ -892,12 +892,12 @@ function formatChanges(changes: readonly FieldChange[]): string {
 /** The `Permission` columns the manifest owns, in the shape the write side takes. */
 interface PermissionColumns {
   readonly action: Action;
-  readonly subject: string;
-  readonly fields: string[];
   readonly conditions: Prisma.InputJsonObject;
+  readonly fields: string[];
   readonly inverted: false;
   readonly reason: string;
   readonly riskLevel: RiskLevel;
+  readonly subject: string;
 }
 
 /** The columns the manifest owns, in the form the column write has always taken them. */

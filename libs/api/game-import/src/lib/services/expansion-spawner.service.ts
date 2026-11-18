@@ -24,28 +24,28 @@ export interface SpawnExpansionsInput {
   baseJobId: string;
   batchId: string;
   correlationId: string;
+  expansionExternalIds: string[];
   gatewayId: string;
+  initiatorType: InitiatorType;
+  locale?: string;
   /**
    * External id of the requested game — recorded on each expansion, which
    * links to it when its DataGateway names no base game (#971).
    */
   requestedExternalId: string;
-  expansionExternalIds: string[];
-  locale?: string;
-  initiatorType: InitiatorType;
   userId: string | null;
 }
 
 export interface SpawnBaseGameInput {
-  /** The Job row id of the game that needs the base game — becomes its parentJobId. */
-  parentJobId: string;
   batchId: string;
   correlationId: string;
-  gatewayId: string;
   /** External id of the base game to add. */
   externalId: string;
-  locale?: string;
+  gatewayId: string;
   initiatorType: InitiatorType;
+  locale?: string;
+  /** The Job row id of the game that needs the base game — becomes its parentJobId. */
+  parentJobId: string;
   userId: string | null;
 }
 

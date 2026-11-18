@@ -3,8 +3,8 @@ import { registerAs } from '@nestjs/config';
 import Joi from 'joi';
 
 export interface HealthConfig {
-  httpHealthCheckUrls: string[];
   enableHealthChecks: boolean;
+  httpHealthCheckUrls: string[];
 }
 
 export default registerAs('health', () =>

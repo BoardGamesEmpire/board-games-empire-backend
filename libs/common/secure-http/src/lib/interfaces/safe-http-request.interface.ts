@@ -44,8 +44,18 @@ export type SafeHttpRequestBody = string | Uint8Array | ArrayBuffer | Record<str
  * hop (#1083).
  */
 export interface SafeHttpRequestOptions {
-  /** Default `GET`. */
-  method?: SafeHttpMethod;
+  /**
+   * The caller's own host rule, asked with `URL.hostname` of the first URL
+   * and of every redirect target, before the outbound HTTP policy looks the
+   * address up. It narrows the policy and never widens it. A refusal is a
+   * `HostNotAllowedError` on the first URL, and a
+   * `RedirectToDisallowedTargetError` caused by one on a redirect; neither
+   * is retried (#1083).
+   */
+  allowHost?: (hostname: string) => boolean;
+
+  /** Request body. Object/array bodies are JSON-stringified. */
+  body?: SafeHttpRequestBody;
 
   /**
    * Headers forwarded verbatim. `Host` is set automatically by the service
@@ -59,21 +69,14 @@ export interface SafeHttpRequestOptions {
    */
   headers?: Record<string, string>;
 
-  /** Request body. Object/array bodies are JSON-stringified. */
-  body?: SafeHttpRequestBody;
-
-  /**
-   * Per-request timeout in milliseconds. Overrides the policy default. An
-   * integer from 1 to 2^31 - 1 (the longest a timer holds); anything else is
-   * a `RangeError` before any request.
-   */
-  timeoutMs?: number;
-
   /**
    * Per-request redirect cap. Overrides the policy default. A non-negative
    * integer; anything else is a `RangeError` before any request.
    */
   maxRedirects?: number;
+
+  /** Default `GET`. */
+  method?: SafeHttpMethod;
 
   /** Default `json`. */
   responseType?: SafeHttpResponseType;
@@ -96,14 +99,11 @@ export interface SafeHttpRequestOptions {
   signal?: AbortSignal;
 
   /**
-   * The caller's own host rule, asked with `URL.hostname` of the first URL
-   * and of every redirect target, before the outbound HTTP policy looks the
-   * address up. It narrows the policy and never widens it. A refusal is a
-   * `HostNotAllowedError` on the first URL, and a
-   * `RedirectToDisallowedTargetError` caused by one on a redirect; neither
-   * is retried (#1083).
+   * Per-request timeout in milliseconds. Overrides the policy default. An
+   * integer from 1 to 2^31 - 1 (the longest a timer holds); anything else is
+   * a `RangeError` before any request.
    */
-  allowHost?: (hostname: string) => boolean;
+  timeoutMs?: number;
 }
 
 /**
@@ -118,11 +118,23 @@ export interface SafeHttpDownloadOptions {
    */
   destination: string;
 
+  /** Forwarded as `SafeHttpRequestOptions.headers` are, credentials rule included. */
+  headers?: Record<string, string>;
+
   /**
    * Most bytes the body may hold. Past it the download fails and no file
    * stays. A value that is not a non-negative integer is refused.
    */
   maxBytes: number;
+
+  /**
+   * Per-download redirect cap. Overrides the policy default. A non-negative
+   * integer; anything else is a `RangeError` before any request.
+   */
+  maxRedirects?: number;
+
+  /** Caller-controlled cancellation. Composes with the time limit. */
+  signal?: AbortSignal;
 
   /**
    * One time limit for the whole transfer, counted from the call. It cuts off
@@ -133,16 +145,4 @@ export interface SafeHttpDownloadOptions {
    * before any request.
    */
   timeoutMs: number;
-
-  /** Forwarded as `SafeHttpRequestOptions.headers` are, credentials rule included. */
-  headers?: Record<string, string>;
-
-  /**
-   * Per-download redirect cap. Overrides the policy default. A non-negative
-   * integer; anything else is a `RangeError` before any request.
-   */
-  maxRedirects?: number;
-
-  /** Caller-controlled cancellation. Composes with the time limit. */
-  signal?: AbortSignal;
 }

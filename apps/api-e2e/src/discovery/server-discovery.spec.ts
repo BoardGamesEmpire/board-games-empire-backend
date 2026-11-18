@@ -35,7 +35,7 @@ describe('signed-in server discovery (#78)', () => {
 
   const readAs = async (headers: Record<string, string>) => request(baseUrl).get(PATH).set(headers).expect(200);
 
-  type Listed = { slug: string; category: string; displayName: string };
+  type Listed = { category: string; displayName: string; slug: string };
 
   const entryFor = (body: { serverPlugins: Listed[] }, slug: string) =>
     body.serverPlugins.find((entry) => entry.slug === slug);

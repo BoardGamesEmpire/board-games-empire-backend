@@ -11,7 +11,7 @@ describe('InviteExpirySweepService', () => {
   const tx = { name: 'the batch transaction' };
 
   let db: MockDatabaseService;
-  let invites: { expireOutstandingWithin: jest.Mock; emit: jest.Mock };
+  let invites: { emit: jest.Mock; expireOutstandingWithin: jest.Mock };
   let audit: { getActorOrThrow: jest.Mock };
   let systemActorScope: { run: jest.Mock };
   let logged: jest.SpyInstance;

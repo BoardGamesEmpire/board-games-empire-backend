@@ -731,7 +731,7 @@ describe('PermissionCatalogService (#772)', () => {
       db.rolePermission.findUnique.mockImplementation((async ({
         where,
       }: {
-        where: { roleId_permissionId: { roleId: string; permissionId: string } };
+        where: { roleId_permissionId: { permissionId: string; roleId: string } };
       }) => {
         const { roleId: role, permissionId: permission } = where.roleId_permissionId;
         const row = snapshot.rolePermissions.find(

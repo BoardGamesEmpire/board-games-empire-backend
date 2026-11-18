@@ -82,67 +82,67 @@ export interface SearchedGame {
 /** One frame of the coordinator's SearchGames stream: enums by name. */
 export interface CoordinatorSearchFrame {
   readonly correlationId: string;
-  readonly gatewayId: string;
-  readonly status: string;
   readonly game?: SearchedGame;
+  readonly gatewayId: string;
   readonly message?: string;
+  readonly status: string;
 }
 
 /** The coordinator's FetchGame reply. */
 export interface CoordinatorFetchReply {
   readonly correlationId: string;
-  readonly gatewayId: string;
-  readonly status: string;
   readonly game?: SearchedGame;
+  readonly gatewayId: string;
   readonly message?: string;
+  readonly status: string;
 }
 
 /** ConnectGateway's and ReinterviewGateway's reply. An unset optional field is absent. */
 export interface GatewayAdminReply {
-  readonly success: boolean;
   readonly error?: string;
   readonly refusalReason?: string;
+  readonly success: boolean;
 }
 
 export interface ConnectGatewayCall {
-  readonly gatewayId: string;
-  readonly connectionUrl: string;
-  readonly connectionPort: number;
   readonly authType: string;
+  readonly connectionPort: number;
+  readonly connectionUrl: string;
+  readonly gatewayId: string;
 }
 
 /** The coordinator's own protocol, `bge.coordinator.v1`, as the api calls it. */
 export interface CoordinatorClient {
   check(): Promise<{ readonly status: string }>;
 
-  /** Every frame of a search that names `gatewayId`. `query` keys the coordinator's search cache. */
-  searchGames(gatewayId: string, query: string, actor?: Actor): Promise<CoordinatorSearchFrame[]>;
+  connectGateway(call: ConnectGatewayCall): Promise<GatewayAdminReply>;
   fetchGame(gatewayId: string, externalId: string, actor?: Actor): Promise<CoordinatorFetchReply>;
   reinterviewGateway(gatewayId: string): Promise<GatewayAdminReply>;
-  connectGateway(call: ConnectGatewayCall): Promise<GatewayAdminReply>;
+  /** Every frame of a search that names `gatewayId`. `query` keys the coordinator's search cache. */
+  searchGames(gatewayId: string, query: string, actor?: Actor): Promise<CoordinatorSearchFrame[]>;
 }
 
 /** One frame of a DataGateway's SearchGames stream: enums by name. */
 export interface GatewaySearchFrame {
   readonly correlationId: string;
-  readonly status: string;
   readonly game?: SearchedGame;
   readonly message?: string;
+  readonly status: string;
 }
 
 export interface GatewayFetchReply {
   readonly correlationId: string;
-  readonly status: string;
   readonly game?: SearchedGame;
   readonly message?: string;
+  readonly status: string;
 }
 
 /** Ping's reply as the client decodes it: int64 as a decimal string. */
 export interface GatewayPingReply {
   readonly correlationId: string;
-  readonly timestampMs: string;
   readonly gatewayName: string;
   readonly gatewayVersion: string;
+  readonly timestampMs: string;
 }
 
 /**
@@ -151,38 +151,38 @@ export interface GatewayPingReply {
  * metadata.
  */
 export interface PluginGatewayClient {
+  fetchGame(externalId: string): Promise<GatewayFetchReply>;
   ping(): Promise<GatewayPingReply>;
   searchGames(query: string): Promise<GatewaySearchFrame[]>;
-  fetchGame(externalId: string): Promise<GatewayFetchReply>;
 }
 
 /** What a gateway protocol client's calls carry in their metadata. */
 export interface GatewayCallMetadata {
-  /** The plugin DataGateway the calls are for, under `x-bge-gateway-id`. Left out, the calls name none. */
-  readonly gatewayId?: string;
-
   /** The actor the calls go out as, under `x-bge-actor`: {@link E2E_ACTOR} unless set, and none when null. */
   readonly actor?: Actor | null;
+
+  /** The plugin DataGateway the calls are for, under `x-bge-gateway-id`. Left out, the calls name none. */
+  readonly gatewayId?: string;
 }
 
 export interface RunningCoordinator {
+  gateway(metadata?: GatewayCallMetadata): PluginGatewayClient;
+
   readonly host: string;
 
   /** The port it listens on, which it keeps across {@link restart}. */
   readonly port: number;
-
-  readonly service: CoordinatorClient;
-  gateway(metadata?: GatewayCallMetadata): PluginGatewayClient;
-
-  /** Stops it as a deployment does, with SIGTERM, so its shutdown hooks run. */
-  stop(): Promise<void>;
-
   /**
    * Stops it if it runs, and launches it again on the same port, over the
    * plugin rows and the plugins root as they are now. A client or a driver
    * built before the restart reaches the new process at the address it has.
    */
   restart(): Promise<void>;
+
+  readonly service: CoordinatorClient;
+
+  /** Stops it as a deployment does, with SIGTERM, so its shutdown hooks run. */
+  stop(): Promise<void>;
 }
 
 /** A client of one service, as its constructor builds it: its RPCs are reached by name. */

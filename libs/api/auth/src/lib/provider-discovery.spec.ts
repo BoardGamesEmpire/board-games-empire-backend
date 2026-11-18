@@ -18,11 +18,11 @@ const noUsers = new Proxy(
 
 /** A sign-in provider's discovery endpoint, answering over a real loopback socket. */
 interface FakeProvider {
-  /** Its origin, with no trailing slash: the issuer. */
-  readonly url: string;
   /** What its discovery document gives as the authorization endpoint. */
   readonly authorizationEndpoint: string;
   close(): Promise<void>;
+  /** Its origin, with no trailing slash: the issuer. */
+  readonly url: string;
 }
 
 /**

@@ -63,7 +63,7 @@ describe('accepting a household invite', () => {
   };
 
   /** Status plus message, so a surprise reads as a diff rather than as `500`. */
-  const outcome = (response: { status: number; body: unknown }) => ({
+  const outcome = (response: { body: unknown; status: number }) => ({
     status: response.status,
     message: (response.body as { message?: unknown } | null)?.message ?? null,
   });

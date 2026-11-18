@@ -26,5 +26,5 @@ export const boundPageQuery = <T extends PaginationQueryDto>(
  * type, and hand-writing the derived values is how a test ends up asserting
  * paging arithmetic that the DTO does not actually perform (#230).
  */
-export const paginationQuery = (init: { page?: number; limit?: number } = {}): PaginationQueryDto =>
+export const paginationQuery = (init: { limit?: number; page?: number } = {}): PaginationQueryDto =>
   boundPageQuery(DefaultPaginationQueryDto, init);

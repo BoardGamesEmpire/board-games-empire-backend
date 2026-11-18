@@ -19,17 +19,17 @@ const TEMPLATE = path.join(WORKSPACE_ROOT, '.env.example');
 const IMPORT_ENVIRONMENT = { NODE_ENV: 'development', OTEL_SDK_DISABLED: 'true', LOG_LEVEL: 'silent' };
 
 export interface RequiredConfiguration {
+  /** Two or more variables set to values validation rejects. */
+  readonly malformed: Record<string, string>;
+
   /** The options the process role's root module passes to `ConfigModule.forRoot`. */
   readonly options: ConfigModuleOptions;
-
-  /** Imports the root module, whose imports are searched for every config the process role loads. */
-  readonly rootModule: () => Promise<Type>;
 
   /** The variables an operator must set, by environment. An environment left out requires none. */
   readonly required: Partial<Record<Environment, readonly string[]>>;
 
-  /** Two or more variables set to values validation rejects. */
-  readonly malformed: Record<string, string>;
+  /** Imports the root module, whose imports are searched for every config the process role loads. */
+  readonly rootModule: () => Promise<Type>;
 }
 
 interface LoadResult {

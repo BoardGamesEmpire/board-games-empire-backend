@@ -8,7 +8,7 @@ import { ImportBatchCompletionService } from './batch-completion.service';
 
 describe('ImportBatchCompletionService', () => {
   let service: ImportBatchCompletionService;
-  let db: { job: { findMany: jest.Mock; count: jest.Mock } };
+  let db: { job: { count: jest.Mock; findMany: jest.Mock } };
   let events: { emit: jest.Mock };
 
   const baseRow = (status: JobStatus) => ({

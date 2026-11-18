@@ -213,7 +213,7 @@ describe('the BGE images, run as the split profile', () => {
       const { events } = await searchGatewayOverSocket(stack.baseUrl, required(session, 'session'), id, STUB.query);
 
       const games = events.flatMap(({ event, payload }) => {
-        const result = payload as { source: string; games: unknown[] };
+        const result = payload as { games: unknown[]; source: string };
         return event === 'search:result' && result.source === id ? result.games : [];
       });
 
@@ -267,7 +267,7 @@ describe('the BGE images, run as the split profile', () => {
     // The Host check sits ahead of the client's files, and only the image
     // carries them (#977). `fetch` can't set Host, so this uses node:http.
     it("refuses the client to a name that is not the server's", async () => {
-      const { status, body } = await new Promise<{ status?: number; body: string }>((resolve, reject) => {
+      const { status, body } = await new Promise<{ body: string; status?: number }>((resolve, reject) => {
         const req = httpRequest(
           `${stack.baseUrl}/`,
           { headers: { Host: 'evil.example', Accept: 'text/html' } },

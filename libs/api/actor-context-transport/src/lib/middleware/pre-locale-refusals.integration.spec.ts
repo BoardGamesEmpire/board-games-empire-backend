@@ -29,7 +29,7 @@ const FRENCH = {
 };
 
 /** Who each session cookie names, and the language each user stored. */
-const SESSIONS: Record<string, { userId: string; impersonatedBy?: string }> = {
+const SESSIONS: Record<string, { impersonatedBy?: string; userId: string }> = {
   impersonated: { userId: 'user-target', impersonatedBy: 'user-admin' },
   'prefers-fr': { userId: 'user-fr' },
   'prefers-en': { userId: 'user-en' },

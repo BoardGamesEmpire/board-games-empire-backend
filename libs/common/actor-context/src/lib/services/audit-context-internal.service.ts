@@ -12,8 +12,6 @@ import {
 export interface ActorContextInit {
   readonly actor: Actor | null;
   readonly correlationId: string;
-  readonly source: EventSource;
-
   /**
    * Resolved catalog locale (a `systemSupported` `LanguageTag.tag`). Optional:
    * seams that carry a pre-resolved locale (a WebSocket connection, #180;
@@ -22,6 +20,8 @@ export interface ActorContextInit {
    * via {@link AuditContextInternalService.setLocale} instead.
    */
   readonly locale?: string;
+
+  readonly source: EventSource;
 }
 
 /**

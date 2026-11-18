@@ -72,7 +72,7 @@ describe('PluginArtifactStager (#1096)', () => {
   } as unknown as PluginUpdateStageResult;
 
   let store: { refreshForInstall: jest.Mock; remove: jest.Mock };
-  let updates: { stage: jest.Mock; describeStaging: jest.Mock };
+  let updates: { describeStaging: jest.Mock; stage: jest.Mock };
   let directories: { resolve: jest.Mock };
   let authority: { isServerAdmin: jest.Mock };
   let db: { plugin: { findUnique: jest.Mock } };

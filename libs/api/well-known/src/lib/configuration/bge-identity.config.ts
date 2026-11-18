@@ -14,18 +14,18 @@ const trim = (value: string): string => value.trim();
 
 export interface BgeIdentityConfig {
   /**
-   * Minimum semver client version this server accepts. Clients older than
-   * this refuse to proceed past server-add. Empty string means no minimum
-   * (advertised as null in the discovery document).
-   */
-  minClientVersion: string;
-
-  /**
    * Maximum semver client version this server accepts. Clients newer than
    * this refuse to proceed. Empty string means no maximum (advertised as
    * null in the discovery document).
    */
   maxClientVersion: string;
+
+  /**
+   * Minimum semver client version this server accepts. Clients older than
+   * this refuse to proceed past server-add. Empty string means no minimum
+   * (advertised as null in the discovery document).
+   */
+  minClientVersion: string;
 }
 
 export default registerAs('bgeIdentity', () =>

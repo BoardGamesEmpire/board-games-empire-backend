@@ -503,10 +503,10 @@ describe('leaving an event', () => {
       const REQUEST_REACHES_LOCK_MS = 20_000;
 
       interface Arrangement {
-        readonly leaver: AuthenticatedActor;
-        readonly eventId: string;
-        readonly leaverId: string;
         readonly entryId: string;
+        readonly eventId: string;
+        readonly leaver: AuthenticatedActor;
+        readonly leaverId: string;
       }
 
       /** The barrier's own backends, which are never the request under test. */

@@ -21,8 +21,8 @@ import type { DatabasePoolMetricsSnapshot, DatabasePoolMetricsSource } from './p
 const METER_NAME = 'bge-database-pool';
 
 interface MockMeter {
-  readonly createObservableGauge: jest.Mock;
   readonly addBatchObservableCallback: jest.Mock;
+  readonly createObservableGauge: jest.Mock;
   readonly removeBatchObservableCallback: jest.Mock;
 }
 

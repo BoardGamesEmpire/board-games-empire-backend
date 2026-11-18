@@ -208,7 +208,7 @@ export class UserProvisioningService {
   private async resolveRoleAssignments(
     userId: string,
     roleNames: readonly SystemRole[],
-  ): Promise<{ userId: string; roleId: string }[]> {
+  ): Promise<{ roleId: string; userId: string }[]> {
     const repeated = [...new Set(roleNames.filter((name, index) => roleNames.indexOf(name) !== index))];
 
     if (repeated.length > 0) {
