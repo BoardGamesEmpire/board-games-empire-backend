@@ -46,8 +46,10 @@ describe('a data-gateway plugin’s DataGateway row (#1083)', () => {
 
   interface BuiltArtifact {
     readonly bytes: Buffer;
+
     /** The DataGateway name the install takes: the display name in the server default locale. */
     readonly displayName: string;
+
     readonly sha256: string;
     readonly slug: string;
   }

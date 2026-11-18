@@ -24,6 +24,7 @@ interface ListedSignInProvider {
 interface PasswordResetSettings {
   /** The settings switch, `allowPasswordResets`. */
   readonly allowed: boolean;
+
   /** Whether the server can send the reset email. */
   readonly mailConfigured: boolean;
 }

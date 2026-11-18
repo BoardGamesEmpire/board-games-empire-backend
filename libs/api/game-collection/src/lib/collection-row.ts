@@ -105,6 +105,7 @@ export type GameCollectionRow = Omit<GameCollectionWithRelations, 'platformGame'
    * actor with no wishlist they can read.
    */
   onWishlist?: boolean | null;
+
   platformGame: Omit<IncludedPlatformGame, 'game'> & {
     game: IncludedPlatformGame['game'] & { baseGames: ExpansionLink[] };
   };

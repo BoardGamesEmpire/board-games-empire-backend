@@ -16,8 +16,10 @@ const CODE_PREFIX = 'app-sign-in-code:';
 export interface AppSignInFlow {
   /** The app's PKCE challenge, which the code is bound to. */
   readonly codeChallenge: string;
+
   /** The return address the app asked for, parsed: one the server sends sign-ins to. */
   readonly returnAddress: URL;
+
   /** The app's `state`, sent back to it unchanged. Absent when the app sent none. */
   readonly state?: string;
 }
@@ -41,10 +43,13 @@ export interface VerificationStore {
 export interface AppSignInStore {
   /** Records a single-use code standing for `record`, and returns the code. Only its hash is stored. */
   issueCode(record: AppSignInCodeRecord): Promise<string>;
+
   /** Records the app's request, and returns the flow's id. */
   openFlow(flow: AppSignInFlow): Promise<string>;
+
   /** The record a code stands for, once: a second redeem, an unknown code or one that expired finds nothing. */
   redeemCode(code: string): Promise<AppSignInCodeRecord | null>;
+
   /**
    * The flow, once: a second take, or one after it expired, finds nothing.
    * So does a flow whose address is no longer one the server sends sign-ins to.

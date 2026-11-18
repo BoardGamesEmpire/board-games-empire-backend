@@ -17,8 +17,10 @@ export type SettingSwitches = Pick<
 export interface SettingGateDeps {
   /** The row's switches, or `null` when the row is missing. A missing row refuses everything gated. */
   readonly readSwitches: () => Promise<SettingSwitches | null>;
+
   /** A user's username as stored, or `null` when there is no such user. */
   readonly readUsername: (userId: string) => Promise<string | null>;
+
   /** Renders a refusal's catalog key. */
   readonly render: (key: I18nPath) => string;
 }
@@ -90,12 +92,14 @@ export interface SettingGateContext {
     /** Set by the route's session middleware. */
     readonly session?: { readonly user: { readonly id: string } } | null;
   };
+
   readonly path?: string;
 }
 
 export interface SettingGates {
   /** `hooks.before`, wrapped in `createAuthMiddleware`. */
   beforeRoute(context: SettingGateContext): Promise<void>;
+
   /**
    * `databaseHooks.user.create.before`. Every account better-auth creates
    * passes through it: email sign-up, anonymous sign-in, a first OIDC login
@@ -105,6 +109,7 @@ export interface SettingGates {
    * on a callback.
    */
   beforeUserCreate(user: unknown, context: SettingGateContext | null): Promise<void>;
+
   /**
    * `databaseHooks.user.update.before`. Refuses `/update-user` only when it
    * would change the username, so a client that resends the whole profile

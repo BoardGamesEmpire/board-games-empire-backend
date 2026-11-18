@@ -35,6 +35,7 @@ export interface RunSeedsOptions {
 export interface SeedsReport {
   /** What the catalog reconcile found and wrote. */
   readonly reconcile: ReconcileResult;
+
   /** The reference seeds that ran, by function name, in order. */
   readonly seeds: readonly string[];
 }

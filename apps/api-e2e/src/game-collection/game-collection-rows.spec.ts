@@ -46,6 +46,7 @@ describe('collection rows (#1070)', () => {
   interface PlatformGameOptions {
     /** The game's own values, its reach included. */
     readonly game?: Partial<Prisma.GameUncheckedCreateInput>;
+
     /** The platform game's overrides of the game's players and play time. */
     readonly platformGame?: Pick<Prisma.PlatformGameUncheckedCreateInput, PlayerAndPlayTimeField>;
   }

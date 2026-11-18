@@ -43,6 +43,7 @@ type BbNode = BbElement | BbText | BbItem;
 /** An element still open while parsing, with the tag that opened it. */
 interface OpenElement extends BbElement {
   readonly openingTag: string;
+
   /**
    * How many opening tags of each name inside it were nested too deep, and
    * are still waiting for their closing tags. Those close nothing either.

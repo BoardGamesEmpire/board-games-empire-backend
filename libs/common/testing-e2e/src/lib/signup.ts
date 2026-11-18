@@ -27,8 +27,10 @@ export const SET_AUTH_TOKEN_HEADER = 'set-auth-token';
 export interface SignupOptions {
   readonly email?: string;
   readonly firstName?: string;
+
   /** better-auth's own sign-up field. Sent as given, so a test can prove it is dropped (#695). */
   readonly image?: string;
+
   readonly lastName?: string;
   readonly password?: string;
   readonly username?: string;

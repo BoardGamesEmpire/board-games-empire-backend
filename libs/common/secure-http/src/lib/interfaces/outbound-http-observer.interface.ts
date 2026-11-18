@@ -52,19 +52,23 @@ export interface OutboundErrorEvent {
 
 export interface SsrfRejectionEvent {
   host: string;
+
   /** Resolved IP, when DNS succeeded but the IP fell into a deny rule. */
   ip?: string;
+
   reason: SsrfRejectionReason;
 }
 
 export interface RedirectDeniedEvent {
   /** The URL that returned the redirect. */
   from: string;
+
   /**
    * The gauntlet's reason, or `host-not-allowed` when the caller's own host
    * rule (`SafeHttpRequestOptions.allowHost`) refused the target (#1083).
    */
   reason: SsrfRejectionReason | 'host-not-allowed';
+
   /** The `Location` target that failed the gauntlet. */
   to: string;
 }

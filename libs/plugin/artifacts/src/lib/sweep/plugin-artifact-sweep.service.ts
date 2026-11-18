@@ -58,12 +58,16 @@ const LOST_AND_FOUND = 'lost+found';
 export interface PluginArtifactSweepResult {
   /** Live artifact rows deleted because their directory was gone, removed by hand. */
   readonly artifactsWithoutDirectory: number;
+
   /** Artifact rows deleted at their expiry. */
   readonly expiredArtifacts: number;
+
   /** `<slug>/<sha256>/` directories removed. */
   readonly removedDirectories: number;
+
   /** Entries removed from `.incoming/`. */
   readonly removedIncoming: number;
+
   /** Load records deleted because their process stopped refreshing them. */
   readonly staleLoadRecords: number;
 }
@@ -72,6 +76,7 @@ export interface PluginArtifactSweepResult {
 interface WhatToKeep {
   /** Whether the database holds any plugin row at all, uninstalled ones included. */
   readonly anyPlugin: boolean;
+
   /** The checksums something still needs. */
   readonly checksums: ReadonlySet<string>;
 }
@@ -79,6 +84,7 @@ interface WhatToKeep {
 interface WalkTotals {
   readonly removedDirectories: number;
   readonly removedIncoming: number;
+
   /** Aged directories nothing names, kept because the database holds no plugin at all. */
   readonly sparedDirectories: number;
 }
@@ -158,8 +164,10 @@ const summarize = (result: PluginArtifactSweepResult): string =>
 @Injectable()
 export class PluginArtifactSweepService implements OnApplicationBootstrap, BeforeApplicationShutdown {
   private readonly logger = new Logger(PluginArtifactSweepService.name);
+
   /** Set once shutdown begins: no run starts, and a run in flight walks no further entry. */
   private stopping = false;
+
   /** The runs in flight, which shutdown waits for. */
   private readonly running = new Set<Promise<unknown>>();
 

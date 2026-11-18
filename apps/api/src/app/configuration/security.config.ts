@@ -7,6 +7,7 @@ export interface SecurityConfig {
     credentials: boolean;
     origin: string;
   };
+
   saltRounds: number;
 }
 

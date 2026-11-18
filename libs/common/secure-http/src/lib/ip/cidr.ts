@@ -11,7 +11,6 @@ export interface ParsedCidr {
   baseBytes: Uint8Array;
 
   family: IpFamily;
-
   prefixLength: number;
 }
 

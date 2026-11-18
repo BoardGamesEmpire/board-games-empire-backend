@@ -101,6 +101,7 @@ describe('household plugin writes racing a soft-delete (#548)', () => {
     readonly householdId: string;
     readonly owner: SessionActor;
     readonly plugin: Plugin;
+
     /** The household's consent surface, read while the household was live; every act body is built from it (#1150). */
     readonly surface: ConsentSurface;
   }
@@ -147,8 +148,10 @@ describe('household plugin writes racing a soft-delete (#548)', () => {
     readonly hiddenCode: string;
     readonly name: string;
     readonly send: (a: Arrangement, caller: Caller) => request.Test;
+
     /** Whether the household's unit enablement is arranged switched on first. */
     readonly switchedOn: boolean;
+
     readonly written: (a: Arrangement) => Promise<number>;
   }[] = [
     {

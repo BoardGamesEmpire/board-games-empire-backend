@@ -6,8 +6,10 @@ export const INCOMING_DIRNAME = '.incoming';
 
 export interface IncomingWorkspace {
   readonly archivePath: string;
+
   /** Removes both paths; a path that is not there is fine. */
   cleanup(): Promise<void>;
+
   readonly extractDir: string;
   readonly id: string;
 }

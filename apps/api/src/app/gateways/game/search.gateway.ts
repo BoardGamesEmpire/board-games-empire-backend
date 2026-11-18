@@ -52,6 +52,7 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
   private readonly server!: Server;
 
   protected readonly logger = new Logger(GameSearchGateway.name);
+
   private readonly userQueryMap = wrapDefaults<WeakMap<Socket, WsClientData>, Pick<WsClientData, 'activeSearches'>>({
     wrap: new WeakMap(),
     defaultValue: (): Pick<WsClientData, 'activeSearches'> => ({

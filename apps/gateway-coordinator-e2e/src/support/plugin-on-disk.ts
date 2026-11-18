@@ -44,11 +44,11 @@ export interface FixturePlacement {
 export interface PlacedPlugin {
   /** The plugin manifest written beside its code. */
   readonly manifest: Record<string, unknown>;
+
   /** The checksum its artifact directory is named for, which its row records as `installedSha256`. */
   readonly sha256: string;
 
   readonly slug: string;
-
   readonly version: string;
 }
 

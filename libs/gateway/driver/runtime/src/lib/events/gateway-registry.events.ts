@@ -36,10 +36,8 @@ type GatewayDisabledSnapshot = Readonly<Pick<DataGateway, 'id' | 'enabled'>>;
  */
 export class GatewayDisabledEvent extends MutationEvent<DataGateway> {
   static readonly eventName = GATEWAY_DISABLED_EVENT;
-
   declare readonly before: GatewayDisabledSnapshot;
   declare readonly after: GatewayDisabledSnapshot;
-
   readonly subject = ResourceType.DataGateway;
   readonly subjectId: string;
 
@@ -65,10 +63,8 @@ type GatewayCapabilitiesSnapshot = Readonly<Pick<DataGateway, 'id' | 'capabiliti
  */
 export class GatewayCapabilitiesChangedEvent extends MutationEvent<DataGateway> {
   static readonly eventName = GATEWAY_CAPABILITIES_CHANGED_EVENT;
-
   declare readonly before: GatewayCapabilitiesSnapshot;
   declare readonly after: GatewayCapabilitiesSnapshot;
-
   readonly subject = ResourceType.DataGateway;
   readonly subjectId: string;
 

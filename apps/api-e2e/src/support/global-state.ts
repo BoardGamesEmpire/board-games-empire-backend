@@ -17,8 +17,10 @@ import type { StartedRedisServer } from './redis-server';
 export interface E2EGlobalState {
   readonly api?: ChildProcess;
   readonly mailpit?: StartedMailpit;
+
   /** The plugins root the API was given (#1094), which teardown removes. */
   readonly pluginsRoot?: string;
+
   readonly postgres?: StartedPostgreSqlContainer;
   readonly redis?: StartedRedisServer;
   readonly signInProvider?: FakeSignInProvider;

@@ -57,6 +57,7 @@ const STUB_DESCRIPTION: proto.DescribeResponse = {
 interface Answers {
   /** What Describe answers. Over gRPC an unset field arrives missing, so a partial answer is cast. */
   description?: Partial<proto.DescribeResponse>;
+
   languages?: proto.GatewayLanguageEntry[];
   version?: string;
 }

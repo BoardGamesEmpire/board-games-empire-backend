@@ -8,6 +8,7 @@ import type { Actor, EventSource } from '@bge/actor-context';
 export interface RecordAuditEntry {
   /** MutationAction today; plugin-specific verbs may widen this later. */
   readonly action: string;
+
   readonly actor: Actor;
   readonly after: Record<string, unknown> | null;
   readonly before: Record<string, unknown> | null;

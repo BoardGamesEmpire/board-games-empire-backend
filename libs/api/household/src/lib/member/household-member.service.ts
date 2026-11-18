@@ -62,6 +62,7 @@ export type HouseholdMemberWithRelations = Prisma.HouseholdMemberGetPayload<{ se
 export interface OwnershipTransferResult {
   /** The promoted member, now `HouseholdOwner`. */
   readonly owner: HouseholdMemberWithRelations;
+
   /** The acting member, now `HouseholdAdmin`. */
   readonly previousOwner: HouseholdMemberWithRelations;
 }
@@ -107,10 +108,13 @@ export function isAdmissibleMembershipOrigin(origin: HouseholdMembershipOrigin):
 export interface AddMemberParams {
   /** The acting principal on the household's side; `origin` says in what capacity. */
   readonly addedById: string;
+
   readonly householdId: string;
   readonly origin: AdmissibleMembershipOrigin;
+
   /** Defaults to `HouseholdMember`. `HouseholdOwner` is not assignable here. */
   readonly role?: AssignableHouseholdRole;
+
   readonly userId: string;
 }
 
@@ -132,7 +136,9 @@ export interface AddMemberResult {
    * the second case.
    */
   readonly admitted: boolean;
+
   readonly member: HouseholdMemberWithRelations;
+
   /**
    * Soft caps this admission crossed (#159). The caller MUST forward these to
    * `QuotaService.emitSoftOverages(...)` only AFTER its transaction commits —
@@ -163,6 +169,7 @@ interface ScopedMemberDenials {
    * row it was.
    */
   onHidden: () => never | Promise<never>;
+
   /** No such row at all → the caller's 404. */
   onMissing: () => never;
 }

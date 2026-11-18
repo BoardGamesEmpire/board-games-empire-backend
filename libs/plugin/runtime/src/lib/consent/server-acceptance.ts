@@ -13,17 +13,21 @@ import type {
 export interface ServerAcceptanceInput {
   /** The server-scope requested permissions this acceptance grants, in manifest order. */
   readonly accepted: readonly NormalizedPermissionRequest[];
+
   readonly defaultLocale: string;
   readonly locale: string;
   readonly riskOf: (check: NormalizedPermissionRequest) => RiskLevel;
+
   /** Every server-scope requested permission of the manifest shown, in manifest order. */
   readonly shown: readonly NormalizedPermissionRequest[];
+
   readonly source: ConsentManifestSource;
 }
 
 export interface ServerAcceptance {
   /** Consent decisions to write, sorted by permissionSlug ascending (the lock order). */
   readonly decisions: readonly ConsentActDecision[];
+
   readonly presentation: ConsentActPresentation;
 }
 
@@ -71,8 +75,10 @@ export function planServerAcceptance(input: ServerAcceptanceInput): ServerAccept
 export interface ServerApprovalInput {
   /** The Server unit's consent decisions on record for the plugin. */
   readonly decisions: readonly ConsentActDecision[];
+
   /** Every requested permission of the staged manifest, in manifest order; the rule reads the server-scope ones. */
   readonly requested: readonly NormalizedPermissionRequest[];
+
   /** Today's catalog risk of a requested permission. */
   readonly riskOf: (check: NormalizedPermissionRequest) => RiskLevel;
 }
@@ -80,6 +86,7 @@ export interface ServerApprovalInput {
 export interface ServerApproval {
   /** What approving grants at today's risk, in manifest order: every required permission and every undecided optional one. */
   readonly accepted: readonly NormalizedPermissionRequest[];
+
   /**
    * The part of `accepted` that confers authority the Server unit does not
    * hold today: no decision, a denial, or a grant at a risk that no longer

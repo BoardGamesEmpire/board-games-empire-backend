@@ -46,8 +46,10 @@ export async function startMailpit(): Promise<StartedMailpit> {
 export interface MailpitMessage {
   readonly id: string;
   readonly subject: string;
+
   /** The plain-text body. */
   readonly text: string;
+
   /** The SMTP user the sender signed in as, or `''` when it sent none. */
   readonly username: string;
 }

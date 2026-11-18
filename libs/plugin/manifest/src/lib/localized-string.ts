@@ -43,6 +43,7 @@ export const canonicalizeLocale = (tag: string): string => {
 export interface ResolveLocaleOptions {
   /** The server's configured default locale — guaranteed present by the validator. */
   readonly defaultLocale: string;
+
   /** The requester's locale (e.g. from `Accept-Language` / user preference). */
   readonly locale: string;
 }
@@ -50,8 +51,10 @@ export interface ResolveLocaleOptions {
 export interface ResolvedLocalizedString {
   /** Which locale the value was served from (canonical form for map hits). */
   readonly locale: string;
+
   /** True when neither the requested locale nor its base language matched. */
   readonly usedFallback: boolean;
+
   readonly value: string;
 }
 

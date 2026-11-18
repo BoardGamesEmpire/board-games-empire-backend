@@ -7,6 +7,7 @@ import { coded, markBodyCutOff, type AuthRequestHandler } from './auth-request-h
 export interface AuthNodeHandlerOptions {
   /** The most bytes of a request body read, beyond which the request is refused. */
   readonly maxBodyBytes: number;
+
   /** Renders a refusal's catalog key. */
   readonly render: (key: I18nPath) => string;
 }

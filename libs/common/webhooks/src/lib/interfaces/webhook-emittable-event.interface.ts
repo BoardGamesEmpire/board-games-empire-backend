@@ -46,8 +46,10 @@ export interface WebhookEmittableEvent<TData = unknown> {
 export function webhookEnvelope<TData>(args: {
   data: TData;
   householdId?: string | null;
+
   /** Stable id of this logical event occurrence — enables delivery dedup. */
   occurrenceId?: string;
+
   subjectId: string;
 }): WebhookEmittableEvent<TData> {
   return {

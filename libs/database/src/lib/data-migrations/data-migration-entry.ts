@@ -20,6 +20,7 @@ export interface DataMigrationEntry {
    * because lexical order is apply order and the two ledgers read alike.
    */
   readonly name: string;
+
   /**
    * The author's revision of `run`, from 1. Bump it whenever `run` changes.
    * A database that applied an earlier revision then refuses to boot: the
@@ -30,6 +31,7 @@ export interface DataMigrationEntry {
    * and boots, and the newer build owns the data.
    */
   readonly revision: number;
+
   run(tx: Prisma.TransactionClient, logger: Logger): Promise<void>;
 }
 

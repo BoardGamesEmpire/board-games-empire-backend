@@ -53,6 +53,7 @@ interface CachedDriver {
   configHash: string;
   driver: DataGatewayDriver;
   gatewayId: string;
+
   /**
    * For a driver the plugin driver source built, the install of the plugin
    * it was built from: its `installedAt`, which a reinstall rewrites (#1083).
@@ -269,9 +270,11 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
   private readonly logger = new Logger(GatewayRegistryService.name);
   private readonly clients = new Map<string, CachedDriver>();
   private readonly failures = new Map<string, FailureTrack>();
+
   // In-flight lazy connects, keyed by gatewayId, so concurrent callers for the
   // same gateway share one connect attempt instead of stampeding the gateway.
   private readonly connecting = new Map<string, Promise<void>>();
+
   // Per-gateway invalidation counter. connect() captures this before its async
   // ping, as connectPlugin() does before a plugin DataGateway's build, and
   // refuses to cache the freshly-built driver if it changed meanwhile
@@ -300,9 +303,11 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
   // version. Held in memory: a process that missed the change goes by the
   // version and the answers' age, as before.
   private readonly connectionChanged = new Set<string>();
+
   // Set once shutdown disposes the drivers. A connect still awaiting its ping
   // then discards its driver rather than caching one nothing will dispose.
   private shuttingDown = false;
+
   private configUpdateUnsubscribe?: () => Promise<void>;
 
   constructor(

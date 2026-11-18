@@ -6,8 +6,10 @@ export interface PluginTarballEntry {
   readonly content?: string;
   readonly linkname?: string;
   readonly name: string;
+
   /** Pax extended-header records, which override the header's own fields. */
   readonly pax?: Record<string, string>;
+
   readonly type?: 'file' | 'directory' | 'symlink' | 'link';
 }
 

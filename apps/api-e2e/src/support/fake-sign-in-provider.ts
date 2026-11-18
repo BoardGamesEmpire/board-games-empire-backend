@@ -67,19 +67,27 @@ function isIdTokenFault(value: string): value is IdTokenFault {
 interface Ticket {
   /** What the ID token says about the user, and `/userinfo` too unless {@link userInfoClaims} is set. */
   readonly claims: Record<string, unknown>;
+
   /** The `client_id` the authorization request named: the ID token's audience. */
   clientId?: string;
+
   codeChallenge?: string;
   codeChallengeMethod?: string;
+
   /** The `code_verifier` the token request sent. */
   codeVerifier?: string;
+
   readonly idTokenFault?: IdTokenFault;
+
   /** The `nonce` the authorization request sent, which only a provider with a JWKS is sent. */
   nonce?: string;
+
   /** The `scope` the authorization request asked for, once one has. */
   scope?: string;
+
   /** How many times `/userinfo` answered this ticket's access token. */
   userInfoCalls: number;
+
   /** What `/userinfo` answers in place of the claims, when the test gave it something else to say (#993). */
   readonly userInfoClaims?: Record<string, unknown>;
 }
@@ -93,8 +101,10 @@ const ID_TOKEN_LIFETIME_SECONDS = 600;
 
 interface SigningKey {
   readonly id: string;
+
   /** The public half, as a JWKS lists it. */
   readonly jwk: Record<string, unknown>;
+
   readonly privateKey: KeyObject;
 }
 

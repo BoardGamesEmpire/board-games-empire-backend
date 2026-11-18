@@ -4,29 +4,36 @@ import { Injectable, Logger } from '@nestjs/common';
 export interface LinkBaseGamesInput {
   /** Every base game its DataGateway names for it, primary first. */
   baseExternalIds: string[];
+
   /** The game's content type, as stored. */
   contentType: ContentType;
+
   /** The game's external id on `gatewayId`. */
   externalId: string;
+
   /**
    * The requested game of the import batch, for an expansion chosen with it.
    * Linked only when the DataGateway names no base game (#971).
    */
   fallbackBaseExternalId?: string;
+
   /** The game just imported. */
   gameId: string;
+
   gatewayId: string;
 }
 
 export interface LinkBaseGamesResult {
   /** The base games the game is now linked to, in the order its DataGateway named them. */
   baseGameIds: string[];
+
   /**
    * The external id of the base game to add to the import batch: the first
    * one named, when the game needs a base game and none of those named is in
    * the game catalog.
    */
   baseGameToAdd?: string;
+
   /**
    * True when the game is an add-on that has a base game: linked to one, or
    * missing the one it needs. A remake, remaster, port or edition linked to

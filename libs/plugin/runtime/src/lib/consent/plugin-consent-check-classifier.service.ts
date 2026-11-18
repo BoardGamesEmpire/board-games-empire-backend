@@ -224,6 +224,7 @@ export type ConsentReadClient = Prisma.TransactionClient | DatabaseService;
 export interface ConsentClassifyOptions {
   /** Read through this client, so a consent act's transaction sees its own writes. Default: the service's database. */
   readonly client?: ConsentReadClient;
+
   /**
    * Which manifest the requested permissions come from. A staged manifest's
    * new declared permission has no catalog row until activation creates it,
@@ -235,8 +236,10 @@ export interface ConsentClassifyOptions {
 export interface ConsentCheckDecisionInput {
   /** Today's catalog risk, `null` when the catalog row is gone. */
   readonly currentRiskLevel: RiskLevel | null;
+
   /** The row at the check's deciding scope, `Granted` or `Denied`; `undefined` when none exists. */
   readonly grant: { readonly decidedRiskLevel: RiskLevel; readonly status: PluginGrantStatus } | undefined;
+
   readonly unboundedUnitScope: boolean;
   readonly wildcardSubject: boolean;
 }

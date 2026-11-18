@@ -12,6 +12,7 @@ const TOO_MANY_REQUESTS = 429;
 export interface IgdbCallerOptions {
   /** IGDB's API. Defaults to `https://api.igdb.com/v4`. */
   baseUrl?: string;
+
   clientId: string;
   clientSecret: string;
 
@@ -19,6 +20,7 @@ export interface IgdbCallerOptions {
   fetch: UpstreamFetch;
 
   logger: DriverLogger;
+
   /** The wait before retrying a 429. Defaults to 1 second. */
   rateLimitRetryMs?: number;
 

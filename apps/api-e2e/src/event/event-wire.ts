@@ -70,6 +70,7 @@ export interface AttendeeSummaryWire {
   readonly guestName: string | null;
   readonly id: string;
   readonly status: EventParticipationStatus;
+
   readonly user:
     | (Pick<Wire<User>, 'id' | 'username'> & {
         readonly profile: Pick<Wire<UserProfile>, 'displayName' | 'avatarUrl'> | null;
@@ -101,6 +102,7 @@ export type LineupGameWire = Pick<
     readonly id: string;
     readonly platform: Pick<Wire<Platform>, 'id' | 'name' | 'platformType'>;
   };
+
   readonly suppliedBy: {
     readonly attendee: AttendeeSummaryWire | null;
     readonly attendeeId: string;
@@ -134,9 +136,11 @@ export type NominationWire = Wire<EventGameNomination> & {
   readonly elevatedTo: { readonly id: string; readonly occurrenceId: string | null } | null;
   readonly nominatedBy: AttendeeSummaryWire | null;
   readonly platformGame: LineupGameWire['platformGame'];
+
   readonly suppliedFrom: {
     readonly attendee: AttendeeSummaryWire | null;
     readonly attendeeId: string;
+
     readonly collection: {
       readonly platformGame: {
         readonly game: Pick<Wire<Game>, 'id' | 'title' | 'subtitle'>;
@@ -144,8 +148,10 @@ export type NominationWire = Wire<EventGameNomination> & {
         readonly platform: Pick<Wire<Platform>, 'id' | 'name'>;
       };
     };
+
     readonly id: string;
   };
+
   readonly votes: readonly NominationVoteWire[];
 };
 
@@ -232,9 +238,11 @@ export interface ListAttendeesEnvelope {
  */
 export interface OfferedGameWire {
   readonly attendeeId: string;
+
   readonly collection: {
     readonly id: string;
     readonly medium: GameMedium;
+
     readonly platformGame: Pick<
       Wire<PlatformGame>,
       'id' | 'image' | 'thumbnail' | 'minPlayers' | 'maxPlayers' | 'minPlayTime' | 'maxPlayTime'
@@ -254,13 +262,17 @@ export interface OfferedGameWire {
         | 'minPlayTime'
         | 'maxPlayTime'
       > & { readonly baseGames: readonly { readonly gameId: string; readonly isStandalone: boolean }[] };
+
       readonly platform: Pick<Wire<Platform>, 'id' | 'name' | 'slug' | 'platformType'>;
     };
   };
+
   readonly createdAt: string;
   readonly id: string;
+
   /** Whether the game is on the acting user's wishlist; null for an actor with no wishlist they can read (#1241). */
   readonly onWishlist: boolean | null;
+
   readonly supplies: { readonly lineup: number | null; readonly nominations: number | null };
 }
 
@@ -321,10 +333,12 @@ export interface AvailabilitySummaryWire {
       readonly maybe: number;
       readonly notAttending: number;
     };
+
     readonly guests: number;
     readonly registered: number;
     readonly total: number;
   };
+
   readonly eligibleVoters: number;
   readonly occurrences: readonly AvailabilitySummaryEntryWire[];
 }

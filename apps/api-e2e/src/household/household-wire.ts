@@ -435,6 +435,7 @@ export function listEnvelope(response: HttpResponseLike, request: RequestDescrip
 /** A row of `GET /api/households/restorable` (#542): the list row with its roster, and when the window ends. */
 export interface RestorableHouseholdWire extends HouseholdWire {
   readonly members: readonly HouseholdMemberProjection[];
+
   /** ISO timestamp the acting user's restore window ends at, or `null` when their grant has no end date. */
   readonly restorableUntil: string | null;
 }

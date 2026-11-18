@@ -46,15 +46,21 @@ export interface VocabularyAdapter<K extends VocabularyKind> {
     slug: string,
     origin: VocabularyLinkOrigin,
   ): Promise<string>;
+
   findBySlug(db: DatabaseService, slug: string): Promise<string | undefined>;
+
   /** The DataGateway's link for the entry, if it has one. */
   findLink(db: DatabaseService, gatewayId: string, externalId: string): Promise<LinkResolution | null>;
+
   /** The record's name in log lines. */
   label: string;
+
   /** The setting that parks a miss as Pending, or null: families have none. */
   reviewSetting: ReviewSetting | null;
+
   /** The record table for the pg_trgm lookup (a constant identifier), or null: platforms match by slug only. */
   similarityTable: Prisma.Sql | null;
+
   /**
    * Creates the link unless another writer made it first, and resolves to the
    * link as it stands. Never rewrites an existing link.
@@ -69,19 +75,25 @@ export interface ReviewedVocabularyAdapter<K extends ReviewedVocabularyKind> ext
    * holds the DataGateway's key, so its record can't be made with a new link.
    */
   createRecord(db: DatabaseService, entry: EntryOf<K>, slug: string): Promise<string>;
+
   /** An admin's decision, whatever the link's status. */
   decide(db: DatabaseService, gatewayId: string, linkId: string, decision: LinkResolution): Promise<VocabularyLinkView>;
+
   /** A link, found only under its own DataGateway. */
   findOwned(db: DatabaseService, gatewayId: string, linkId: string): Promise<VocabularyLinkView | null>;
+
   /** A link by id, with the entry its supplied fields rebuild. */
   findSupplied(
     db: DatabaseService,
     linkId: string,
   ): Promise<{ entry: EntryOf<K>; status: VocabularyLinkStatus } | null>;
+
   /** One page of links, and their count, from one REPEATABLE READ snapshot. */
   list(db: DatabaseService, query: ReviewQuery): Promise<PaginatedRows<VocabularyLinkView>>;
+
   recordExists(db: DatabaseService, recordId: string): Promise<boolean>;
   reviewSetting: ReviewSetting;
+
   /** Links a link to `recordId` only while it's still Pending. Resolves to whether it did. */
   settlePending(db: DatabaseService, linkId: string, recordId: string): Promise<boolean>;
 }

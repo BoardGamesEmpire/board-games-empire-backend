@@ -24,8 +24,10 @@ import { HouseholdEvents } from '../constants/household-events.constant';
  */
 export interface HouseholdOwnershipSnapshot {
   readonly householdId: string;
+
   /** `HouseholdMember.id` of the owning member. */
   readonly ownerMemberId: string;
+
   readonly ownerUserId: string;
 }
 
@@ -42,10 +44,8 @@ export interface HouseholdOwnershipSnapshot {
  */
 export class HouseholdOwnershipTransferredEvent extends MutationEvent<HouseholdOwnershipSnapshot> {
   static readonly eventName = HouseholdEvents.OwnershipTransferred;
-
   declare readonly before: HouseholdOwnershipSnapshot;
   declare readonly after: HouseholdOwnershipSnapshot;
-
   readonly subject = ResourceType.Household;
   readonly subjectId: string;
 
@@ -66,10 +66,8 @@ export class HouseholdOwnershipTransferredEvent extends MutationEvent<HouseholdO
  */
 export class HouseholdGameShareApprovedEvent extends MutationEvent<GameShareSnapshot> {
   static readonly eventName = HouseholdEvents.GameShareApproved;
-
   declare readonly before: GameShareSnapshot;
   declare readonly after: GameShareSnapshot;
-
   readonly subject = ResourceType.GameShare;
   readonly subjectId: string;
 
@@ -91,10 +89,8 @@ export class HouseholdGameShareApprovedEvent extends MutationEvent<GameShareSnap
  */
 export class HouseholdGameShareEndedEvent extends MutationEvent<GameShareSnapshot> {
   static readonly eventName = HouseholdEvents.GameShareEnded;
-
   declare readonly before: GameShareSnapshot;
   declare readonly after: null;
-
   readonly subject = ResourceType.GameShare;
   readonly subjectId: string;
 

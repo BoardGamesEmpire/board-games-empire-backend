@@ -34,6 +34,7 @@ import {
 export interface HouseholdUnitActionInput {
   /** The acting household admin — resolved from CLS at the API edge, verified here, never taken from a request body. */
   readonly actorId: string;
+
   readonly householdId: string;
   readonly slug: string;
 }
@@ -44,6 +45,7 @@ export interface HouseholdUnitConfigInput extends HouseholdUnitActionInput {
 
 export interface UserUnitActionInput {
   readonly slug: string;
+
   /** The acting user — the API edge enforces the user-actor kind; this axis is self-addressed only. */
   readonly userId: string;
 }

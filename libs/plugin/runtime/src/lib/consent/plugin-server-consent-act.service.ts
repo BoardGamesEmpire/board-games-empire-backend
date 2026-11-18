@@ -25,6 +25,7 @@ import { writeConsentAct } from './write-consent-act';
 export interface ServerConsentActInput {
   /** The acting server admin. Verified here. */
   readonly actorId: string;
+
   readonly answers: readonly ConsentActAnswer[];
   readonly locale?: string;
   readonly manifestSha256: string;
@@ -34,6 +35,7 @@ export interface ServerConsentActInput {
 export interface ServerConsentActResult {
   /** Null when the act would have changed nothing: no act, no event (ADR 0002). */
   readonly act: PluginConsentAct | null;
+
   readonly changed: boolean;
 }
 
@@ -51,6 +53,7 @@ type ServerActOutcome =
   | {
       readonly act: PluginConsentAct;
       readonly changed: true;
+
       /** Only the decisions whose row changed: the ones an event announces. */
       readonly changedDecisions: readonly WrittenDecision[];
     };

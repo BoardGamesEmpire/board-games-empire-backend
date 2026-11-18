@@ -83,12 +83,15 @@ const DEFAULT_MAX_BACKOFF_MS = 30_000;
 interface ResolvedOptions {
   /** The caller's host rule, asked on every hop. `download()` never sets it. */
   allowHost?: (hostname: string) => boolean;
+
   body?: SafeHttpRequestBody;
+
   /**
    * One time limit shared by every hop. `download()` sets it; `request()`
    * leaves it out, so each hop gets its own `timeoutMs`.
    */
   deadline?: AbortSignal;
+
   headers: Record<string, string>;
   maxRedirects: number;
   method: SafeHttpMethod;
@@ -122,11 +125,15 @@ interface TerminalHop {
 interface HopResult {
   bodyBytes: Buffer;
   headers: Record<string, string>;
+
   /** Each Set-Cookie header by itself; `headers` holds them joined. */
   setCookie: string[];
+
   status: number;
+
   /** The status line's reason phrase; empty over HTTP/2. */
   statusText: string;
+
   /** Set when the body was streamed to a `DownloadSink`. */
   written?: { bytes: number; sha256: string };
 }

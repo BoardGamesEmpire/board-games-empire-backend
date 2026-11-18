@@ -25,8 +25,10 @@ export interface ObjectMeta {
 export interface StoredObject {
   readonly checksum: string; // sha256 hex
   readonly contentType: string;
+
   /** Driver-specific extras, discriminated by `driverSlug`. Opaque to consumers. */
   readonly details?: Readonly<Record<string, unknown>>;
+
   readonly driverSlug: string;
   readonly etag?: string;
   readonly key: string;
@@ -44,8 +46,10 @@ export interface RetrievedObject {
 export interface SignedUrlOptions {
   /** Extra claims folded into the signature (e.g. `{ ownerId }`). App-served drivers MUST bind these. */
   readonly bindings?: Readonly<Record<string, string>>;
+
   /** Bound into the signature and enforced as the response Content-Type by app-served drivers. */
   readonly contentType?: string;
+
   readonly ttlSeconds: number;
 }
 
@@ -58,6 +62,7 @@ export interface SignedUrl {
 export interface ListOptions {
   /** Resume after this key (from a prior `ListResult.nextCursor`). */
   readonly cursor?: string;
+
   /** Max objects per page. Omit to return all matches in one page (no `nextCursor`). */
   readonly limit?: number;
 }
@@ -65,5 +70,6 @@ export interface ListOptions {
 export interface ListResult {
   /** Present only when more objects remain beyond this page; pass back as `ListOptions.cursor`. */
   readonly nextCursor?: string;
+
   readonly objects: readonly StoredObject[];
 }

@@ -114,10 +114,10 @@ export interface ConnectGatewayCall {
 /** The coordinator's own protocol, `bge.coordinator.v1`, as the api calls it. */
 export interface CoordinatorClient {
   check(): Promise<{ readonly status: string }>;
-
   connectGateway(call: ConnectGatewayCall): Promise<GatewayAdminReply>;
   fetchGame(gatewayId: string, externalId: string, actor?: Actor): Promise<CoordinatorFetchReply>;
   reinterviewGateway(gatewayId: string): Promise<GatewayAdminReply>;
+
   /** Every frame of a search that names `gatewayId`. `query` keys the coordinator's search cache. */
   searchGames(gatewayId: string, query: string, actor?: Actor): Promise<CoordinatorSearchFrame[]>;
 }
@@ -167,11 +167,11 @@ export interface GatewayCallMetadata {
 
 export interface RunningCoordinator {
   gateway(metadata?: GatewayCallMetadata): PluginGatewayClient;
-
   readonly host: string;
 
   /** The port it listens on, which it keeps across {@link restart}. */
   readonly port: number;
+
   /**
    * Stops it if it runs, and launches it again on the same port, over the
    * plugin rows and the plugins root as they are now. A client or a driver

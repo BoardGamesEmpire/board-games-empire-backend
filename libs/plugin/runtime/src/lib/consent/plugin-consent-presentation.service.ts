@@ -28,9 +28,12 @@ import { presentedRiskLevel } from './presented-risk-level';
 export interface PresentablePluginRow {
   readonly enabled: boolean;
   readonly id: string;
+
   /** The installed artifact's sha, which the active consent surface names (#1150). */
   readonly installedSha256: string;
+
   readonly manifestJson: unknown;
+
   /**
    * Nullable column — `null` means no staged update. Typed `unknown` like
    * `manifestJson` because stored manifests are distrusted (re-validated on
@@ -38,8 +41,10 @@ export interface PresentablePluginRow {
    * shape would claim structure this service deliberately does not trust.
    */
   readonly pendingManifestJson: unknown;
+
   /** The staged artifact's sha, which the staged consent surface names; `null` when nothing is staged (#1150). */
   readonly pendingSha256: string | null;
+
   readonly pendingVersion: string | null;
   readonly slug: string;
   readonly uninstalledAt: Date | null;

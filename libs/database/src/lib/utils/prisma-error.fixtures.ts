@@ -22,6 +22,7 @@ interface DriverAdapterCause {
    * than required.
    */
   readonly code?: string;
+
   readonly constraint?: { readonly fields?: readonly string[]; readonly index?: string };
   readonly detail?: string;
   readonly hint?: string;

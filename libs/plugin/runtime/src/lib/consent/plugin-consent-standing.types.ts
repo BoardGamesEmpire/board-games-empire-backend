@@ -23,12 +23,17 @@ export type ConsentOutstandingKind = 'never_asked' | 'refused' | 'risk_raised' |
 export interface ConsentOutstandingCheck {
   /** Manifest `features[].name` the check is bound to, or `null` for a plugin-wide check. */
   readonly feature: string | null;
+
   readonly kind: ConsentOutstandingKind;
+
   /** Localized reason text, resolved with the manifest fallback chain. */
   readonly reason: string;
+
   readonly required: boolean;
+
   /** Today's catalog risk; `null` when a core permission's catalog row is gone. A declared permission is always `Low`. */
   readonly riskLevel: RiskLevel | null;
+
   /** Canonical slug. */
   readonly slug: string;
 }
@@ -36,6 +41,7 @@ export interface ConsentOutstandingCheck {
 export interface PluginConsentStanding {
   /** Optional checks the unit's resolution consumes that do not confer. */
   readonly optionalOff: readonly ConsentOutstandingCheck[];
+
   /** Required checks the unit's resolution consumes that do not confer. */
   readonly outstanding: readonly ConsentOutstandingCheck[];
 }
@@ -48,5 +54,6 @@ export interface PluginConsentStandingDetail {
    * here while its kind reads `outstanding_elsewhere`.
    */
   readonly refusedSlugs: ReadonlySet<string>;
+
   readonly standing: PluginConsentStanding;
 }

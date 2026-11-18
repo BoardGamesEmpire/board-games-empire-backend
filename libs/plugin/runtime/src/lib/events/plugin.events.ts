@@ -77,17 +77,22 @@ export interface PluginInstallAuditContext {
    * reconstruction `decidedRiskLevel` exists to avoid on grant rows.
    */
   readonly acknowledgedForbiddenImports: readonly string[];
+
   /**
    * The `InstallAccept` consent act the install recorded (#1336), so the
    * lifecycle row names the act that holds what the server admin was shown.
    */
   readonly actId: string;
+
   /** npm advisory findings acknowledged at install, `null` when no lockfile was present (#84). */
   readonly auditFindings: readonly NpmAuditFinding[] | null;
+
   /** Server-consentable permissions granted by the installing admin. */
   readonly grantedPermissions: readonly GrantedPermissionRecord[];
+
   /** Ingress provenance — context for the lifecycle table, not row state. */
   readonly provenance: PluginProvenance;
+
   /**
    * A reinstall over a tombstone found the retained server config invalid
    * under the NEW manifest's `config.schema` and reset it to `{}` —
@@ -96,19 +101,17 @@ export interface PluginInstallAuditContext {
    * so pre-reinstall construction sites need no churn.
    */
   readonly retainedConfigReset?: boolean;
+
   /** Everything static analysis reported: warnings, deep-scan advisories, and any overridden forbidden imports. */
   readonly staticAnalysis: readonly StaticAnalysisFinding[];
 }
 
 export class PluginInstalledEvent extends MutationEvent<Plugin> {
   static readonly eventName = PluginEvent.Installed;
-
   declare readonly before: null;
   declare readonly after: PluginInstalledSnapshot;
-
   readonly subject = ResourceType.Plugin;
   readonly subjectId: string;
-
   readonly provenance: PluginProvenance;
   readonly grantedPermissions: readonly GrantedPermissionRecord[];
   readonly auditFindings: readonly NpmAuditFinding[] | null;
@@ -134,10 +137,8 @@ type PluginEnablementSnapshot = Readonly<Pick<Plugin, 'id' | 'slug' | 'enabled'>
 
 export class PluginEnabledEvent extends MutationEvent<Plugin> {
   static readonly eventName = PluginEvent.Enabled;
-
   declare readonly before: PluginEnablementSnapshot;
   declare readonly after: PluginEnablementSnapshot;
-
   readonly subject = ResourceType.Plugin;
   readonly subjectId: string;
 
@@ -149,10 +150,8 @@ export class PluginEnabledEvent extends MutationEvent<Plugin> {
 
 export class PluginDisabledEvent extends MutationEvent<Plugin> {
   static readonly eventName = PluginEvent.Disabled;
-
   declare readonly before: PluginEnablementSnapshot;
   declare readonly after: PluginEnablementSnapshot;
-
   readonly subject = ResourceType.Plugin;
   readonly subjectId: string;
 
@@ -166,10 +165,8 @@ type PluginUninstalledSnapshot = Readonly<Pick<Plugin, 'id' | 'slug' | 'version'
 
 export class PluginUninstalledEvent extends MutationEvent<Plugin> {
   static readonly eventName = PluginEvent.Uninstalled;
-
   declare readonly before: PluginUninstalledSnapshot;
   declare readonly after: null;
-
   readonly subject = ResourceType.Plugin;
   readonly subjectId: string;
 
@@ -194,10 +191,8 @@ type PluginConfigSnapshot = Readonly<Pick<Plugin, 'id' | 'slug' | 'config'>>;
 /** Server-scope plugin configuration changed (`Plugin.config`). Triggers the Phase B config pub/sub reload. */
 export class PluginConfigUpdatedEvent extends MutationEvent<Plugin> {
   static readonly eventName = PluginEvent.ConfigUpdated;
-
   declare readonly before: PluginConfigSnapshot;
   declare readonly after: PluginConfigSnapshot;
-
   readonly subject = ResourceType.Plugin;
   readonly subjectId: string;
 
@@ -223,10 +218,8 @@ type HouseholdPluginConfigSnapshot = Readonly<Pick<HouseholdPlugin, 'id' | 'hous
 /** Per-household plugin configuration changed (`HouseholdPlugin.config`). Same routing key as the server-scope event. */
 export class HouseholdPluginConfigUpdatedEvent extends MutationEvent<HouseholdPlugin> {
   static readonly eventName = PluginEvent.ConfigUpdated;
-
   declare readonly before: HouseholdPluginConfigSnapshot;
   declare readonly after: HouseholdPluginConfigSnapshot;
-
   readonly subject = ResourceType.HouseholdPlugin;
   readonly subjectId: string;
 
@@ -253,10 +246,8 @@ type HouseholdPluginSwitchSnapshot = Readonly<Pick<HouseholdPlugin, 'id' | 'hous
  */
 export class HouseholdPluginEnabledEvent extends MutationEvent<HouseholdPlugin> {
   static readonly eventName = PluginEvent.Enabled;
-
   declare readonly before: HouseholdPluginSwitchSnapshot | null;
   declare readonly after: HouseholdPluginSwitchSnapshot;
-
   readonly subject = ResourceType.HouseholdPlugin;
   readonly subjectId: string;
 
@@ -275,10 +266,8 @@ export class HouseholdPluginEnabledEvent extends MutationEvent<HouseholdPlugin> 
 /** The household admin flipped their unit's `enabled` switch OFF (#323) — see {@link HouseholdPluginEnabledEvent}. */
 export class HouseholdPluginDisabledEvent extends MutationEvent<HouseholdPlugin> {
   static readonly eventName = PluginEvent.Disabled;
-
   declare readonly before: HouseholdPluginSwitchSnapshot;
   declare readonly after: HouseholdPluginSwitchSnapshot;
-
   readonly subject = ResourceType.HouseholdPlugin;
   readonly subjectId: string;
 
@@ -304,10 +293,8 @@ type UserPluginSwitchSnapshot = Readonly<Pick<UserPlugin, 'id' | 'userId' | 'plu
  */
 export class UserPluginEnabledEvent extends MutationEvent<UserPlugin> {
   static readonly eventName = PluginEvent.Enabled;
-
   declare readonly before: UserPluginSwitchSnapshot | null;
   declare readonly after: UserPluginSwitchSnapshot;
-
   readonly subject = ResourceType.UserPlugin;
   readonly subjectId: string;
 
@@ -326,10 +313,8 @@ export class UserPluginEnabledEvent extends MutationEvent<UserPlugin> {
 /** The user flipped their own unit's `enabled` switch OFF (#323) — see {@link UserPluginEnabledEvent}. */
 export class UserPluginDisabledEvent extends MutationEvent<UserPlugin> {
   static readonly eventName = PluginEvent.Disabled;
-
   declare readonly before: UserPluginSwitchSnapshot;
   declare readonly after: UserPluginSwitchSnapshot;
-
   readonly subject = ResourceType.UserPlugin;
   readonly subjectId: string;
 
@@ -352,10 +337,8 @@ type PluginUpdateCheckSnapshot = Readonly<
 /** An update-check poll completed and its result columns were persisted (#84 polling). */
 export class PluginUpdateCheckCompletedEvent extends MutationEvent<Plugin> {
   static readonly eventName = PluginEvent.UpdateCheckCompleted;
-
   declare readonly before: PluginUpdateCheckSnapshot;
   declare readonly after: PluginUpdateCheckSnapshot;
-
   readonly subject = ResourceType.Plugin;
   readonly subjectId: string;
 
@@ -384,10 +367,8 @@ type PluginUpdateStagingSnapshot = Readonly<
 /** A validated update was staged (`pendingVersion`/`pendingManifestJson` populated), awaiting consent (#59 update flow). */
 export class PluginUpdatePendingEvent extends MutationEvent<Plugin> {
   static readonly eventName = PluginEvent.UpdatePending;
-
   declare readonly before: PluginUpdateStagingSnapshot;
   declare readonly after: PluginUpdateStagingSnapshot;
-
   readonly subject = ResourceType.Plugin;
   readonly subjectId: string;
 
@@ -413,10 +394,8 @@ export class PluginUpdatePendingEvent extends MutationEvent<Plugin> {
 
 export class PluginUpdateApprovedEvent extends MutationEvent<Plugin> {
   static readonly eventName = PluginEvent.UpdateApproved;
-
   declare readonly before: PluginUpdateStagingSnapshot;
   declare readonly after: PluginUpdateStagingSnapshot;
-
   readonly subject = ResourceType.Plugin;
   readonly subjectId: string;
 
@@ -459,10 +438,8 @@ export class PluginUpdateApprovedEvent extends MutationEvent<Plugin> {
 
 export class PluginUpdateRejectedEvent extends MutationEvent<Plugin> {
   static readonly eventName = PluginEvent.UpdateRejected;
-
   declare readonly before: PluginUpdateStagingSnapshot;
   declare readonly after: PluginUpdateStagingSnapshot;
-
   readonly subject = ResourceType.Plugin;
   readonly subjectId: string;
 
@@ -477,10 +454,8 @@ type PluginLoadFailureSnapshot = Readonly<Pick<Plugin, 'id' | 'slug' | 'loadFail
 /** Boot-time load failure — plugin marked failed, server continues (#59 boot flow). */
 export class PluginLoadFailedEvent extends MutationEvent<Plugin> {
   static readonly eventName = PluginEvent.LoadFailed;
-
   declare readonly before: PluginLoadFailureSnapshot;
   declare readonly after: PluginLoadFailureSnapshot;
-
   readonly subject = ResourceType.Plugin;
   readonly subjectId: string;
 
@@ -502,6 +477,7 @@ type PluginGrantSnapshot = Readonly<
 export interface PluginGrantEventContext {
   /** The consent act that wrote the decision; every decision has one, the Server unit's included (#1336). */
   readonly actId: string;
+
   /** Version of the manifest the decision was made against. */
   readonly manifestVersion: string;
 }
@@ -512,10 +488,8 @@ export interface PluginGrantEventContext {
  */
 export class PluginGrantCreatedEvent extends MutationEvent<PluginGrant> {
   static readonly eventName = PluginEvent.GrantCreated;
-
   declare readonly before: PluginGrantSnapshot | null;
   declare readonly after: PluginGrantSnapshot;
-
   readonly subject = ResourceType.PluginGrant;
   readonly subjectId: string;
 
@@ -533,10 +507,8 @@ export class PluginGrantCreatedEvent extends MutationEvent<PluginGrant> {
 /** A consent unit decided `Denied` — the durable rejection record (#59/#60). */
 export class PluginGrantRejectedEvent extends MutationEvent<PluginGrant> {
   static readonly eventName = PluginEvent.GrantRejected;
-
   declare readonly before: PluginGrantSnapshot | null;
   declare readonly after: PluginGrantSnapshot;
-
   readonly subject = ResourceType.PluginGrant;
   readonly subjectId: string;
 
@@ -581,10 +553,8 @@ export type PluginGrantRevocationReason =
  */
 export class PluginGrantRevokedEvent extends MutationEvent<PluginGrant> {
   static readonly eventName = PluginEvent.GrantRevoked;
-
   declare readonly before: PluginGrantSnapshot;
   declare readonly after: null;
-
   readonly subject = ResourceType.PluginGrant;
   readonly subjectId: string;
 
@@ -613,10 +583,8 @@ export class PluginGrantRevokedEvent extends MutationEvent<PluginGrant> {
  */
 export class HouseholdPluginReconsentRequestedEvent extends MutationEvent<HouseholdPlugin> {
   static readonly eventName = PluginEvent.ReconsentRequested;
-
   declare readonly before: HouseholdPluginSwitchSnapshot;
   declare readonly after: HouseholdPluginSwitchSnapshot;
-
   readonly subject = ResourceType.HouseholdPlugin;
   readonly subjectId: string;
 
@@ -640,10 +608,8 @@ export class HouseholdPluginReconsentRequestedEvent extends MutationEvent<Househ
  */
 export class UserPluginReconsentRequestedEvent extends MutationEvent<UserPlugin> {
   static readonly eventName = PluginEvent.ReconsentRequested;
-
   declare readonly before: UserPluginSwitchSnapshot;
   declare readonly after: UserPluginSwitchSnapshot;
-
   readonly subject = ResourceType.UserPlugin;
   readonly subjectId: string;
 

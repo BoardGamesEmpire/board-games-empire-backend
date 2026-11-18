@@ -4,6 +4,7 @@ import Joi from 'joi';
 
 export interface PrometheusConfig {
   collectDefaultMetrics: boolean;
+
   defaultMetrics: {
     enabled: boolean;
     prefix: string;

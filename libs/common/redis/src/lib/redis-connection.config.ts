@@ -11,6 +11,7 @@ import type { InjectionToken, ModuleMetadata } from '@nestjs/common';
 export interface BgeRedisConnectionConfig {
   database?: number;
   password?: string;
+
   socket: {
     ca?: string;
     cert?: string;
@@ -20,6 +21,7 @@ export interface BgeRedisConnectionConfig {
     rejectUnauthorized?: boolean;
     tls: boolean;
   };
+
   username?: string;
 }
 

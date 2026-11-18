@@ -43,7 +43,6 @@ interface VersionedEntry<T> {
 @Injectable()
 export class PermissionsService {
   private readonly logger = new Logger(PermissionsService.name);
-
   static readonly CACHE_TTL_IN_MILLISECONDS = 5 * 60 * 1000;
 
   /**

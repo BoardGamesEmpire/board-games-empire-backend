@@ -13,6 +13,7 @@ const DISCOVERY_FIELDS = ['issuer', 'authorization_endpoint'] as const;
 export interface ProviderUserInfoDeps {
   /** Defaults to the global fetch, looked up on each call. */
   readonly fetch?: typeof fetch;
+
   readonly logger: Pick<LoggerService, 'warn'>;
 }
 

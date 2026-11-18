@@ -23,10 +23,8 @@ type UserCreatedSnapshot = Readonly<Pick<User, 'id' | 'username' | 'email' | 'is
 @AuditExclude(['email'] satisfies readonly (keyof User & string)[])
 export class UserCreatedEvent extends MutationEvent<User> {
   static readonly eventName = AuthEvent.UserCreated;
-
   declare readonly before: null;
   declare readonly after: UserCreatedSnapshot;
-
   readonly subject = ResourceType.User;
   readonly subjectId: string;
 

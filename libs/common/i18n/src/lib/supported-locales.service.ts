@@ -24,7 +24,6 @@ import { FALLBACK_LOCALE } from './locale.constants';
 @Injectable()
 export class SupportedLocalesService implements OnModuleInit {
   private readonly logger = new Logger(SupportedLocalesService.name);
-
   private tags: readonly string[] = [FALLBACK_LOCALE];
 
   constructor(

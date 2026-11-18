@@ -36,12 +36,16 @@ export function parsePluginArtifactSha256(value: string): PluginArtifactSha256 |
 export interface PluginArtifactDirectory {
   /** Absolute path to `manifest.json` (always at the root). */
   readonly manifestPath: string;
+
   /** Absolute path to `package.json` (always at the root). */
   readonly packageJsonPath: string;
+
   /** Absolute path to the artifact's directory. */
   readonly rootDir: string;
+
   /** The artifact's SHA-256 (64 lowercase hex characters): the directory's name and its identity. */
   readonly sha256: PluginArtifactSha256;
+
   readonly slug: string;
 }
 

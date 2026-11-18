@@ -5,6 +5,7 @@ import { errorEnvelope, type ErrorCode } from './error-envelope';
 export interface CodedHttpExceptionOptions {
   /** Server-side context for logs. It never reaches the response body. */
   readonly cause?: unknown;
+
   /** Machine-readable detail beside the message: a quota's `limit`, a permission catalog refusal's `problems`. */
   readonly fields?: Readonly<Record<string, unknown>>;
 }

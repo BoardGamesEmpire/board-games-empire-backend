@@ -6,16 +6,16 @@ import { SigningKeyService } from './signing-key.service.js';
 /** Everything bound into a signed URL's HMAC. Values are recovered server-side at verify time. */
 export interface SignaturePayload {
   readonly bindings?: Readonly<Record<string, string>>;
-
   readonly contentType?: string;
+
   /**
    * Expiry as epoch seconds.
    */
   readonly expiresAt: number;
 
   readonly key: string;
-
   readonly op: StorageOp;
+
   /**
    * Driver slug the URL routes to. Bound into the signature so a captured URL can't be repointed at another backend.
    */

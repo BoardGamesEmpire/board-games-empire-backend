@@ -35,9 +35,11 @@ export type ConsentUngrantableCause =
 export function consentUngrantableCause(input: {
   /** The catalog's risk for the slug; undefined when it has no row. */
   readonly catalogRisk: RiskLevel | undefined;
+
   readonly check: Pick<NormalizedPermissionRequest, 'canonicalSlug' | 'origin'>;
   readonly corePermission: ConsentCatalogPermission | undefined;
   readonly decidingScope: PluginGrantScope;
+
   /** A staged manifest's new declared permission has no catalog row until activation, and is grantable. */
   readonly source: ConsentManifestSource;
 }): ConsentUngrantableCause | null {

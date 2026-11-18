@@ -6,6 +6,7 @@ import { performance } from 'node:perf_hooks';
 export interface ExtendedNetworkRebuildResult {
   /** Rows deleted: pairs no longer within three friendship steps. */
   readonly removed: number;
+
   /** Rows inserted, plus rows whose `steps` changed. A row left as it was isn't counted. */
   readonly written: number;
 }
@@ -30,6 +31,7 @@ export const REBUILD_ALL_BATCH_SIZE = 200;
 interface RebuildCounts {
   /** From a batch of a full rebuild: its last source, and how many sources it had. */
   readonly last_user_id?: string | null;
+
   readonly removed: bigint;
   readonly sources?: bigint;
   readonly written: bigint;

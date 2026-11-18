@@ -46,6 +46,7 @@ export type RedisServerName = 'redis' | 'valkey' | 'keydb' | 'dragonfly-undeclar
 export interface RedisServerProfile {
   /** The arguments the container runs with; empty runs the image's own command. */
   readonly command: readonly string[];
+
   readonly image: string;
 
   /** Whether the container runs with no limit on locked memory. */
@@ -119,11 +120,10 @@ const PING_ATTEMPT_TIMEOUT_MS = 2_000;
 export interface StartedRedisServer {
   /** `redis://<host>:<port>`, with no credentials: no profile sets a password. */
   readonly connectionUrl: string;
+
   readonly host: string;
   readonly port: number;
-
   readonly profile: RedisServerProfile;
-
   stop(): Promise<void>;
 }
 

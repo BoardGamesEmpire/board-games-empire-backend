@@ -5,14 +5,15 @@ import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contrac
 export interface RoutedPlugin {
   /** An update can move a plugin out of the data-gateway category, and its row stays. */
   readonly category: PluginCategory;
-  readonly enabled: boolean;
 
+  readonly enabled: boolean;
   readonly id: string;
+
   /** Names the install: a reinstall rewrites it, an update doesn't. */
   readonly installedAt: Date;
+
   readonly loadFailed: boolean;
   readonly slug: string;
-
   readonly uninstalledAt: Date | null;
 }
 

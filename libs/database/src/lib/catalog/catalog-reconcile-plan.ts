@@ -12,8 +12,10 @@ import type { PermissionSeedDefinition, RoleSeedDefinition } from './seed-defini
  */
 export interface CatalogManifest {
   readonly permissions: readonly PermissionSeedDefinition[];
+
   /** Role name → slugs the role holds. */
   readonly rolePermissions: Readonly<Record<string, readonly string[]>>;
+
   readonly roles: readonly RoleSeedDefinition[];
 }
 
@@ -41,8 +43,10 @@ export interface RoleSnapshotRow {
 export interface RolePermissionSnapshotRow {
   readonly managedBy: PermissionOwner;
   readonly permissionSlug: string;
+
   /** Set when the grant is revoked: the row stays, and confers nothing (#772). */
   readonly revokedAt: Date | null;
+
   readonly roleName: string;
 }
 
@@ -89,8 +93,10 @@ export interface PermissionSkip {
 /** A permission the manifest does not list and the reconciler does not own. */
 export interface RetainedPermission {
   readonly managedBy: PermissionOwner;
+
   /** Set when the row is retired, so the report can say it confers nothing (#772). */
   readonly retiredAt: Date | null;
+
   readonly slug: string;
 }
 
@@ -119,6 +125,7 @@ export interface RolePermissionEdge {
 export interface FailingEntries {
   readonly grants: ReadonlyMap<string, readonly EntryProblem[]>;
   readonly permissions: ReadonlyMap<string, readonly EntryProblem[]>;
+
   /**
    * Grants the permission catalog ships, by {@link edgeKey}, that this start
    * would create or restore and that the Owner's edits make fail the entry
@@ -152,42 +159,56 @@ export interface ReconcilePlan {
   readonly permissions: {
     /** `Plugin` row whose slug the manifest claims → the apply refuses to run. */
     readonly conflicts: readonly { readonly slug: string }[];
+
     /** Manifest has it, database lacks it → written as `System`. */
     readonly create: readonly PermissionSeedDefinition[];
+
     /** Row the manifest does not list and the reconciler does not own → left alone. */
     readonly retained: readonly RetainedPermission[];
+
     /** `System` row the manifest no longer lists and not yet retired → tombstoned. */
     readonly retire: readonly string[];
+
     /**
      * `Admin` row, not yet retired, that fails the entry check → retired and
      * left `Admin`, its edit kept to fix and hand back (#772). It is also in
      * `skipped` or `retained`, as every `Admin` row is.
      */
     readonly retireEdited: readonly EditedPermissionRetire[];
+
     /** Retired `System` row whose slug is back → `retiredAt` cleared (may also appear in `update`). */
     readonly revive: readonly string[];
+
     /** `Admin` row the manifest lists → left alone; its drift is the report. */
     readonly skipped: readonly PermissionSkip[];
+
     /** `System` row that drifted from the manifest → converged, field by field. */
     readonly update: readonly PermissionUpdate[];
   };
+
   readonly rolePermissions: {
     readonly conflicts: readonly RolePermissionEdge[];
     readonly create: readonly RolePermissionEdge[];
+
     /** `System` edge the manifest no longer lists → deleted (revoked or not); this is how a grant is removed. */
     readonly delete: readonly RolePermissionEdge[];
+
     /** Listed `System` edge that is revoked (`revokedAt` set) → `revokedAt` cleared; the grant is back (#772). */
     readonly restore: readonly RolePermissionEdge[];
+
     /** Edge the manifest does not list and the reconciler does not own → left alone. */
     readonly retained: readonly RolePermissionSnapshotRow[];
+
     /**
      * `Admin` edge, not yet revoked, that fails the entry check → revoked and
      * left `Admin`, the row kept to fix and hand back (#772). One the
      * permission catalog does not list is also in `retained`.
      */
     readonly revokeEdited: readonly EditedGrantRevoke[];
+
     /** Listed `Admin` edge that is revoked → left revoked; the report says so (#772). */
     readonly skipped: readonly RolePermissionEdge[];
+
     /**
      * Listed edge this start would create, or `System` edge it would restore,
      * that the Owner's edits make fail the entry check → not written, so the
@@ -196,11 +217,14 @@ export interface ReconcilePlan {
      */
     readonly withheld: readonly WithheldGrant[];
   };
+
   readonly roles: {
     readonly conflicts: readonly { readonly name: string }[];
     readonly create: readonly RoleSeedDefinition[];
+
     /** `System` role the manifest no longer lists → reported, never mutated. */
     readonly orphans: readonly string[];
+
     readonly skipped: readonly RoleSkip[];
     readonly update: readonly RoleUpdate[];
   };
@@ -271,14 +295,19 @@ export interface ReconcileCounts {
   readonly grantsCreated: number;
   readonly grantsRemoved: number;
   readonly grantsRestored: number;
+
   /** The Owner's grants that failed the entry check (#772). */
   readonly grantsRevokedAfterCheck: number;
+
   readonly mutations: number;
   readonly permissionsCreated: number;
+
   /** `System` permissions the catalog no longer lists. */
   readonly permissionsRetired: number;
+
   /** The Owner's permissions that failed the entry check (#772). */
   readonly permissionsRetiredAfterCheck: number;
+
   readonly permissionsRevived: number;
   readonly permissionsUpdated: number;
   readonly rolesCreated: number;

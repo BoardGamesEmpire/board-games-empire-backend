@@ -75,6 +75,7 @@ interface EstreeNode {
 
 interface CollectedFiles {
   readonly files: readonly string[];
+
   /** Directories that could not be listed, so their contents were never screened. */
   readonly unreadableDirectories: readonly string[];
 }

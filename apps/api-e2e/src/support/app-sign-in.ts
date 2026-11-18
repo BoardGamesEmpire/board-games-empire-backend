@@ -23,14 +23,19 @@ export function pkcePair(): { readonly challenge: string; readonly verifier: str
 export interface AppSignInRequest {
   /** The browser's own cookies, sent with every step, as a browser already signed in sends them. */
   readonly cookies?: string;
+
   /** `code_challenge_method`; `S256` unless set. */
   readonly method?: string;
+
   /** The listed provider to sign in through; the strict fake unless set. */
   readonly providerId?: string;
+
   /** Replaces the whole query the options above build, for a malformed request. */
   readonly query?: string;
+
   /** `redirect_uri`; the official app's address unless set. */
   readonly returnAddress?: string;
+
   /** The app's `state`; none unless set. */
   readonly state?: string;
 }
@@ -38,8 +43,10 @@ export interface AppSignInRequest {
 /** One redirect the API answered the browser with. */
 export interface BrowserStep {
   readonly headers: Headers;
+
   /** Where it sends the browser. */
   readonly location: URL;
+
   readonly setCookie: string[];
   readonly status: number;
 }
@@ -97,16 +104,22 @@ export async function startAppSignIn(baseUrl: string, options: AppSignInRequest 
 export interface AppSignInThroughProvider {
   /** The `bge://` address the browser ends at. */
   readonly appLocation: URL;
+
   /** The provider's authorization URL the start route sent the browser to. */
   readonly authorization: URL;
+
   /** The cookies the browser holds once the start route has answered, its own included. */
   readonly browserCookies: string;
+
   /** The API's callback response. */
   readonly callback: BrowserStep;
+
   /** The callback URL the provider sent the browser to, to fetch it again. */
   readonly callbackUrl: URL;
+
   /** The fake's ticket for this sign-in. */
   readonly ticket: string;
+
   readonly verifier: string;
 }
 

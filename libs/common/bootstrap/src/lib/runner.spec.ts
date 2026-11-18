@@ -53,12 +53,16 @@ class FakeLedger implements SchemaLedger {
 class FakeLock implements BootstrapLock {
   events: string[] = [];
   acquireOptions: (LockAcquireOptions | undefined)[] = [];
+
   /** Simulates time spent blocked on the lock, per acquire call. */
   blockedFor: number[] = [];
+
   /** Simulates a slow release round-trip, per release call. */
   releaseBlockedFor: number[] = [];
+
   /** When set, every release rejects with it: the dedicated connection dropped. */
   releaseError: Error | undefined;
+
   /** When set, `assertHeld` throws it: the lock's connection failed while it was held. */
   lost: Error | undefined;
   constructor(private readonly clock?: FakeClock) {}

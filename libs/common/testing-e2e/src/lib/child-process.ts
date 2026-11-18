@@ -54,6 +54,7 @@ export function requireBundle(label: string, bundle: string, buildTarget: string
 
 export interface ChildLaunch {
   readonly bundle: string;
+
   /**
    * The child's working directory, the workspace root unless given. An app
    * reads `.env` from there, and fills even a variable set to `''` from it,
@@ -61,6 +62,7 @@ export interface ChildLaunch {
    * directory without one.
    */
   readonly cwd?: string;
+
   /** Appended to a timeout: what the probe was still waiting for, and why it might never arrive. */
   describeWait?(): string;
 
@@ -75,9 +77,9 @@ export interface ChildLaunch {
 
   /** How the child is named in log lines and failure messages. */
   readonly label: string;
+
   readonly pollMs: number;
   readonly timeoutMs: number;
-
   readonly verbose: boolean;
 }
 
@@ -85,6 +87,7 @@ export type ChildLaunchOutcome =
   | {
       readonly child: ChildProcess;
       readonly kind: 'ready';
+
       /** Kept current for the child's lifetime, for callers that report a later exit. */
       readonly outputTail: readonly string[];
     }
@@ -92,6 +95,7 @@ export type ChildLaunchOutcome =
       readonly child: ChildProcess;
       readonly failure: string;
       readonly kind: 'exited' | 'failed';
+
       /** The captured output, for callers that classify a boot failure by it. */
       readonly outputTail: readonly string[];
     };

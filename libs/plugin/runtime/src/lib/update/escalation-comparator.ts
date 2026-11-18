@@ -9,13 +9,16 @@ import type {
 
 export interface EscalationComparatorInput {
   readonly active: ManifestComparisonView;
+
   /**
    * TODAY's catalog risk per canonical slug in the NEXT manifest — core
    * slugs from `Permission`, plugin-declared slugs locked `Low`.
    */
   readonly currentRiskBySlug: ReadonlyMap<string, RiskLevel>;
+
   /** Every existing `PluginGrant` row for the plugin, all scopes. */
   readonly grants: readonly GrantComparisonView[];
+
   readonly next: ManifestComparisonView;
 }
 

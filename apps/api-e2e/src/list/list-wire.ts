@@ -14,6 +14,7 @@ export type ListWire = Wire<List> & { readonly entryCount: number };
 /** A list entry as the routes return it, with the game or platform game it names embedded. */
 export type ListEntryWire = Wire<ListEntry> & {
   readonly game: { readonly id: string; readonly title: string } | null;
+
   readonly platformGame: {
     readonly game: { readonly id: string; readonly title: string };
     readonly id: string;

@@ -6,8 +6,10 @@ export const IGDB_BASE_URL = 'https://api.igdb.com/v4';
 
 export interface IgdbQueryOptions {
   accessToken: string;
+
   /** Defaults to {@link IGDB_BASE_URL}. */
   baseUrl?: string;
+
   clientId: string;
 
   /** How the query reaches IGDB; it has no other way (#1082). */

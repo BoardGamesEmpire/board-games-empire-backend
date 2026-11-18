@@ -7,6 +7,7 @@ import type { CacheFlush, ReconcileSummary, SeedsPhase } from './ports';
 export interface RunSeedsSeederOptions {
   /** The api's cache flush; absent in a build without one. */
   readonly flush?: CacheFlush;
+
   /** Where the seeds log; a Nest `Logger` named `Seeds` by default. */
   readonly logger?: Logger;
 }

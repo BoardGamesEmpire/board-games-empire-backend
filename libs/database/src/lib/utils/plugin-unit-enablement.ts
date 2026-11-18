@@ -18,7 +18,9 @@ import type { PluginUnitCoordinates } from './plugin-grant.constants';
 export interface PluginUnitEnablement {
   /** A unit enablement exists for `(unit, pluginId)`. Always `true` for Server units, which have none to store. */
   readonly anchored: boolean;
+
   readonly enabled: boolean;
+
   /**
    * The document {@link derivePluginUnitDormancy} judges (#1151): a household
    * unit enablement's `config` exactly as stored (a stored JSON `null`
@@ -53,8 +55,10 @@ export type PluginUnitDormancy = (typeof PLUGIN_UNIT_DORMANCY_CODES)[number];
 export function derivePluginUnitDormancy(input: {
   /** `null` when the stored manifest cannot be read. */
   readonly manifest: PluginActiveManifest | null;
+
   /** A household unit's document, `{}` when it has no unit enablement. Ignored for Server and User units. */
   readonly retainedConfig: unknown;
+
   readonly scopeType: PluginUnitCoordinates['scopeType'];
 }): PluginUnitDormancy | null {
   const { scopeType, manifest, retainedConfig } = input;

@@ -12,14 +12,17 @@ export type PluginProductCheck = (product: unknown) => string | null;
 export interface PluginModuleOptions {
   /** Running BGE version for manifest `bgeCompat` evaluation — build-time injected constant per #59. */
   readonly bgeVersion: string;
+
   /** Server default locale for manifest localization resolution. */
   readonly defaultLocale: string;
+
   /**
    * The plugin categories this process loads (#1083). Each category runs in
    * the process that serves it, as one copy, so a process loads only the
    * plugins of the categories it names; one that names none loads nothing.
    */
   readonly loadCategories: readonly PluginCategory[];
+
   /**
    * Root directory for installed plugins, one directory per plugin artifact
    * (`<pluginsRoot>/<slug>/<sha256>`, #224), which the install ingress

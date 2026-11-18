@@ -13,6 +13,7 @@ export const PLUGIN_ACTIVE_MANIFEST_READER = Symbol('PLUGIN_ACTIVE_MANIFEST_READ
 /** One permission the active manifest requests, at the decision scope its consent scope maps to. */
 export interface PluginRequestedPermission {
   readonly scopeType: PluginGrantScope;
+
   /** The canonical slug, as grant rows carry it. */
   readonly slug: string;
 }
@@ -33,6 +34,7 @@ export type PluginConfigVerdict = 'conforms' | 'rejected' | 'schema-unusable';
 export interface PluginActiveManifest {
   /** False when the manifest's scope is `server`: no household can hold a unit enablement under it. */
   readonly householdSurface: boolean;
+
   /**
    * Judges a document against the manifest's `config.schema`. A schema that
    * cannot be used is `'schema-unusable'` whatever the document is; otherwise
@@ -42,6 +44,7 @@ export interface PluginActiveManifest {
    * makes it throw, since both are answers, and every read of the unit asks.
    */
   judgeConfig(document: unknown): PluginConfigVerdict;
+
   readonly requested: readonly PluginRequestedPermission[];
 }
 

@@ -28,7 +28,6 @@ export interface BggName {
   sortindex?: number;
 
   type: BggNameType | string;
-
   value: BggText;
 }
 
@@ -38,6 +37,7 @@ export interface BggName {
  */
 export interface BggLink {
   id: number;
+
   /**
    * BGG returns `inbound="true"` when the link points back at this thing
    * from the related thing — used to distinguish "this game IS an expansion
@@ -95,18 +95,17 @@ export interface BggStatistics {
 export interface BggThing {
   description?: BggText;
   id: number;
-
   image?: string;
+
   /**
    * Relational links — categories, mechanics, designers, expansions, etc.
    */
   links?: BggLink[];
-  maxplayers?: number;
 
+  maxplayers?: number;
   maxplaytime?: number;
   minage?: number;
   minplayers?: number;
-
   minplaytime?: number;
 
   /**
@@ -116,6 +115,7 @@ export interface BggThing {
    * (#1082). An alternate name of "0" is kept (#863).
    */
   names?: BggName[];
+
   /**
    * BGG `playingtime` is the canonical play-time. `minplaytime`
    * and `maxplaytime` are sometimes populated for variable-length games.
@@ -129,7 +129,6 @@ export interface BggThing {
   statistics?: BggStatistics;
 
   thumbnail?: string;
-
   type: BggThingType | string;
 
   /**
@@ -151,6 +150,7 @@ export interface BggThing {
  */
 export interface BggSearchItem {
   id: number;
+
   /**
    * The name search matched, which can be an alternate one. A search result
    * carries a single `name` element rather than an array.
@@ -158,7 +158,6 @@ export interface BggSearchItem {
   name?: BggText;
 
   type: BggThingType | string;
-
   yearpublished?: number;
 }
 
@@ -184,8 +183,10 @@ export interface BggVersion {
   length: number;
   links: BggLink[];
   name: BggText;
+
   /** No mapper reads it yet. */
   productcode: BggText;
+
   type: BggThingType | string;
   weight: number;
   width: number;

@@ -221,6 +221,7 @@ export interface PluginActor {
   readonly kind: 'plugin';
   readonly pluginId: string;
   readonly trigger: Actor;
+
   /**
    * The consent unit the plugin is operating as. Authority-bearing (unlike
    * `trigger`): ability resolution scopes grants and condition templates to

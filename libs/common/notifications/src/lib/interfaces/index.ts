@@ -57,6 +57,7 @@ export interface ImportFailedPayload {
   gatewayId: string;
   jobId: string;
   jobType: JobType;
+
   /**
    * Why the job was in its import batch: `Requested`, `ChosenExpansion` or
    * `AddedBaseGame` (#971).
@@ -148,6 +149,7 @@ export interface EventRsvpReceivedPayload extends EventRefPayload {
 export interface EventRsvpChangedPayload extends EventRefPayload {
   /** `null` when the person who changed it is not a user, and the client words it. */
   changedByName: string | null;
+
   status: EventParticipationStatus;
 }
 
@@ -168,6 +170,7 @@ export interface NominationOutcomePayload {
 export interface GameAddedToEventPayload extends EventRefPayload {
   /** Tells apart two editions that share a title (#1271). */
   nominatedGameSubtitle: string | null;
+
   nominatedGameTitle: string;
 }
 
@@ -194,6 +197,7 @@ export type LineupRemovalReason = (typeof LineupRemovalReason)[keyof typeof Line
 export interface GameRemovedFromEventPayload extends EventRefPayload {
   /** Tells apart two editions that share a title (#1271). */
   gameSubtitle: string | null;
+
   gameTitle: string;
   lineupGameId: string;
   occurrenceId: string | null;
@@ -328,9 +332,11 @@ export type NotificationPayloadMap = {
   [NotificationType.EventOccurrenceCanceled]: OccurrenceChangePayload;
   [NotificationType.EventOccurrenceConfirmed]: OccurrenceChangePayload;
   [NotificationType.EventOccurrenceDeclined]: OccurrenceChangePayload;
+
   // Occurrence lifecycle — Confirmed/Canceled/Declined are emitted today;
   // Proposed/Rescheduled are not yet, but share the same shape.
   [NotificationType.EventOccurrenceProposed]: OccurrenceChangePayload;
+
   [NotificationType.EventOccurrenceRescheduled]: OccurrenceChangePayload;
   [NotificationType.EventReopened]: EventRefPayload;
   [NotificationType.EventRsvpChanged]: EventRsvpChangedPayload;

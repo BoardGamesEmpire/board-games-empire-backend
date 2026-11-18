@@ -186,8 +186,10 @@ type TransitionSpec<Select extends Prisma.InviteSelect, Event extends InviteTran
    * the invitee, the inviter, or for a revoke anyone but the inviter. Throws 403.
    */
   readonly assertRole?: (row: InviteTransitionRow) => void;
+
   /** The statuses the transition may start from. Throws 409 otherwise; runs again on a guard miss. */
   readonly assertStatus: (row: InviteTransitionRow) => void;
+
   readonly data: (now: Date) => Prisma.InviteUncheckedUpdateManyInput;
   readonly event: InviteTransitionEventClass<Event>;
   readonly target: InviteTarget;
@@ -196,8 +198,10 @@ type TransitionSpec<Select extends Prisma.InviteSelect, Event extends InviteTran
   | {
       /** The acting user when the transition is a party's. Scopes the read: a stranger gets a miss. */
       readonly partyOf: string;
+
       /** The type the consumer handles. Scopes the read: an invite of another type gets a miss. */
       readonly type: InviteType;
+
       /** An address the consumer vouches is the acting user's, normalized. Widens the read to invites by it. */
       readonly vouchedEmail?: string | null;
     }

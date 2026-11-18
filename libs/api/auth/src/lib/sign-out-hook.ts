@@ -23,6 +23,7 @@ export interface SignOutHookContext {
     readonly internalAdapter: { deleteSession(token: string): Promise<void> };
     readonly secret: string;
   };
+
   getSignedCookie(name: string, secret: string): Promise<string | null | false>;
   readonly headers?: Headers;
   readonly path?: string;

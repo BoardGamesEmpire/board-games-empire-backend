@@ -9,8 +9,10 @@ import { domainToASCII } from 'node:url';
 export interface ServerNames {
   /** `media.baseUrl`: where the media links the api signs point. */
   readonly mediaBaseUrl: string;
+
   /** `auth.url`: where clients reach the api. */
   readonly publicUrl: string;
+
   /** `auth.trustedOrigins`, in the forms better-auth accepts. */
   readonly trustedOrigins: readonly string[];
 }

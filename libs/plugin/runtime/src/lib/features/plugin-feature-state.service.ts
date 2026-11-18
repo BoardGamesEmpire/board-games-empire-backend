@@ -41,11 +41,15 @@ export type PluginFeatureBlockReason = 'denied' | 'pending';
 export interface PluginFeatureState {
   /** Canonical slugs of the bound checks blocking activation (empty when active). */
   readonly blockingSlugs: readonly string[];
+
   readonly description: string;
+
   /** Localized per the requested locale with the manifest fallback chain. */
   readonly displayName: string;
+
   /** Manifest `features[].name` — the stable identifier. */
   readonly name: string;
+
   /**
    * Bound checks decided on a DIFFERENT unit axis, which this unit's
    * resolution never consumes (the read path's grant scoping, #60) and whose state is therefore
@@ -57,14 +61,17 @@ export interface PluginFeatureState {
    * A "degraded anywhere?" answer (#67) must ask the owning units.
    */
   readonly perUnitSlugs: readonly string[];
+
   /** `null` exactly when `state` is `active`. */
   readonly reason: PluginFeatureBlockReason | null;
+
   readonly state: 'active' | 'disabled';
 }
 
 export interface PluginFeatureUnitState {
   /** Required permissions the unit still owes and optional ones switched off. */
   readonly consent: PluginConsentStanding;
+
   /**
    * What keeps the unit from running apart from the two switches, its own
    * and the Server switch (#1151): `unavailable` when the server cannot run it
@@ -79,11 +86,14 @@ export interface PluginFeatureUnitState {
    * is worked out.
    */
   readonly dormancy: PluginUnitDormancy | null;
+
   readonly features: readonly PluginFeatureState[];
+
   readonly plugin: {
     readonly id: string;
     readonly slug: string;
   };
+
   /**
    * The full operational predicate: plugin enabled and not tombstoned, AND
    * the unit's enablement is on with no dormancy. Consent never enters it: a
@@ -92,18 +102,21 @@ export interface PluginFeatureUnitState {
    * review is waiting (#1149).
    */
   readonly served: boolean;
+
   /**
    * The plugin's server switch. Reported beside `state` so a client can say
    * why a switched-on unit reads `unavailable`: this, or its `dormancy`
    * (#1149, #1151).
    */
   readonly serverEnabled: boolean;
+
   /**
    * The stable code for the unit's state: off, on, review_pending,
    * needs_configuration or unavailable. Carries what the server switch,
    * dormancy and consent each add.
    */
   readonly state: PluginUnitStateCode;
+
   readonly unit: PluginUnit;
 }
 

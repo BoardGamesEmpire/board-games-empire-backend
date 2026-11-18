@@ -14,6 +14,7 @@ const PGBOUNCER_PORT = 6432;
 export interface PgBouncerOptions {
   /** The harness database's URL; its user and password are the ones the pooler logs in with. */
   readonly databaseUrl: string;
+
   /** Server connections per database and user: fewer than the clients is what makes them shared. */
   readonly serverConnections: number;
 }
@@ -21,6 +22,7 @@ export interface PgBouncerOptions {
 export interface PgBouncer {
   /** `databaseUrl` with the pooler's host and port in place of the database's. */
   pooled(databaseUrl: string): string;
+
   stop(): Promise<void>;
 }
 
