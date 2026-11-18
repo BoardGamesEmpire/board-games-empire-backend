@@ -31,7 +31,8 @@ import { MailTransportError } from './mail-transport.error';
  * either, and a later try can reach the host.
  */
 function isPermanentFailure(error: unknown, code: MailFailureCode): boolean {
-  const { responseCode } = (error ?? {}) as { responseCode?: unknown };
+  const responseCode =
+    typeof error === 'object' && error !== null && 'responseCode' in error ? error.responseCode : undefined;
 
   if (typeof responseCode === 'number') {
     return responseCode >= 500 && responseCode < 600;
@@ -210,8 +211,12 @@ export class MailDeliveryService {
 
   /** Only the fields that name the failed step; never the error's message, response or stack. */
   private logSendFailure(job: MailDeliveryJob, code: MailFailureCode, error: unknown): void {
-    const { code: nodemailerCode, responseCode, command } = (error ?? {}) as Record<string, unknown>;
-    const facts = Object.entries({ code: nodemailerCode, responseCode, command })
+    const failure: object = typeof error === 'object' && error !== null ? error : {};
+    const facts = Object.entries({
+      code: 'code' in failure ? failure.code : undefined,
+      responseCode: 'responseCode' in failure ? failure.responseCode : undefined,
+      command: 'command' in failure ? failure.command : undefined,
+    })
       .filter(([, value]) => typeof value === 'string' || typeof value === 'number')
       .map(([key, value]) => `${key}=${value}`);
 
