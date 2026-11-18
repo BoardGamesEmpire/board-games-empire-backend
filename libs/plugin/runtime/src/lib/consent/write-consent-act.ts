@@ -80,7 +80,7 @@ export async function writeConsentAct(
       manifestVersion: input.manifestVersion,
       manifestSha256: input.manifestSha256,
       stagingId: input.stagingId,
-      presentation: input.presentation as unknown as Prisma.InputJsonValue,
+      presentation: input.presentation,
       decidedById: input.actorId,
       decidedAt: input.decidedAt,
       correlationId: input.correlationId,

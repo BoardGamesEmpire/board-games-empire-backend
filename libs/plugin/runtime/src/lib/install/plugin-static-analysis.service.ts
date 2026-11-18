@@ -80,12 +80,10 @@ interface CollectedFiles {
 }
 
 const isEstreeNode = (value: unknown): value is EstreeNode =>
-  typeof value === 'object' && value !== null && typeof (value as { type?: unknown }).type === 'string';
+  typeof value === 'object' && value !== null && 'type' in value && typeof value.type === 'string';
 
 const errorCode = (err: unknown): string | undefined =>
-  typeof err === 'object' && err !== null && typeof (err as { code?: unknown }).code === 'string'
-    ? (err as { code: string }).code
-    : undefined;
+  typeof err === 'object' && err !== null && 'code' in err && typeof err.code === 'string' ? err.code : undefined;
 
 /** A finding key that ignores `file` — the deep pass dedupes on this across the whole tree. */
 const findingIdentity = (finding: StaticAnalysisFinding): string => `${finding.kind}\u0000${finding.specifier ?? ''}`;
@@ -443,7 +441,7 @@ export class PluginStaticAnalysisService {
       const callee = node['callee'];
 
       if (isEstreeNode(callee) && callee.type === 'Identifier' && callee['name'] === 'require') {
-        const argument = Array.isArray(node['arguments']) ? (node['arguments'][0] as unknown) : undefined;
+        const argument: unknown = Array.isArray(node['arguments']) ? node['arguments'][0] : undefined;
 
         if (isEstreeNode(argument) && argument.type === 'Literal' && typeof argument['value'] === 'string') {
           classify('cjs-require', argument['value']);

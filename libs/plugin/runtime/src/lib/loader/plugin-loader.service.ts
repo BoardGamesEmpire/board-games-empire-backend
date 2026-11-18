@@ -250,7 +250,7 @@ export class PluginLoaderService implements OnApplicationBootstrap {
   private async readDiskVersion(manifestPath: string): Promise<string | null> {
     try {
       const parsed: unknown = JSON.parse(await readFile(manifestPath, 'utf8'));
-      const version = typeof parsed === 'object' && parsed !== null ? (parsed as { version?: unknown }).version : null;
+      const version = typeof parsed === 'object' && parsed !== null && 'version' in parsed ? parsed.version : null;
 
       return typeof version === 'string' ? version : null;
     } catch {
@@ -275,6 +275,7 @@ export class PluginLoaderService implements OnApplicationBootstrap {
       throw new PluginEntrypointError(slug, 'package.json is not a JSON object');
     }
 
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- data from outside the process; parse it through a schema (#1322)
     return parsed as PluginPackageDescriptor;
   }
 
@@ -285,6 +286,7 @@ export class PluginLoaderService implements OnApplicationBootstrap {
       throw new PluginModuleShapeError(slug, `default export must be a factory function, got ${typeof candidate}`);
     }
 
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- typeof narrows a plugin's default export only to Function, and no runtime check can confirm a function's parameter and return types (#1321)
     return candidate as PluginFactory;
   }
 

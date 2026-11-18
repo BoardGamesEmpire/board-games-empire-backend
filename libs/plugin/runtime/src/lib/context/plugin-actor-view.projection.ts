@@ -56,8 +56,9 @@ const projectActor = (actor: Actor): PluginActorView => {
       });
     default: {
       const unprojectable: never = actor;
+      const unknownActor: { readonly kind?: unknown } = unprojectable;
 
-      throw new UnknownActorKindError((unprojectable as { readonly kind?: unknown }).kind);
+      throw new UnknownActorKindError(unknownActor.kind);
     }
   }
 };

@@ -98,6 +98,7 @@ function resolveExports(field: PackageExportsField | null): string | null {
     return null;
   }
 
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Array.isArray narrows to any[], so its false branch doesn't remove the ReadonlyArray member of the union (#1321)
   const record = field as { readonly [key: string]: PackageExportsField | null };
   const keys = Object.keys(record);
   const isSubpathMap = keys.some((key) => key.startsWith('.'));

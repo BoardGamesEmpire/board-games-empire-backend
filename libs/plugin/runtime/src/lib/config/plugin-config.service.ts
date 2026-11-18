@@ -124,7 +124,7 @@ export class PluginConfigService implements OnModuleInit {
       // Deep clone: the value arrives as a Prisma Json tree whose nested
       // objects would otherwise be shared with the caller's row object, so a
       // shallow spread leaves nested state reachable and mutable.
-      const cloned = structuredClone(config) as Record<string, unknown>;
+      const cloned = structuredClone(config);
 
       return deepFreeze(cloned);
     } catch (err) {

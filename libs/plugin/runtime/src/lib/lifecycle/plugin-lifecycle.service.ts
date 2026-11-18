@@ -171,6 +171,7 @@ export class PluginLifecycleService {
 
       const written = await tx.plugin.update({
         where: { id: plugin.id },
+        // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Prisma's InputJsonValue can't take Record<string, unknown>; the document is JSON the plugin's config schema has checked (#1321)
         data: { config: input.config as Prisma.InputJsonValue },
       });
 

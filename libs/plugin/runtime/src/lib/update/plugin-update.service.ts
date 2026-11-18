@@ -781,6 +781,7 @@ export class PluginUpdateService {
         where: { id: plugin.id, pendingVersion: null, uninstalledAt: null, installedSha256: plugin.installedSha256 },
         data: {
           pendingVersion: next.manifest.version,
+          // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Prisma's InputJsonValue can't take the manifest type, whose config.schema is Record<string, unknown>; the manifest is the validated JSON document (#1321)
           pendingManifestJson: next.manifest as Prisma.InputJsonValue,
           pendingSha256: provenance.sha256,
           // The link and registry ride with the checksum they describe, so an
@@ -1793,10 +1794,12 @@ export class PluginUpdateService {
           // hint and the column is admin-owned after that (#197).
           category: MANIFEST_CATEGORY_TO_PRISMA[next.manifest.category],
           scope: MANIFEST_SCOPE_TO_PRISMA[next.manifest.scope],
+          // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Prisma's InputJsonValue can't take the manifest type, whose config.schema is Record<string, unknown>; the manifest is the validated JSON document (#1321)
           manifestJson: next.manifest as Prisma.InputJsonValue,
           // D-CN: rides the same reset-on-mismatch rule reinstall applies,
           // so activation is not the one manifest-replacing path that leaves
           // a stale server config in force.
+          // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Prisma's InputJsonValue can't take Record<string, unknown>; the document is JSON the plugin's config schema has checked (#1321)
           config: retainedConfig.config as Prisma.InputJsonValue,
           // Activation switches which artifact directory the row names, and
           // nothing on disk moves: the loader finds the new code by this

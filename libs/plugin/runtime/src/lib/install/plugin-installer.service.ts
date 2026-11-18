@@ -630,6 +630,7 @@ export class PluginInstallerService {
         scope: MANIFEST_SCOPE_TO_PRISMA[manifest.scope],
         // The VALIDATED manifest object — the canonical form every later
         // re-validation (loader, grants, C3 comparison) starts from.
+        // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Prisma's InputJsonValue can't take the manifest type, whose config.schema is Record<string, unknown>; the manifest is the validated JSON document (#1321)
         manifestJson: manifest as Prisma.InputJsonValue,
         installedFromUrl: provenance.url,
         installedSha256: provenance.sha256,
@@ -686,6 +687,7 @@ export class PluginInstallerService {
             restartRequired: true,
             loadFailed: false,
             loadError: null,
+            // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Prisma's InputJsonValue can't take Record<string, unknown>; the document is JSON the plugin's config schema has checked (#1321)
             config: retained.config as Prisma.InputJsonValue,
             // Stale signals about the uninstalled version.
             latestKnownVersion: null,

@@ -26,6 +26,12 @@ export const PLUGIN_MODULE_IMPORTER = Symbol('PLUGIN_MODULE_IMPORTER');
  */
 export class DynamicImportPluginModuleImporter implements PluginModuleImporter {
   async importModule(entrypointPath: string): Promise<Record<string, unknown>> {
-    return (await import(/* webpackIgnore: true */ pathToFileURL(entrypointPath).href)) as Record<string, unknown>;
+    // A module namespace object is always an object keyed by export name, so
+    // `import()`'s untyped result fits this annotation without a check.
+    const namespace: Record<string, unknown> = await import(
+      /* webpackIgnore: true */ pathToFileURL(entrypointPath).href
+    );
+
+    return namespace;
   }
 }
