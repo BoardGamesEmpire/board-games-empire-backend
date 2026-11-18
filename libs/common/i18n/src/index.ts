@@ -9,6 +9,8 @@
 export {
   I18N_CATALOG_DIR,
   I18nMessage,
+  PRIVACY_POLICY_DIR,
+  STANDARD_PRIVACY_POLICY_HASHES,
   i18nValidationMessage,
   isI18nMessage,
   t,
