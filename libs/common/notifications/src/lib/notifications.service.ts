@@ -21,6 +21,7 @@ export class NotificationsService {
       data: {
         userId: input.userId,
         type: input.type,
+        // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- a payload interface has no index signature, so it isn't assignable to Prisma's InputJsonValue, and for a generic `T` it doesn't overlap it enough for one step (#1321)
         payload: input.payload as unknown as InputJsonValue,
       },
     });
@@ -37,6 +38,7 @@ export class NotificationsService {
       data: inputs.map((i) => ({
         userId: i.userId,
         type: i.type,
+        // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- a payload interface has no index signature, so it isn't assignable to Prisma's InputJsonValue, and for a generic `T` it doesn't overlap it enough for one step (#1321)
         payload: i.payload as unknown as InputJsonValue,
       })),
     });
