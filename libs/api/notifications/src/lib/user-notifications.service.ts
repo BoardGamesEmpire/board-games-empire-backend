@@ -50,10 +50,12 @@ export class UserNotificationsService {
     // The (type, payload) pairing is written together by `create()`, so it is
     // sound — but the compiler can't prove the correlation from a JSON column,
     // so assert the discriminated-union shape once here.
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- the (type, payload) pairing create() writes is a correlation a JSON column can't carry (#1321)
     return notifications.map((notification) => ({
       id: notification.id,
       type: notification.type,
       read: notification.read,
+      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Prisma types the column as JsonValue, which shares no shape with the payload interfaces, so the cast goes through unknown (#1321)
       payload: notification.payload as unknown as NotificationPayload,
       createdAt: notification.createdAt,
     })) as UnreadNotificationDto[];
