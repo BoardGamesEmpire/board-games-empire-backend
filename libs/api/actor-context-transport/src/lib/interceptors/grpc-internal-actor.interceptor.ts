@@ -141,7 +141,8 @@ export class GrpcInternalActorInterceptor extends ActorInterceptor {
     try {
       parsed = JSON.parse(decoded);
     } catch (error) {
-      throw new BadRequestException(`'${BGE_ACTOR_HEADER}' is not valid JSON: ${(error as Error).message}`);
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new BadRequestException(`'${BGE_ACTOR_HEADER}' is not valid JSON: ${reason}`);
     }
 
     return validateActorShape(parsed);
@@ -157,7 +158,7 @@ export class GrpcInternalActorInterceptor extends ActorInterceptor {
     }
 
     if ('get' in value && typeof value.get === 'function') {
-      return value as Metadata;
+      return value;
     }
 
     return null;
@@ -195,6 +196,7 @@ export const validateActorShape = (value: unknown): Actor => {
     throw new BadRequestException('actor payload is not an object');
   }
 
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- data from outside the process; parse it through a schema (#1322)
   const obj = value as Record<string, unknown>;
   if (typeof obj?.kind !== 'string') {
     throw new BadRequestException('actor payload missing string "kind"');
@@ -216,7 +218,7 @@ export const validateActorShape = (value: unknown): Actor => {
         throw new BadRequestException('anonymous actor: userId must be a string');
       }
 
-      return { kind: 'anonymous', userId } as Actor;
+      return { kind: 'anonymous', userId };
     }
 
     case 'apiKey': {

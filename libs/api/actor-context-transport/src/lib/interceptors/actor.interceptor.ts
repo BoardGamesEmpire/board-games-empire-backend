@@ -19,6 +19,7 @@ export abstract class ActorInterceptor implements NestInterceptor {
   abstract intercept(executionContext: ExecutionContext, next: CallHandler): Observable<unknown>;
 
   get source(): EventSource {
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- the fallback is Nest's context type, an EventSource only for 'http' and 'ws'; both subclasses set auditSource, so 'rpc' never reaches it (#1321)
     return (this.auditSource || this.executionContextType) as EventSource;
   }
 

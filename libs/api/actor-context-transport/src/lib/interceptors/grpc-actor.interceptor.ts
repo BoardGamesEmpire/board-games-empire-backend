@@ -88,7 +88,7 @@ export class GrpcActorInterceptor extends ActorInterceptor {
     }
 
     if ('get' in value && typeof value.get === 'function') {
-      return value as Metadata;
+      return value;
     }
 
     return null;

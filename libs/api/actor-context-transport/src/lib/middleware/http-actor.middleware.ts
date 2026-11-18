@@ -148,6 +148,7 @@ export class HttpActorMiddleware implements NestMiddleware {
       return null;
     }
 
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- better-auth's inference over this instance's plugin list leaves out the anonymous plugin's isAnonymous (#1321)
     const user = session.user as AnonymousUserSession;
 
     const impersonatorId = sessionImpersonatorId(session);
