@@ -53,6 +53,7 @@ export async function fetchAccessToken(
       throw new Error(`Failed to obtain IGDB access token: ${response.status} ${response.statusText}`);
     }
 
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- data from outside the process; parse it through a schema (#1322)
     return (await response.json()) as TokenResponse;
   } catch (err) {
     if (signal.aborted) {

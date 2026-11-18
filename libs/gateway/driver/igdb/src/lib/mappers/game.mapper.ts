@@ -35,6 +35,7 @@ function resizeCoverUrl(url: string, size: string): string {
 
 /** Read in UTC, as a release's year is, so the two never fall a day apart (#719). */
 function toIsoDate(unixSeconds: number): string {
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Luxon types toISODate as string | null, the null for an invalid DateTime, which only a timestamp outside Luxon's range makes (#1321)
   return <string>DateTime.fromSeconds(unixSeconds, { zone: 'utc' }).toISODate();
 }
 

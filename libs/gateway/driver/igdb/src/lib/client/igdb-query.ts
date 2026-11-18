@@ -108,6 +108,7 @@ export class IgdbQuery implements IGDBClient {
       throw new IgdbHttpError(response.status, endpoint);
     }
 
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- data from outside the process; parse it through a schema (#1322)
     return { data: (await response.json()) as T[] };
   }
 }
