@@ -12,8 +12,7 @@ const isGrpcErrorStatus = (code: unknown): code is number =>
  * isn't a status: an aborted fetch's AbortError has 20 (#1082).
  */
 const hasGrpcStatus = (err: unknown): err is Error & { code: number } =>
-  // The cast only reads a property any Error may or may not carry, as unknown.
-  err instanceof Error && !(err instanceof DOMException) && isGrpcErrorStatus((err as { code?: unknown }).code);
+  err instanceof Error && !(err instanceof DOMException) && 'code' in err && isGrpcErrorStatus(err.code);
 
 /**
  * The driver's answer, with an error that carries a gRPC status code sent
