@@ -22,7 +22,7 @@ export interface LogRecord {
 }
 
 // Any control sequence, not only colours: nothing in a log line needs one.
-// eslint-disable-next-line no-control-regex
+// eslint-disable-next-line no-control-regex -- matching the ESC control character is the point (#1321)
 const ANSI_SEQUENCE = /\u001b\[[0-?]*[ -/]*[@-~]/g;
 
 /** pino's standard levels, by the number it writes in a record. */

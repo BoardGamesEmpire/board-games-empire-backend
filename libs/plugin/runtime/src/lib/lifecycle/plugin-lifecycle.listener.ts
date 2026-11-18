@@ -415,7 +415,10 @@ export class PluginLifecycleListener implements OnModuleInit, OnApplicationShutd
       return null;
     }
 
-    const snapshot = (event.after ?? event.before) as { id?: unknown; slug?: unknown };
+    // MutationEvent's constructor refuses an event with neither snapshot, so
+    // the empty fallback is never taken; it gives the compiler a non-null
+    // value (#1321).
+    const snapshot: { readonly id?: unknown; readonly slug?: unknown } = event.after ?? event.before ?? {};
 
     return this.pluginRowIdentity({
       id: typeof snapshot.id === 'string' ? snapshot.id : event.subjectId,
@@ -457,6 +460,7 @@ export class PluginLifecycleListener implements OnModuleInit, OnApplicationShutd
    * write cannot fail on a non-JSON payload smuggled through `unknown`.
    */
   private serialize(value: unknown): Prisma.InputJsonValue {
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- JSON.parse returns any; the stringify round trip in this line is what makes the value JSON, an in-process copy rather than outside data (#1322)
     return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
   }
 }

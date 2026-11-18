@@ -8,7 +8,7 @@ interface DurationFormatter {
 
 declare global {
   // Merging into the global `Intl` namespace is the only way to type it (#654).
-  // eslint-disable-next-line @typescript-eslint/no-namespace
+  // eslint-disable-next-line @typescript-eslint/no-namespace -- the global Intl namespace can only be augmented as a namespace (#1321)
   namespace Intl {
     const DurationFormat: new (locale: string, options: { style: 'long' }) => DurationFormatter;
   }

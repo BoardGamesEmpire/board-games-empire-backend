@@ -293,6 +293,7 @@ export class PluginConsentActService {
       // answered or half-recorded, whether or not it is already switched on
       // (#323, #1151). A supplied document was judged before the transaction.
       if (household && kind === 'SwitchOn' && config === undefined) {
+        // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- a household unit reads from the household table, and TypeScript can't relate readUnitEnablement's result to the household flag (#1321)
         assertHeldConfigSatisfiesGate(this.configSchema, named.active, unitBefore as HouseholdPlugin | null);
       }
 
@@ -388,6 +389,7 @@ export class PluginConsentActService {
 
       if (kind !== 'SwitchOn') {
         // Switched on: a toggle or review over any other unit was refused above.
+        // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- the refusal of an absent unit narrowed unitBefore inside the other branch of the kind check, and the narrowing doesn't reach this one (#1321)
         const switchedOn = unitBefore as UnitEnablement;
 
         if (!plan.switchesOff) {
@@ -402,12 +404,10 @@ export class PluginConsentActService {
       }
 
       if (household) {
-        const existing = unitBefore as HouseholdPlugin | null;
-
         // A unit already switched on, with no document supplied, needs no
         // write: the gate above has judged the document it holds.
-        if (existing !== null && existing.enabled && config === undefined) {
-          return writtenOutcome(existing);
+        if (unitBefore !== null && unitBefore.enabled && config === undefined) {
+          return writtenOutcome(unitBefore);
         }
 
         // By upsert, one statement, whether or not this act read a unit
@@ -423,8 +423,10 @@ export class PluginConsentActService {
             householdId: unit.householdId,
             pluginId: plugin.id,
             enabled: true,
+            // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Prisma's InputJsonValue can't take Record<string, unknown>; the document is JSON the plugin's config schema has checked (#1321)
             config: (config ?? {}) as Prisma.InputJsonValue,
           },
+          // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Prisma's InputJsonValue can't take Record<string, unknown>; the document is JSON the plugin's config schema has checked (#1321)
           update: { enabled: true, config: config as Prisma.InputJsonValue | undefined },
         });
 
@@ -599,6 +601,7 @@ export class PluginConsentActService {
     const switchedOn = unit.enabled && (unitBefore === null || !unitBefore.enabled);
 
     if (isHouseholdEnablement(unit)) {
+      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- unitBefore is the same unit enablement as unit, read before the act, but TypeScript narrows only unit (#1321)
       const before = unitBefore as HouseholdPlugin | null;
 
       if (switchedOn) {
@@ -645,6 +648,7 @@ export class PluginConsentActService {
       return;
     }
 
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- unitBefore is the same unit enablement as unit, read before the act, but TypeScript narrows only unit (#1321)
     const before = unitBefore as UserPlugin | null;
 
     if (switchedOn) {

@@ -194,7 +194,9 @@ function compile(schema: Record<string, unknown>): ValidateFunction {
 
 /** ajv types the async form as a separate interface, so the flag needs the widened view. */
 function isAsync(validator: ValidateFunction): boolean {
-  return (validator as Partial<AsyncValidateFunction>).$async === true;
+  const widened: Partial<AsyncValidateFunction> = validator;
+
+  return widened.$async === true;
 }
 
 /**

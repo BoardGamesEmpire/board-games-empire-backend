@@ -25,6 +25,7 @@ export const MANIFEST_CATEGORY_TO_PRISMA: Readonly<Record<PluginCategoryValue, P
 };
 
 /** Reverse lookup for surfacing a stored category back to its manifest form. */
+// eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Object.fromEntries types its keys as string; the bijection spec, not the compiler, proves the inverse covers every PluginCategory (#1321)
 export const PRISMA_CATEGORY_TO_MANIFEST = Object.fromEntries(
   Object.entries(MANIFEST_CATEGORY_TO_PRISMA).map(([manifestValue, prismaValue]) => [prismaValue, manifestValue]),
 ) as Readonly<Record<PluginCategory, PluginCategoryValue>>;

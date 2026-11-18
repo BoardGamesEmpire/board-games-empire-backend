@@ -16,6 +16,7 @@ export const PLUGIN_ARTIFACT_SHA256_PATTERN = /^[0-9a-f]{64}$/;
 
 /** The branded checksum for a value that is 64 lowercase hex characters, otherwise `null` (#1117). */
 export function parsePluginArtifactSha256(value: string): PluginArtifactSha256 | null {
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- a brand exists only in the type system, so minting one takes an assertion; the pattern test is the check it stands for (#1321)
   return PLUGIN_ARTIFACT_SHA256_PATTERN.test(value) ? (value as PluginArtifactSha256) : null;
 }
 

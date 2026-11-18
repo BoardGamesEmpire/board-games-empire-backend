@@ -40,7 +40,12 @@ export interface ShownRisk {
   readonly riskLevel: RiskLevel;
 }
 
-export interface ConsentActPresentationCheck {
+/**
+ * A type alias rather than an interface, here and in `ConsentActPresentation`:
+ * an alias is assignable to Prisma's JSON input type, so the compiler checks
+ * that what `writeConsentAct` stores is JSON (#1321).
+ */
+export type ConsentActPresentationCheck = {
   readonly feature: string | null;
   readonly outcome: 'granted' | 'refused' | 'unanswered';
   readonly reason: string;
@@ -48,13 +53,13 @@ export interface ConsentActPresentationCheck {
   readonly riskLevel: RiskLevel | null;
   readonly slug: string;
   readonly usedFallback: boolean;
-}
+};
 
 /**
  * Stored verbatim in `PluginConsentAct.presentation`: every requested
  * permission the unit itself decides under the manifest the act named.
  */
-export interface ConsentActPresentation {
+export type ConsentActPresentation = {
   /** Manifest order. */
   readonly checks: readonly ConsentActPresentationCheck[];
 
@@ -62,7 +67,7 @@ export interface ConsentActPresentation {
 
   /** Which manifest the act's sha named: the installed one or the staged update. */
   readonly source: ConsentManifestSource;
-}
+};
 
 export interface ConsentActDecision {
   readonly decidedRiskLevel: RiskLevel;

@@ -40,7 +40,7 @@ export interface BgeRedisAsyncConnectionOptions {
 
   // NestJS DI factories are inherently variadic; `any[]` here matches the
   // codebase convention (see GatewayConfigEventsModuleAsyncOptions).
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- a Nest DI factory's arguments are whatever `inject` lists (#1321)
   useFactory: (...args: any[]) => Promise<BgeRedisConnectionConfig> | BgeRedisConnectionConfig;
 }
 

@@ -23,6 +23,7 @@ export const buildPluginTarball = async (entries: ReadonlyArray<PluginTarballEnt
   const chunks: Buffer[] = [];
   const collected = (async () => {
     for await (const chunk of archive) {
+      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- tar-stream's pack types its async iterator's chunks as unknown, and every chunk it emits is a Buffer (#1321)
       chunks.push(Buffer.from(chunk as Uint8Array));
     }
   })();
