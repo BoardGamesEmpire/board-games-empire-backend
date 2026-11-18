@@ -52,7 +52,7 @@ export function buildWsClientData(
   session: UserSession,
   headers: Record<string, string | string[] | undefined>,
 ): WsClientDataOutcome {
-  const user = session?.user as (UserSession['user'] & { isAnonymous?: boolean }) | undefined;
+  const user = session?.user;
 
   if (!user) {
     return refuse('no-user');
@@ -78,7 +78,8 @@ export function buildWsClientData(
     return refuse('impersonated', `#408 target=${user.id} impersonatedBy=${impersonatorId}`);
   }
 
-  if (user.isAnonymous) {
+  // The anonymous plugin's flag, which better-auth's user type doesn't declare.
+  if ('isAnonymous' in user && user.isAnonymous) {
     return refuse('anonymous');
   }
 

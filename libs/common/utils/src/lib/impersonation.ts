@@ -51,6 +51,7 @@ export const UNKNOWN_IMPERSONATOR = '<unknown>';
  * is audited first.
  */
 export function sessionImpersonatorId(session: SessionEnvelope | null | undefined): string | null {
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- better-auth's session type doesn't declare the admin plugin's `impersonatedBy` column, so the envelope keeps the row `unknown` (#1321)
   const row = session?.session as ImpersonatableSessionRow | null | undefined;
   const impersonatedBy = row?.impersonatedBy;
 
