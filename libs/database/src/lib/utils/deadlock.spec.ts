@@ -1,6 +1,6 @@
 import { PrismaError } from '@status/codes';
 import { Prisma } from '../client';
-import { DEADLOCK_SQLSTATE, isDeadlockError, retryOnDeadlock } from './deadlock';
+import { DEADLOCK_SQLSTATE, isDeadlockError } from './deadlock';
 import { deadlock, transactionWriteConflict, uniqueViolation } from './prisma-error.fixtures';
 
 describe('isDeadlockError', () => {
@@ -49,37 +49,5 @@ describe('isDeadlockError', () => {
 
   it('names the SQLSTATE it looks for', () => {
     expect(DEADLOCK_SQLSTATE).toBe('40P01');
-  });
-});
-
-describe('retryOnDeadlock', () => {
-  it('returns the first attempt when nothing deadlocks', async () => {
-    const operation = jest.fn<Promise<string>, []>().mockResolvedValue('first');
-
-    await expect(retryOnDeadlock(operation)).resolves.toBe('first');
-    expect(operation).toHaveBeenCalledTimes(1);
-  });
-
-  it('runs the operation again when the first attempt deadlocks', async () => {
-    const operation = jest.fn<Promise<string>, []>().mockRejectedValueOnce(deadlock()).mockResolvedValue('second');
-
-    await expect(retryOnDeadlock(operation)).resolves.toBe('second');
-    expect(operation).toHaveBeenCalledTimes(2);
-  });
-
-  it('gives up after the second deadlock rather than looping', async () => {
-    const second = deadlock();
-    const operation = jest.fn<Promise<string>, []>().mockRejectedValueOnce(deadlock()).mockRejectedValueOnce(second);
-
-    await expect(retryOnDeadlock(operation)).rejects.toBe(second);
-    expect(operation).toHaveBeenCalledTimes(2);
-  });
-
-  it('never retries an error that is not a deadlock', async () => {
-    const violation = uniqueViolation();
-    const operation = jest.fn<Promise<string>, []>().mockRejectedValue(violation);
-
-    await expect(retryOnDeadlock(operation)).rejects.toBe(violation);
-    expect(operation).toHaveBeenCalledTimes(1);
   });
 });

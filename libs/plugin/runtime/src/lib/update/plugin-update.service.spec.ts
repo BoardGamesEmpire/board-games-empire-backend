@@ -262,8 +262,8 @@ describe('PluginUpdateService', () => {
     // back as the row the upsert would return.
     db.pluginConsentAct.create.mockImplementation(((args: { data: Record<string, unknown> }) =>
       Promise.resolve({ id: 'act-approve', ...args.data })) as never);
-    // The acts behind revoked decisions, read for the version each revocation
-    // names; a test that asserts the version arranges them.
+    // The acts that answered a staging, which a rejection reads to find its
+    // pre-consents; a test that asserts a rejection's deletions arranges them.
     db.pluginConsentAct.findMany.mockResolvedValue([]);
     db.pluginGrant.upsert.mockImplementation(((args: { create: Partial<PluginGrant> }) =>
       Promise.resolve(makeGrant({ id: `grant-${String(args.create.permissionSlug)}`, ...args.create }))) as never);
@@ -794,17 +794,22 @@ describe('PluginUpdateService', () => {
       expect(emitter.emit).not.toHaveBeenCalled();
     });
 
-    it('applies the declares diff: added rows created Low, removed grants revoked with permission-removed', async () => {
-      // v1.3.0 renames the declared permission: manage:digest → manage:archive.
-      const removedGrant = makeGrant({
+    /**
+     * A consent decision the active manifest does not request at its scope
+     * confers nothing, by the bound applied when abilities are read (#577),
+     * so activation keeps every one: the decision counts again if a later
+     * manifest requests the permission at that scope (#1152). The catalog
+     * rows of permissions the plugin stops declaring do go.
+     */
+    it('activation removes the catalog rows of permissions the plugin stops declaring and keeps every consent decision (#1152)', async () => {
+      // v1.3.0 renames the declared permission: manage:digest → manage:archive,
+      // and stops requesting it. The Server unit granted it.
+      const declaredGrant = makeGrant({
         id: 'grant-2',
         permissionSlug: 'plugin|demo-sink|manage:digest',
         decidedRiskLevel: RiskLevel.Low,
       });
-      db.pluginGrant.findMany
-        .mockResolvedValueOnce([makeGrant(), removedGrant]) // comparison load
-        .mockResolvedValueOnce([makeGrant(), removedGrant]) // the Server unit's decisions, under the claim
-        .mockResolvedValueOnce([removedGrant]); // grants on removed declares
+      db.pluginGrant.findMany.mockResolvedValue([makeGrant(), declaredGrant]);
       await writeManifest(
         nextManifest({
           permissions: {
@@ -820,29 +825,16 @@ describe('PluginUpdateService', () => {
       expect(db.pluginPermission.create).toHaveBeenCalledWith({
         data: { pluginId: 'plugin-1', slug: 'plugin|demo-sink|manage:archive', riskLevel: RiskLevel.Low },
       });
-      expect(db.pluginGrant.deleteMany).toHaveBeenCalledWith({
-        where: { pluginId: 'plugin-1', permissionSlug: { in: ['plugin|demo-sink|manage:digest'] } },
-      });
       expect(db.pluginPermission.deleteMany).toHaveBeenCalledWith({
         where: { pluginId: 'plugin-1', slug: { in: ['plugin|demo-sink|manage:digest'] } },
       });
-      expect(emitter.emit).toHaveBeenCalledWith(
-        PluginGrantRevokedEvent.eventName,
-        expect.objectContaining({ reason: 'permission-removed' }),
-      );
-      // The dropped declaration is also a dropped requested permission; it
-      // revokes once, under the declares diff, never a second time (#577).
-      expect(db.pluginGrant.deleteMany).toHaveBeenCalledTimes(1);
-      expect(emitter.emit).not.toHaveBeenCalledWith(
-        PluginGrantRevokedEvent.eventName,
-        expect.objectContaining({ reason: 'permission-no-longer-requested' }),
-      );
+      expect(db.pluginGrant.deleteMany).not.toHaveBeenCalled();
+      expect(db.pluginGrant.delete).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalledWith(PluginGrantRevokedEvent.eventName, expect.anything());
     });
 
-    it('deletes every decision on a core permission the next manifest stops requesting, granted and denied, with permission-no-longer-requested (#577)', async () => {
+    it('activation keeps every consent decision on a permission the next manifest stops requesting, granted or denied (#1152)', async () => {
       // v1.3.0 stops requesting feedback:read and leaves declares[] alone.
-      // Both decisions go: a decision on a permission nothing requests must
-      // not confer if a later version requests it again (#577).
       const granted = makeGrant();
       const denied = makeGrant({
         id: 'grant-hh',
@@ -852,8 +844,7 @@ describe('PluginUpdateService', () => {
       });
       db.pluginGrant.findMany
         .mockResolvedValueOnce([granted, denied]) // comparison load
-        .mockResolvedValueOnce([granted]) // the Server unit's decisions, under the claim
-        .mockResolvedValueOnce([granted, denied]); // decisions on permissions no longer requested
+        .mockResolvedValueOnce([granted]); // the Server unit's decisions, under the claim
       await writeManifest(
         nextManifest({
           permissions: {
@@ -866,60 +857,10 @@ describe('PluginUpdateService', () => {
       const result = await service.stage(input());
 
       expect(result.activated).toBe(true);
-      expect(db.pluginGrant.deleteMany).toHaveBeenCalledWith({
-        where: { pluginId: 'plugin-1', permissionSlug: { in: ['feedback:read'] } },
-      });
+      expect(db.pluginGrant.deleteMany).not.toHaveBeenCalled();
+      expect(db.pluginGrant.delete).not.toHaveBeenCalled();
       expect(db.pluginPermission.deleteMany).not.toHaveBeenCalled();
-      const revocations = emitter.emit.mock.calls.filter(
-        ([eventName]) => eventName === PluginGrantRevokedEvent.eventName,
-      );
-      expect(revocations.map(([, event]) => (event as PluginGrantRevokedEvent).reason)).toEqual([
-        'permission-no-longer-requested',
-        'permission-no-longer-requested',
-      ]);
-    });
-
-    it("names the version each revoked decision's act answered, not the one the update replaces (#1150, #1336)", async () => {
-      // Consent given at 1.0.0 and 1.1.0 survived the unchanged 1.2.0. Each
-      // revocation names the version read from its own act, the Server
-      // unit's decision included, never the outgoing 1.2.0.
-      const server = makeGrant();
-      const household = makeGrant({
-        id: 'grant-hh',
-        scopeType: PluginGrantScope.Household,
-        scopeId: 'household-1',
-        actId: 'act-hh',
-      });
-      db.pluginGrant.findMany
-        .mockResolvedValueOnce([server, household]) // comparison load
-        .mockResolvedValueOnce([server]) // the Server unit's decisions, under the claim
-        .mockResolvedValueOnce([server, household]); // decisions on permissions no longer requested
-      db.pluginConsentAct.findMany.mockResolvedValue([
-        { id: 'act-1', manifestVersion: '1.1.0' },
-        { id: 'act-hh', manifestVersion: '1.0.0' },
-      ] as never);
-      await writeManifest(
-        nextManifest({
-          permissions: {
-            ...activeManifest.permissions,
-            checks: activeManifest.permissions.checks.filter((check) => check.slug !== 'feedback:read'),
-          },
-        }),
-      );
-
-      await service.stage(input());
-
-      expect(db.pluginConsentAct.findMany).toHaveBeenCalledWith({
-        where: { id: { in: ['act-1', 'act-hh'] } },
-        select: { id: true, manifestVersion: true },
-      });
-      const contexts = emitter.emit.mock.calls
-        .filter(([eventName]) => eventName === PluginGrantRevokedEvent.eventName)
-        .map(([, event]) => (event as PluginGrantRevokedEvent).context);
-      expect(contexts).toEqual([
-        { manifestVersion: '1.1.0', actId: 'act-1' },
-        { manifestVersion: '1.0.0', actId: 'act-hh' },
-      ]);
+      expect(emitter.emit).not.toHaveBeenCalledWith(PluginGrantRevokedEvent.eventName, expect.anything());
     });
   });
 
@@ -1146,7 +1087,7 @@ describe('PluginUpdateService', () => {
         expect(db.pluginGrant.upsert).not.toHaveBeenCalled();
       });
 
-      it('does not retry the activation: the denial is not a deadlock, so the claim is taken once', async () => {
+      it('takes the activation claim once: the denial rolls the activation back and the update is staged (#1336)', async () => {
         db.pluginGrant.findMany
           .mockResolvedValueOnce([makeGrant(), digest()])
           .mockResolvedValueOnce([denied(), digest()])
@@ -1561,6 +1502,8 @@ describe('PluginUpdateService', () => {
             kind: PluginConsentActKind.UpdateApprove,
             manifestVersion: '1.3.0',
             manifestSha256: 'e'.repeat(64),
+            // The approval answers the staging it was sent with (#1152).
+            stagingId: 'staging-a',
             presentation: {
               locale: 'de',
               source: 'staged',
@@ -1769,8 +1712,8 @@ describe('PluginUpdateService', () => {
        * The writes are upserts under the plugin row's `FOR UPDATE`, which every
        * writer of a server-scope decision claims first, so no decision can
        * commit between the transaction's read and its writes: a unique
-       * violation has nothing to explain, and retrying it would replay a write
-       * that fails the same way.
+       * violation has nothing to explain, and the aborted approval reaches the
+       * caller as it is (#1152).
        */
       it.each([
         [
@@ -1786,7 +1729,7 @@ describe('PluginUpdateService', () => {
           () => uniqueViolation({ fields: ['plugin_id', 'slug'], constraintName: 'plugin_permissions_slug_key' }),
         ],
         ['carrying no identifiable constraint', () => uniqueViolationWithoutMeta()],
-      ])('propagates a unique violation %s without retrying (#1336)', async (_label, makeError) => {
+      ])('propagates a unique violation %s as it is (#1336, #1152)', async (_label, makeError) => {
         db.plugin.findUnique.mockResolvedValue(pendingPlugin(nextManifest()));
         const failure = makeError();
         db.pluginGrant.upsert.mockRejectedValue(failure);
@@ -1800,35 +1743,21 @@ describe('PluginUpdateService', () => {
 
     /**
      * A deadlock: nothing about this transaction was wrong, Postgres simply
-     * chose it as the victim of a cycle. The abort took it whole, so the
-     * recovery is one whole retry, and one only (#398).
+     * chose it as the victim of a cycle. The abort took it whole, and the API
+     * answers it as a retryable 409, so the approval is not replayed here
+     * (#398, #1152).
      */
     describe('a deadlock that aborts the activation transaction', () => {
-      it('retries the whole transaction when Postgres picks this one as the victim', async () => {
+      it('propagates the deadlock as it is: the transaction runs once (#1152)', async () => {
         db.plugin.findUnique.mockResolvedValue(pendingPlugin(nextManifest()));
-        db.pluginGrant.upsert.mockRejectedValueOnce(deadlock());
-
-        const result = await service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' });
-
-        // The retry writes the act and the required decision again: the
-        // aborted attempt's writes went with it.
-        expect(result.seededGrants.map((grant) => grant.permissionSlug)).toEqual(['plugin|demo-sink|manage:digest']);
-        expect(db.pluginGrant.upsert).toHaveBeenCalledTimes(2);
-        expect(db.pluginConsentAct.create).toHaveBeenCalledTimes(2);
-        // Re-claimed, not carried over: the aborted attempt released it.
-        expect(db.plugin.updateMany).toHaveBeenCalledTimes(2);
-        expect(emitter.emit).toHaveBeenCalledTimes(1);
-      });
-
-      it('propagates a second deadlock rather than looping on the contention', async () => {
-        db.plugin.findUnique.mockResolvedValue(pendingPlugin(nextManifest()));
-        const second = deadlock();
-        db.pluginGrant.upsert.mockRejectedValueOnce(deadlock()).mockRejectedValueOnce(second);
+        const victim = deadlock();
+        db.pluginGrant.upsert.mockRejectedValueOnce(victim);
 
         await expect(
           service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' }),
-        ).rejects.toBe(second);
-        expect(db.plugin.updateMany).toHaveBeenCalledTimes(2);
+        ).rejects.toBe(victim);
+        expect(db.plugin.updateMany).toHaveBeenCalledTimes(1);
+        expect(db.pluginConsentAct.create).toHaveBeenCalledTimes(1);
         expect(emitter.emit).not.toHaveBeenCalled();
       });
     });
@@ -2224,10 +2153,11 @@ describe('PluginUpdateService', () => {
 
     /**
      * A permission moving consent scope is a different consent act, not a
-     * widening: the old scope's decision authorizes nothing, and the new
-     * scope needs a grant that only this approval will create.
+     * widening: the new scope needs a grant that only this approval will
+     * create. The old scope's decision is kept and confers nothing while the
+     * permission is requested at another scope (#1152).
      */
-    it('seeds the new scope and revokes the stale grant when a permission moves household → server', async () => {
+    it('activation seeds the new scope and deletes no consent decision when a permission moves household → server (#1152)', async () => {
       const householdActive = buildPluginManifest({
         scope: 'household',
         permissions: {
@@ -2247,11 +2177,8 @@ describe('PluginUpdateService', () => {
         pendingPlugin(nextManifest(), { manifestJson: householdActive as unknown as Prisma.JsonValue }),
       );
       // compare() → the server read inside the transaction (nothing decided at
-      // server scope) → the stale-scope lookup
-      db.pluginGrant.findMany
-        .mockResolvedValueOnce([staleHouseholdGrant])
-        .mockResolvedValueOnce([])
-        .mockResolvedValueOnce([staleHouseholdGrant]);
+      // server scope)
+      db.pluginGrant.findMany.mockResolvedValueOnce([staleHouseholdGrant]).mockResolvedValueOnce([]);
 
       const result = await service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' });
 
@@ -2263,17 +2190,52 @@ describe('PluginUpdateService', () => {
           create: expect.objectContaining({ permissionSlug: 'feedback:read', scopeType: PluginGrantScope.Server }),
         }),
       );
-      expect(db.pluginGrant.deleteMany).toHaveBeenCalledWith({ where: { id: { in: ['grant-hh'] } } });
-      expect(emitter.emit).toHaveBeenCalledWith(
-        PluginGrantRevokedEvent.eventName,
-        expect.objectContaining({ reason: 'consent-scope-changed' }),
+      expect(db.pluginGrant.deleteMany).not.toHaveBeenCalled();
+      expect(db.pluginGrant.delete).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalledWith(PluginGrantRevokedEvent.eventName, expect.anything());
+    });
+
+    it('a later activation that declares a permission again creates its catalog row at Low and writes no consent decision (#1152)', async () => {
+      // The active manifest stopped declaring and requesting manage:digest;
+      // the Server unit's decision on it was kept. The staged one declares it
+      // again and requests it as an optional server permission, so approving
+      // leaves the kept decision as it stands, and it counts again.
+      const withoutDigest = buildPluginManifest({
+        permissions: {
+          declares: [],
+          checks: activeManifest.permissions.checks.filter((check) => check.slug !== 'manage:digest'),
+        },
+      });
+      const next = nextManifest({
+        permissions: {
+          ...activeManifest.permissions,
+          checks: activeManifest.permissions.checks.map((check) =>
+            check.slug === 'manage:digest' ? { ...check, required: false } : check,
+          ),
+        },
+      });
+      const keptGrant = makeGrant({
+        id: 'grant-2',
+        permissionSlug: 'plugin|demo-sink|manage:digest',
+        decidedRiskLevel: RiskLevel.Low,
+      });
+      db.plugin.findUnique.mockResolvedValue(
+        pendingPlugin(next, { manifestJson: withoutDigest as unknown as Prisma.JsonValue }),
       );
-      // Still requested, at another consent scope: a scope move, not a
-      // permission the update stopped requesting (#577).
-      expect(emitter.emit).not.toHaveBeenCalledWith(
-        PluginGrantRevokedEvent.eventName,
-        expect.objectContaining({ reason: 'permission-no-longer-requested' }),
-      );
+      db.pluginGrant.findMany.mockResolvedValue([makeGrant(), keptGrant]);
+
+      const result = await service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' });
+
+      expect(result.comparison.escalations).toEqual([
+        expect.objectContaining({ kind: 'new-permission', slug: 'plugin|demo-sink|manage:digest' }),
+      ]);
+      expect(db.pluginPermission.create).toHaveBeenCalledWith({
+        data: { pluginId: 'plugin-1', slug: 'plugin|demo-sink|manage:digest', riskLevel: RiskLevel.Low },
+      });
+      expect(db.pluginGrant.upsert).not.toHaveBeenCalled();
+      expect(db.pluginGrant.create).not.toHaveBeenCalled();
+      expect(db.pluginGrant.deleteMany).not.toHaveBeenCalled();
+      expect(result.seededGrants).toEqual([]);
     });
 
     it('announces re-consent to a unit holding a STALE Granted row — presence of a grant is not consent at the new risk', async () => {
@@ -2749,26 +2711,12 @@ describe('PluginUpdateService', () => {
       db.pluginGrant.findMany.mockResolvedValue([]);
     });
 
-    it('reject deletes the pre-consents given to the staged update and announces each one (#1150)', async () => {
-      // The active manifest asks households for calendar:read only. The
-      // staged update added events:read for households and notes:read for
-      // users, and one household and one user accepted them ahead of time.
-      const active = buildPluginManifest({
-        scope: 'household',
-        permissions: {
-          ...activeManifest.permissions,
-          checks: [
-            ...activeManifest.permissions.checks,
-            {
-              slug: 'calendar:read',
-              required: false,
-              reason: { en: 'Schedules digests around events.' },
-              consentScope: 'household' as const,
-            },
-          ],
-        },
-      });
-      db.plugin.findUnique.mockResolvedValue(staged({ manifestJson: active as unknown as Prisma.JsonValue }));
+    it('rejection deletes the consent decisions whose act names the rejected staging, and no others (#1152)', async () => {
+      // One household and one user accepted the staged update's new
+      // permissions ahead of time, each in a staged review that recorded this
+      // staging.
+      db.plugin.findUnique.mockResolvedValue(staged());
+      db.pluginConsentAct.findMany.mockResolvedValue([{ id: 'act-hh' }, { id: 'act-user' }] as never);
       const householdPreConsent = makeGrant({
         id: 'grant-hh',
         scopeType: PluginGrantScope.Household,
@@ -2787,23 +2735,32 @@ describe('PluginUpdateService', () => {
 
       await service.reject({ slug: 'demo-sink', rejectorId: 'admin-1', stagingId: 'staging-a' });
 
-      // Only household and user decisions the active manifest does not
-      // request at their scope: a server decision is never a pre-consent, and
-      // the household's decision on calendar:read is in force.
-      expect(db.pluginGrant.findMany).toHaveBeenCalledWith({
+      // The acts that answered this staging, by the id the rejection was sent
+      // with, then exactly the decisions those acts wrote: a decision given
+      // under the active manifest names another act, whatever its permission.
+      expect(db.pluginConsentAct.findMany).toHaveBeenCalledWith({
         where: {
           pluginId: 'plugin-1',
-          OR: [
-            { scopeType: PluginGrantScope.Household, permissionSlug: { notIn: ['calendar:read'] } },
-            { scopeType: PluginGrantScope.User, permissionSlug: { notIn: [] } },
-          ],
+          stagingId: 'staging-a',
+          scopeType: { in: [PluginGrantScope.Household, PluginGrantScope.User] },
         },
+        select: { id: true },
+      });
+      expect(db.pluginGrant.findMany).toHaveBeenCalledWith({
+        where: { pluginId: 'plugin-1', actId: { in: ['act-hh', 'act-user'] } },
       });
       expect(db.pluginGrant.deleteMany).toHaveBeenCalledWith({ where: { id: { in: ['grant-hh', 'grant-user'] } } });
-      // The clear claims the plugin row before the decisions are read, so a
-      // staged review in flight is either read here or refused afterwards.
+      // The clear claims the plugin row before the acts and decisions are
+      // read, so a staged review in flight is either read here or refused
+      // afterwards.
       expect(db.plugin.updateMany.mock.invocationCallOrder[0]).toBeLessThan(
+        db.pluginConsentAct.findMany.mock.invocationCallOrder[0] ?? 0,
+      );
+      expect(db.pluginConsentAct.findMany.mock.invocationCallOrder[0]).toBeLessThan(
         db.pluginGrant.findMany.mock.invocationCallOrder[0] ?? 0,
+      );
+      expect(db.pluginGrant.findMany.mock.invocationCallOrder[0]).toBeLessThan(
+        db.pluginGrant.deleteMany.mock.invocationCallOrder[0] ?? 0,
       );
       expect(revokedEvents()).toEqual([
         expect.objectContaining({
@@ -2825,26 +2782,39 @@ describe('PluginUpdateService', () => {
 
       await service.reject({ slug: 'demo-sink', rejectorId: 'admin-1', stagingId: 'staging-a' });
 
+      // No staged review names the staging, so no decision is read either (#1152).
+      expect(db.pluginGrant.findMany).not.toHaveBeenCalled();
       expect(db.pluginGrant.deleteMany).not.toHaveBeenCalled();
       expect(revokedEvents()).toEqual([]);
     });
 
-    it('reject still clears a staged update whose active manifest cannot be read, and leaves every decision alone (#1150)', async () => {
-      // Which decisions are pre-consents is read from the active manifest.
-      // One that no longer validates must not block the rejection, and must
-      // not be guessed around.
+    it('rejection over an unreadable active manifest still deletes the pre-consents given to the staging (#1152)', async () => {
+      // The acts say which decisions answered the staging, so no manifest is
+      // read to tell a pre-consent from a decision in force: an active
+      // manifest that no longer validates blocks nothing.
       db.plugin.findUnique.mockResolvedValue(staged({ manifestJson: { slug: 'demo-sink' } as Prisma.JsonValue }));
+      db.pluginConsentAct.findMany.mockResolvedValue([{ id: 'act-hh' }] as never);
+      db.pluginGrant.findMany.mockResolvedValue([
+        makeGrant({
+          id: 'grant-hh',
+          scopeType: PluginGrantScope.Household,
+          scopeId: 'household-1',
+          permissionSlug: 'events:read',
+          actId: 'act-hh',
+        }),
+      ]);
 
       await service.reject({ slug: 'demo-sink', rejectorId: 'admin-1', stagingId: 'staging-a' });
 
       expect(db.plugin.updateMany).toHaveBeenCalledTimes(1);
-      expect(db.pluginGrant.findMany).not.toHaveBeenCalled();
-      expect(db.pluginGrant.deleteMany).not.toHaveBeenCalled();
+      expect(db.pluginGrant.deleteMany).toHaveBeenCalledWith({ where: { id: { in: ['grant-hh'] } } });
       expect(emitter.emit).toHaveBeenCalledWith(
         PluginUpdateRejectedEvent.eventName,
         expect.any(PluginUpdateRejectedEvent),
       );
-      expect(revokedEvents()).toEqual([]);
+      expect(revokedEvents()).toEqual([
+        expect.objectContaining({ subjectId: 'grant-hh', reason: 'staged-update-rejected' }),
+      ]);
     });
 
     it('reject clears only the staging it loaded, by its staging id (#357)', async () => {
@@ -3338,10 +3308,11 @@ describe('PluginUpdateService', () => {
       expect(description.noLongerRequested).toEqual([]);
     });
 
-    it('reports the requested permissions approving stops requesting, whose decisions it deletes (#577)', async () => {
+    it('reports the requested permissions approving stops requesting, whose decisions then stop conferring (#577, #1152)', async () => {
       // The same drop the activation test applies: feedback:read leaves the
-      // checks while declares[] stays put. Approving deletes every decision
-      // on it, so the screen has to say so before the admin approves.
+      // checks while declares[] stays put. Approving keeps every decision on
+      // it, and none of them confers afterwards, so the screen has to say so
+      // before the admin approves.
       db.plugin.findUnique.mockResolvedValue(
         stagedPlugin(
           nextManifest({

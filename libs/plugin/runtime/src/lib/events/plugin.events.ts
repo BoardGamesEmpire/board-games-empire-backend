@@ -553,37 +553,31 @@ export class PluginGrantRejectedEvent extends MutationEvent<PluginGrant> {
 
 /**
  * Why a revocation fired. Carried on the event and persisted into the
- * lifecycle row payload — the grant row itself is DELETED
- * (delete-to-pending), so this is the only durable record of why.
+ * lifecycle row payload — the consent decision itself is DELETED, so this is
+ * the only durable record of why.
  *
- * Every reason is a change to what the plugin requests: an update that was
- * activated, or a staged one that was rejected. Losing authority revokes
- * nothing: a consent decision belongs to the unit and survives the person
- * who made it (#1150).
+ * One thing revokes a consent decision: rejecting the staged update it was
+ * given to. Activating an update revokes none (#1152): a decision the active
+ * manifest does not request at its scope is kept and confers nothing.
+ * Uninstall's purge deletes every decision of the plugin, and announces the
+ * uninstall rather than a revocation per decision. Losing authority revokes
+ * nothing either: a consent decision belongs to the unit and survives the
+ * person who made it (#1150).
  */
 export type PluginGrantRevocationReason =
-  /** The declaring plugin's update removed the permission from `declares[]` — the catalog diff deleted its grants. */
-  | 'permission-removed'
-  /** The plugin's update stopped requesting the permission, so every decision on it was deleted (#577). */
-  | 'permission-no-longer-requested'
-  /**
-   * An update moved the permission to a different consent scope, so the
-   * decision recorded at the OLD scope no longer authorizes anything — the
-   * principal that made it does not own the permission any more.
-   */
-  | 'consent-scope-changed'
   /**
    * The staged update was rejected, so the pre-consents households and users
    * gave to it were deleted with it: a later update that requests the same
-   * permission starts from no decision (#1150).
+   * permission starts from no decision (#1150, #1152).
    */
-  | 'staged-update-rejected';
+  'staged-update-rejected';
 
 /**
- * A grant was revoked because the authority that justified it lapsed
- * (#211 eager revoke): the row is deleted, returning the unit to pending —
- * delete-shaped, never a decision flip. Distinct from
- * `PluginGrantRejectedEvent`, which records a decision somebody MADE.
+ * A consent decision was revoked: the row is deleted, returning the unit to
+ * pending on that permission (#211) — delete-shaped, never a decision flip.
+ * `reason` says why: a rejected staged update is the one thing that revokes
+ * a consent decision (#1152). Distinct from `PluginGrantRejectedEvent`,
+ * which records a decision somebody MADE.
  */
 export class PluginGrantRevokedEvent extends MutationEvent<PluginGrant> {
   static readonly eventName = PluginEvent.GrantRevoked;

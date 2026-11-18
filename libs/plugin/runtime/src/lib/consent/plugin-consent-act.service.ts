@@ -1,13 +1,6 @@
 import { AuditContextService } from '@bge/actor-context';
 import type { HouseholdPlugin, Plugin, PluginConsentAct, PluginScope, UserPlugin } from '@bge/database';
-import {
-  DatabaseService,
-  lockLiveHousehold,
-  PluginConsentActKind,
-  PluginGrantScope,
-  Prisma,
-  retryOnDeadlock,
-} from '@bge/database';
+import { DatabaseService, lockLiveHousehold, PluginConsentActKind, PluginGrantScope, type Prisma } from '@bge/database';
 import type { PluginManifestValidationResult } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -22,7 +15,6 @@ import {
   UserPluginEnabledEvent,
 } from '../events/plugin.events';
 import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
-import { lockHouseholdUnitScope, lockUserUnitScope } from '../grants/unit-scope-lock';
 import { revalidateStoredManifest } from '../manifest/stored-manifest';
 import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
 import { assertHouseholdAdmin } from '../units/household-admin-assertion';
@@ -46,6 +38,7 @@ import {
 } from './plugin-consent-act.errors';
 import type { ConsentActAnswer, ConsentActKind, ConsentActUnit } from './plugin-consent-act.types';
 import { PluginConsentCheckClassifier } from './plugin-consent-check-classifier.service';
+import { writeConsentAct } from './write-consent-act';
 
 export interface ConsentActInput {
   readonly slug: string;
@@ -92,6 +85,7 @@ interface ConsentActClaimRow {
   readonly scope: PluginScope;
   readonly installed_sha256: string;
   readonly pending_sha256: string | null;
+  readonly pending_staging_id: string | null;
 }
 
 /** What a written act did to its unit enablement besides leaving it as `unit`. */
@@ -119,11 +113,20 @@ type ActOutcome =
  * decisions it carries and the unit enablement, and the events go out after
  * it commits.
  *
- * It takes the total lock order every per-unit writer of the plugin runtime
- * takes (`apps/api-e2e/src/plugin/lock-order.ts`): household row, plugin row,
- * the unit's advisory key, grant rows, the unit enablement. That file and
- * `PluginUnitLifecycleService` explain each stage; the comments in `commit`
- * say only what is particular to an act.
+ * Its transaction takes, in this order: the household row, shared (#548); the
+ * plugin row, shared, on the sha the act names; the consent decisions, in
+ * permission order; the unit enablement. Two acts on one unit are not ordered
+ * against each other (#1152). Each judges against the rows it reads and writes
+ * by upsert, so the later write wins on each permission, the later switch-on
+ * updates the unit enablement the earlier one created, and both acts stay on
+ * record. The sha the claim compares is what keeps an act from landing on a
+ * manifest that moved under it.
+ *
+ * Every writer that holds the plugin row shared takes the rows after it in
+ * one order, so two acts wait on each other rather than deadlock. Should
+ * Postgres still pick one as a deadlock victim, nothing here retries it: the
+ * API answers 409 `TRANSACTION_DEADLOCK` with `fields.retryable: true`
+ * (`TransactionDeadlockInterceptor`), and the client sends the act again.
  */
 @Injectable()
 export class PluginConsentActService {
@@ -163,13 +166,10 @@ export class PluginConsentActService {
     const scopeId = household ? unit.householdId : unit.userId;
     const config = household && kind === 'SwitchOn' ? input.config : undefined;
 
-    // The plugin is read once per request, before the transaction, and a
-    // deadlock replay judges against this same read (#361). A deadlock means a
-    // writer of this plugin row was live, most often an activation (#398); a
-    // replay that read again would record consent against a manifest that
-    // moved mid-request with nothing telling the client. Judged against the
-    // first read, the replay's claim sees the move and refuses it with the
-    // same stale refusal.
+    // The plugin is read once per request, before the transaction (#361). The
+    // claim inside it compares the sha this read named with the row it locks,
+    // so a manifest that moved since, most often by an activation, is refused
+    // stale rather than judged against (#1152).
     const plugin = await loadLivingPlugin(this.db, input.slug);
     const named = this.nameManifest(plugin, input.manifestSha256);
 
@@ -197,8 +197,8 @@ export class PluginConsentActService {
       // transaction, so an invalid one is refused before any lock is taken
       // (#323). Otherwise the schema is established usable and compiled
       // here: an unusable one is refused before any lock, and the config gate
-      // under the advisory key, which asks the rule about the document the
-      // unit would hold, compiles nothing inside the lock window (#1151).
+      // inside the transaction, which asks the rule about the document the
+      // unit would hold, compiles nothing while the locks are held (#1151).
       if (config !== undefined) {
         const issues = this.configSchema.validate({
           slug: plugin.slug,
@@ -218,249 +218,217 @@ export class PluginConsentActService {
     const correlationId = this.auditContext.getCorrelationId() ?? null;
     const locale = input.locale ?? this.options.defaultLocale;
 
-    // Retried once if Postgres picks this attempt as the deadlock victim
-    // (#398): the abort took the transaction whole and the events emit below,
-    // after the commit, so a replay writes nothing twice.
-    const outcome = await retryOnDeadlock(() =>
-      this.db.$transaction(async (tx): Promise<ActOutcome> => {
-        // The household row first, shared (#548): the admin check above took
-        // no lock, so a soft-delete can commit in between.
-        if (household && !(await lockLiveHousehold(tx, unit.householdId))) {
-          throw new PluginUnitHouseholdNotFoundError(unit.householdId);
+    const outcome = await this.db.$transaction(async (tx): Promise<ActOutcome> => {
+      // The household row first, shared (#548): the admin check above took
+      // no lock, so a soft-delete can commit in between.
+      if (household && !(await lockLiveHousehold(tx, unit.householdId))) {
+        throw new PluginUnitHouseholdNotFoundError(unit.householdId);
+      }
+
+      // The plugin row next, shared. It must be held before the first grant
+      // write: an INSERT into the grants table takes this row through its
+      // foreign key only AFTER the grant tuple exists, so without the claim
+      // this transaction would take the plugin row last and close a cycle
+      // with activation (#398). The claim also compares the sha the consent
+      // surface named, so nothing judged below can be judged against a
+      // manifest that has since moved (#361, #1150), and returns the staging
+      // a staged review answers, which the act records (#1152).
+      const stagingId = await this.claimPluginForAct(tx, plugin.id, plugin.slug, {
+        source: named.source,
+        manifestSha256: input.manifestSha256,
+        installedSha256: plugin.installedSha256,
+        householdSurface: household && kind === 'SwitchOn',
+      });
+
+      // The catalog and the unit's decisions are read under the claim,
+      // through this transaction, so the act judges against the manifest the
+      // claim pinned (#361). No lock holds the decisions still: another act
+      // on this unit can write between this read and this act's writes, and
+      // the later write wins on each permission (#1152). Nothing locks
+      // catalog rows: a risk edit landing before the commit leaves the
+      // decision's risk below the catalog's, so it confers nothing
+      // (`riskCovers`) and fails closed.
+      const classification = await this.classifier.classify(plugin.id, unit, named.validated.permissionChecks, {
+        source: named.source,
+        client: tx,
+      });
+
+      // Throws every answer, required-set, ungrantable and risk refusal, so
+      // nothing has been written when it does.
+      const plan = planConsentAct({
+        kind,
+        pluginSlug: plugin.slug,
+        unit,
+        source: named.source,
+        checks: named.validated.permissionChecks,
+        activeChecks: named.active.permissionChecks,
+        classification,
+        answers: input.answers,
+        locale,
+        defaultLocale: this.options.defaultLocale,
+      });
+
+      // Read before anything is written, so an act that would change
+      // nothing writes nothing: no act, no decision, no event.
+      // A retried request then lands exactly where its first attempt left
+      // the unit (ADR 0002, docs/adr/0002-retried-writes-use-client-request-ids.md).
+      const unitBefore = await this.readUnitEnablement(tx, unit, plugin.id);
+
+      // A household switch-on that supplies no document asks the dormancy
+      // rule, with the active manifest, about the document it would leave
+      // the unit holding: the retained one, or `{}` for a new unit
+      // enablement. The gate refuses whatever the rule finds dormant. Asked
+      // here, before the answer that changes nothing and before any write,
+      // so a unit the read would call dormant is refused rather than
+      // answered or half-recorded, whether or not it is already switched on
+      // (#323, #1151). A supplied document was judged before the transaction.
+      if (household && kind === 'SwitchOn' && config === undefined) {
+        assertHeldConfigSatisfiesGate(this.configSchema, named.active, unitBefore as HouseholdPlugin | null);
+      }
+
+      const standingRows = await tx.pluginGrant.findMany({
+        where: {
+          pluginId: plugin.id,
+          scopeType,
+          scopeId,
+          permissionSlug: { in: plan.decisions.map((decision) => decision.permissionSlug) },
+        },
+      });
+      const standingBySlug = new Map(standingRows.map((row) => [row.permissionSlug, row]));
+      const stand = decisionsStand(plan.decisions, standingBySlug);
+
+      if (kind === 'SwitchOn') {
+        if (stand && unitBefore !== null && unitBefore.enabled && config === undefined) {
+          return { changed: false, unit: unitBefore, switchedOff: false };
+        }
+      } else {
+        // A review that refuses a required permission asks for two things:
+        // the denial recorded and the unit off. Both already hold, so it
+        // changes nothing and answers as the review that left them so did,
+        // `switchedOff` included: this is that review sent again, most
+        // often. It is the one review a switched-off unit answers rather
+        // than refuses, because the unit is where the request wants it (a
+        // state change already at its target answers 2xx, ADR 0002)
+        // whichever request put it there.
+        if (plan.switchesOff && stand && unitBefore !== null && !unitBefore.enabled) {
+          return { changed: false, unit: unitBefore, switchedOff: true };
         }
 
-        // The plugin row next, shared. It must be held before the first grant
-        // write: an INSERT into the grants table takes this row through its
-        // foreign key only AFTER the grant tuple exists, so without the claim
-        // this transaction would take the plugin row last and close a cycle
-        // with activation (#398). The claim also compares the sha the consent
-        // surface named, so nothing judged below can be judged against a
-        // manifest that has since moved (#361, #1150).
-        await this.claimPluginForAct(tx, plugin.id, plugin.slug, {
-          source: named.source,
-          manifestSha256: input.manifestSha256,
-          installedSha256: plugin.installedSha256,
-          householdSurface: household && kind === 'SwitchOn',
-        });
-
-        // The unit's advisory key, before anything that judges or writes this
-        // unit. Every other writer of the unit takes it before the unit
-        // enablement (see unit-scope-lock.ts); an act takes it before its
-        // decisions as well, so two acts on one unit run one after the other.
-        // The later one classifies and plans against the decisions and the
-        // switch the earlier one left: a review refusing a required
-        // permission the earlier act granted is refused as not outstanding
-        // rather than switching the unit off on a plan made before that grant;
-        // an act whose answers already stand records nothing; and each act
-        // announces its changes against the rows it found, never against rows
-        // the earlier act has since replaced (#1150).
-        if (household) {
-          await lockHouseholdUnitScope(tx, unit.householdId, plugin.id);
-        } else {
-          await lockUserUnitScope(tx, unit.userId, plugin.id);
+        // A toggle or review needs the unit switched on, as this read finds
+        // it. A switch-off that commits after the read is not waited for:
+        // the act's decisions stand on a unit that is off, as any decision
+        // does when its unit is switched off later (#1152).
+        if (unitBefore === null || !unitBefore.enabled) {
+          throw new PluginConsentActUnitOffError(plugin.slug, unit.scopeType);
         }
 
-        // The catalog and the unit's decisions are read under the claim and
-        // the key, through this transaction, so the act judges against the
-        // decisions it writes over (#361). Nothing locks catalog rows: a risk
-        // edit landing before the commit leaves the decision's risk below the
-        // catalog's, so it confers nothing (`riskCovers`) and fails closed.
-        const classification = await this.classifier.classify(plugin.id, unit, named.validated.permissionChecks, {
-          source: named.source,
-          client: tx,
-        });
+        // A review that refuses a required permission changes the switch
+        // even when its denial already stands (refused while optional, then
+        // promoted by an update), so only an act that leaves the unit on can
+        // change nothing (#1150).
+        if (stand && !plan.switchesOff) {
+          return { changed: false, unit: unitBefore, switchedOff: false };
+        }
+      }
 
-        // Throws every answer, required-set, ungrantable and risk refusal, so
-        // nothing has been written when it does.
-        const plan = planConsentAct({
-          kind,
-          pluginSlug: plugin.slug,
-          unit,
-          source: named.source,
-          checks: named.validated.permissionChecks,
-          activeChecks: named.active.permissionChecks,
-          classification,
-          answers: input.answers,
-          locale,
-          defaultLocale: this.options.defaultLocale,
-        });
+      // A staged review (the claim returned a staging id) writes only the
+      // decisions it changes. Activation keeps consent decisions (#1152), so
+      // the staged manifest can request again a permission the unit decided
+      // under an earlier one; rewritten here, that decision would name this
+      // review's act, and rejecting the staging deletes every decision whose
+      // act names it, a decision given before the staging existed included.
+      // A kept decision the review changes becomes this staging's
+      // pre-consent and goes with it, since nothing records the earlier
+      // answer to put back. The presentation is unchanged, so the act still
+      // records everything shown and answered. An act on the active manifest
+      // writes every decision. The plan's decisions are already in permission
+      // order, and the filter keeps it.
+      const decisions =
+        stagingId === null
+          ? plan.decisions
+          : plan.decisions.filter((decision) => !decisionStands(decision, standingBySlug.get(decision.permissionSlug)));
+      const { act, changed: changedDecisions } = await writeConsentAct(tx, {
+        pluginId: plugin.id,
+        pluginSlug: plugin.slug,
+        scopeType,
+        scopeId,
+        kind: PluginConsentActKind[kind],
+        manifestVersion: named.version,
+        manifestSha256: input.manifestSha256,
+        stagingId,
+        presentation: plan.presentation,
+        decisions,
+        standingBySlug,
+        actorId: input.actorId,
+        decidedAt: initiatedAt,
+        correlationId,
+      });
 
-        // Read under the key, before anything is written, so an act that
-        // would change nothing writes nothing: no act, no decision, no event.
-        // A retried request then lands exactly where its first attempt left
-        // the unit (ADR 0002, docs/adr/0002-retried-writes-use-client-request-ids.md).
-        const unitBefore = await this.readUnitEnablement(tx, unit, plugin.id);
+      // Every written outcome differs only in the unit it leaves and what
+      // happened to it.
+      const writtenOutcome = (unitAfter: UnitEnablement, effects: Partial<UnitEffects> = {}): ActOutcome => ({
+        changed: true,
+        act,
+        changedDecisions,
+        unitBefore,
+        unit: unitAfter,
+        switchedOff: effects.switchedOff ?? false,
+        configWritten: effects.configWritten ?? false,
+      });
 
-        // A household switch-on that supplies no document asks the dormancy
-        // rule, with the active manifest, about the document it would leave
-        // the unit holding: the retained one, or `{}` for a new unit
-        // enablement. The gate refuses whatever the rule finds dormant. Asked
-        // here, before the answer that changes nothing and before any write,
-        // so a unit the read would call dormant is refused rather than
-        // answered or half-recorded, whether or not it is already switched on
-        // (#323, #1151). A supplied document was judged before the transaction.
-        if (household && kind === 'SwitchOn' && config === undefined) {
-          assertHeldConfigSatisfiesGate(this.configSchema, named.active, unitBefore as HouseholdPlugin | null);
+      if (kind !== 'SwitchOn') {
+        // Switched on: a toggle or review over any other unit was refused above.
+        const switchedOn = unitBefore as UnitEnablement;
+
+        if (!plan.switchesOff) {
+          return writtenOutcome(switchedOn);
         }
 
-        const standingRows = await tx.pluginGrant.findMany({
-          where: {
+        const switchedOff = household
+          ? await tx.householdPlugin.update({ where: { id: switchedOn.id }, data: { enabled: false } })
+          : await tx.userPlugin.update({ where: { id: switchedOn.id }, data: { enabled: false } });
+
+        return writtenOutcome(switchedOff, { switchedOff: true });
+      }
+
+      if (household) {
+        const existing = unitBefore as HouseholdPlugin | null;
+
+        // A unit already switched on, with no document supplied, needs no
+        // write: the gate above has judged the document it holds.
+        if (existing !== null && existing.enabled && config === undefined) {
+          return writtenOutcome(existing);
+        }
+
+        // By upsert, one statement, whether or not this act read a unit
+        // enablement: a first switch-on racing this one can insert the row
+        // after this act's read, and the later write then updates it rather
+        // than colliding with it (#1152). A new unit enablement holds the
+        // supplied document or `{}`; `config` undefined leaves a retained
+        // document as it is, since Prisma writes no column whose value is
+        // undefined.
+        const written = await tx.householdPlugin.upsert({
+          where: { householdId_pluginId: { householdId: unit.householdId, pluginId: plugin.id } },
+          create: {
+            householdId: unit.householdId,
             pluginId: plugin.id,
-            scopeType,
-            scopeId,
-            permissionSlug: { in: plan.decisions.map((decision) => decision.permissionSlug) },
+            enabled: true,
+            config: (config ?? {}) as Prisma.InputJsonValue,
           },
-        });
-        const standingBySlug = new Map(standingRows.map((row) => [row.permissionSlug, row]));
-        const stand = decisionsStand(plan.decisions, standingBySlug);
-
-        if (kind === 'SwitchOn') {
-          if (stand && unitBefore !== null && unitBefore.enabled && config === undefined) {
-            return { changed: false, unit: unitBefore, switchedOff: false };
-          }
-        } else {
-          // A review that refuses a required permission asks for two things:
-          // the denial recorded and the unit off. Both already hold, so it
-          // changes nothing and answers as the review that left them so did,
-          // `switchedOff` included: this is that review sent again, most
-          // often. It is the one review a switched-off unit answers rather
-          // than refuses, because the unit is where the request wants it (a
-          // state change already at its target answers 2xx, ADR 0002)
-          // whichever request put it there.
-          if (plan.switchesOff && stand && unitBefore !== null && !unitBefore.enabled) {
-            return { changed: false, unit: unitBefore, switchedOff: true };
-          }
-
-          // A toggle or review needs the unit switched on. Judged under the
-          // key, so no switch-off can commit between this read and the act.
-          if (unitBefore === null || !unitBefore.enabled) {
-            throw new PluginConsentActUnitOffError(plugin.slug, unit.scopeType);
-          }
-
-          // A review that refuses a required permission changes the switch
-          // even when its denial already stands (refused while optional, then
-          // promoted by an update), so only an act that leaves the unit on can
-          // change nothing (#1150).
-          if (stand && !plan.switchesOff) {
-            return { changed: false, unit: unitBefore, switchedOff: false };
-          }
-        }
-
-        const act = await tx.pluginConsentAct.create({
-          data: {
-            pluginId: plugin.id,
-            pluginSlug: plugin.slug,
-            scopeType,
-            scopeId,
-            kind: PluginConsentActKind[kind],
-            manifestVersion: named.version,
-            manifestSha256: input.manifestSha256,
-            presentation: plan.presentation as unknown as Prisma.InputJsonValue,
-            decidedById: input.actorId,
-            decidedAt: initiatedAt,
-            correlationId,
-          },
+          update: { enabled: true, config: config as Prisma.InputJsonValue | undefined },
         });
 
-        // Every planned decision is written, the ones that already stand
-        // included, so a row's actId always names the act that last set it.
-        // In permission order, which the plan sorts by code unit: two acts on
-        // one unit then take their grant rows in the same order, where any
-        // other order lets each hold a row the other waits on.
-        const changedDecisions: WrittenDecision[] = [];
+        return writtenOutcome(written, { configWritten: config !== undefined });
+      }
 
-        for (const decision of plan.decisions) {
-          const fields = {
-            status: decision.status,
-            decidedRiskLevel: decision.decidedRiskLevel,
-            decidedById: input.actorId,
-            decidedAt: initiatedAt,
-            actId: act.id,
-          };
-          const after = await tx.pluginGrant.upsert({
-            where: {
-              pluginId_scopeType_scopeId_permissionSlug: {
-                pluginId: plugin.id,
-                scopeType,
-                scopeId,
-                permissionSlug: decision.permissionSlug,
-              },
-            },
-            create: { pluginId: plugin.id, scopeType, scopeId, permissionSlug: decision.permissionSlug, ...fields },
-            update: fields,
-          });
-          const before = standingBySlug.get(decision.permissionSlug) ?? null;
+      const written = await tx.userPlugin.upsert({
+        where: { userId_pluginId: { userId: unit.userId, pluginId: plugin.id } },
+        create: { userId: unit.userId, pluginId: plugin.id, enabled: true },
+        update: { enabled: true },
+      });
 
-          if (!decisionStands(decision, before)) {
-            changedDecisions.push({ before, after });
-          }
-        }
-
-        // Every written outcome differs only in the unit it leaves and what
-        // happened to it.
-        const writtenOutcome = (unitAfter: UnitEnablement, effects: Partial<UnitEffects> = {}): ActOutcome => ({
-          changed: true,
-          act,
-          changedDecisions,
-          unitBefore,
-          unit: unitAfter,
-          switchedOff: effects.switchedOff ?? false,
-          configWritten: effects.configWritten ?? false,
-        });
-
-        if (kind !== 'SwitchOn') {
-          // Switched on: a toggle or review over any other unit was refused above.
-          const switchedOn = unitBefore as UnitEnablement;
-
-          if (!plan.switchesOff) {
-            return writtenOutcome(switchedOn);
-          }
-
-          const switchedOff = household
-            ? await tx.householdPlugin.update({ where: { id: switchedOn.id }, data: { enabled: false } })
-            : await tx.userPlugin.update({ where: { id: switchedOn.id }, data: { enabled: false } });
-
-          return writtenOutcome(switchedOff, { switchedOff: true });
-        }
-
-        if (household) {
-          const existing = unitBefore as HouseholdPlugin | null;
-
-          // A unit already switched on, with no document supplied, needs no
-          // write: the gate above has judged the document it holds.
-          if (existing !== null && existing.enabled && config === undefined) {
-            return writtenOutcome(existing);
-          }
-
-          // `config` undefined leaves the retained document as it is: Prisma
-          // writes no column whose value is undefined.
-          const written =
-            existing === null
-              ? await tx.householdPlugin.create({
-                  data: {
-                    householdId: unit.householdId,
-                    pluginId: plugin.id,
-                    enabled: true,
-                    config: (config ?? {}) as Prisma.InputJsonValue,
-                  },
-                })
-              : await tx.householdPlugin.update({
-                  where: { id: existing.id },
-                  data: { enabled: true, config: config as Prisma.InputJsonValue | undefined },
-                });
-
-          return writtenOutcome(written, { configWritten: config !== undefined });
-        }
-
-        const written = await tx.userPlugin.upsert({
-          where: { userId_pluginId: { userId: unit.userId, pluginId: plugin.id } },
-          create: { userId: unit.userId, pluginId: plugin.id, enabled: true },
-          update: { enabled: true },
-        });
-
-        return writtenOutcome(written);
-      }),
-    );
+      return writtenOutcome(written);
+    });
 
     if (!outcome.changed) {
       return { act: null, changed: false, unit: outcome.unit, switchedOff: outcome.switchedOff };
@@ -480,6 +448,12 @@ export class PluginConsentActService {
    * A staged review pins BOTH shas: the staged one it names, and the active
    * one the request read, because the planner judged which staged
    * permissions are new against that active manifest.
+   *
+   * Returns the staging the act answers: the row's `pending_staging_id`, read
+   * under the same lock as the staged sha, for a staged review, and null for
+   * an act on the active manifest. A rejection deletes the consent decisions
+   * whose act names its staging, so a staged review that named none could
+   * never be cleared away (#1152).
    */
   private async claimPluginForAct(
     tx: Prisma.TransactionClient,
@@ -493,8 +467,9 @@ export class PluginConsentActService {
       /** A household switch-on writes a household surface, which the plugin's scope must still admit. */
       readonly householdSurface: boolean;
     },
-  ): Promise<void> {
-    const rows = await tx.$queryRaw<ConsentActClaimRow[]>`SELECT uninstalled_at, scope, installed_sha256, pending_sha256
+  ): Promise<string | null> {
+    const rows = await tx.$queryRaw<ConsentActClaimRow[]>`SELECT uninstalled_at, scope, installed_sha256,
+        pending_sha256, pending_staging_id
         FROM plugins WHERE id = ${pluginId} FOR SHARE`;
     const row = rows[0];
 
@@ -518,6 +493,20 @@ export class PluginConsentActService {
     if (expected.householdSurface) {
       assertHouseholdSurface(pluginSlug, row.scope);
     }
+
+    if (expected.source === 'active') {
+      return null;
+    }
+
+    // The database keeps the staged columns all set or all null
+    // (`plugins_staged_update_all_or_nothing`), so a staged sha with no
+    // staging id is unreachable. Should one be read, the review is refused
+    // rather than recorded naming no staging.
+    if (row.pending_staging_id === null) {
+      throw new PluginConsentActStaleError(pluginSlug, 'manifest');
+    }
+
+    return row.pending_staging_id;
   }
 
   /**

@@ -31,6 +31,7 @@ import { retainedServerConfig } from '../config/retained-server-config';
 import { PluginConsentActStaleError } from '../consent/plugin-consent-act.errors';
 import type { ShownRisk } from '../consent/plugin-consent-act.types';
 import { planServerAcceptance, staleShownRisks } from '../consent/server-acceptance';
+import { writeConsentAct } from '../consent/write-consent-act';
 import { PluginInstalledEvent, type GrantedPermissionRecord, type PluginProvenance } from '../events/plugin.events';
 import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
 import { PluginDirectoryResolverService } from '../loader/plugin-directory-resolver.service';
@@ -638,9 +639,11 @@ export class PluginInstallerService {
 
         // Reinstall clears the tombstone in place. Consent starts from zero
         // (the uninstall purge emptied the catalog; re-seeded below), the
-        // enable switch starts OFF like any fresh install, and the running
-        // process may still hold the pre-uninstall module — restartRequired
-        // says so until the loader's success path clears it.
+        // Server switch starts OFF like any fresh install, every unit
+        // enablement is already off because uninstall switched each one off
+        // (#1328), and the running process may still hold the pre-uninstall
+        // module — restartRequired says so until the loader's success path
+        // clears it.
         //
         // Guarded on the tombstone STILL being present, the way the unique
         // slug index guards a fresh install: two concurrent reinstalls both
@@ -682,8 +685,10 @@ export class PluginInstallerService {
 
         plugin = await tx.plugin.findUniqueOrThrow({ where: { id: existing.id } });
 
-        // A reinstall reads and writes no household unit enablement: whether a
-        // retained one can run under this manifest is worked out when read (#1151).
+        // A reinstall reads and writes no unit enablement: uninstall switched
+        // every one off (#1328), so each unit switches on again by a consent
+        // act under this sha, and whether a retained one can run under this
+        // manifest is worked out when read (#1151).
       }
 
       // A data-gateway plugin's DataGateway row, created or (on a reinstall)
@@ -716,44 +721,27 @@ export class PluginInstallerService {
 
       // The Server unit's consent to this install, one act whatever the
       // manifest requests of the server, so every install leaves a record of
-      // what the server admin accepted and under which sha (#1336).
-      const act = await tx.pluginConsentAct.create({
-        data: {
-          pluginId: plugin.id,
-          pluginSlug: manifest.slug,
-          scopeType: PluginGrantScope.Server,
-          scopeId: SERVER_SCOPE_SENTINEL,
-          kind: PluginConsentActKind.InstallAccept,
-          manifestVersion: manifest.version,
-          manifestSha256: provenance.sha256,
-          presentation: acceptance.presentation as unknown as Prisma.InputJsonValue,
-          decidedById: installerId,
-          decidedAt: initiatedAt,
-          correlationId,
-        },
+      // what the server admin accepted and under which sha (#1336). The
+      // acceptance's decisions are in permission order. No consent decision
+      // stands before an install, fresh or a reinstall, whose uninstall purged
+      // every one, so each upsert inserts.
+      const { act, rows: seededGrants } = await writeConsentAct(tx, {
+        pluginId: plugin.id,
+        pluginSlug: manifest.slug,
+        scopeType: PluginGrantScope.Server,
+        scopeId: SERVER_SCOPE_SENTINEL,
+        kind: PluginConsentActKind.InstallAccept,
+        manifestVersion: manifest.version,
+        manifestSha256: provenance.sha256,
+        // An install answers no staged update.
+        stagingId: null,
+        presentation: acceptance.presentation,
+        decisions: acceptance.decisions,
+        standingBySlug: new Map(),
+        actorId: installerId,
+        decidedAt: initiatedAt,
+        correlationId,
       });
-
-      // In permission order, which the acceptance sorts by code unit: the
-      // order every writer of the Server unit's consent decisions takes them.
-      const seededGrants: PluginGrant[] = [];
-
-      for (const decision of acceptance.decisions) {
-        seededGrants.push(
-          await tx.pluginGrant.create({
-            data: {
-              pluginId: plugin.id,
-              scopeType: PluginGrantScope.Server,
-              scopeId: SERVER_SCOPE_SENTINEL,
-              permissionSlug: decision.permissionSlug,
-              status: decision.status,
-              decidedById: installerId,
-              decidedAt: initiatedAt,
-              decidedRiskLevel: decision.decidedRiskLevel,
-              actId: act.id,
-            },
-          }),
-        );
-      }
 
       return { plugin, declaredPermissions, act, seededGrants, retainedConfigReset };
     });

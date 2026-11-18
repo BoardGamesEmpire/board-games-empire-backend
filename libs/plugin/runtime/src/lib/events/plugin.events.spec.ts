@@ -255,12 +255,12 @@ describe('plugin lifecycle events', () => {
       expect(PluginGrantRejectedEvent.eventName).toBe(PluginEvent.GrantRejected);
     });
 
-    it('revocation is delete-shaped and carries the plugin manifest change that caused it (#211)', () => {
-      const event = new PluginGrantRevokedEvent(grantRow, 'permission-no-longer-requested', context, initiatedAt);
+    it('revocation is delete-shaped and carries the rejected staged update that caused it (#211, #1152)', () => {
+      const event = new PluginGrantRevokedEvent(grantRow, 'staged-update-rejected', context, initiatedAt);
 
       expect(event.action).toBe('delete');
       expect(event.after).toBeNull();
-      expect(event.reason).toBe('permission-no-longer-requested');
+      expect(event.reason).toBe('staged-update-rejected');
       expect(event.before.decidedRiskLevel).toBe(RiskLevel.Low);
       expect(PluginGrantRevokedEvent.eventName).toBe(PluginEvent.GrantRevoked);
     });

@@ -250,7 +250,7 @@ export function deadlock(options: DeadlockOptions = {}): Error {
 /**
  * Prisma's OWN spelling for a deadlock — P2034, documented as "write conflict or
  * deadlock" — with nothing under `meta`. The predicate accepts the code alone:
- * it means, by definition, the thing the retry answers.
+ * it means, by definition, the thing a client's retry answers.
  */
 export function transactionWriteConflict(): Prisma.PrismaClientKnownRequestError {
   return new Prisma.PrismaClientKnownRequestError(

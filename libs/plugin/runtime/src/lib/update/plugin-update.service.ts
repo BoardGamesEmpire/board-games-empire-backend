@@ -1,7 +1,6 @@
 import { AuditContextService } from '@bge/actor-context';
 import {
   DatabaseService,
-  isDeadlockError,
   PluginCategory,
   PluginConsentActKind,
   PluginGrantScope,
@@ -32,7 +31,6 @@ import { readFile } from 'node:fs/promises';
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
 import { retainedServerConfig } from '../config/retained-server-config';
 import { emitDecisionEvents, type WrittenDecision } from '../consent/consent-decision-events';
-import { decisionStands } from '../consent/consent-decision-stands';
 import { PluginConsentActStaleError } from '../consent/plugin-consent-act.errors';
 import type { ShownRisk } from '../consent/plugin-consent-act.types';
 import {
@@ -41,6 +39,7 @@ import {
   type ConsentCheckDecisionInput,
 } from '../consent/plugin-consent-check-classifier.service';
 import { planServerAcceptance, planServerApproval, staleShownRisks } from '../consent/server-acceptance';
+import { writeConsentAct } from '../consent/write-consent-act';
 import { grantSnapshot, householdSwitchSnapshot, userSwitchSnapshot } from '../events/plugin-event-snapshots';
 import {
   HouseholdPluginReconsentRequestedEvent,
@@ -50,10 +49,8 @@ import {
   PluginUpdateRejectedEvent,
   UserPluginReconsentRequestedEvent,
   type GrantedPermissionRecord,
-  type PluginGrantRevocationReason,
   type PluginProvenance,
 } from '../events/plugin.events';
-import { CONSENT_SCOPE_TO_GRANT_SCOPE } from '../grants/consent-scope.map';
 import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
 import {
   collectForbiddenPermissionViolations,
@@ -78,7 +75,7 @@ import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module
 import { MANIFEST_CATEGORY_TO_PRISMA } from '../registry/plugin-category.map';
 import { compareForEscalations, deniedRequiredServerSlugs } from './escalation-comparator';
 import { CLEARED_STAGED_UPDATE } from './staged-update.columns';
-import type { ManifestComparisonView, UpdateEscalation, UpdateEscalationComparison } from './update-escalation.types';
+import type { ManifestComparisonView, UpdateEscalationComparison } from './update-escalation.types';
 import {
   PluginUpdateActiveArtifactMovedError,
   PluginUpdateAuthorityError,
@@ -120,9 +117,11 @@ function declaredSlugDiff(
  * The requested permissions the next manifest stops requesting at any
  * consent scope (#577). A permission still requested at another scope is a
  * scope move, which the comparison owns. One whose declaration the update
- * also drops is left to the declares diff, so its decisions revoke once,
- * as `'permission-removed'`. The approval screen and activation both use it,
- * so the screen cannot show less than approving deletes.
+ * also drops is left to the declares diff, which names it once. Approving
+ * keeps every consent decision on these permissions, and each then confers
+ * nothing until a later manifest requests the permission at its scope
+ * again (#1152). The staged-update read reports them, so the approval
+ * screen can say what stops conferring.
  */
 function requestedSlugsDropped(
   active: PluginManifestValidationResult,
@@ -315,7 +314,8 @@ export interface PluginUpdateRejectInput {
 /**
  * The `declares[]` catalog diff between the active and pending manifests:
  * the plugin-namespaced permissions activation will INSERT into the catalog,
- * and the ones it will delete — taking their grants with them.
+ * and the ones whose catalog rows it will delete. Consent decisions on a
+ * removed one are kept and confer nothing without the row (#1152).
  *
  * Not derivable from `checks[]` or from the escalations: a declaration the
  * plugin never requests still appears in the catalog, and no escalation kind
@@ -341,11 +341,11 @@ export interface PluginUpdatePendingDescription {
   readonly pendingSince: Date | null;
   readonly declares: PluginUpdateDeclaresDiff;
   /**
-   * The requested permissions the update stops requesting (#577), from the
-   * function activation applies. Approving deletes every decision on them,
-   * granted and denied, at every scope, so this is destructive too. A
-   * permission whose declaration the update removes is in `declares.removed`
-   * instead.
+   * The requested permissions the update stops requesting (#577). Approving
+   * keeps every consent decision on them, at every scope, and none of them
+   * confers while the activated manifest does not request the permission
+   * (#1152). A permission whose declaration the update removes is in
+   * `declares.removed` instead.
    */
   readonly noLongerRequested: readonly string[];
   /**
@@ -551,17 +551,6 @@ interface ActivationOutcome {
   readonly changedDecisions: readonly WrittenDecision[];
   /** The approval's `UpdateApprove` consent act; null when the update activated without approval. */
   readonly act: PluginConsentAct | null;
-  readonly revokedGrants: readonly PluginGrant[];
-  /** Decisions deleted because the next manifest stopped requesting their permission (#577). */
-  readonly unrequestedGrants: readonly PluginGrant[];
-  /** Grants deleted because their permission moved consent scope. */
-  readonly scopeMovedGrants: readonly PluginGrant[];
-  /**
-   * The manifest version each deleted decision's consent act answered, by act
-   * id (#1150). A decision can outlive the version it was made against, so
-   * its revocation names the act's version, not the one this update replaces.
-   */
-  readonly revokedActVersions: ReadonlyMap<string, string>;
   /** Enabled household units that owe re-consent — announced after commit, never written (#1149). */
   readonly reconsentHouseholdUnits: readonly ReconsentCandidate<HouseholdPlugin>[];
   /** The user-scope mirror (#225). */
@@ -602,14 +591,17 @@ interface ActivationOutcome {
  * `UpdateApprove` consent act (#1336).
  *
  * ACTIVATION never hot-swaps running code: the transaction promotes
- * the DB state — version, manifest, the `declares[]` catalog diff with
- * `'permission-removed'` grant revocation, `'permission-no-longer-requested'`
- * revocation of decisions on permissions the new manifest stops requesting
- * (#577) — and sets
- * `restartRequired`; the running instance continues on the prior code until
- * the next boot, where the loader clears the flag. No forced restart:
+ * the DB state — version, manifest, the `declares[]` catalog diff — and
+ * sets `restartRequired`; the running instance continues on the prior code
+ * until the next boot, where the loader clears the flag. No forced restart:
  * updating several plugins in one sitting must not bounce the server N
  * times. A real teardown path arrives with #197's worker mode.
+ *
+ * No consent decision is deleted by activation (#1152). A decision the new
+ * manifest does not request at its scope is kept and confers nothing, and it
+ * counts again, with no act, if a later manifest requests the permission at
+ * that scope. Only rejecting a staged update deletes decisions: the
+ * pre-consents given to that staging.
  *
  * Activation never stops a household's or user's plugin over consent
  * (#1149). An enabled unit that does not cover its scope's re-consent slugs
@@ -961,7 +953,6 @@ export class PluginUpdateService {
     this.logger.log(
       `Plugin '${plugin.slug}' update approved: ${plugin.version} → ${next.manifest.version}, ` +
         `${outcome.acceptedGrants.length} server consent decision(s) written under act ${act.id}, ` +
-        `${outcome.revokedGrants.length + outcome.unrequestedGrants.length + outcome.scopeMovedGrants.length} revoked, ` +
         `${outcome.reconsentHouseholdUnits.length} household and ${outcome.reconsentUserUnits.length} user ` +
         `unit(s) owe re-consent; restart required`,
     );
@@ -1124,7 +1115,6 @@ export class PluginUpdateService {
     this.assertAnswersCurrentStaging(plugin, input.stagingId);
 
     const stagedVersion = plugin.pendingVersion;
-    const activeUnitRequests = this.activeUnitRequests(plugin);
 
     // Conditional on the EXACT staging the rejector saw, like every other
     // staged-update writer: an unconditional clear racing an approve would
@@ -1152,22 +1142,35 @@ export class PluginUpdateService {
         throw await this.refusalForLostStagedWrite(tx, plugin, { answeredStagingId: input.stagingId });
       }
 
-      // Read back INSIDE the claim, like the staging and activation writes.
-      // The clear leaves `pendingVersion` null, which is exactly the slot
-      // stage() claims on, so an outside read-back can observe a NEWLY
-      // staged version — handing this response, and the rejected event's
-      // `after` snapshot, a staged update nobody rejected. The atomic
-      // single-statement update this replaced could not express that state;
-      // the guarded updateMany can.
+      // Read back INSIDE the claim, like the staging and activation writes:
+      // the guarded updateMany returns a count, not the row. The clear leaves
+      // `pendingVersion` null, which is exactly the slot stage() claims on,
+      // so an outside read-back can observe a NEWLY staged version — handing
+      // this response, and the rejected event's `after` snapshot, a staged
+      // update nobody rejected.
       const rejected = await tx.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
 
       // The pre-consents households and users gave to this staged update go
       // with it (#1150). Left in place, a later update that requests the same
       // permission would find it already granted, a consent nobody gave to
-      // that update: the inheritance activation prevents for a permission an
-      // update stops requesting (#577). A pre-consent is a household or user
-      // decision the active manifest does not request at its scope, and with
-      // the staged update gone nothing requests it at all.
+      // that update. A pre-consent is a consent decision whose act names this
+      // staging (#1152): a staged review records the staging it answered, and
+      // may only grant a permission the active manifest does not request at
+      // the unit's scope, so those decisions are exactly the pre-consents.
+      // Any other decision names an act that answered no staging (one on the
+      // active manifest) or another staging (an earlier approval's), whatever
+      // its permission, and stays. No manifest is read to tell them apart, so
+      // a rejection over an active manifest that no longer validates deletes
+      // them all the same. A pre-consent is a household's or user's consent
+      // decision, and the Server unit answers a staged update by approving
+      // it, so an approval's act, which names the staging it consumed, is
+      // never matched and a rejection cannot reach the Server unit's
+      // decisions.
+      //
+      // The acts are matched on `input.stagingId`, the string
+      // `assertAnswersCurrentStaging` proved equal to the row's staging id
+      // and the clear above matched: never on a value that could be null,
+      // since a null staging id matches every act on the active manifest.
       //
       // Read and deleted under the claim above, which holds the plugin row.
       // A staged review claims that row `FOR SHARE` before it writes, so one
@@ -1175,21 +1178,24 @@ export class PluginUpdateService {
       // or waits for this transaction and is then refused: its sha is no
       // longer the staged one. Read before the delete, because the
       // revocation events are the only durable record of what went.
-      const preConsents =
-        activeUnitRequests === null
-          ? []
-          : await tx.pluginGrant.findMany({
-              where: {
-                pluginId: plugin.id,
-                OR: [
-                  {
-                    scopeType: PluginGrantScope.Household,
-                    permissionSlug: { notIn: [...activeUnitRequests.household] },
-                  },
-                  { scopeType: PluginGrantScope.User, permissionSlug: { notIn: [...activeUnitRequests.user] } },
-                ],
-              },
-            });
+      const stagingActs = await tx.pluginConsentAct.findMany({
+        where: {
+          pluginId: plugin.id,
+          stagingId: input.stagingId,
+          scopeType: { in: [PluginGrantScope.Household, PluginGrantScope.User] },
+        },
+        select: { id: true },
+      });
+
+      // Most stagings are rejected with no staged review on record, and
+      // then no decision can name one of their acts.
+      if (stagingActs.length === 0) {
+        return { rejected, preConsents: [] };
+      }
+
+      const preConsents = await tx.pluginGrant.findMany({
+        where: { pluginId: plugin.id, actId: { in: stagingActs.map((act) => act.id) } },
+      });
 
       if (preConsents.length > 0) {
         await tx.pluginGrant.deleteMany({ where: { id: { in: preConsents.map((grant) => grant.id) } } });
@@ -1225,49 +1231,6 @@ export class PluginUpdateService {
     );
 
     return rejected;
-  }
-
-  /**
-   * The permissions the ACTIVE manifest requests of households and of users,
-   * which is what tells a pre-consent from a consent decision in force:
-   * rejecting a staged update deletes the household and user decisions
-   * outside these sets (#1150).
-   *
-   * Null when the stored active manifest cannot be read. A rejection must
-   * stay possible then, as it does over a corrupt staged manifest (#1117),
-   * so it clears the staged update and leaves every decision alone rather
-   * than guess which are pre-consents. Nothing confers from such a plugin,
-   * and no update of it can be staged or approved until the active manifest
-   * reads again; the warning below records that pre-consents may remain.
-   */
-  private activeUnitRequests(
-    plugin: Plugin,
-  ): { readonly household: ReadonlySet<string>; readonly user: ReadonlySet<string> } | null {
-    let active: PluginManifestValidationResult;
-
-    try {
-      active = this.validateActiveManifest(plugin);
-    } catch (err) {
-      if (!(err instanceof PluginUpdateManifestError)) {
-        throw err;
-      }
-
-      this.logger.warn(
-        `Plugin '${plugin.slug}': the active manifest cannot be read, so rejecting its staged update deletes no ` +
-          `pre-consents (${err.message})`,
-      );
-
-      return null;
-    }
-
-    const requestedAt = (consentScope: NormalizedPermissionRequest['consentScope']): ReadonlySet<string> =>
-      new Set(
-        active.permissionChecks
-          .filter((check) => check.consentScope === consentScope)
-          .map((check) => check.canonicalSlug),
-      );
-
-    return { household: requestedAt('household'), user: requestedAt('user') };
   }
 
   /**
@@ -1680,8 +1643,11 @@ export class PluginUpdateService {
   }
 
   /**
-   * The activation entry point: one bounded retry around the transaction,
-   * for a deadlock that aborts it.
+   * The activation entry point: warms the next manifest's config schema, then
+   * runs the activation transaction once. Nothing is retried. The signal that
+   * an update needs approval goes straight back to `stage()`, which stages it
+   * (#1336), and a deadlock reaches the client as the API's retryable 409
+   * (#1152).
    */
   private async activate(input: ActivationInput): Promise<ActivationOutcome> {
     const { next } = input;
@@ -1696,47 +1662,21 @@ export class PluginUpdateService {
       schema: next.manifest.config.schema,
     });
 
-    const attempt = (): Promise<ActivationOutcome> => this.activateInTransaction(input);
-
-    try {
-      return await attempt();
-    } catch (error) {
-      // A deadlock is not this transaction being wrong about anything —
-      // Postgres chose a victim of a cycle (#398). The abort took the whole
-      // transaction with it, every accumulator lives inside it, and the events
-      // emit only after it commits, so the honest answer is to run it again.
-      //
-      // Nothing else is retried. The signal that an update needs approval goes
-      // straight back to `stage()`, which stages it (#1336). A unique violation
-      // is not retried either. The consent decisions are upserts under the
-      // plugin row's `FOR UPDATE`, which every writer of a server-scope
-      // decision claims first, so no decision can land between this
-      // transaction's read and its writes: a violation has nothing a second
-      // attempt could see differently (#1336).
-      if (!isDeadlockError(error)) {
-        throw error;
-      }
-
-      // Once, not until-success. A second deadlock means the contention is
-      // still there, and answering it with an unbounded loop would hold the
-      // claim open against it; the error propagates instead.
-      return await attempt();
-    }
+    return this.activateInTransaction(input);
   }
 
   /**
    * The activation transaction, shared by the immediate path and
-   * `approve()`: promote the pending state, apply the `declares[]`
-   * catalog diff (insert added rows, revoke and delete grants on removed
-   * declares with `'permission-removed'` provenance, delete the rows),
-   * revoke and delete decisions on permissions the next manifest stops
-   * requesting with `'permission-no-longer-requested'` provenance (#577),
+   * `approve()`: promote the pending state, apply the `declares[]` catalog
+   * diff (insert added rows at Low, delete the rows of removed declares),
    * record an approval's `UpdateApprove` consent act and the server-scope
    * consent decisions it grants (#1336), work out which enabled household AND
    * user units do not cover their scope's re-consent slugs (#225) — a read,
-   * never a write to their rows (#1149) — and set `restartRequired`. Events,
-   * the re-consent announcements among them, are collected inside and
-   * emitted by the caller AFTER commit.
+   * never a write to their rows (#1149) — and set `restartRequired`. It
+   * deletes no consent decision: one the new manifest does not request at
+   * its scope is kept and confers nothing (#1152). Events, the re-consent
+   * announcements among them, are collected inside and emitted by the caller
+   * AFTER commit.
    */
   private async activateInTransaction(input: ActivationInput): Promise<ActivationOutcome> {
     const { plugin, active, next, provenance, comparison, corePermissions, actorId, initiatedAt, approval } = input;
@@ -1762,8 +1702,8 @@ export class PluginUpdateService {
       // Prisma's query API cannot express FOR UPDATE; unqualified table name
       // so the search_path (per-worker test schemas) resolves it. Placed
       // first in the transaction, ahead of the grant rows the approval
-      // writes, matching the plugin row → advisory → grant row → unit row
-      // total order `unit-scope-lock.ts` documents.
+      // writes: every writer of consent decisions takes the plugin row
+      // before them.
       const [current] = await tx.$queryRaw<{ config: Prisma.JsonValue; category: PluginCategory }[]>`
         SELECT config, category FROM plugins WHERE id = ${plugin.id} FOR UPDATE`;
 
@@ -1941,39 +1881,20 @@ export class PluginUpdateService {
 
       const { added: addedDeclares, removed: removedDeclares } = declaredSlugDiff(active, next);
 
-      // Grants on removed declares are deleted with
-      // 'permission-removed' provenance — collected BEFORE deletion because
-      // the revocation events are the only durable record of what lapsed.
-      let revokedGrants: PluginGrant[] = [];
-
+      // The catalog follows `declares[]`: a permission the plugin stops
+      // declaring loses its catalog row, and one it declares (again) gets
+      // one. No consent decision is deleted, here or anywhere in activation
+      // (#1152). A decision the next manifest does not request at its scope,
+      // because the plugin stopped declaring or requesting the permission or
+      // moved it to another consent scope, is kept and confers nothing: the
+      // ability is bounded by the active manifest's requested permissions
+      // when read (#577), and a plugin-declared one also needs its catalog
+      // row. It counts again, with no act, if a later manifest requests the
+      // permission at that scope.
       if (removedDeclares.length > 0) {
         // Copied because Prisma's `in` takes a mutable array and the diff is
         // shared with the read that renders it, which must not hand out one.
-        const removed = [...removedDeclares];
-
-        revokedGrants = await tx.pluginGrant.findMany({
-          where: { pluginId: plugin.id, permissionSlug: { in: removed } },
-        });
-        await tx.pluginGrant.deleteMany({ where: { pluginId: plugin.id, permissionSlug: { in: removed } } });
-        await tx.pluginPermission.deleteMany({ where: { pluginId: plugin.id, slug: { in: removed } } });
-      }
-
-      // Decisions on a permission the next manifest stops requesting are
-      // deleted, granted and denied alike, with 'permission-no-longer-requested'
-      // provenance (#577). Left in place, a later version that requests the
-      // permission again would inherit a consent decision nobody made for
-      // it. Read before the delete, for the same reason as the declares diff.
-      // A consent act (#1150, #1336) that judged against the outgoing
-      // plugin manifest cannot write one back afterwards: its claim waits for
-      // this transaction and then refuses the moved plugin manifest (#361).
-      const droppedRequests = requestedSlugsDropped(active, next, removedDeclares);
-      let unrequestedGrants: PluginGrant[] = [];
-
-      if (droppedRequests.length > 0) {
-        unrequestedGrants = await tx.pluginGrant.findMany({
-          where: { pluginId: plugin.id, permissionSlug: { in: droppedRequests } },
-        });
-        await tx.pluginGrant.deleteMany({ where: { pluginId: plugin.id, permissionSlug: { in: droppedRequests } } });
+        await tx.pluginPermission.deleteMany({ where: { pluginId: plugin.id, slug: { in: [...removedDeclares] } } });
       }
 
       for (const slug of addedDeclares) {
@@ -1983,37 +1904,10 @@ export class PluginUpdateService {
         });
       }
 
-      // A permission that moved consent scope leaves a decision made by a
-      // principal that no longer owns it. The old-scope rows are deleted
-      // (delete-to-pending) so the new scope's consent surface starts clean.
-      const scopeMoves = comparison.escalations.filter(
-        (escalation): escalation is Extract<UpdateEscalation, { kind: 'consent-scope-changed' }> =>
-          escalation.kind === 'consent-scope-changed',
-      );
-      const scopeMovedGrants: PluginGrant[] = [];
-
-      for (const move of scopeMoves) {
-        const stale = await tx.pluginGrant.findMany({
-          where: {
-            pluginId: plugin.id,
-            permissionSlug: move.slug,
-            scopeType: CONSENT_SCOPE_TO_GRANT_SCOPE[move.from],
-          },
-        });
-
-        if (stale.length === 0) {
-          continue;
-        }
-
-        await tx.pluginGrant.deleteMany({ where: { id: { in: stale.map((row) => row.id) } } });
-        scopeMovedGrants.push(...stale);
-      }
-
-      // The approval's consent act and the decisions it carries, after the
-      // deletion passes: a decision on a permission whose consent scope moved
-      // to server is written here, on the row the old scope's deletion left
-      // free. Every accepted decision is written, one that already stood
-      // included, so each row's actId names the act that last set it.
+      // The approval's consent act and the decisions it carries. A decision
+      // on a permission whose consent scope moved to server is written at the
+      // Server unit's coordinates, which no decision at the scope it left
+      // shares.
       let act: PluginConsentAct | null = null;
       const acceptedGrants: PluginGrant[] = [];
       const changedDecisions: WrittenDecision[] = [];
@@ -2028,56 +1922,32 @@ export class PluginUpdateService {
           defaultLocale: this.options.defaultLocale,
         });
 
-        act = await tx.pluginConsentAct.create({
-          data: {
-            pluginId: plugin.id,
-            pluginSlug: plugin.slug,
-            scopeType: PluginGrantScope.Server,
-            scopeId: SERVER_SCOPE_SENTINEL,
-            kind: PluginConsentActKind.UpdateApprove,
-            manifestVersion: next.manifest.version,
-            manifestSha256: provenance.sha256,
-            presentation: acceptance.presentation as unknown as Prisma.InputJsonValue,
-            decidedById: actorId,
-            decidedAt: initiatedAt,
-            correlationId,
-          },
+        // The acceptance's decisions are in permission order. The standing
+        // rows are the ones read under the claim.
+        const written = await writeConsentAct(tx, {
+          pluginId: plugin.id,
+          pluginSlug: plugin.slug,
+          scopeType: PluginGrantScope.Server,
+          scopeId: SERVER_SCOPE_SENTINEL,
+          kind: PluginConsentActKind.UpdateApprove,
+          manifestVersion: next.manifest.version,
+          manifestSha256: provenance.sha256,
+          // The staging the approval answered, which the claim above held.
+          stagingId: plugin.pendingStagingId,
+          presentation: acceptance.presentation,
+          decisions: acceptance.decisions,
+          standingBySlug: serverDecisionsBySlug,
+          actorId,
+          decidedAt: initiatedAt,
+          correlationId,
         });
 
-        // In permission order, which the acceptance sorts by code unit: the
-        // order every writer of the Server unit's consent decisions takes
-        // their rows in.
-        for (const decision of acceptance.decisions) {
-          const fields = {
-            status: decision.status,
-            decidedRiskLevel: decision.decidedRiskLevel,
-            decidedById: actorId,
-            decidedAt: initiatedAt,
-            actId: act.id,
-          };
-          const coordinates = {
-            pluginId: plugin.id,
-            scopeType: PluginGrantScope.Server,
-            scopeId: SERVER_SCOPE_SENTINEL,
-            permissionSlug: decision.permissionSlug,
-          };
-
-          const after = await tx.pluginGrant.upsert({
-            where: { pluginId_scopeType_scopeId_permissionSlug: coordinates },
-            create: { ...coordinates, ...fields },
-            update: fields,
-          });
-          // The rows read under the claim, before the deletion passes: those
-          // passes delete only permissions `next` stops requesting or moves
-          // out of server scope, never one the approval accepts here.
-          const before = serverDecisionsBySlug.get(decision.permissionSlug);
-
-          acceptedGrants.push(after);
-
-          if (before !== undefined && !decisionStands(decision, before)) {
-            changedDecisions.push({ before, after });
-          }
-        }
+        act = written.act;
+        acceptedGrants.push(...written.rows);
+        // A decision the approval writes fresh is announced by
+        // `plugin.update_approved`, so only a row that stood before is
+        // announced as a decision change.
+        changedDecisions.push(...written.changed.filter(({ before }) => before !== null));
       }
 
       const updated = await tx.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
@@ -2090,30 +1960,12 @@ export class PluginUpdateService {
       // surface counts its covered units with the same method (#1336).
       const owing = await this.unitsOwingReconsent(tx, plugin.id, next, corePermissions, comparison);
 
-      // The acts behind the deleted decisions, for the version each revocation
-      // names. The act table is append-only, so every act a row names is still
-      // there to read.
-      const revokedActIds = [
-        ...new Set([...revokedGrants, ...unrequestedGrants, ...scopeMovedGrants].map((grant) => grant.actId)),
-      ];
-      const revokedActs =
-        revokedActIds.length === 0
-          ? []
-          : await tx.pluginConsentAct.findMany({
-              where: { id: { in: revokedActIds } },
-              select: { id: true, manifestVersion: true },
-            });
-
       return {
         plugin: updated,
         acceptedChecks,
         acceptedGrants,
         changedDecisions,
         act,
-        revokedGrants,
-        unrequestedGrants,
-        scopeMovedGrants,
-        revokedActVersions: new Map(revokedActs.map((revokedAct) => [revokedAct.id, revokedAct.manifestVersion])),
         reconsentHouseholdUnits: owing.household.owing,
         reconsentUserUnits: owing.user.owing,
         retainedConfigReset: retainedConfig.reset,
@@ -2169,31 +2021,6 @@ export class PluginUpdateService {
         outcome.changedDecisions,
         { manifestVersion: next.manifest.version, actId: outcome.act.id },
         initiatedAt,
-      );
-    }
-
-    const revocations: readonly { grant: PluginGrant; reason: PluginGrantRevocationReason }[] = [
-      ...outcome.revokedGrants.map((grant) => ({ grant, reason: 'permission-removed' as const })),
-      ...outcome.unrequestedGrants.map((grant) => ({ grant, reason: 'permission-no-longer-requested' as const })),
-      ...outcome.scopeMovedGrants.map((grant) => ({ grant, reason: 'consent-scope-changed' as const })),
-    ];
-
-    for (const { grant, reason } of revocations) {
-      this.emitter.emit(
-        PluginGrantRevokedEvent.eventName,
-        new PluginGrantRevokedEvent(
-          grantSnapshot(grant),
-          reason,
-          // The row does not store the manifest version (#1150), so a decision
-          // names its act's: consent given at one version can outlive the next
-          // unchanged one. The act table is append-only, so the act is there;
-          // the manifest this update replaces only answers if its read missed.
-          {
-            manifestVersion: outcome.revokedActVersions.get(grant.actId) ?? before.version,
-            actId: grant.actId,
-          },
-          initiatedAt,
-        ),
       );
     }
 

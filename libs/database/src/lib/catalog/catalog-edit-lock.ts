@@ -6,8 +6,8 @@ import type { Prisma } from '../client';
  * Postgres derives the 64-bit key from the name (`hashtextextended(name, 0)`),
  * as it does for the bootstrap lock (`bge:bootstrap`) and the Owner election
  * (`bge:owner-election`), so no caller computes the key and none can pick one
- * that collides by hand. The `bge:` names, the plugin unit-scope keys
- * (`plugin_grant:…`) and the quota keys all share the 64-bit keyspace; a
+ * that collides by hand. The `bge:` names, the extended-network rebuild lock
+ * (`extended-network`) and the quota keys all share the 64-bit keyspace; a
  * collision would only make two unrelated writers wait for each other, never
  * let either skip a lock.
  */

@@ -531,8 +531,8 @@ describe('PluginsController (delegation)', () => {
         // The catalog diff rides the body: no escalation kind describes a
         // declaration change, so a client cannot reconstruct it.
         declares: DECLARES,
-        // So does the other destructive half: approving deletes every
-        // decision on a permission the update stops requesting (#577).
+        // So do the permissions the update stops requesting, whose consent
+        // decisions stop conferring once it is approved (#577, #1152).
         noLongerRequested: NO_LONGER_REQUESTED,
         dataGatewayNameConflict: null,
         presentation: PRESENTATION,

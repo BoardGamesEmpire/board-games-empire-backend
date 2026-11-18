@@ -12,7 +12,6 @@ import {
   UserPluginDisabledEvent,
 } from '../events/plugin.events';
 import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
-import { lockHouseholdUnitScope, lockUserUnitScope } from '../grants/unit-scope-lock';
 import {
   bindManifest,
   classifyManifestMove,
@@ -65,32 +64,23 @@ type LivingPluginRef = Pick<Plugin, 'id' | 'slug' | 'scope'>;
  * refuses a unit that has none. One hardening rides these writes (from the
  * #322/PR #359 review rounds, recorded on #59):
  *
- * - **The advisory-lock scheme**: every transaction here opens the same
- *   way — the plugin row under `FOR SHARE`, then the `(scopeId, pluginId)`
- *   advisory lock, then the unit row (`openHouseholdUnit` /
- *   `openUserUnit`), a suffix of the total order
- *   (household row → plugin row → advisory → grant row → unit row). A
- *   household transaction takes the household row's share lock ahead of
- *   all of it (#548), so a soft-deleted household refuses the write. The
- *   row-creating path, the consent act, cannot be serialized without the
- *   advisory lock; the existing-row paths here take it too, by rule rather
- *   than by need — see the lock helper's contract before optimizing one away.
+ * - **The household row, then the plugin row**: every transaction here
+ *   opens the same way (`openHouseholdUnit` / `openUserUnit`). A household
+ *   transaction takes the household row's share lock first (#548), so a
+ *   soft-deleted household refuses the write; then the plugin row under
+ *   `FOR SHARE`; then the write to the unit enablement itself, which locks
+ *   only that row. That is the order a consent act takes them in too, with
+ *   its consent decisions between the plugin row and the unit enablement,
+ *   so no two of these writers can each hold a row the other waits on.
+ *   Nothing orders two writers of one unit enablement against each other
+ *   (#1152): the later write wins.
  *
- *   The plugin row comes before the advisory lock, and the order is not
- *   free: uninstall and activation both claim that row exclusively, and
- *   every other unit writer, the consent act among them, holds it shared
- *   while taking this advisory lock. Taking the advisory before the plugin
- *   row closed a cycle through those writers when #323's branch did it
- *   (PR #363 review), which Postgres resolves by aborting a caller. Reading
- *   the plugin row shared before the advisory is what orders this
- *   transaction against all of them.
- *
- *   The `FOR SHARE` itself exists because uninstall's purge deletes unit
- *   rows without joining the advisory scheme: reading the plugin row
- *   shared blocks a concurrent tombstone until this transaction commits
- *   (so the purge sweeps the row it wrote), and a tombstone that committed
- *   first is seen and refused — without it, a write here could commit
- *   against a plugin whose purge had already promised its unit
+ *   The `FOR SHARE` exists because uninstall's purge deletes unit
+ *   enablements after claiming the plugin row exclusively: reading the
+ *   plugin row shared blocks a concurrent tombstone until this transaction
+ *   commits (so the purge sweeps the row it wrote), and a tombstone that
+ *   committed first is seen and refused — without it, a write here could
+ *   commit against a plugin whose purge had already promised its unit
  *   enablements gone.
  *   It blocks a concurrent ACTIVATION the same way, which is why the
  *   re-read also returns `scope` and `version`: activation rewrites
@@ -104,12 +94,17 @@ type LivingPluginRef = Pick<Plugin, 'id' | 'slug' | 'scope'>;
  *   an A→B→A activation pair replaces the content and returns the version
  *   to where the caller found it.
  *
- * Switch-off is idempotent: a request matching current state returns it
- * unchanged — no write, no event. Config writes are last-writer-wins
- * between callers — no precondition on the DOCUMENT, matching the server
- * config PATCH — but they do carry the manifest precondition above, because
- * the document was judged against one specific schema. Events are emitted
- * post-commit, one per real transition.
+ * Switch-off is idempotent: a request that finds the unit already off
+ * returns it unchanged — no write, no event. Config writes are
+ * last-writer-wins between callers — no precondition on the DOCUMENT,
+ * matching the server config PATCH — but they do carry the manifest
+ * precondition above, because the document was judged against one specific
+ * schema. Events are emitted post-commit, one per transition the write
+ * found. Two switch-offs sent at once can both find the unit on, so both
+ * write and both announce it, and a config event's `before` can be a
+ * document another write has since replaced: the unit ends as a sequence of
+ * the same requests would leave it, and the events are the ones #1153
+ * replaces (#1152).
  */
 @Injectable()
 export class PluginUnitLifecycleService {
@@ -218,7 +213,7 @@ export class PluginUnitLifecycleService {
 
   /**
    * Switch off the user's own unit. 404 without a unit enablement — the
-   * user's switch-on, a consent act, is its only creator (#1150). Already
+   * user's switch-on, a consent act, is its only creator (#1150). Found
    * off: no write, no event.
    */
   async disableUser(input: UserUnitActionInput): Promise<UserPlugin> {
@@ -253,18 +248,15 @@ export class PluginUnitLifecycleService {
 
   /**
    * Every unit-state transaction opens the same way, fused into one helper
-   * so obtaining the row WITHOUT the lock has no convenient API: the
-   * household row's liveness under `FOR SHARE` (#548), then the plugin row's,
-   * then the advisory lock, then the unit row. See the class doc for why the
-   * plugin row must precede the advisory lock (a deadlock cycle against
-   * uninstall/activation and a consent act) and why its share lock is
-   * load-bearing against uninstall's purge.
+   * so obtaining the row WITHOUT the plugin row's share lock has no
+   * convenient API: the household row's liveness under `FOR SHARE` (#548),
+   * then the plugin row's, then a plain read of the unit enablement, which the
+   * caller's write then locks. See the class doc for why the plugin row's
+   * share lock is load-bearing against uninstall's purge.
    *
    * The scope re-check runs on the freshly read row and reuses the same
    * predicate the pre-transaction guard used, so an activation that
    * re-scoped the plugin mid-request cannot leave household config behind.
-   * It runs BEFORE the advisory lock: a request that is going to be refused
-   * has no business serializing other writers of that unit.
    *
    * `expected` is supplied by the caller that already DERIVED something
    * from the pre-transaction manifest — the config schema — and refuses the
@@ -307,8 +299,6 @@ export class PluginUnitLifecycleService {
       assertHouseholdSurface(plugin.slug, scope);
     }
 
-    await lockHouseholdUnitScope(tx, householdId, plugin.id);
-
     return tx.householdPlugin.findUnique({
       where: { householdId_pluginId: { householdId, pluginId: plugin.id } },
     });
@@ -325,7 +315,6 @@ export class PluginUnitLifecycleService {
     userId: string,
   ): Promise<UserPlugin | null> {
     await this.assertStillLiving(tx, plugin);
-    await lockUserUnitScope(tx, userId, plugin.id);
 
     return tx.userPlugin.findUnique({
       where: { userId_pluginId: { userId, pluginId: plugin.id } },

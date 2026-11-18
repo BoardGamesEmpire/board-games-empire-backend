@@ -51,9 +51,10 @@ export function sqlStateOf(cause: unknown): string | undefined {
  * Up to 7.8 the model-write case was a bare `DriverAdapterError` with no Prisma
  * class around it and no Prisma `code` at all — the #398 shape.
  *
- * So this accepts P2034, which means by definition the thing a retry answers, and
- * otherwise reads the SQLSTATE rather than the Prisma code, from the bare position
- * as well as under `meta`, so a regression to the old shape still classifies.
+ * So this accepts P2034, which means by definition the thing a client's retry
+ * answers, and otherwise reads the SQLSTATE rather than the Prisma code, from the
+ * bare position as well as under `meta`, so a regression to the old shape still
+ * classifies.
  *
  * Deliberately NOT a type predicate: the two shapes share no class, so narrowing to
  * one of them would be a lie about the other.
@@ -80,32 +81,4 @@ export function isDeadlockError(error: unknown): boolean {
   const driverAdapterError = meta['driverAdapterError'];
 
   return isRecord(driverAdapterError) && sqlStateOf(driverAdapterError['cause']) === DEADLOCK_SQLSTATE;
-}
-
-/**
- * Run `operation`, and run it ONE more time if Postgres killed it as a deadlock
- * victim.
- *
- * Safe to replay because a deadlock aborts the victim's transaction WHOLE: nothing
- * is half-written, and a caller whose accumulators live inside the transaction has
- * nothing to unwind. The bound is once, not until-success. A second deadlock means a
- * contender is sustaining the contention, and answering that with a loop would hold
- * the claim open against it — so the error propagates, and the edge renders it as a
- * typed, retryable refusal rather than a bare 500.
- *
- * The operation must own its transaction. Wrapping a callback that runs INSIDE
- * someone else's transaction cannot work: the aborted transaction rejects every
- * subsequent statement, so the second attempt would fail on syntax it never
- * reached.
- */
-export async function retryOnDeadlock<T>(operation: () => Promise<T>): Promise<T> {
-  try {
-    return await operation();
-  } catch (error) {
-    if (!isDeadlockError(error)) {
-      throw error;
-    }
-
-    return await operation();
-  }
 }

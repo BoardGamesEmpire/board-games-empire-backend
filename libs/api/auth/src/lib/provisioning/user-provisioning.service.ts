@@ -6,8 +6,8 @@ import { DISPLAY_NAME_MAX_LENGTH } from '../constants';
 
 /**
  * The Owner election's advisory lock. Postgres derives the 64-bit key from the
- * name (`hashtextextended`), as it does for the bootstrap lock and the plugin
- * unit-scope locks, so no caller computes the key itself.
+ * name (`hashtextextended`), as it does for the bootstrap lock and the catalog
+ * edit lock, so no caller computes the key itself.
  */
 const OWNER_ELECTION_LOCK_NAME = 'bge:owner-election';
 

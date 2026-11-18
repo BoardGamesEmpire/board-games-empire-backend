@@ -146,6 +146,7 @@ describe('PluginConsentActService', () => {
     readonly scope: PluginScope;
     readonly installed_sha256: string;
     readonly pending_sha256: string | null;
+    readonly pending_staging_id: string | null;
   }
 
   const claimRow = (overrides: Partial<ClaimRow> = {}): ClaimRow => ({
@@ -153,6 +154,7 @@ describe('PluginConsentActService', () => {
     scope: PluginScope.Household,
     installed_sha256: ACTIVE_SHA,
     pending_sha256: null,
+    pending_staging_id: null,
     ...overrides,
   });
 
@@ -282,10 +284,6 @@ describe('PluginConsentActService', () => {
 
       throw new Error(`Unrouted $queryRaw in test: ${sql}`);
     }) as never);
-    db.$executeRaw.mockImplementation((() => {
-      order.push('advisory key');
-      return Promise.resolve(1);
-    }) as never);
 
     db.pluginConsentAct.create.mockImplementation((({ data }: { data: Record<string, unknown> }) => {
       order.push('act');
@@ -313,15 +311,28 @@ describe('PluginConsentActService', () => {
       order.push('unit read');
       return Promise.resolve(householdRow);
     }) as never);
-    db.householdPlugin.create.mockImplementation((({ data }: { data: Partial<HouseholdPlugin> }) => {
-      order.push('unit');
-      return Promise.resolve(makeHouseholdRow(data));
-    }) as never);
     db.householdPlugin.update.mockImplementation((({ data }: { data: Partial<HouseholdPlugin> }) => {
       order.push('unit');
       // Prisma leaves a column whose value is `undefined` as it is.
       const written = Object.fromEntries(Object.entries(data).filter(([, value]) => value !== undefined));
       return Promise.resolve({ ...(householdRow as HouseholdPlugin), ...written });
+    }) as never);
+    db.householdPlugin.upsert.mockImplementation((({
+      create,
+      update,
+    }: {
+      create: Partial<HouseholdPlugin>;
+      update: Partial<HouseholdPlugin>;
+    }) => {
+      order.push('unit');
+
+      if (householdRow === null) {
+        return Promise.resolve(makeHouseholdRow(create));
+      }
+
+      // Prisma leaves a column whose value is `undefined` as it is.
+      const written = Object.fromEntries(Object.entries(update).filter(([, value]) => value !== undefined));
+      return Promise.resolve({ ...householdRow, ...written });
     }) as never);
     db.userPlugin.findUnique.mockImplementation((() => {
       order.push('unit read');
@@ -357,22 +368,22 @@ describe('PluginConsentActService', () => {
   const expectNothingWritten = () => {
     expect(db.pluginConsentAct.create).not.toHaveBeenCalled();
     expect(db.pluginGrant.upsert).not.toHaveBeenCalled();
-    expect(db.householdPlugin.create).not.toHaveBeenCalled();
     expect(db.householdPlugin.update).not.toHaveBeenCalled();
+    expect(db.householdPlugin.upsert).not.toHaveBeenCalled();
     expect(db.userPlugin.upsert).not.toHaveBeenCalled();
     expect(db.userPlugin.update).not.toHaveBeenCalled();
   };
 
   describe('switchOn', () => {
-    it('a household switch-on reads the unit under its key, then writes one act, the decisions in permission order and the unit enablement (#1150)', async () => {
+    it('a household switch-on claims the plugin row, reads the unit, then writes one act, the decisions in permission order and the unit enablement (#1150, #1152)', async () => {
       const result = await service.switchOn(householdSwitchOn);
 
-      // The key comes before the reads that judge whether the act changes
-      // anything, so two acts on one unit are judged one after the other.
+      // The household row and the plugin row are the only locks taken before
+      // the writes: nothing orders two acts on one unit (#1152).
+      expect(db.$executeRaw).not.toHaveBeenCalled();
       expect(order).toEqual([
         'household lock',
         'plugin claim',
-        'advisory key',
         'unit read',
         'standing read',
         'act',
@@ -393,6 +404,8 @@ describe('PluginConsentActService', () => {
           kind: 'SwitchOn',
           manifestVersion: '1.2.0',
           manifestSha256: ACTIVE_SHA,
+          // An act on the active manifest answered no staging (#1152).
+          stagingId: null,
           decidedById: 'admin-1',
           correlationId: 'corr-1',
         }),
@@ -419,18 +432,50 @@ describe('PluginConsentActService', () => {
         expect(upsert.create['decidedAt']).toBe(act['decidedAt']);
       }
 
-      expect(db.householdPlugin.create).toHaveBeenCalledWith({
-        data: { householdId: 'hh-1', pluginId: 'plugin-1', enabled: true, config: {} },
-      });
+      expect(db.householdPlugin.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: { householdId: 'hh-1', pluginId: 'plugin-1', enabled: true, config: {} },
+        }),
+      );
       expect(result).toEqual(
         expect.objectContaining({ changed: true, switchedOff: false, act: expect.objectContaining({ id: 'act-1' }) }),
       );
     });
 
-    it("classifies the unit's decisions only once it holds the unit's key, so the plan judges what an earlier act left (#1150)", async () => {
-      // Classified before the key, a review queued behind an act that granted
-      // a required permission would still plan its refusal as outstanding,
-      // then deny the grant and switch the unit off once the key came free.
+    it('a household switch-on writes the unit enablement by upsert, so a racing first switch-on updates rather than collides (#1152)', async () => {
+      // No unit enablement; a document supplied.
+      await service.switchOn({ ...householdSwitchOn, config: { webhookUrl: 'https://example.test/hook' } });
+
+      expect(db.householdPlugin.upsert).toHaveBeenCalledWith({
+        where: { householdId_pluginId: { householdId: 'hh-1', pluginId: 'plugin-1' } },
+        create: {
+          householdId: 'hh-1',
+          pluginId: 'plugin-1',
+          enabled: true,
+          config: { webhookUrl: 'https://example.test/hook' },
+        },
+        update: { enabled: true, config: { webhookUrl: 'https://example.test/hook' } },
+      });
+      expect(db.householdPlugin.create).not.toHaveBeenCalled();
+    });
+
+    it('a household switch-on with no document creates the unit enablement holding {} and leaves a retained document as it is (#1152)', async () => {
+      await service.switchOn(householdSwitchOn);
+
+      const [[upsert]] = db.householdPlugin.upsert.mock.calls as unknown as [
+        [{ create: Record<string, unknown>; update: Record<string, unknown> }],
+      ];
+      expect(upsert.create).toEqual({ householdId: 'hh-1', pluginId: 'plugin-1', enabled: true, config: {} });
+      // `undefined` writes no column, so the update arm keeps a document a
+      // racing switch-on's insert left.
+      expect(upsert.update).toEqual({ enabled: true, config: undefined });
+      expect(upsert.update['config']).toBeUndefined();
+    });
+
+    it("classifies the unit's decisions only under the plugin-row claim, so the plan judges the manifest the claim pinned (#1150, #1152)", async () => {
+      // Classified before the claim, the plan could judge a manifest an
+      // activation has since replaced, which the claim's sha comparison exists
+      // to refuse.
       classifier.classify.mockImplementation((...args: Parameters<typeof pendingClassification>) => {
         order.push('classify');
         return pendingClassification(...args);
@@ -438,7 +483,7 @@ describe('PluginConsentActService', () => {
 
       await service.switchOn(householdSwitchOn);
 
-      expect(order.slice(0, 4)).toEqual(['household lock', 'plugin claim', 'advisory key', 'classify']);
+      expect(order.slice(0, 3)).toEqual(['household lock', 'plugin claim', 'classify']);
     });
 
     it('a switch-on naming a sha the plugin has moved off is refused before anything is written (#1150)', async () => {
@@ -469,15 +514,7 @@ describe('PluginConsentActService', () => {
         answers: [granted(USER_OPTIONAL)],
       });
 
-      expect(order).toEqual([
-        'plugin claim',
-        'advisory key',
-        'unit read',
-        'standing read',
-        'act',
-        `grant:${USER_OPTIONAL}`,
-        'unit',
-      ]);
+      expect(order).toEqual(['plugin claim', 'unit read', 'standing read', 'act', `grant:${USER_OPTIONAL}`, 'unit']);
       expect(db.userPlugin.upsert).toHaveBeenCalledWith({
         where: { userId_pluginId: { userId: 'user-1', pluginId: 'plugin-1' } },
         create: { userId: 'user-1', pluginId: 'plugin-1', enabled: true },
@@ -552,7 +589,7 @@ describe('PluginConsentActService', () => {
 
       expect(result).toEqual({ act: null, changed: false, unit: householdRow, switchedOff: false });
       expectNothingWritten();
-      expect(order).toEqual(['household lock', 'plugin claim', 'advisory key', 'unit read', 'standing read']);
+      expect(order).toEqual(['household lock', 'plugin claim', 'unit read', 'standing read']);
       expect(emitter.emit).not.toHaveBeenCalled();
     });
 
@@ -569,7 +606,9 @@ describe('PluginConsentActService', () => {
       // Every planned decision is written with the act, so its actId names the
       // act that last set it, but only a changed row is announced.
       expect(db.pluginGrant.upsert).toHaveBeenCalledTimes(2);
-      expect(db.householdPlugin.update).toHaveBeenCalledWith({ where: { id: 'hp-1' }, data: { enabled: true } });
+      expect(db.householdPlugin.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({ update: { enabled: true, config: undefined } }),
+      );
       expect(result.changed).toBe(true);
       expect(result.unit).toEqual(expect.objectContaining({ enabled: true }));
       // No consent decision changed, so the switch event is what names the
@@ -599,7 +638,7 @@ describe('PluginConsentActService', () => {
       expect(db.pluginGrant.upsert).toHaveBeenCalledTimes(2);
       // A unit already switched on, with no document supplied, needs no
       // write: the document it holds passed the config gate (#323, #1151).
-      expect(db.householdPlugin.create).not.toHaveBeenCalled();
+      expect(db.householdPlugin.upsert).not.toHaveBeenCalled();
       expect(db.householdPlugin.update).not.toHaveBeenCalled();
       expect(result).toEqual(expect.objectContaining({ changed: true, switchedOff: false, unit: householdRow }));
       expect(emitted().map(({ event }) => event.constructor)).toEqual([
@@ -690,9 +729,11 @@ describe('PluginConsentActService', () => {
 
         const result = await service.switchOn({ ...householdSwitchOn, config: { webhookUrl: 'https://new.test' } });
 
-        const [[{ data }]] = db.householdPlugin.update.mock.calls as unknown as [[{ data: Record<string, unknown> }]];
-        expect(Object.keys(data).sort()).toEqual(['config', 'enabled']);
-        expect(data).toEqual({ enabled: true, config: { webhookUrl: 'https://new.test' } });
+        const [[{ update }]] = db.householdPlugin.upsert.mock.calls as unknown as [
+          [{ update: Record<string, unknown> }],
+        ];
+        expect(Object.keys(update).sort()).toEqual(['config', 'enabled']);
+        expect(update).toEqual({ enabled: true, config: { webhookUrl: 'https://new.test' } });
         expect(result.unit).toEqual(
           expect.objectContaining({ enabled: true, config: { webhookUrl: 'https://new.test' } }),
         );
@@ -706,10 +747,9 @@ describe('PluginConsentActService', () => {
         const result = await service.switchOn({ ...householdSwitchOn, config: { webhookUrl: 'https://new.test' } });
 
         expect(result.changed).toBe(true);
-        expect(db.householdPlugin.update).toHaveBeenCalledWith({
-          where: { id: 'hp-1' },
-          data: { enabled: true, config: { webhookUrl: 'https://new.test' } },
-        });
+        expect(db.householdPlugin.upsert).toHaveBeenCalledWith(
+          expect.objectContaining({ update: { enabled: true, config: { webhookUrl: 'https://new.test' } } }),
+        );
         // The decisions stood and the switch was already on, so the
         // configuration event is the one that names the act.
         expect(emitted().map(({ event }) => event.constructor)).toEqual([HouseholdPluginConfigUpdatedEvent]);
@@ -720,14 +760,16 @@ describe('PluginConsentActService', () => {
     it('a household switch-on with config writes it with the unit enablement and announces it (#1150)', async () => {
       await service.switchOn({ ...householdSwitchOn, config: { webhookUrl: 'https://example.com' } });
 
-      expect(db.householdPlugin.create).toHaveBeenCalledWith({
-        data: {
-          householdId: 'hh-1',
-          pluginId: 'plugin-1',
-          enabled: true,
-          config: { webhookUrl: 'https://example.com' },
-        },
-      });
+      expect(db.householdPlugin.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: {
+            householdId: 'hh-1',
+            pluginId: 'plugin-1',
+            enabled: true,
+            config: { webhookUrl: 'https://example.com' },
+          },
+        }),
+      );
       const config = emitted().find(({ event }) => event instanceof HouseholdPluginConfigUpdatedEvent);
       expect(config?.event.before).toEqual({ id: 'hp-1', householdId: 'hh-1', pluginId: 'plugin-1', config: {} });
     });
@@ -749,13 +791,11 @@ describe('PluginConsentActService', () => {
       expectNothingWritten();
     });
 
-    it('a toggle reads the switch under the unit key, so a switch-off committed first refuses it before anything is written (#1150)', async () => {
+    it('a toggle reads the switch inside its transaction, so a switch-off committed first refuses it before anything is written (#1150)', async () => {
       householdRow = makeHouseholdRow({ enabled: false });
 
       await expect(service.toggle(householdToggle)).rejects.toBeInstanceOf(PluginConsentActUnitOffError);
-      // The read that refuses it waited on the key a switch-off holds until
-      // it commits, so it cannot miss one that committed ahead of it.
-      expect(order).toEqual(['household lock', 'plugin claim', 'advisory key', 'unit read', 'standing read']);
+      expect(order).toEqual(['household lock', 'plugin claim', 'unit read', 'standing read']);
       expectNothingWritten();
     });
 
@@ -777,7 +817,6 @@ describe('PluginConsentActService', () => {
       expect(order).toEqual([
         'household lock',
         'plugin claim',
-        'advisory key',
         'unit read',
         'standing read',
         'act',
@@ -799,7 +838,6 @@ describe('PluginConsentActService', () => {
       expect(order).toEqual([
         'household lock',
         'plugin claim',
-        'advisory key',
         'unit read',
         'standing read',
         'act',
@@ -859,9 +897,9 @@ describe('PluginConsentActService', () => {
       expectNothingWritten();
     });
 
-    it('a staged review reads the staged manifest and records the staged version and sha on the act (#1150)', async () => {
+    it('a staged review reads the staged manifest and records the staged version, sha and staging on the act (#1150, #1152)', async () => {
       db.plugin.findUnique.mockResolvedValue(stagedPlugin());
-      claim = claimRow({ pending_sha256: STAGED_SHA });
+      claim = claimRow({ pending_sha256: STAGED_SHA, pending_staging_id: 'staging-a' });
       householdRow = makeHouseholdRow();
 
       const result = await service.review({
@@ -881,6 +919,9 @@ describe('PluginConsentActService', () => {
           kind: 'Review',
           manifestVersion: '1.3.0',
           manifestSha256: STAGED_SHA,
+          // The staging the claim read under the share lock: the one a
+          // rejection deletes this act's decisions by.
+          stagingId: 'staging-a',
           presentation: expect.objectContaining({ source: 'staged' }),
         }),
       });
@@ -889,6 +930,106 @@ describe('PluginConsentActService', () => {
       const [created] = emitted();
       expect(created.event).toBeInstanceOf(PluginGrantCreatedEvent);
       expect(created.event.context).toEqual({ manifestVersion: '1.3.0', actId: 'act-1' });
+    });
+
+    it('a staged review writes only the decisions it changes, so a decision that already stands keeps the act that gave it (#1152)', async () => {
+      // The staged update requests two household permissions the active
+      // manifest does not: one the unit decided under an earlier manifest,
+      // whose decision activation kept, and one it never decided. Rejecting
+      // the staging deletes the decisions whose act names it, so re-stamping
+      // the kept one would take a decision the unit gave before the staging.
+      const KEPT = 'read:game:public';
+      const stagedWithKept = buildPluginManifest({
+        version: '1.3.0',
+        scope: 'household',
+        permissions: {
+          declares: ['manage:digest'],
+          checks: [
+            ...activeChecks,
+            { slug: KEPT, required: false, reason: { en: 'Lists public games.' }, consentScope: 'household' },
+            {
+              slug: STAGED_NEW,
+              required: false,
+              reason: { en: 'Reads submitted feedback for the digest.' },
+              consentScope: 'household',
+            },
+          ],
+        },
+      });
+      db.plugin.findUnique.mockResolvedValue(
+        stagedPlugin({ pendingManifestJson: stagedWithKept as unknown as Prisma.JsonValue }),
+      );
+      claim = claimRow({ pending_sha256: STAGED_SHA, pending_staging_id: 'staging-a' });
+      householdRow = makeHouseholdRow();
+      standing = [standingGrant(KEPT, PluginGrantStatus.Granted, { actId: 'act-earlier' })];
+
+      const result = await service.review({
+        ...householdToggle,
+        manifestSha256: STAGED_SHA,
+        answers: [granted(KEPT), granted(STAGED_NEW)],
+      });
+
+      expect(result.changed).toBe(true);
+      expect(order.filter((step) => step.startsWith('grant:'))).toEqual([`grant:${STAGED_NEW}`]);
+      expect(db.pluginGrant.upsert).not.toHaveBeenCalledWith(
+        expect.objectContaining({ create: expect.objectContaining({ permissionSlug: KEPT }) }),
+      );
+      // The act still records everything the review was shown and answered.
+      expect(db.pluginConsentAct.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          stagingId: 'staging-a',
+          presentation: expect.objectContaining({
+            checks: expect.arrayContaining([
+              expect.objectContaining({ slug: KEPT, outcome: 'granted' }),
+              expect.objectContaining({ slug: STAGED_NEW, outcome: 'granted' }),
+            ]),
+          }),
+        }),
+      });
+    });
+
+    it('a staged review that changes a kept decision writes it under the staged act, so it goes with the staging if that is rejected (#1152)', async () => {
+      // The staged update requests again a permission the unit refused under
+      // an earlier manifest, and activation kept that refusal. Granting it
+      // changes the decision, so it is written, and its row names this act,
+      // which names the staging: nothing records the earlier refusal to put
+      // back, so a rejection of the staging deletes it as a pre-consent.
+      const KEPT = 'read:game:public';
+      const stagedWithKept = buildPluginManifest({
+        version: '1.3.0',
+        scope: 'household',
+        permissions: {
+          declares: ['manage:digest'],
+          checks: [
+            ...activeChecks,
+            { slug: KEPT, required: false, reason: { en: 'Lists public games.' }, consentScope: 'household' },
+          ],
+        },
+      });
+      db.plugin.findUnique.mockResolvedValue(
+        stagedPlugin({ pendingManifestJson: stagedWithKept as unknown as Prisma.JsonValue }),
+      );
+      claim = claimRow({ pending_sha256: STAGED_SHA, pending_staging_id: 'staging-a' });
+      householdRow = makeHouseholdRow();
+      standing = [standingGrant(KEPT, PluginGrantStatus.Denied, { actId: 'act-earlier' })];
+
+      const result = await service.review({
+        ...householdToggle,
+        manifestSha256: STAGED_SHA,
+        answers: [granted(KEPT)],
+      });
+
+      expect(result.changed).toBe(true);
+      expect(db.pluginGrant.upsert).toHaveBeenCalledTimes(1);
+      expect(db.pluginGrant.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({ permissionSlug: KEPT, status: PluginGrantStatus.Granted, actId: 'act-1' }),
+          update: expect.objectContaining({ status: PluginGrantStatus.Granted, actId: 'act-1' }),
+        }),
+      );
+      expect(db.pluginConsentAct.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ kind: 'Review', manifestSha256: STAGED_SHA, stagingId: 'staging-a' }),
+      });
     });
 
     it('a review naming a staged sha that is no longer staged is refused as stale (#1150)', async () => {
@@ -922,6 +1063,20 @@ describe('PluginConsentActService', () => {
       // read before the transaction, so the claim must still find that one.
       db.plugin.findUnique.mockResolvedValue(stagedPlugin());
       claim = claimRow({ installed_sha256: 'sha-reinstalled', pending_sha256: STAGED_SHA });
+      householdRow = makeHouseholdRow();
+
+      await expect(
+        service.review({ ...householdToggle, manifestSha256: STAGED_SHA, answers: [granted(STAGED_NEW)] }),
+      ).rejects.toEqual(expect.objectContaining({ constructor: PluginConsentActStaleError, kind: 'manifest' }));
+      expectNothingWritten();
+    });
+
+    it('a staged review is refused as stale when the claim reads a staged sha with no staging id, rather than record an act that names no staging (#1152)', async () => {
+      // The database keeps the staged columns all set or all null, so this
+      // row cannot be reached. Recorded, the review would name no staging,
+      // and rejecting the update could never find its pre-consents.
+      db.plugin.findUnique.mockResolvedValue(stagedPlugin());
+      claim = claimRow({ pending_sha256: STAGED_SHA, pending_staging_id: null });
       householdRow = makeHouseholdRow();
 
       await expect(
@@ -984,17 +1139,15 @@ describe('PluginConsentActService', () => {
   });
 
   describe('deadlock', () => {
-    it('a deadlock replays the whole attempt once (#1150)', async () => {
-      db.$transaction.mockImplementationOnce(() => Promise.reject(deadlock()));
+    it('does not replay the transaction when Postgres picks it as a deadlock victim (#1152)', async () => {
+      // The API answers the deadlock as a retryable 409, and the client sends
+      // the act again: an aborted act reaches the caller as it is.
+      const victim = deadlock();
+      db.$transaction.mockImplementationOnce(() => Promise.reject(victim));
 
-      const result = await service.switchOn(householdSwitchOn);
-
-      expect(db.$transaction).toHaveBeenCalledTimes(2);
-      // The plugin is read once per request; only the transaction replays (#361).
-      expect(db.plugin.findUnique).toHaveBeenCalledTimes(1);
-      expect(db.pluginConsentAct.create).toHaveBeenCalledTimes(1);
-      expect(result.changed).toBe(true);
-      expect(emitted()).toHaveLength(3);
+      await expect(service.switchOn(householdSwitchOn)).rejects.toBe(victim);
+      expect(db.$transaction).toHaveBeenCalledTimes(1);
+      expect(emitter.emit).not.toHaveBeenCalled();
     });
   });
 });
