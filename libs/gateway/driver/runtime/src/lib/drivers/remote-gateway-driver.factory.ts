@@ -2,7 +2,7 @@ import { pingWithRetry, walkDir } from '@bge/utils';
 import { GatewayServiceClient, PROTO_PACKAGE_NAME } from '@boardgamesempire/proto-gateway';
 import type { ClientOptions, Interceptor } from '@grpc/grpc-js';
 import { Injectable, Logger } from '@nestjs/common';
-import { ClientGrpcProxy, ClientProxyFactory, Transport } from '@nestjs/microservices';
+import { ClientProxyFactory, Transport } from '@nestjs/microservices';
 import * as path from 'node:path';
 import { GatewayCredentialsFactory } from '../credentials/gateway-credentials.factory';
 import type { GatewayConnectionOptions } from '../interfaces';
@@ -74,7 +74,7 @@ export class RemoteGatewayDriverFactory {
           channelOptions: { interceptors: channel.interceptors } satisfies ClientOptions,
         }),
       },
-    }) as ClientGrpcProxy;
+    });
 
     const client = proxy.getService<GatewayServiceClient>('GatewayService');
 

@@ -33,7 +33,7 @@ const sameList = <T>(left: readonly T[], right: readonly T[]): boolean =>
 
 /** A Describe the DataGateway doesn't implement, or one that failed in some other way. */
 const describeFailure = (err: unknown): DataGatewayInterviewFailure =>
-  (err as { code?: unknown } | null)?.code === status.UNIMPLEMENTED
+  typeof err === 'object' && err !== null && 'code' in err && err.code === status.UNIMPLEMENTED
     ? DataGatewayInterviewFailure.DescribeUnsupported
     : DataGatewayInterviewFailure.DescribeFailed;
 

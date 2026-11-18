@@ -24,7 +24,7 @@ const errorMessage = (err: unknown): string => (err instanceof Error ? err.messa
 
 /** A list the DataGateway doesn't implement, or one that failed in some other way. */
 const listFailure = (err: unknown): DataGatewaySectionFailure =>
-  (err as { code?: unknown } | null)?.code === status.UNIMPLEMENTED
+  typeof err === 'object' && err !== null && 'code' in err && err.code === status.UNIMPLEMENTED
     ? DataGatewaySectionFailure.ListUnsupported
     : DataGatewaySectionFailure.ListFailed;
 
