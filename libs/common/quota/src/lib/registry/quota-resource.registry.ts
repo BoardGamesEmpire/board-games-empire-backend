@@ -97,7 +97,9 @@ export class QuotaResourceRegistry {
   constructor(private readonly databaseService: DatabaseService) {}
 
   has(resource: string): resource is QuotaResource {
-    return this.definitions.has(resource as QuotaResource);
+    const known: ReadonlyMap<string, QuotaResourceDefinition> = this.definitions;
+
+    return known.has(resource);
   }
 
   /** Definition for a known resource, throwing if absent (programmer error). */
