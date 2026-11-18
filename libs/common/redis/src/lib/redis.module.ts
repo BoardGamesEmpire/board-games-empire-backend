@@ -57,6 +57,7 @@ export class RedisModule {
     if (options.cache) {
       exports_.push(CACHE_REDIS_CLIENT);
     }
+
     if (options.queue) {
       exports_.push(QUEUE_REDIS_CLIENT);
     }

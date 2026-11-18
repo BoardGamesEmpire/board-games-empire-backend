@@ -482,6 +482,7 @@ export class WebhookSubscriptionService {
     if (abilities.length === 0) {
       throw new ForbiddenException(message);
     }
+
     return abilities;
   }
 

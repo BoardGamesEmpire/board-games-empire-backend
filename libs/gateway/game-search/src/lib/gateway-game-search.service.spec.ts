@@ -373,6 +373,7 @@ describe('GatewayGameSearchService', () => {
         if (gatewayId === 'igdb') {
           throw outage;
         }
+
         return FakeRegistry.prototype.resolveSearch.call(registry, gatewayId, filter);
       });
 
@@ -470,6 +471,7 @@ describe('GatewayGameSearchService', () => {
         if (where.gatewayId_externalId.externalId === brass.externalId) {
           throw new Error('connection pool exhausted');
         }
+
         return null;
       }) as never);
 

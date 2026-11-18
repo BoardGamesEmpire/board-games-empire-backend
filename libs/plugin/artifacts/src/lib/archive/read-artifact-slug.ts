@@ -29,6 +29,7 @@ export const readArtifactSlug = async (extractDir: string): Promise<string> => {
     if ((await stat(path)).size > PLUGIN_ARCHIVE_MAX_MANIFEST_BYTES) {
       throw new PluginArchiveRefusedError('manifest-size', PLUGIN_MANIFEST_FILENAME);
     }
+
     parsed = JSON.parse(await readFile(path, 'utf8'));
   } catch (err) {
     if (err instanceof PluginArchiveRefusedError) {

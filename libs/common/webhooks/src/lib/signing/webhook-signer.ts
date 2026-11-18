@@ -47,6 +47,7 @@ export class WebhookSigner {
     if (expectedBuffer.length !== presentedBuffer.length) {
       return false;
     }
+
     return timingSafeEqual(expectedBuffer, presentedBuffer);
   }
 

@@ -136,9 +136,11 @@ describe('edgeDecision', () => {
       if (![base, head].every((sha) => line.includes(sha) || beside.includes(sha))) {
         return 'missing';
       }
+
       if (base === head) {
         return 'identical';
       }
+
       if (beside.includes(base) || beside.includes(head)) {
         return 'diverged';
       }

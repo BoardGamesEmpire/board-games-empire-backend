@@ -139,6 +139,7 @@ export function createPrismaCliMigrator(options: PrismaCliMigratorOptions): Migr
           reject(resolved);
           return;
         }
+
         const { projectRoot, cli } = resolved;
 
         options.logger.log(`Running \`prisma migrate deploy\` in ${projectRoot} for ${pending.length} migration(s).`);

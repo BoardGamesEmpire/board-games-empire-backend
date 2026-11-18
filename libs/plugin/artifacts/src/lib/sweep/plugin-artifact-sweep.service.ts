@@ -101,9 +101,11 @@ const describeEntry = (stats: Stats): string => {
   if (stats.isSymbolicLink()) {
     return 'a symbolic link';
   }
+
   if (stats.isFile()) {
     return 'a file';
   }
+
   return stats.isDirectory() ? 'a directory' : 'a special file';
 };
 
@@ -378,6 +380,7 @@ export class PluginArtifactSweepService implements OnApplicationBootstrap, Befor
     for (const { sha256 } of artifacts) {
       checksums.add(sha256);
     }
+
     for (const { installedSha256, pendingSha256, uninstalledAt } of plugins) {
       // An uninstalled plugin's code is kept only while a process still runs it.
       if (uninstalledAt !== null) {
@@ -389,6 +392,7 @@ export class PluginArtifactSweepService implements OnApplicationBootstrap, Befor
         checksums.add(pendingSha256);
       }
     }
+
     for (const { sha256 } of loads) {
       checksums.add(sha256);
     }

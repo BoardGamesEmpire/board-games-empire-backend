@@ -94,6 +94,7 @@ describe('metricsExportEnabled', () => {
         } else {
           process.env[OTEL_METRICS_EXPORTER_ENV] = originalExporter;
         }
+
         if (originalEndpoint === undefined) {
           delete process.env[OTEL_EXPORTER_OTLP_ENDPOINT_ENV];
         } else {

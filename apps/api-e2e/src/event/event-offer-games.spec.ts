@@ -97,6 +97,7 @@ describe('POST /api/events/:eventId/attendees/:attendeeId/games/batch (#1188)', 
       ]);
       expect(Object.keys(entry?.collection ?? {}).sort()).toEqual(['id', 'medium', 'platformGame']);
     }
+
     const listed = listOfferedGamesEnvelope(
       await listOfferedGames(host, eventId, { limit: 100 }).expect(200),
       'GET /api/events/:eventId/offered-games as the host',

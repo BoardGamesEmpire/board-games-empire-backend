@@ -41,6 +41,7 @@ function readFiles(dir) {
       }
     }
   };
+
   walk(dir);
   return files;
 }
@@ -124,6 +125,7 @@ describe('exportProtos (#313)', () => {
     const notFound = () => {
       throw Object.assign(new Error('spawnSync buf ENOENT'), { code: 'ENOENT' });
     };
+
     expect(() => run(notFound)).toThrow('spawnSync buf ENOENT');
     expect(fs.readdirSync(stagingRoot)).toEqual([]);
 

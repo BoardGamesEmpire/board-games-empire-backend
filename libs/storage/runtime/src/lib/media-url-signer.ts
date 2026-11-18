@@ -78,6 +78,7 @@ export class MediaUrlSigner {
     if (actual.length !== expected.length || !/^[0-9a-f]+$/.test(actual)) {
       return false;
     }
+
     return timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(actual, 'hex'));
   }
 }

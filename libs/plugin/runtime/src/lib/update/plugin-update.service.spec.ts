@@ -282,6 +282,7 @@ describe('PluginUpdateService', () => {
     setPluginConfigLock = (config) => {
       pluginConfigLockRow = { ...pluginConfigLockRow, config };
     };
+
     setLockedCategory = (category) => {
       pluginConfigLockRow = { ...pluginConfigLockRow, category };
     };

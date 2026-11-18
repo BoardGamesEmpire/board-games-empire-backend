@@ -391,6 +391,7 @@ export class EventAttendeeService {
       if (isPrismaDependentRecordNotFoundError(error)) {
         throw new ForbiddenException(t('errors.attendee.forbidden_remove'));
       }
+
       throw error;
     }
 
@@ -473,6 +474,7 @@ export class EventAttendeeService {
       if (isPrismaDependentRecordNotFoundError(error)) {
         throw new ForbiddenException(t('errors.attendee.forbidden_update'));
       }
+
       throw error;
     }
 
@@ -778,6 +780,7 @@ export class EventAttendeeService {
       if (isPrismaDependentRecordNotFoundError(error)) {
         throw new ForbiddenException(t('errors.attendee.forbidden_remove_game'));
       }
+
       throw error;
     }
   }

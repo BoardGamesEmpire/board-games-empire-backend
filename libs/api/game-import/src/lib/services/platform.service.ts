@@ -221,6 +221,7 @@ export class PlatformUpsertService {
             `regional publisher split), the GameRelease unique constraint needs revisiting.`,
         );
       }
+
       seen.add(dedupKey);
       seenByPG.set(platformGameId, seen);
 

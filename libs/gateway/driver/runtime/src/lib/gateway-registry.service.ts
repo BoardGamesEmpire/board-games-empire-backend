@@ -718,6 +718,7 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
       if (!this.clients.has(gatewayId)) {
         throw new Error(`DataGateway ${gatewayId}'s interview was abandoned: its connect was invalidated`);
       }
+
       return;
     }
 
@@ -987,6 +988,7 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
       // connect() resolved without populating the cache — defensive guard.
       throw new Error(`No connection established for gateway ${gatewayId}.`);
     }
+
     return connected.driver;
   }
 
@@ -1315,6 +1317,7 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
         this.logger.log(`Gateway ${event.gatewayId} ${event.changeType} elsewhere; invalidating local client`);
         this.disconnect(event.gatewayId);
       }
+
       this.failures.delete(event.gatewayId);
       return;
     }
@@ -1327,6 +1330,7 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
       if (cached) {
         this.disconnect(event.gatewayId);
       }
+
       this.failures.delete(event.gatewayId);
 
       try {
@@ -1338,6 +1342,7 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
           `Reconnect for gateway ${event.gatewayId} failed: ${err instanceof Error ? err.message : err}`,
         );
       }
+
       return;
     }
 

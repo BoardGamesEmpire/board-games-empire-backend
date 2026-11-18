@@ -132,6 +132,7 @@ describe('appSignIn', () => {
           if (flowKeys.length > 0) {
             throw new Error('the verification store is unreachable');
           }
+
           await base.set(key, value, ttl);
           if (key.includes('app-sign-in-flow:')) {
             flowKeys.push(key);
@@ -178,6 +179,7 @@ describe('appSignIn', () => {
       if (description !== undefined) {
         params.set('error_description', description);
       }
+
       const callback = await get(auth, `/api/auth/callback/github?${params.toString()}`, cookiesOf(start));
 
       return locationOf(callback);

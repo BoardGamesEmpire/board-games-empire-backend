@@ -96,11 +96,13 @@ describe('WebSocket credentials', () => {
         socket.off('disconnect', onDisconnect);
         outcome();
       };
+
       const onDone = (frame: { correlationId?: string }): void => {
         if (frame.correlationId === correlationId) {
           settle(resolve);
         }
       };
+
       const onRefused = (payload: WsErrorPayload): void =>
         settle(() => reject(new Error(`Search refused: ${JSON.stringify(payload)}`)));
       const onDisconnect = (reason: string): void =>

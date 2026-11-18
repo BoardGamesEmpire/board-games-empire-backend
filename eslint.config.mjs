@@ -150,9 +150,11 @@ function receiverName(object) {
   if (object.type === 'Identifier') {
     return object.name;
   }
+
   if (object.type === 'MemberExpression' && !object.computed && object.property.type === 'Identifier') {
     return object.property.name;
   }
+
   return undefined;
 }
 
@@ -161,6 +163,7 @@ function ceilingCallName(callee) {
   if (callee.type === 'Identifier') {
     return CEILING_CALLS.has(callee.name) ? callee.name : undefined;
   }
+
   if (callee.type !== 'MemberExpression' || callee.computed || callee.property.type !== 'Identifier') {
     return undefined;
   }
@@ -169,9 +172,11 @@ function ceilingCallName(callee) {
   if (CEILING_CALLS.has(name)) {
     return name;
   }
+
   if (name === 'compose' && /composer$/i.test(receiverName(callee.object) ?? '')) {
     return name;
   }
+
   return undefined;
 }
 
@@ -179,9 +184,11 @@ function propertyKeyName(property) {
   if (property.key.type === 'Identifier' && !property.computed) {
     return property.key.name;
   }
+
   if (property.key.type === 'Literal' && typeof property.key.value === 'string') {
     return property.key.value;
   }
+
   return undefined;
 }
 
@@ -190,9 +197,11 @@ function bindingName(node) {
   if (node.type === 'VariableDeclarator' && node.id.type === 'Identifier') {
     return node.id.name;
   }
+
   if (node.type === 'AssignmentExpression') {
     return receiverName(node.left);
   }
+
   return undefined;
 }
 
@@ -229,6 +238,7 @@ const noNestedCeiling = {
           if (FUNCTION_NODES.has(ancestor.type)) {
             return;
           }
+
           if (ancestor.type === 'CallExpression' && ancestor.arguments.includes(child)) {
             return;
           }
@@ -269,6 +279,7 @@ const noUncodedExceptionBody = {
       if (exceptionClass?.type !== 'Identifier' || !exceptionClass.name.endsWith('Exception')) {
         return;
       }
+
       if (EXCEPTIONS_THAT_MAY_NAME_A_CODE.has(exceptionClass.name)) {
         return;
       }
@@ -292,6 +303,7 @@ const noUncodedExceptionBody = {
         while (ancestor && ancestor.type !== 'ClassDeclaration' && ancestor.type !== 'ClassExpression') {
           ancestor = ancestor.parent;
         }
+
         check(node, ancestor?.superClass);
       },
     };

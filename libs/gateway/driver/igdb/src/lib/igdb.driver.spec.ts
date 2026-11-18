@@ -168,6 +168,7 @@ describe('IgdbDriver', () => {
                   if (key === 'offset') {
                     offset(...args);
                   }
+
                   return client;
                 },
         },

@@ -107,6 +107,7 @@ function clean(parent: Parents, unsafeIds: ReadonlySet<string>, htmlBlocks = tru
       for (const node of replacement) {
         kept.push(node);
       }
+
       continue;
     }
 
@@ -121,15 +122,18 @@ function clean(parent: Parents, unsafeIds: ReadonlySet<string>, htmlBlocks = tru
         for (const node of wrap(child.children, (inner) => ({ ...child, children: inner }))) {
           kept.push(node);
         }
+
         continue;
       }
     }
+
     kept.push(child);
   }
 
   if (changed) {
     parent.children = tidy(parent, kept) as typeof parent.children;
   }
+
   return changed;
 }
 
@@ -207,6 +211,7 @@ function asBlocks(nodes: readonly RootContent[]): RootContent[] {
     if (children.length > 0) {
       blocks.push({ type: 'paragraph', children });
     }
+
     run = [];
   };
 

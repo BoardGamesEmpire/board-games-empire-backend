@@ -122,6 +122,7 @@ describe('prisma-generate lock', () => {
         if (++calls === 3) {
           fs.rmSync(lockPath, { recursive: true, force: true });
         }
+
         return clock.now();
       },
     });
@@ -142,6 +143,7 @@ describe('prisma-generate lock', () => {
           // deciding about the record we already read.
           secondWon = attempt(second);
         }
+
         return queried !== DEAD_PID;
       },
       // One poll only: what matters is the reclaim decision taken against the
@@ -172,6 +174,7 @@ describe('prisma-generate lock', () => {
           fs.rmSync(lockPath, { force: true });
           plantLock(777);
         }
+
         return queried !== DEAD_PID;
       },
       // One poll only: what matters is the first reclaim decision.
@@ -283,6 +286,7 @@ describe('prisma-generate lock', () => {
         if (++calls === 4 && !competitorTook) {
           competitorTook = attempt(competitor);
         }
+
         return clock.now();
       },
       options: {

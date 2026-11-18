@@ -20,6 +20,7 @@ const buildMetadata = (entries: Record<string, string> = {}): Metadata => {
   for (const [key, value] of Object.entries(entries)) {
     md.set(key, value);
   }
+
   return md;
 };
 

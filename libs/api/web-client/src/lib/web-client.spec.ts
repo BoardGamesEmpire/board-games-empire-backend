@@ -48,6 +48,7 @@ async function serve(root: string): Promise<express.Express> {
   if (webClient) {
     app.use(webClient);
   }
+
   app.get('/api/games', (_req, res) => res.json({ route: 'games' }));
   app.all('/api/auth/*any', (_req, res) => res.json({ route: 'auth' }));
   app.get('/health', (_req, res) => res.json({ route: 'health' }));

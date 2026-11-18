@@ -61,6 +61,7 @@ export function nextEvent<T = unknown>(socket: Socket, event: string): Promise<T
     if (event !== 'connect_error') {
       socket.on('connect_error', onConnectError);
     }
+
     if (event !== 'disconnect') {
       socket.on('disconnect', onDisconnect);
     }

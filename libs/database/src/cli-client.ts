@@ -10,5 +10,6 @@ export function openCliClient(): StandaloneClient {
   if (!url) {
     throw new Error('DATABASE_URL is not set. `.env` is loaded first; set the variable and run again.');
   }
+
   return openStandaloneClient(url);
 }

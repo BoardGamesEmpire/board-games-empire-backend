@@ -435,6 +435,7 @@ describe('consent acts (#1150)', () => {
           permissions: [{ permissionSlug: UNGRANTABLE.slug, cause: 'unbound_unit_scope' }],
         });
       }
+
       await expectNothingWritten(plugin.id, householdId);
     });
 

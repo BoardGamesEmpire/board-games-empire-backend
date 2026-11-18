@@ -244,6 +244,7 @@ export class LocalDiskDriver implements StorageDriver {
     if (key === '' || key.includes('\\')) {
       throw new InvalidObjectKeyError(key);
     }
+
     for (const segment of key.split('/')) {
       if (segment === '' || segment === '.' || segment === '..') {
         throw new InvalidObjectKeyError(key);
@@ -261,14 +262,17 @@ export class LocalDiskDriver implements StorageDriver {
     if (prefix === '') {
       return;
     }
+
     if (prefix.includes('\\')) {
       throw new InvalidObjectKeyError(prefix);
     }
+
     const segments = prefix.split('/');
     segments.forEach((segment, index) => {
       if (segment === '.' || segment === '..') {
         throw new InvalidObjectKeyError(prefix);
       }
+
       if (segment === '' && index !== segments.length - 1) {
         throw new InvalidObjectKeyError(prefix);
       }
@@ -298,6 +302,7 @@ export class LocalDiskDriver implements StorageDriver {
       if (isENOENT(error)) {
         throw await this.classifyEnoent(error, key);
       }
+
       throw this.classify(error, key) ?? error;
     }
   }
@@ -456,6 +461,7 @@ export class LocalDiskDriver implements StorageDriver {
             { retryable: true },
           );
         }
+
         return undefined;
       case 'sentinel':
         return this.checkSentinel();
@@ -613,9 +619,11 @@ export class LocalDiskDriver implements StorageDriver {
         { cause: error },
       );
     }
+
     if (!stats.isDirectory()) {
       throw new StorageMisconfiguredError(`media.localDiskRoot '${this.root}' is not a directory`);
     }
+
     return stats;
   }
 
@@ -644,6 +652,7 @@ export class LocalDiskDriver implements StorageDriver {
         this.logger.debug(`Mount check: sentinel (${sentinelPath})`);
         return { mode: 'sentinel', sentinelPath };
       }
+
       case 'auto':
         return this.resolveAuto(rootStats);
       default:
@@ -712,6 +721,7 @@ export class LocalDiskDriver implements StorageDriver {
           `resolving to a marker directly under the storage root '${this.root}'`,
       );
     }
+
     return join(this.root, sentinelFile);
   }
 

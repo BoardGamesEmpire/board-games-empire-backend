@@ -35,6 +35,7 @@ export class MediaContributionPurgeProcessor extends ActorAwareWorkerHost<PurgeC
       if (this.isTerminal(error)) {
         throw new UnrecoverableError(error instanceof Error ? error.message : String(error));
       }
+
       throw error; // retryable / unmodeled — BullMQ retries with backoff
     }
   }

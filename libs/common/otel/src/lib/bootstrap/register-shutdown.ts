@@ -61,6 +61,7 @@ export const createShutdown = (
       } catch (error) {
         logger.error({ err: error }, 'NestJS app.close() failed');
       }
+
       try {
         await otelHandle.shutdown();
       } catch (error) {

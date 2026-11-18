@@ -47,6 +47,7 @@ function breadcrumb(overrides: Partial<BreadcrumbInput> = {}): BreadcrumbInput {
     ...overrides,
   };
 }
+
 /** Loose-typed helper for invalid-payload cases (deliberately Record). */
 function rawBreadcrumb(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return { ...breadcrumb(), ...overrides };
@@ -590,6 +591,7 @@ describe('CreateFeedbackReportDto', () => {
           if (serialized.length >= FEEDBACK_BREADCRUMBS_MAX_BYTES) {
             break; // safety
           }
+
           entries.push(candidate[candidate.length - 1]!);
 
           if (byteSize > FEEDBACK_BREADCRUMBS_MAX_BYTES + 4_096) {

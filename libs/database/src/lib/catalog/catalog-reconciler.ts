@@ -511,6 +511,7 @@ function catalogAfterReconcile(manifest: CatalogManifest, snapshot: CatalogSnaps
       );
     }
   }
+
   rolePermissions.push(
     ...snapshot.rolePermissions.filter(
       (edge) => !listedEdges.has(edgeKey(edge.roleName, edge.permissionSlug)) && leftAsIs(edge),
@@ -749,24 +750,31 @@ export function describeWrites(plan: ReconcilePlan): string[] {
   for (const { slug, changes } of plan.permissions.update) {
     lines.push(`permission '${slug}' updated: ${formatChanges(changes)}`);
   }
+
   for (const slug of plan.permissions.revive) {
     lines.push(`permission '${slug}' revived`);
   }
+
   for (const slug of plan.permissions.retire) {
     lines.push(`permission '${slug}' retired`);
   }
+
   for (const { slug, problems } of plan.permissions.retireEdited) {
     lines.push(`permission '${slug}' retired after its check: ${formatProblems(problems)}`);
   }
+
   for (const { name, changes } of plan.roles.update) {
     lines.push(`role '${name}' updated: ${formatChanges(changes)}`);
   }
+
   for (const { roleName, permissionSlug } of plan.rolePermissions.delete) {
     lines.push(`grant '${roleName} → ${permissionSlug}' removed`);
   }
+
   for (const { roleName, permissionSlug } of plan.rolePermissions.restore) {
     lines.push(`grant '${roleName} → ${permissionSlug}' restored`);
   }
+
   for (const { roleName, permissionSlug, problems } of plan.rolePermissions.revokeEdited) {
     lines.push(`grant '${roleName} → ${permissionSlug}' revoked after its check: ${formatProblems(problems)}`);
   }
@@ -802,19 +810,23 @@ export function describeDrift(plan: ReconcilePlan): string[] {
         'retired, the edit kept',
     );
   }
+
   for (const { slug, managedBy, drift } of plan.permissions.skipped) {
     const retired = retiredNow.has(slug) || drift.some(({ field }) => field === 'retiredAt');
     lines.push(
       `${managedBy}-owned permission '${slug}'${mark('retired', retired)} left alone${describeChanges(drift)}`,
     );
   }
+
   for (const { slug, managedBy, retiredAt } of plan.permissions.retained) {
     const retired = retiredNow.has(slug) || retiredAt !== null;
     lines.push(`${managedBy}-owned permission '${slug}'${mark('retired', retired)} is not in the manifest; retained`);
   }
+
   for (const { name, managedBy, drift } of plan.roles.skipped) {
     lines.push(`${managedBy}-owned role '${name}' left alone${describeChanges(drift)}`);
   }
+
   for (const name of plan.roles.orphans) {
     // The row is kept — that is what "never mutated" covers; its System grants
     // follow the RolePermission rule and are removed with the rest.
@@ -824,21 +836,25 @@ export function describeDrift(plan: ReconcilePlan): string[] {
         `${removed === 1 ? 'is' : 'are'} removed`,
     );
   }
+
   for (const { roleName, permissionSlug, problems } of plan.rolePermissions.revokeEdited) {
     lines.push(
       `${PermissionOwner.Admin}-owned grant '${roleName} → ${permissionSlug}' fails the entry check ` +
         `(${problemKinds(problems)}): revoked, the row kept`,
     );
   }
+
   for (const { roleName, permissionSlug, problems } of plan.rolePermissions.withheld) {
     lines.push(
       `System grant '${roleName} → ${permissionSlug}' fails the entry check against the Owner's edits: ` +
         `not given, and judged again at the next start: ${formatProblems(problems)}`,
     );
   }
+
   for (const { roleName, permissionSlug } of plan.rolePermissions.skipped) {
     lines.push(`grant '${roleName} → ${permissionSlug}' was revoked on this server`);
   }
+
   for (const { roleName, permissionSlug, managedBy, revokedAt } of plan.rolePermissions.retained) {
     const revoked = revokedNow.has(edgeKey(roleName, permissionSlug)) || revokedAt !== null;
     lines.push(

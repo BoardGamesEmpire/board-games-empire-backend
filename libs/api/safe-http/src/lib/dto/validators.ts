@@ -29,10 +29,12 @@ export class IsHostnameOrWildcardConstraint implements ValidatorConstraintInterf
     if (typeof value !== 'string') {
       return false;
     }
+
     const candidate = value.startsWith('*.') ? value.slice(2) : value;
     if (candidate.length === 0) {
       return false;
     }
+
     return isFQDN(candidate, { require_tld: false, allow_underscores: false });
   }
 
@@ -73,6 +75,7 @@ export class IsCidrConstraint implements ValidatorConstraintInterface {
     if (typeof value !== 'string') {
       return false;
     }
+
     return parseCidr(value) !== null;
   }
 

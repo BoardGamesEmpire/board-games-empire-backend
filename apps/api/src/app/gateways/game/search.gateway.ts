@@ -362,6 +362,7 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
       sub.unsubscribe();
       client.leave(this.searchRoom(client, correlationId));
     }
+
     data.activeSearches.clear();
   }
 

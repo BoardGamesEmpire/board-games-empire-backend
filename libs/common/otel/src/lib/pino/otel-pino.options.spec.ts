@@ -45,6 +45,7 @@ const getTargets = (options: LoggerOptions): TransportTargetOptions[] => {
   if (transport && typeof transport === 'object' && 'targets' in transport) {
     return transport.targets as TransportTargetOptions[];
   }
+
   throw new Error('expected transport to expose targets[]');
 };
 

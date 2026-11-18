@@ -122,10 +122,12 @@ describe.each(['platform', 'category', 'mechanic'] as const)('DataGateway %s lin
         const row = await db.client.platformGatewayLink.findUniqueOrThrow({ where: { id: linkId } });
         return { status: row.status, recordId: row.platformId };
       }
+
       case 'category': {
         const row = await db.client.categoryGatewayLink.findUniqueOrThrow({ where: { id: linkId } });
         return { status: row.status, recordId: row.categoryId };
       }
+
       case 'mechanic': {
         const row = await db.client.mechanicGatewayLink.findUniqueOrThrow({ where: { id: linkId } });
         return { status: row.status, recordId: row.mechanicId };

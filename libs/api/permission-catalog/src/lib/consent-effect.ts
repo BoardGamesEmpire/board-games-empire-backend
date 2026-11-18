@@ -115,6 +115,7 @@ export async function loadConsentDecisionsInForce(
         : null;
       boundByPlugin.set(decision.pluginId, bound);
     }
+
     return bound;
   };
 

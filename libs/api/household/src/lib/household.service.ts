@@ -153,6 +153,7 @@ export class HouseholdService {
       if (await householdExists(this.db, id)) {
         throw new ForbiddenException(t('common.forbidden.view'));
       }
+
       throw new NotFoundException(t('errors.household.not_found', { id }));
     }
 

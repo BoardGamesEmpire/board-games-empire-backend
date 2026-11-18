@@ -216,6 +216,7 @@ describe('HouseholdGameShareService', () => {
             .mockResolvedValueOnce(resolves(ROSTER))
             .mockResolvedValueOnce(resolves(arrange.roster));
         }
+
         if (arrange.sharedById === null) {
           db.gameShare.findFirst.mockResolvedValue({ ...approvedRow(CREATED), sharedById: null });
         }

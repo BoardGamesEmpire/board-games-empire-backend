@@ -16,6 +16,7 @@ async function main() {
   if (!clientId || !clientSecret) {
     throw new Error('IGDB client ID and secret must be provided');
   }
+
   const accessToken = await fetchAccessToken(fetch, { client_id: clientId!, client_secret: clientSecret! });
   const client = new IgdbQuery({ fetch, clientId, accessToken: accessToken.access_token });
   // const gameData = await searchGamesRequest('catan', 10, 0, 'en-US')(client);

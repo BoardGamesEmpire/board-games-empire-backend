@@ -198,6 +198,7 @@ describe('WebhookVisibilityService', () => {
     if (readJob === undefined) {
       throw new Error("The catalog has no 'read:job' entry");
     }
+
     const userAbility = createPrismaAbility([
       { action: readJob.action, subject: readJob.subject, conditions: readJob.conditions },
     ]) as AppAbility;

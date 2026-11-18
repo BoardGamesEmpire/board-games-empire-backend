@@ -117,6 +117,7 @@ export class InMemoryStorageDriver implements StorageDriver {
     if (!entry) {
       throw new ObjectNotFoundError(key);
     }
+
     return entry;
   }
 

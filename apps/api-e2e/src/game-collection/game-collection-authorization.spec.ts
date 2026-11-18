@@ -212,6 +212,7 @@ describe('game collection authorization', () => {
       for (const owner of [showingOwner, hidingOwner, blockingOwner]) {
         await arrangeExtendedNetwork(db.client, owner, viewer, 3);
       }
+
       await arrangeFriendship(db.client, blockingOwner, viewer, FriendshipStatus.Blocked);
       await db.client.userPreferences.update({
         where: { userId: hidingOwner.user.id },

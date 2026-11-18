@@ -149,6 +149,7 @@ async function edgeDecision({ commit, tip, edge, otherEdges, compare }) {
   if (onMaster !== 'identical' && onMaster !== 'ahead') {
     return { move: false, reason: `master's tip, \`${tip}\`, doesn't contain this commit.` };
   }
+
   if (edge === null && otherEdges.some((digest) => digest !== null)) {
     return {
       move: false,
@@ -157,12 +158,14 @@ async function edgeDecision({ commit, tip, edge, otherEdges, compare }) {
         "the BGE image has no `edge`, though another package has one, so which commit `edge` named isn't known. Move `edge` by hand.",
     };
   }
+
   if (edge === null && tip !== commit) {
     return {
       move: false,
       reason: `no package has an \`edge\`, and only master's tip, now \`${tip}\`, writes the first, since no commit published can be newer than the tip.`,
     };
   }
+
   if (edge === null) {
     return { move: true, reason: 'there was no `edge` yet.' };
   }
@@ -184,12 +187,15 @@ async function edgeDecision({ commit, tip, edge, otherEdges, compare }) {
         '`edge` already names this commit, so only a package whose `edge` an earlier attempt failed to move changes.',
     };
   }
+
   if (comparison === 'ahead') {
     return { move: true, reason: `this commit descends from \`${revision}\`, which \`edge\` named.` };
   }
+
   if (comparison === 'behind') {
     return { move: false, reason: `\`edge\` names \`${revision}\`, which descends from this commit.` };
   }
+
   if (comparison === 'diverged') {
     return {
       move: false,
@@ -197,6 +203,7 @@ async function edgeDecision({ commit, tip, edge, otherEdges, compare }) {
       reason: `\`edge\` names \`${revision}\`, which has diverged from this commit. Each commit published is one master moved to, so \`${revision}\` has left master, and no commit will descend from it. Move \`edge\` by hand.`,
     };
   }
+
   if (comparison === 'missing') {
     return {
       move: false,
@@ -262,11 +269,13 @@ function publishProblems({ commit, manifest, tested, labels }) {
       }
     }
   }
+
   for (const platform of Object.keys(tested)) {
     const entries = listed.filter((image) => image.platform === platform).length;
     if (entries === 0) {
       problems.push(`it lists no ${platform} image`);
     }
+
     if (entries > 1) {
       problems.push(`it lists ${entries} entries for ${platform}, not one`);
     }
@@ -291,6 +300,7 @@ function inspectFailure(ref, stderr) {
   if (stderr.includes(`${ref}: not found`)) {
     return 'not-found';
   }
+
   if (/403 Forbidden|denied/.test(stderr)) {
     return 'denied';
   }

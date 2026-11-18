@@ -862,6 +862,7 @@ export class PluginExceptionFilter extends BaseExceptionFilter {
       if (render) {
         return render;
       }
+
       ctor = Object.getPrototypeOf(ctor);
     }
 

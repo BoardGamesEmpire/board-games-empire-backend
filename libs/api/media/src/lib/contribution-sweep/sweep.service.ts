@@ -89,6 +89,7 @@ export class MediaContributionSweepService {
     if (eligible.length > 0) {
       this.logger.log(`Enqueued ${eligible.length} contribution purge job(s)`);
     }
+
     return { enqueued: eligible.length };
   }
 }

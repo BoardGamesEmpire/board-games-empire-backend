@@ -61,6 +61,7 @@ class FakeDnsResolver implements DnsResolver {
     if (!entry) {
       throw new DnsResolutionError(hostname, new Error('NXDOMAIN'));
     }
+
     return entry;
   }
 }
@@ -80,6 +81,7 @@ class FakeDispatcherFactory implements HttpDispatcherFactory {
         if (prop === 'close' || prop === 'destroy') {
           return async () => undefined;
         }
+
         const value = Reflect.get(target, prop, target);
         return typeof value === 'function' ? value.bind(target) : value;
       },
@@ -822,6 +824,7 @@ describe('SecureHttpService', () => {
       for (const [host, ip] of hosts) {
         dns.set(host, [v4(ip)]);
       }
+
       return dns;
     }
 
@@ -1060,6 +1063,7 @@ describe('SecureHttpService', () => {
         for (const res of held) {
           res.destroy();
         }
+
         await agent.close();
         server.closeAllConnections();
         await new Promise((resolve) => server.close(resolve));
@@ -1160,6 +1164,7 @@ describe('SecureHttpService', () => {
             res.end('moved');
             return;
           }
+
           res.end('plugin');
         });
 

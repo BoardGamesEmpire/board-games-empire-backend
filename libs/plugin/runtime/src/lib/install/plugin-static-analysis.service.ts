@@ -339,6 +339,7 @@ export class PluginStaticAnalysisService {
       const finding: StaticAnalysisFinding = { file, kind, specifier, severity, scanScope };
       collected.set(findingIdentity(finding), finding);
     };
+
     const classify = (kind: 'esm-import' | 'dynamic-import' | 'cjs-require', specifier: string): void => {
       const verdict = classifyImportSpecifier(specifier);
 

@@ -391,9 +391,11 @@ describe('MailDeliveryService', () => {
     for (const wanted of ['MAIL_AUTH_FAILED', 'EAUTH', '535', 'AUTH PLAIN', job.message.kind]) {
       expect(line).toContain(wanted);
     }
+
     for (const forbidden of ['secret-ish', 'tok', 'c.example', 'sam@example.test']) {
       expect(line).not.toContain(forbidden);
     }
+
     warn.mockRestore();
   });
 

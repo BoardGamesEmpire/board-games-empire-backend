@@ -65,12 +65,14 @@ function carriesSqlState(error: unknown, sqlState: string, messageSays?: (messag
     if (current === null || typeof current !== 'object' || seen.has(current)) {
       continue;
     }
+
     seen.add(current);
 
     const record = current as Record<string, unknown>;
     if (record['code'] === sqlState || record['sqlState'] === sqlState || record['originalCode'] === sqlState) {
       return true;
     }
+
     if (
       typeof record['message'] === 'string' &&
       (record['message'].includes(inMessage) || messageSays?.(record['message']))

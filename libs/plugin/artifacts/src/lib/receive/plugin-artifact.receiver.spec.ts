@@ -114,6 +114,7 @@ const mockDispatchers = (agent: MockAgent): HttpDispatcherFactory =>
           if (prop === 'close' || prop === 'destroy') {
             return async () => undefined;
           }
+
           const value = Reflect.get(target, prop, target);
           return typeof value === 'function' ? value.bind(target) : value;
         },
@@ -169,6 +170,7 @@ describe('normalizeExpectedSha256 (#1094)', () => {
         } catch (thrown) {
           return thrown;
         }
+
         throw new Error('expected a refusal');
       })();
 
@@ -661,6 +663,7 @@ describe('PluginArtifactReceiver (#1094)', () => {
         if (path === upload.archivePath) {
           throw new Error('EBUSY: resource busy or locked');
         }
+
         return realRm(path, options);
       });
 

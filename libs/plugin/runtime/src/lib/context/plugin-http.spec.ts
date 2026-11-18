@@ -194,6 +194,7 @@ describe('buildPluginHttp', () => {
         expect(text).not.toContain('secret-path');
         expect(text).not.toContain('s3cret');
       }
+
       expect(request).not.toHaveBeenCalled();
     });
 
@@ -212,6 +213,7 @@ describe('buildPluginHttp', () => {
           expect(text).not.toContain('s3cret');
           expect(text).not.toContain("''");
         }
+
         expect(request).not.toHaveBeenCalled();
       },
     );

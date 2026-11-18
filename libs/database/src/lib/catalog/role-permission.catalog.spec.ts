@@ -122,6 +122,7 @@ describe('the shipped catalogs', () => {
         if (node.includes('{{') && !isIdentifier(column)) {
           misplaced.push(`${slug}: ${path}`);
         }
+
         return;
       }
 

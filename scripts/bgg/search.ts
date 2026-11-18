@@ -7,6 +7,7 @@ async function main() {
   if (!apiKey) {
     throw new Error('BGG API key must be provided');
   }
+
   const client = createBggClient({ fetch, apiKey });
   const searchResults = await client.search.query({
     query: 'catan',

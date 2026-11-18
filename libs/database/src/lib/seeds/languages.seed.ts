@@ -81,6 +81,7 @@ function assertSystemSupportedTags(curated: readonly CuratedLanguage[]) {
     if (canonical === null) {
       throw new Error(`languagesSeed: systemSupported tag '${tag}' is not a valid BCP 47 tag`);
     }
+
     if (canonical !== tag) {
       throw new Error(`languagesSeed: systemSupported tag '${tag}' is not canonical (expected '${canonical}')`);
     }

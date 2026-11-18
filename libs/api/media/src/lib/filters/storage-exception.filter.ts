@@ -69,6 +69,7 @@ export class StorageExceptionFilter extends BaseExceptionFilter {
       if (exception.retryable) {
         this.setRetryAfter(host);
       }
+
       return { status: Http.ServiceUnavailable, message: t('errors.storage.unavailable') };
     }
 

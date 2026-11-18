@@ -66,11 +66,13 @@ function holdersAnswered(holders: readonly Holder[]): Buffer {
     meta.writeInt32BE(-1, 12);
     return Buffer.concat([Buffer.from(`${name}\0`), meta]);
   };
+
   const value = (text: string) => {
     const length = Buffer.alloc(4);
     length.writeInt32BE(Buffer.byteLength(text));
     return Buffer.concat([length, Buffer.from(text)]);
   };
+
   const INT4 = 23;
   const TEXT = 25;
 
@@ -108,10 +110,12 @@ function serve(socket: Socket, onMessage: (type: string, text: string) => void):
       if (pending.length < 4 || pending.length < pending.readInt32BE(0)) {
         return;
       }
+
       pending = pending.subarray(pending.readInt32BE(0));
       started = true;
       socket.write(STARTUP_ANSWERED);
     }
+
     while (pending.length >= 5 && pending.length >= pending.readInt32BE(1) + 1) {
       const type = String.fromCharCode(pending[0]);
       const text = pending.subarray(5, pending.readInt32BE(1) + 1).toString();
@@ -137,12 +141,15 @@ function answersUntil(silentFrom: string, last?: Buffer) {
           socket.end(last);
         }
       }
+
       if (silent) {
         return;
       }
+
       if (type === 'Q') {
         socket.write(QUERY_ANSWERED);
       }
+
       if (type === 'S') {
         socket.write(holdersAnswered([]));
       }
@@ -169,9 +176,11 @@ function lockHeld(attempts: number, holders: readonly Holder[]) {
         }, Number(lockTimeout[1]));
         return;
       }
+
       if (type === 'Q') {
         socket.write(QUERY_ANSWERED);
       }
+
       if (type === 'S') {
         socket.write(holdersAnswered(holders));
       }
@@ -211,6 +220,7 @@ async function fakeDatabase(onConnection: (socket: Socket) => void) {
       for (const socket of sockets) {
         socket.destroy();
       }
+
       await new Promise<void>((resolve) => server.close(() => resolve()));
     },
   };

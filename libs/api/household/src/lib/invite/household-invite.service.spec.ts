@@ -723,6 +723,7 @@ describe('HouseholdInviteService', () => {
             expect(error).toBeInstanceOf(ForbiddenException);
             expect((error as ForbiddenException).message).toContain('errors.household.invitee_friends_only');
           }
+
           expect(db.user.count).not.toHaveBeenCalled();
           expect(invites.createWithin).not.toHaveBeenCalled();
         });

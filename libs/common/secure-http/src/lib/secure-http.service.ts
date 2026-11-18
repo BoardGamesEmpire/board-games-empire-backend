@@ -562,6 +562,7 @@ export class SecureHttpService {
     if (!('content-type' in headers)) {
       headers['content-type'] = 'application/json';
     }
+
     return { headers, payload: JSON.stringify(body) };
   }
 
@@ -590,6 +591,7 @@ export class SecureHttpService {
             body = null;
           }
         }
+
         break;
       }
 
@@ -855,6 +857,7 @@ export class SecureHttpService {
     if (retry.retryOnNetworkError === false) {
       return false;
     }
+
     return err instanceof OutboundNetworkError || err instanceof RequestTimeoutError;
   }
 
@@ -864,6 +867,7 @@ export class SecureHttpService {
     if (retry.jitter === false) {
       return exp;
     }
+
     return Math.floor(Math.random() * exp);
   }
 
@@ -885,6 +889,7 @@ export class SecureHttpService {
     if (!handler) {
       return;
     }
+
     try {
       await handler.call(this.observer, event);
     } catch (err) {

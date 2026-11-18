@@ -56,8 +56,10 @@ function readFiles(root) {
     if (error.code === 'ENOENT') {
       return null;
     }
+
     throw error;
   }
+
   return files;
 }
 
@@ -73,6 +75,7 @@ function sameFiles(a, b) {
       return false;
     }
   }
+
   return true;
 }
 

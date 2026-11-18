@@ -143,6 +143,7 @@ describe('createAuthNodeHandler', () => {
         failedRead();
         return Response.json({ code: 'BAD_REQUEST' }, { status: 400 });
       }
+
       return new Response('read');
     });
 

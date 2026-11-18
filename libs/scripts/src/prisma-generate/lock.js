@@ -113,6 +113,7 @@ function sameHolder(a, b) {
   if (a === null || b === null) {
     return a === b;
   }
+
   return a.pid === b.pid && a.acquiredAt === b.acquiredAt;
 }
 
@@ -165,6 +166,7 @@ function createLock({
       if (error.code === 'ENOENT') {
         return null;
       }
+
       throw error;
     }
 
@@ -213,6 +215,7 @@ function createLock({
         if (error.code === 'EEXIST') {
           continue;
         }
+
         throw error;
       }
 
@@ -237,6 +240,7 @@ function createLock({
       if (error.code === 'EEXIST') {
         return false;
       }
+
       throw error;
     } finally {
       fs.rmSync(stagingPath, { force: true });
@@ -283,6 +287,7 @@ function createLock({
       if (error.code === 'ENOENT') {
         return false;
       }
+
       throw error;
     }
 

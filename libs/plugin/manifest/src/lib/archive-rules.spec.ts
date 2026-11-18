@@ -161,6 +161,7 @@ describe('plugin archive rules (#1094)', () => {
     for (let i = 0; i < PLUGIN_ARCHIVE_MAX_ENTRIES; i++) {
       expect(checker.check(file(`package/f${i}`, 0)).ok).toBe(true);
     }
+
     expect(checker.check(file('package/one-too-many', 0))).toEqual({
       ok: false,
       rule: 'entry-count',

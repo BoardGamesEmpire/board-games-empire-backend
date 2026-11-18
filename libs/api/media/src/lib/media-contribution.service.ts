@@ -54,6 +54,7 @@ export class MediaContributionService {
     if (!media) {
       throw new NotFoundException(t('errors.media_object.not_found', { id: mediaObjectId }));
     }
+
     if (media.ownerId !== actorId) {
       throw new ForbiddenException(t('errors.contribution.forbidden_contribute'));
     }

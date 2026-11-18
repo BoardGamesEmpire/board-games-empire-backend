@@ -37,5 +37,6 @@ export function isTooCostlyToParse(markdown: string): boolean {
       return true;
     }
   }
+
   return false;
 }

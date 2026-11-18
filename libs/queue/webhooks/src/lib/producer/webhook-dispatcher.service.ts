@@ -109,6 +109,7 @@ export class WebhookDispatcherService implements OnModuleInit, OnApplicationShut
     if (!this.registry.has(eventName)) {
       return;
     }
+
     if (!isWebhookEmittableEvent(payload)) {
       return this.logger.warn(
         `Registered webhook event "${eventName}" emitted a payload missing the WebhookEmittableEvent shape; skipping`,
@@ -148,6 +149,7 @@ export class WebhookDispatcherService implements OnModuleInit, OnApplicationShut
         subscriptionsByOwner.set(createdById, [{ id, apiKeyId }]);
       }
     }
+
     const owners = [...subscriptionsByOwner.entries()];
     let failures = 0;
 
@@ -204,6 +206,7 @@ export class WebhookDispatcherService implements OnModuleInit, OnApplicationShut
               failures += 1;
               continue;
             }
+
             keyGraph = keyGraphs.get(apiKeyId);
           }
 

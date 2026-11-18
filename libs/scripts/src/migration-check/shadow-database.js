@@ -51,6 +51,7 @@ function databaseNames(url, env) {
   } catch {
     return null;
   }
+
   if (parsed.protocol !== 'postgresql:' && parsed.protocol !== 'postgres:') {
     return null;
   }
@@ -106,6 +107,7 @@ function shadowDatabaseProblem(env) {
       );
     }
   }
+
   return null;
 }
 
@@ -135,6 +137,7 @@ function migrateDiffEnv(env) {
     url.searchParams.set('schema', schema);
     result[variable] = url.toString();
   }
+
   return result;
 }
 

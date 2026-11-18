@@ -49,6 +49,7 @@ try {
   if (status === 0) {
     console.log(written ? 'buf export: wrote proto-export' : 'buf export: proto-export is up to date');
   }
+
   process.exitCode = status;
 } catch (error) {
   console.error(`buf export: ${error.message}`);

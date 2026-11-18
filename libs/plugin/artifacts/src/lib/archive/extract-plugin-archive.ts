@@ -174,10 +174,12 @@ const extractInto = async (
           if (COLLISION_CODES.has(code)) {
             throw new PluginArchiveRefusedError('corrupt', header.name);
           }
+
           if (code === NAME_TOO_LONG) {
             throw new PluginArchiveRefusedError('unsafe-path', header.name);
           }
         }
+
         throw err;
       }
     }

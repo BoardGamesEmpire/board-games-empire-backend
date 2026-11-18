@@ -158,6 +158,7 @@ describe('DatabaseService', () => {
       const call = (target.$on as jest.Mock).mock.calls.find(([name]) => name === level);
       return call?.[1] as (event: unknown) => void;
     };
+
     const event = (message: string) => ({ message, target: 'x', timestamp: new Date() });
 
     afterEach(() => jest.restoreAllMocks());
@@ -326,6 +327,7 @@ describe('DatabaseService', () => {
         // A failed assertion must still let close() finish, or Jest never exits.
         release();
       }
+
       await expect(response).resolves.toBe('done');
       await closing;
 

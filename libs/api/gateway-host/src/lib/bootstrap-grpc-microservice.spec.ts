@@ -353,6 +353,7 @@ describe('bootstrapGrpcMicroservice', () => {
       const stopped = (): never => {
         throw new Error('the process would have ended here');
       };
+
       const exit = jest.spyOn(process, 'exit').mockImplementation(stopped);
       jest.spyOn(process, 'abort').mockImplementation(stopped);
       const stderr = jest.spyOn(process.stderr, 'write').mockImplementation(() => true);

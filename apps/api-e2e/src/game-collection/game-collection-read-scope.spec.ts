@@ -75,6 +75,7 @@ describe('game collection read scope', () => {
         );
         expect(read.collection.id).toBe(strangersEntry);
       }
+
       await readEntry(plainUser, strangersEntry).expect(404);
 
       for (const [who, actor, ownId] of staff) {

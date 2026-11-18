@@ -294,6 +294,7 @@ describe('reconcileCatalog and the edits of the permission catalog (#772)', () =
       statements.push(statement);
       return [];
     };
+
     const tx = {
       $executeRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
         statements.push(`${strings.join('?')} ${JSON.stringify(values)}`);
@@ -343,6 +344,7 @@ describe('applyReconcilePlan — a batch statement that writes fewer rows than p
       calls.push(statement);
       return { count: short?.statement === statement ? asked - short.by : asked };
     };
+
     const ids = (rows: { slug?: string; name?: string }[]) => rows.map((row, i) => ({ ...row, id: `id-${i}` }));
     const checked = (statement: string, where: { managedBy: PermissionOwner }) =>
       where.managedBy === PermissionOwner.Admin ? `${statement} (entry check)` : statement;
@@ -573,12 +575,14 @@ describe('findFailingEditedEntries (#772)', () => {
       if (JSON.stringify(where).includes('"visibility"')) {
         throw new Prisma.PrismaClientValidationError('\nUnknown argument `visibility`.', { clientVersion: 'test' });
       }
+
       return 0;
     });
     const executeRaw = async (statement: string) => {
       statements.push(statement);
       return 0;
     };
+
     const tx = new Proxy({} as Record<string | symbol, unknown>, {
       get: (_target, key) => (key === '$executeRawUnsafe' ? executeRaw : { count }),
     }) as unknown as Prisma.TransactionClient;

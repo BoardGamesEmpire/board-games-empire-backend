@@ -81,6 +81,7 @@ class FakeLock implements BootstrapLock {
     if (blocked && this.clock) {
       this.clock.time += blocked;
     }
+
     if (this.releaseError) {
       throw this.releaseError;
     }
@@ -257,6 +258,7 @@ describe('the boot sequence', () => {
       if (ledger.reads === 2) {
         ledger.rows = CHAIN.map(finished);
       }
+
       return rows;
     };
 
@@ -289,10 +291,12 @@ describe('the boot sequence', () => {
       if (ledger.reads === 2) {
         ledger.rows = CHAIN.map(finished);
       }
+
       // The read that finds the chain complete is a slow one: a second on a busy database.
       if (ledger.reads === 3) {
         clock.time += 1_000;
       }
+
       return rows;
     };
 
@@ -376,6 +380,7 @@ describe('the boot sequence', () => {
       if (ledger.reads === 3) {
         ledger.rows = [...CHAIN.map(finished), finished('20260910_from_the_future')];
       }
+
       return rows;
     };
 
@@ -662,6 +667,7 @@ describe('the boot sequence', () => {
         if (ledger.reads === 2) {
           ledger.rows.push(finishedAt('20260301_permissions', '2026-09-03T00:00:00Z'));
         }
+
         return rows;
       };
 
@@ -1034,6 +1040,7 @@ describe('the data-migrations phase', () => {
         if (dataMigrations.error) {
           throw dataMigrations.error;
         }
+
         return { applied: dataMigrations.applied ?? [], unknown: dataMigrations.unknown ?? [], cachesFlushed: false };
       },
     };

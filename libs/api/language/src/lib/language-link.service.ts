@@ -213,12 +213,15 @@ export class LanguageLinkService {
     if (data.ietfTag) {
       candidates.push({ value: data.ietfTag, format: LanguageCodeFormat.IetfBcp47, ...enrichments });
     }
+
     if (data.iso6393) {
       candidates.push({ value: data.iso6393, format: LanguageCodeFormat.Iso6393, ...enrichments });
     }
+
     if (data.iso6391) {
       candidates.push({ value: data.iso6391, format: LanguageCodeFormat.Iso6391, ...enrichments });
     }
+
     if (data.name) {
       candidates.push({ value: data.name, format: LanguageCodeFormat.Name, ...enrichments });
     }

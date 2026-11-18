@@ -96,6 +96,7 @@ function sourceFiles(dir: string, extension = '.ts'): string[] {
     if (entry.isDirectory()) {
       return skipsDir(path) ? [] : sourceFiles(path, extension);
     }
+
     return entry.name.endsWith(extension) && !entry.name.endsWith('.spec.ts') && !entry.name.endsWith('.d.ts')
       ? [path]
       : [];
@@ -172,10 +173,12 @@ function isRoleQuery(args: ts.ObjectLiteralExpression): boolean {
   if (!ts.isCallExpression(call) || !call.arguments.some((argument) => argument === outer)) {
     return false;
   }
+
   const callee = unwrap(call.expression);
   if (!ts.isPropertyAccessExpression(callee)) {
     return false;
   }
+
   const delegate = unwrap(callee.expression);
   return (
     (ts.isIdentifier(delegate) && delegate.text === ROLE_KEY) ||
@@ -256,6 +259,7 @@ function scanSource(file: string, source: string): Scan {
 
     ts.forEachChild(node, visit);
   };
+
   visit(sourceFile);
 
   return { reads, unfiltered };

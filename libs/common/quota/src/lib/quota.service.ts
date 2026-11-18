@@ -156,6 +156,7 @@ export class QuotaService {
         applicable.push({ scope, scopeId, row });
       }
     }
+
     return applicable;
   }
 

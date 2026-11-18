@@ -717,6 +717,7 @@ describe('WebhookSubscriptionService', () => {
             t('errors.webhook_subscription.forbidden_other_key'),
           );
         }
+
         expect(db.webhookSubscription.update).not.toHaveBeenCalled();
       },
     );

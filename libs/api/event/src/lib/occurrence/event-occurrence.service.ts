@@ -383,6 +383,7 @@ export class EventOccurrenceService {
           new OccurrenceUpdatedEvent(pickSnapshot(existing, changed), pickSnapshot(updated, changed), initiatedAt),
         );
       }
+
       emitGamesNobodyBrings(this.eventEmitter, eventId, removedGames, actingUserId, initiatedAt);
 
       const removedIds = new Set(removedGames.map((game) => game.id));
@@ -397,6 +398,7 @@ export class EventOccurrenceService {
       if (isPrismaDependentRecordNotFoundError(error)) {
         throw new ForbiddenException(t('common.forbidden.update'));
       }
+
       throw error;
     }
   }
@@ -494,6 +496,7 @@ export class EventOccurrenceService {
       if (isPrismaDependentRecordNotFoundError(error)) {
         throw new ForbiddenException(t('common.forbidden.remove'));
       }
+
       throw error;
     }
   }

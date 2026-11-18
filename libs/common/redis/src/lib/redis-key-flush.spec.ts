@@ -27,6 +27,7 @@ function fakeClient(batches: Record<string, string[][] | Error>) {
           },
         });
       }
+
       return Readable.from(pages);
     },
     async unlink(...keys: string[]): Promise<number> {

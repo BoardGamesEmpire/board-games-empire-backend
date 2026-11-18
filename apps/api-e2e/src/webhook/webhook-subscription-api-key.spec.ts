@@ -193,6 +193,7 @@ describe('webhook subscriptions made through an API key (#723)', () => {
 
         return { id: fixture.household.id, owner, heir, heirMemberId: fixture.members[0].member.id };
       };
+
       const reached = await household();
       const unreached = await household();
 

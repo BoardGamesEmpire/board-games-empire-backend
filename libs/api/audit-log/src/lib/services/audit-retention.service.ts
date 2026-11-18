@@ -54,6 +54,7 @@ export class AuditRetentionService {
             `Set a positive value or null (unlimited).`,
         );
       }
+
       return { softDeleted: 0 };
     }
 

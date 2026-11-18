@@ -94,6 +94,7 @@ function createClientState(workspaceRoot) {
     if (!fs.existsSync(outputDir)) {
       return 0;
     }
+
     return listFiles(outputDir, () => true).length;
   }
 

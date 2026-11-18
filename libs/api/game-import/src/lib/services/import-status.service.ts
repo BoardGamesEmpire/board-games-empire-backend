@@ -158,6 +158,7 @@ export class GameImportStatusService {
           if (row.batchId === null) {
             continue;
           }
+
           const bucket = rowsByBatch.get(row.batchId) ?? [];
           bucket.push(row);
           rowsByBatch.set(row.batchId, bucket);

@@ -94,6 +94,7 @@ const thrown = (run: () => unknown): unknown => {
   } catch (error) {
     return error;
   }
+
   throw new Error('expected the plan to throw');
 };
 

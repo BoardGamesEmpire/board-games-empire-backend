@@ -92,6 +92,7 @@ describe('media read scope', () => {
       );
       expect(read.media.id).toBe(strangersPrivate);
     }
+
     await readMedia(plainUser, strangersPrivate).expect(404);
 
     for (const [who, actor, ownId] of staff) {

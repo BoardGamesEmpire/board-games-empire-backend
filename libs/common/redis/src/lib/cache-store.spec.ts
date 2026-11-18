@@ -16,6 +16,7 @@ function fakeClient() {
     commands.push(['set', key, ...args]);
     strings.set(key, value);
   };
+
   const client = {
     options: { family: 4 },
     on: () => client,
@@ -45,6 +46,7 @@ function brokenClient() {
   const lost = async () => {
     throw new Error('Connection is closed.');
   };
+
   const client = { options: { family: 4 }, on: () => client, set: lost, get: lost, unlink: lost };
 
   return client as unknown as Redis;

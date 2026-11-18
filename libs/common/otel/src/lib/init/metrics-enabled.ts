@@ -45,6 +45,7 @@ export function metricsExportEnabled(env: NodeJS.ProcessEnv = process.env): bool
   if (env[OTEL_METRICS_EXPORTER_ENV] !== 'otlp') {
     return false;
   }
+
   // `||` rather than `??` so an empty-string endpoint is treated as
   // unset — matches operator intent ("blank means I forgot to set it")
   // and aligns with how the OTLP exporters interpret an empty endpoint.

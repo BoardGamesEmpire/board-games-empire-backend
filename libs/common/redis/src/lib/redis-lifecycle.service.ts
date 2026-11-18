@@ -32,6 +32,7 @@ export class RedisLifecycleManager implements OnApplicationShutdown {
     if (this.cache) {
       clients.push(['cache', this.cache] as const);
     }
+
     if (this.queue) {
       clients.push(['queue', this.queue] as const);
     }
@@ -58,6 +59,7 @@ export class RedisLifecycleManager implements OnApplicationShutdown {
     if (client.status === 'end' || client.status === 'close') {
       return name;
     }
+
     await client.quit();
     return name;
   }

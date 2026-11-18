@@ -60,6 +60,7 @@ export async function createWebClient(options: WebClientOptions): Promise<Reques
     if (error.code === 'ENOENT' || error.code === 'ENOTDIR') {
       return undefined;
     }
+
     throw error;
   });
   if (!index) {
@@ -98,12 +99,14 @@ export async function createWebClient(options: WebClientOptions): Promise<Reques
       if (error) {
         return next(error);
       }
+
       // A path the build lacks is the page to a browser and a 404 to anything
       // else, so the answer depends on Accept either way.
       res.vary('Accept');
       if (!isPageNavigation(req)) {
         return next();
       }
+
       setClientHeaders(res, entityTags.get(indexPath));
       res.type('html').send(index);
     });
@@ -120,6 +123,7 @@ function setClientHeaders(res: ServerResponse, entityTag: string | undefined): v
   if (entityTag) {
     res.setHeader('ETag', entityTag);
   }
+
   clientPolicy(res.req, res, () => undefined);
 }
 
@@ -185,8 +189,10 @@ function serverPathMatcher(routes: readonly string[]): (path: string) => boolean
           if (/[*:{(]/.test(segment)) {
             break;
           }
+
           literal.push(segment.toLowerCase());
         }
+
         return `/${literal.join('/')}`;
       }),
     ),

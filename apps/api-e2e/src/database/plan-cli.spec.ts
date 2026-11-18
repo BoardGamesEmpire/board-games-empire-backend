@@ -180,6 +180,7 @@ describe('db:plan against Postgres', () => {
     if (last === undefined) {
       throw new Error('the migration manifest is empty');
     }
+
     const [row] = await db.client.$queryRawUnsafe<Array<{ finished_at: Date }>>(
       'SELECT finished_at FROM _prisma_migrations WHERE migration_name = $1',
       last,
@@ -187,6 +188,7 @@ describe('db:plan against Postgres', () => {
     if (row === undefined) {
       throw new Error(`the harness database has no row for ${last}`);
     }
+
     // Marked rolled back, as `prisma migrate resolve --rolled-back` marks a
     // failed migration for `migrate deploy` to retry; the classifier reads
     // that as pending. Restored exactly, as the harness database is shared.

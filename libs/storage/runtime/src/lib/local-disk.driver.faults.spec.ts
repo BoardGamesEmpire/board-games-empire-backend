@@ -250,6 +250,7 @@ describe('LocalDiskDriver mount check — auto', () => {
       if (p === ROOT) {
         return dirStats(10);
       }
+
       throw errno('EACCES'); // parent (/srv) unreadable
     });
     const driver = makeDriver({ mountCheck: 'auto' });
@@ -274,6 +275,7 @@ describe('LocalDiskDriver mount check — sentinel', () => {
       if (p === ROOT) {
         return dirStats(1);
       }
+
       throw errno('ENOENT'); // sentinel absent
     });
     expect(() => makeDriver({ mountCheck: 'sentinel' })).toThrow(StorageMisconfiguredError);
@@ -284,6 +286,7 @@ describe('LocalDiskDriver mount check — sentinel', () => {
       if (p === ROOT) {
         return dirStats(1);
       }
+
       throw errno('ENOENT');
     });
     expect(() => makeDriver({ mountCheck: 'sentinel' })).toThrow(`touch ${SENTINEL}`);
@@ -302,6 +305,7 @@ describe('LocalDiskDriver mount check — sentinel', () => {
       if (p === ROOT) {
         return dirStats(1);
       }
+
       throw errno('EACCES'); // sentinel present but unreadable
     });
     const err = (() => {

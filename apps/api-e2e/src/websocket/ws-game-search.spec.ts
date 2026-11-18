@@ -98,16 +98,19 @@ describe('game search over WebSocket', () => {
           ids.push(...(frame.games ?? []).map((hit) => hit.gameId ?? '<a local hit with no gameId>'));
         }
       };
+
       const onError = (frame: SearchFrame) => {
         if (ours(frame)) {
           fail(`search:error for the search: ${JSON.stringify(frame)}`);
         }
       };
+
       const onRefused = (payload: WsErrorPayload) => {
         if (ours(payload)) {
           fail(`Frame refused: ${JSON.stringify(payload)}`);
         }
       };
+
       const onConnectError = (error: Error) => fail(`Connection refused: ${error.message}`);
       const onDone = (frame: SearchFrame) => {
         if (ours(frame)) {
@@ -125,10 +128,12 @@ describe('game search over WebSocket', () => {
         socket.off('connect_error', onConnectError);
         socket.off('search:done', onDone);
       };
+
       const fail = (message: string) => {
         settle();
         reject(new Error(message));
       };
+
       const timer = setTimeout(
         () => fail(`No search:done within ${SEARCH_TIMEOUT_MS}ms; received [${received.join(', ')}]`),
         SEARCH_TIMEOUT_MS,

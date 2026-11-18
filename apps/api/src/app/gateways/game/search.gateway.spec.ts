@@ -1157,6 +1157,7 @@ function makeResultFrame(overrides: Partial<SearchGameResult> = {}): SearchGameR
     ...overrides,
   };
 }
+
 /**
  * A SOURCE_DONE sentinel that terminates a gateway stream
  */

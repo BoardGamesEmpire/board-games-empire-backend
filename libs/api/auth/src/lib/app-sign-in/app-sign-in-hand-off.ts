@@ -88,6 +88,7 @@ export async function handOffAppSignIn(handOff: AppSignInHandOff): Promise<strin
   if (handOff.responseHeaders !== undefined) {
     withoutSessionCredentials(handOff.responseHeaders, handOff.credentialCookies);
   }
+
   handOff.forgetNewSession();
 
   try {
@@ -104,6 +105,7 @@ export async function handOffAppSignIn(handOff: AppSignInHandOff): Promise<strin
       handOff.logger.error('Could not read the flow of an app sign-in', error);
       return handOff.errorPage(APP_SIGN_IN_UNAVAILABLE);
     }
+
     if (flow === null) {
       return handOff.errorPage(APP_SIGN_IN_FLOW_INVALID);
     }

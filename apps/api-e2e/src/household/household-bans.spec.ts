@@ -305,6 +305,7 @@ describe('household bans (#782)', () => {
     for (const target of [h.member, h.guest, stranger]) {
       await banUser(h.admin, h.householdId, { userId: target.user.id }).expect(201);
     }
+
     await expect(membership(h.householdId, h.member.user.id)).resolves.toBeNull();
     await expect(membership(h.householdId, h.guest.user.id)).resolves.toBeNull();
 

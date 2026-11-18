@@ -205,24 +205,31 @@ const artifactDownloadError = (err: unknown): unknown => {
   if (unresolvable(err)) {
     return new PluginArtifactDownloadFailedError('unreachable', null, options);
   }
+
   if (err instanceof InvalidRequestUrlError) {
     return new PluginArtifactLinkRefusedError('invalid-link', options);
   }
+
   if (err instanceof SsrfRejectionError) {
     return new PluginArtifactLinkRefusedError('blocked-by-policy', options);
   }
+
   if (err instanceof RedirectToDisallowedTargetError) {
     return new PluginArtifactLinkRefusedError('redirect-blocked', options);
   }
+
   if (err instanceof RedirectLimitExceededError) {
     return new PluginArtifactLinkRefusedError('too-many-redirects', options);
   }
+
   if (err instanceof RequestTimeoutError) {
     return new PluginArtifactDownloadFailedError('timeout', null, options);
   }
+
   if (err instanceof OutboundNetworkError) {
     return new PluginArtifactDownloadFailedError('unreachable', null, options);
   }
+
   if (err instanceof ResponseTooLargeError) {
     return new PluginArtifactTooLargeError(err.limitBytes, options);
   }
@@ -506,6 +513,7 @@ export class PluginArtifactReceiver {
       if (!(value instanceof Error)) {
         return 'a non-error value';
       }
+
       const { code, reason } = value as { code?: unknown; reason?: unknown };
       const details = [
         typeof code === 'string' ? `code ${code}` : null,
@@ -513,6 +521,7 @@ export class PluginArtifactReceiver {
       ].filter((detail) => detail !== null);
       return details.length > 0 ? `${value.name} (${details.join(', ')})` : value.name;
     };
+
     const inner = cause instanceof Error && cause.cause !== undefined ? `, caused by ${named(cause.cause)}` : '';
     const hasUpstreamStatus = mapped instanceof PluginArtifactDownloadFailedError && mapped.upstreamStatus !== null;
     const detail =

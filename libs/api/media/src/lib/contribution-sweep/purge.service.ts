@@ -51,6 +51,7 @@ export class MediaContributionPurgeService {
       if (isPrismaDependentRecordNotFoundError(error)) {
         return false; // another runner won the race — don't notify twice
       }
+
       throw error;
     }
   }

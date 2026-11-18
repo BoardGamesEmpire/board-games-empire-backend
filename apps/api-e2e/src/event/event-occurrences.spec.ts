@@ -222,6 +222,7 @@ describe('event occurrences', () => {
     do {
       addedIds.push(await directAddedGameId(host, eventId, occurrence.id));
     } while (inIdOrder(addedIds) && addedIds.length < 12);
+
     expect(inIdOrder(addedIds)).toBe(false);
 
     // The ids are lowercase letters and digits of one length, so the

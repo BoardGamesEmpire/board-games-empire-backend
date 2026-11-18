@@ -80,6 +80,7 @@ describe('the entry check probe against Postgres', () => {
         for (const permission of PERMISSION_CATALOG) {
           found.push(...(await probeConditions(tx, permission)));
         }
+
         return found;
       },
       { timeout: 60_000 },
