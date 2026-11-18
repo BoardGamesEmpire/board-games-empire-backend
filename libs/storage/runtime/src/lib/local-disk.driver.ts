@@ -25,17 +25,27 @@ import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import { z } from 'zod';
 import { MediaUrlSigner } from './media-url-signer.js';
 import type { MediaConfig, MountCheckMode } from './media.config.js';
 
 const SIDECAR_SUFFIX = '.meta.json';
 
-interface Sidecar {
-  readonly checksum: string;
-  readonly contentType: string;
-  readonly etag: string;
-  readonly originalName?: string;
-}
+/**
+ * The metadata sidecar beside each object. It is a file on disk, so it is data
+ * from outside the process: a hand edit or a partial restore can leave it in
+ * any shape, and `readSidecar` parses it rather than trusting it (#1322).
+ */
+const sidecarSchema = z
+  .object({
+    checksum: z.string(),
+    contentType: z.string(),
+    etag: z.string(),
+    originalName: z.string().optional(),
+  })
+  .readonly();
+
+type Sidecar = z.infer<typeof sidecarSchema>;
 
 /** Effective mount-check strategy after `auto` has been resolved at construction. */
 type ResolvedMountCheck = 'st_dev' | 'sentinel' | 'off';
@@ -310,8 +320,9 @@ export class LocalDiskDriver implements StorageDriver {
   }
 
   private async readSidecar(key: string, filePath: string): Promise<Sidecar> {
+    let text: string;
     try {
-      return JSON.parse(await readFile(this.sidecarPath(filePath), 'utf8')) as Sidecar;
+      text = await readFile(this.sidecarPath(filePath), 'utf8');
     } catch (error) {
       if (isENOENT(error)) {
         throw await this.classifyEnoent(error, key);
@@ -319,6 +330,35 @@ export class LocalDiskDriver implements StorageDriver {
 
       throw this.classify(error, key) ?? error;
     }
+
+    return this.parseSidecar(key, text);
+  }
+
+  /**
+   * A sidecar that isn't JSON, or doesn't match the schema, is a storage fault
+   * the operator has to repair, so it is reported as unavailable and not
+   * retryable, naming the file to fix (#1322).
+   */
+  private parseSidecar(key: string, text: string): Sidecar {
+    const malformed = (cause: unknown) =>
+      new StorageUnavailableError(`Metadata sidecar '${key}${SIDECAR_SUFFIX}' is malformed`, {
+        retryable: false,
+        cause,
+      });
+
+    let json: unknown;
+    try {
+      json = JSON.parse(text);
+    } catch (error) {
+      throw malformed(error);
+    }
+
+    const parsed = sidecarSchema.safeParse(json);
+    if (!parsed.success) {
+      throw malformed(parsed.error);
+    }
+
+    return parsed.data;
   }
 
   /**

@@ -1,4 +1,8 @@
-import { InvalidObjectKeyError, StorageMisconfiguredError } from '@boardgamesempire/storage-contract';
+import {
+  InvalidObjectKeyError,
+  StorageMisconfiguredError,
+  StorageUnavailableError,
+} from '@boardgamesempire/storage-contract';
 import { runStorageDriverContract } from '@boardgamesempire/storage-contract-testing';
 import type { ConfigService } from '@nestjs/config';
 import { Buffer } from 'node:buffer';
@@ -121,6 +125,26 @@ describe('LocalDiskDriver', () => {
       const head = await driver.head('media/b.json');
       expect(head.contentType).toBe('application/json');
       expect(head.checksum).toMatch(/^[0-9a-f]{64}$/);
+    });
+
+    // The sidecar is a file on disk, outside the process, so a hand-edited or
+    // half-restored one is parsed rather than trusted; a bad one is a storage
+    // fault that names the file to fix, not a stray TypeError (#1322).
+    it.each([
+      ['fails the schema', '{"contentType":1}'],
+      ['is not JSON', '{not json'],
+    ])('reports a malformed sidecar as unavailable, naming the file (#1322): sidecar %s', async (_case, sidecar) => {
+      await driver.put('media/c.png', Buffer.from('x'), { contentType: 'image/png' });
+      await writeFile(join(root, 'media/c.png.meta.json'), sidecar, 'utf8');
+
+      const error = await driver.head('media/c.png').then(
+        () => undefined,
+        (rejection: unknown) => rejection,
+      );
+
+      expect(error).toBeInstanceOf(StorageUnavailableError);
+      expect((error as StorageUnavailableError).retryable).toBe(false);
+      expect((error as StorageUnavailableError).message).toContain('media/c.png.meta.json');
     });
 
     it.each(['../escape.txt', 'a/../escape.txt', 'a/./b.txt', 'a//b.txt', 'a\\..\\b.txt', '/abs.txt', ''])(
