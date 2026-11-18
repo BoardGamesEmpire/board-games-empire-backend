@@ -46,9 +46,9 @@ export class CoordinatorService {
   ) {}
 
   async connectGateway(request: proto.ConnectGatewayRequest): Promise<proto.ConnectGatewayResponse> {
-    const authType = request.authType as AuthType;
+    const authType = Object.values(AuthType).find((each) => each === request.authType);
 
-    if (!Object.values(AuthType).includes(authType)) {
+    if (authType === undefined) {
       return { success: false, error: `Unknown auth type: '${request.authType}'` };
     }
 
@@ -60,6 +60,7 @@ export class CoordinatorService {
         connectionUrl: request.connectionUrl,
         connectionPort: request.connectionPort,
         authType,
+        // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- JSON.parse yields only JSON values, which the schema's z.unknown() doesn't carry into the type (#1321)
         authParameters: authParameters as Prisma.JsonValue,
       });
 
