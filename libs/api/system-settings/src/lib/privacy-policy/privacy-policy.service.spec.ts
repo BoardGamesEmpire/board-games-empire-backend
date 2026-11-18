@@ -72,9 +72,16 @@ describe('PrivacyPolicyService (#934)', () => {
     texts = new Map(files.map((text) => [text.language, text]));
   }
 
-  /** The server admins' rows in the database. */
+  /**
+   * The server admins' rows in the database: listed whole by `findMany`, and
+   * found one at a time by language with `findFirst`.
+   */
   function givenRows(...rows: ReturnType<typeof row>[]): void {
     db.privacyPolicy.findMany.mockResolvedValue(rows as never);
+    db.privacyPolicy.findFirst.mockImplementation(((args: { where: { languageTag: { tag: string } } }) =>
+      Promise.resolve(
+        rows.find(({ languageTag }) => languageTag.tag === args.where.languageTag.tag) ?? null,
+      )) as never);
   }
 
   /**
@@ -147,6 +154,52 @@ describe('PrivacyPolicyService (#934)', () => {
       markdown: '# de row\n',
       source: 'operator',
       updatedAt: '2026-12-01T10:20:30.000Z',
+    });
+  });
+
+  // Anyone can read the policy, so a read lists the rows by language alone and
+  // fetches the Markdown of the one row it serves, not every row's.
+  it("reads the Markdown of the served language's row only", async () => {
+    givenFiles(file('en'));
+    givenRows(row('de'), row('fr'), row('pt-BR'));
+
+    await service.read({ lang: 'fr' });
+
+    expect(db.privacyPolicy.findMany).toHaveBeenCalledWith({ select: { languageTag: { select: { tag: true } } } });
+    expect(db.privacyPolicy.findFirst).toHaveBeenCalledTimes(1);
+    expect(db.privacyPolicy.findFirst).toHaveBeenCalledWith({
+      where: { languageTag: { tag: 'fr' } },
+      select: { markdown: true, updatedAt: true },
+    });
+  });
+
+  it('reads no row when the served language has none', async () => {
+    givenFiles(file('en'), file('de'));
+    givenRows(row('fr'));
+
+    await service.read({ lang: 'de' });
+
+    expect(db.privacyPolicy.findFirst).not.toHaveBeenCalled();
+  });
+
+  // A server admin may remove the row between the listing and the row's read.
+  it('serves the file when the row is removed between the two reads', async () => {
+    givenFiles(file('en'), file('de'));
+    givenRows(row('de'));
+    db.privacyPolicy.findFirst.mockResolvedValueOnce(null);
+
+    await expect(service.read({ lang: 'de' })).resolves.toMatchObject({ language: 'de', markdown: '# de file\n' });
+  });
+
+  it('chooses again when the removed row was the only text in its language', async () => {
+    givenFiles(file('en'));
+    db.privacyPolicy.findMany.mockResolvedValueOnce([row('pt-BR')] as never).mockResolvedValue([] as never);
+    db.privacyPolicy.findFirst.mockResolvedValue(null);
+
+    await expect(service.read({ lang: 'pt-BR' })).resolves.toMatchObject({
+      availableLanguages: ['en'],
+      language: 'en',
+      markdown: '# en file\n',
     });
   });
 
@@ -252,7 +305,7 @@ describe('PrivacyPolicyService (#934)', () => {
     // Multilingual Plane once, and the sanitizer's bound counts it twice, so
     // this passes the DTO. Stored, the sanitizer would keep it as plain text
     // and flatten its headings and lists.
-    it('refuses Markdown past the limit in UTF-16 code units, which the request validation lets through', async () => {
+    it('refuses Markdown past the limit in UTF-16 code units, emoji counting as two', async () => {
       const markdown = '\u{1F600}'.repeat(PRIVACY_POLICY_MAX_LENGTH / 2 + 1);
 
       await expect(service.put('de', markdown)).rejects.toMatchObject(

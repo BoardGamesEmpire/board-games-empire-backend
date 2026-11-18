@@ -12,7 +12,12 @@
 export { I18N_CATALOG_DIR } from './lib/catalog';
 // The standard privacy policy sits with the catalogs, so translators work in one
 // place, and ships to a directory of its own (#934).
-export { PRIVACY_POLICY_DIR, STANDARD_PRIVACY_POLICY_HASHES } from './lib/privacy-policy';
+export {
+  PRIVACY_POLICY_DIR,
+  isStandardPrivacyPolicy,
+  readPolicyFile,
+  type PolicyFileContents,
+} from './lib/privacy-policy';
 // Generated from the `en` catalog by the nestjs-i18n CLI, and NOT committed (#260).
 // Nx produces it as a dependency of `typecheck` (this project's own, plus the
 // `^generate` default in nx.json for everything downstream) and of every app's

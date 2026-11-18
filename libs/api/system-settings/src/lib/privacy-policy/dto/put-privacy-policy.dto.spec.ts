@@ -14,32 +14,19 @@ const keysFor = async (plain: Record<string, unknown>) =>
   );
 
 /**
- * #934. The cap applies before the Markdown is sanitized: the sanitizer keeps
- * longer Markdown as plain text, which would flatten the headings and lists a
- * screen reader moves by.
+ * #934. The length is not the request validation's to check: class-validator
+ * counts code points, the limit counts UTF-16 code units, and one rule would be
+ * refused in two shapes. The service refuses it, with PRIVACY_POLICY_TOO_LONG.
  */
 describe('PutPrivacyPolicyDto', () => {
-  it('accepts Markdown at the limit', async () => {
-    expect(await keysFor({ markdown: 'a'.repeat(PRIVACY_POLICY_MAX_LENGTH) })).toEqual({});
+  it('leaves the length to the service, whether past the limit in code points or in UTF-16 code units', async () => {
+    const pastInCodePoints = 'a'.repeat(PRIVACY_POLICY_MAX_LENGTH + 1);
+    const pastInCodeUnits = '\u{1F600}'.repeat(PRIVACY_POLICY_MAX_LENGTH / 2 + 1);
+
+    expect(await keysFor({ markdown: pastInCodePoints })).toEqual({});
+    expect(await keysFor({ markdown: pastInCodeUnits })).toEqual({});
   });
 
-  it('refuses Markdown one character past the limit, with the maxLength message', async () => {
-    expect(await keysFor({ markdown: 'a'.repeat(PRIVACY_POLICY_MAX_LENGTH + 1) })).toEqual({
-      'markdown.maxLength': 'validation.maxLength',
-    });
-  });
-
-  // The validator counts a character outside the Basic Multilingual Plane
-  // once, though it is two UTF-16 code units, so this passes; the service
-  // refuses it with PRIVACY_POLICY_TOO_LONG before it is sanitized.
-  it('lets through Markdown within the limit in characters but past it in UTF-16 code units', async () => {
-    const markdown = '\u{1F600}'.repeat(PRIVACY_POLICY_MAX_LENGTH / 2 + 1);
-
-    expect(markdown.length).toBeGreaterThan(PRIVACY_POLICY_MAX_LENGTH);
-    expect(await keysFor({ markdown })).toEqual({});
-  });
-
-  // A missing value fails every constraint on the field, maxLength included.
   it('refuses a body with no markdown', async () => {
     expect(await keysFor({})).toMatchObject({ 'markdown.isString': 'validation.isString' });
   });

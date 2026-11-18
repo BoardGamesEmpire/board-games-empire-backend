@@ -20,6 +20,19 @@ const FALLBACK_FILE = `${FALLBACK_LOCALE}${POLICY_FILE_EXTENSION}`;
 /** How the boot errors start. They go to the log, so they're English only. */
 const NEEDS_FALLBACK = `The server needs a privacy policy in ${displayName(FALLBACK_LOCALE) ?? FALLBACK_LOCALE}`;
 
+/**
+ * An entry that names the fallback language's file and can't be used. It
+ * fails the boot only when no other entry gives the policy in that language.
+ */
+interface FallbackProblem {
+  cause?: unknown;
+
+  /** What is wrong with it, following "<name> in <directory>". */
+  detail: string;
+
+  name: string;
+}
+
 /** What each problem means, for the log. */
 const PROBLEMS: Readonly<Record<PolicyFileProblem['problem'], string>> = {
   empty: 'nothing is left of its text once unsafe content is removed',
@@ -35,10 +48,12 @@ const PROBLEMS: Readonly<Record<PolicyFileProblem['problem'], string>> = {
  * mount their own files over the standard privacy policy. A change to the
  * files applies on restart.
  *
- * The boot fails when the fallback language's file is missing or can't be
- * used. Any other file that can't be used is logged and skipped, so one
- * mistake in a second language doesn't stop the server, and readers of that
- * language get another until it's fixed.
+ * The boot fails when there is no usable file in the fallback language. Any
+ * other file that can't be used is logged and skipped, so one mistake in a
+ * second language doesn't stop the server, and readers of that language get
+ * another until it's fixed. So is an unusable alias of the fallback's file
+ * (`EN.md`, `eng.md`) beside a usable one: which of them sorts first must not
+ * decide whether the server starts.
  *
  * Entries whose names start with a dot, and directories, are skipped without
  * a word, and symlinks are followed: a Kubernetes ConfigMap mounts each file
@@ -65,9 +80,10 @@ export class PrivacyPolicyFilesService implements OnModuleInit {
   async onModuleInit(): Promise<void> {
     const texts = new Map<string, PolicyText>();
     const files = new Map<string, string>();
+    const fallbackProblems: FallbackProblem[] = [];
 
     for (const name of await this.entries()) {
-      const text = await this.read(name);
+      const text = await this.read(name, fallbackProblems);
       if (!text) {
         continue;
       }
@@ -84,10 +100,25 @@ export class PrivacyPolicyFilesService implements OnModuleInit {
       files.set(text.language, name);
     }
 
-    if (!texts.has(FALLBACK_LOCALE)) {
+    const fallback = files.get(FALLBACK_LOCALE);
+    if (fallback === undefined) {
+      const [problem] = fallbackProblems;
+      if (problem) {
+        throw new Error(
+          `${NEEDS_FALLBACK}, but ${problem.name} in ${this.dir} ${problem.detail}.`,
+          problem.cause === undefined ? undefined : { cause: problem.cause },
+        );
+      }
+
       throw new Error(
         `${NEEDS_FALLBACK}, but there is no ${FALLBACK_FILE} in ${this.dir}. ` +
           'Put the standard privacy policy back, or write your own.',
+      );
+    }
+
+    for (const { name, detail } of fallbackProblems) {
+      this.logger.warn(
+        `Skipped the privacy policy entry ${name}, which ${detail}. ${fallback} gives the policy in ${FALLBACK_LOCALE}.`,
       );
     }
 
@@ -107,8 +138,12 @@ export class PrivacyPolicyFilesService implements OnModuleInit {
     }
   }
 
-  /** One entry's text, or undefined for an entry that is skipped. */
-  private async read(name: string): Promise<PolicyText | undefined> {
+  /**
+   * One entry's text, or undefined for an entry that is skipped. An unusable
+   * entry naming the fallback's file goes into `fallbackProblems` instead of
+   * the log.
+   */
+  private async read(name: string, fallbackProblems: FallbackProblem[]): Promise<PolicyText | undefined> {
     if (name.startsWith('.')) {
       return undefined;
     }
@@ -117,17 +152,18 @@ export class PrivacyPolicyFilesService implements OnModuleInit {
     try {
       entry = await this.readEntry(name);
     } catch (error) {
-      return this.unusable(name, `(unreadable): ${error instanceof Error ? error.message : String(error)}`, error);
+      const reason = `(unreadable): ${error instanceof Error ? error.message : String(error)}`;
+      return this.unusable(fallbackProblems, name, reason, error);
     }
 
     if (entry === 'not-a-file') {
       // A directory is skipped without a word, except where the fallback's
       // file belongs: a bind mount makes one there when its file is missing.
       if (isFallbackFile(name)) {
-        throw new Error(
-          `${NEEDS_FALLBACK}, but ${name} in ${this.dir} is not a file. A bind mount makes a directory ` +
-            'where the file it names is missing on the host.',
-        );
+        fallbackProblems.push({
+          detail: 'is not a file. A bind mount makes a directory where the file it names is missing on the host',
+          name,
+        });
       }
 
       return undefined;
@@ -143,7 +179,7 @@ export class PrivacyPolicyFilesService implements OnModuleInit {
 
     const parsed = parsePolicyFile(name, entry);
     if ('problem' in parsed) {
-      return this.unusable(name, `(${parsed.problem}): ${PROBLEMS[parsed.problem]}`);
+      return this.unusable(fallbackProblems, name, `(${parsed.problem}): ${PROBLEMS[parsed.problem]}`);
     }
 
     return parsed;
@@ -164,13 +200,15 @@ export class PrivacyPolicyFilesService implements OnModuleInit {
     return readFile(file);
   }
 
-  /** Fails the boot for the fallback language's policy file, and skips any other entry with a warning. */
-  private unusable(name: string, reason: string, cause?: unknown): undefined {
+  /**
+   * Skips an entry that can't be used: one naming the fallback's file goes into
+   * `fallbackProblems`, decided once every entry is read, and any other is
+   * logged.
+   */
+  private unusable(fallbackProblems: FallbackProblem[], name: string, reason: string, cause?: unknown): undefined {
     if (isFallbackFile(name)) {
-      throw new Error(
-        `${NEEDS_FALLBACK}, but ${name} in ${this.dir} can't be used ${reason}.`,
-        cause === undefined ? undefined : { cause },
-      );
+      fallbackProblems.push({ cause, detail: `can't be used ${reason}`, name });
+      return undefined;
     }
 
     this.logger.warn(`Skipped the privacy policy file ${name} ${reason}. Fix it and restart the server to serve it.`);

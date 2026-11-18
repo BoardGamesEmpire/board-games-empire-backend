@@ -60,14 +60,32 @@ export class PrivacyPolicyService {
    * together: `lang` first, then `Accept-Language` in its order of preference,
    * then English. A regional tag matches its base language, and anything that
    * isn't a language tag matches nothing, so the read never fails on it.
+   *
+   * Anyone can read it, so a read fetches the Markdown of one row at most: the
+   * rows' languages decide which language is served, then that language's row,
+   * if it has one, is read.
    */
-  async read({ acceptLanguage, lang }: PrivacyPolicyLanguageRequest): Promise<PrivacyPolicyDto> {
-    const rows = await this.operatorTexts();
-    const available = this.availableLanguages(rows.keys());
-    const preferred = parseAcceptLanguage(acceptLanguage);
-    const language = lookupTag(lang ? [lang, ...preferred] : preferred, available) ?? FALLBACK_LOCALE;
+  async read(request: PrivacyPolicyLanguageRequest): Promise<PrivacyPolicyDto> {
+    const rowLanguages = await this.rowLanguages(this.db);
+    const available = this.availableLanguages(rowLanguages);
+    const preferred = parseAcceptLanguage(request.acceptLanguage);
+    const language = lookupTag(request.lang ? [request.lang, ...preferred] : preferred, available) ?? FALLBACK_LOCALE;
 
-    return toDto(this.text(rows, language), available);
+    const row = rowLanguages.includes(language) ? await this.rowText(language) : null;
+    const text = row ?? this.files.get(language);
+    if (text) {
+      return toDto(text, available);
+    }
+
+    // The row was removed between the two reads, and no file gives the
+    // language, so it is no longer available: choose again.
+    if (rowLanguages.includes(language)) {
+      return this.read(request);
+    }
+
+    // Every available language has a row or a file, and the boot fails
+    // without the fallback language's file, so this is a wiring fault.
+    throw new Error(`There is no privacy policy in ${language}: the privacy policy files were not loaded.`);
   }
 
   /**
@@ -77,10 +95,10 @@ export class PrivacyPolicyService {
    * The Markdown is kept as a policy file's body is
    * ({@link sanitizePolicyMarkdown}). Longer than
    * {@link PRIVACY_POLICY_MAX_LENGTH} UTF-16 code units, it is refused with
-   * 400 `PRIVACY_POLICY_TOO_LONG` before it is sanitized. The request's
-   * validation can't be relied on for that: it counts a character outside the
-   * Basic Multilingual Plane once, not twice, so it lets some such text
-   * through. With nothing but whitespace left once sanitized, it is refused
+   * 400 `PRIVACY_POLICY_TOO_LONG` before it is sanitized. This is the only
+   * check of the length: the request's validation would count a character
+   * outside the Basic Multilingual Plane once, not twice, and refuse the same
+   * rule in a second shape. With nothing but whitespace left once sanitized, it is refused
    * with 400 `PRIVACY_POLICY_EMPTY`. The language tag is canonicalized, so
    * `EN-us` names `en-US`, and must be one the server knows, or the answer is
    * 404 `PRIVACY_POLICY_LANGUAGE_TAG_NOT_FOUND`. It need not be a language the
@@ -113,7 +131,7 @@ export class PrivacyPolicyService {
     }
 
     const initiatedAt = new Date();
-    const { before, changed, current, rowLanguages } = await this.db.$transaction(async (tx) => {
+    const write = await this.db.$transaction(async (tx) => {
       const languageTagId = await lockLanguageTag(tx, tag);
       if (languageTagId === null) {
         throw unknownLanguage();
@@ -123,7 +141,7 @@ export class PrivacyPolicyService {
       // Writing the same text again would move the row's date, `@updatedAt`,
       // and tell readers the policy changed when nothing they read did.
       if (stored !== null && stored.markdown === sanitized) {
-        return { before: stored, changed: false, current: stored, rowLanguages: await this.rowLanguages(tx) };
+        return { changed: false as const, current: stored, rowLanguages: await this.rowLanguages(tx) };
       }
 
       const written = await tx.privacyPolicy.upsert({
@@ -134,19 +152,20 @@ export class PrivacyPolicyService {
       });
 
       // Read after the write, so a first write lists its own language.
-      return { before: stored, changed: true, current: written, rowLanguages: await this.rowLanguages(tx) };
+      return { before: stored, changed: true as const, current: written, rowLanguages: await this.rowLanguages(tx) };
     });
 
-    if (changed) {
+    if (write.changed) {
       this.eventEmitter.emit(
         PrivacyPolicyReplacedEvent.eventName,
-        new PrivacyPolicyReplacedEvent(before, current, initiatedAt),
+        new PrivacyPolicyReplacedEvent(write.before, write.current, initiatedAt),
       );
     }
 
+    const { current } = write;
     return toDto(
       { language: tag, markdown: current.markdown, source: 'operator', updatedAt: current.updatedAt },
-      this.availableLanguages(rowLanguages),
+      this.availableLanguages(write.rowLanguages),
     );
   }
 
@@ -196,45 +215,26 @@ export class PrivacyPolicyService {
     this.eventEmitter.emit(PrivacyPolicyRemovedEvent.eventName, new PrivacyPolicyRemovedEvent(removed, initiatedAt));
   }
 
-  /**
-   * The server admins' rows, as policy texts by language tag. The table holds
-   * at most one row per language, so it stays small enough to read whole.
-   */
-  private async operatorTexts(): Promise<ReadonlyMap<string, PolicyText>> {
-    const rows = await this.db.privacyPolicy.findMany({
-      select: { markdown: true, updatedAt: true, languageTag: { select: { tag: true } } },
-    });
-
-    return new Map<string, PolicyText>(
-      rows.map(({ languageTag: { tag }, markdown, updatedAt }) => [
-        tag,
-        { language: tag, markdown, source: 'operator', updatedAt },
-      ]),
-    );
-  }
-
-  /** The languages the server admins' rows are in, as `client` reads them. */
+  /** The languages the server admins' rows are in, as `client` reads them: a read's, or a write's transaction. */
   private async rowLanguages(client: Prisma.TransactionClient): Promise<string[]> {
     const rows = await client.privacyPolicy.findMany({ select: { languageTag: { select: { tag: true } } } });
 
     return rows.map(({ languageTag: { tag } }) => tag);
   }
 
+  /** The server admin's row in a language, as a policy text, or null when there is none. */
+  private async rowText(language: string): Promise<PolicyText | null> {
+    const row = await this.db.privacyPolicy.findFirst({
+      where: { languageTag: { tag: language } },
+      select: { markdown: true, updatedAt: true },
+    });
+
+    return row && { language, markdown: row.markdown, source: 'operator', updatedAt: row.updatedAt };
+  }
+
   /** Every language the policy can be read in, from rows and files, once each and sorted. */
   private availableLanguages(rowLanguages: Iterable<string>): string[] {
     return [...new Set([...rowLanguages, ...this.files.languages()])].sort();
-  }
-
-  /** The text in a language: the row if there is one, otherwise the file. */
-  private text(rows: ReadonlyMap<string, PolicyText>, language: string): PolicyText {
-    const text = rows.get(language) ?? this.files.get(language);
-    // Every available language has a row or a file, and the boot fails
-    // without the fallback language's file, so this is a wiring fault.
-    if (!text) {
-      throw new Error(`There is no privacy policy in ${language}: the privacy policy files were not loaded.`);
-    }
-
-    return text;
   }
 }
 

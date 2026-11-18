@@ -1,16 +1,7 @@
-import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import * as path from 'node:path';
-import { PRIVACY_POLICY_DIR, STANDARD_PRIVACY_POLICY_HASHES } from './privacy-policy';
-
-/** A byte order mark, which an editor may put at the start of a file. */
-const BOM = String.fromCodePoint(0xfeff);
-
-/**
- * The front matter every policy file starts with (#934): after an optional
- * BOM, only the date the text last changed. CRLF reads as LF.
- */
-const FRONT_MATTER = new RegExp(`^${BOM}?---\\r?\\nupdated: (\\d{4}-\\d{2}-\\d{2})\\r?\\n---\\r?\\n`);
+import type { PolicyFileContents } from './privacy-policy';
+import { PRIVACY_POLICY_DIR, readPolicyFile, STANDARD_PRIVACY_POLICY_HASHES } from './privacy-policy';
 
 /**
  * What would tell an attacker about the server's insides: addresses, ports and
@@ -46,33 +37,21 @@ const REVEALING_WORDS = [
   'column',
 ];
 
-interface ShippedText {
-  body: string;
-  bytes: Buffer;
+interface ShippedText extends PolicyFileContents {
   language: string;
-  updated: string;
 }
 
-const sha256 = (bytes: Buffer): string => createHash('sha256').update(bytes).digest('hex');
-
-/** Every policy file in the directory, with its front matter read and the body after it. */
+/** Every policy file in the directory, read as the server reads it. */
 function shippedTexts(): ShippedText[] {
   return readdirSync(PRIVACY_POLICY_DIR)
     .filter((name) => name.endsWith('.md'))
     .map((name) => {
-      const bytes = readFileSync(path.join(PRIVACY_POLICY_DIR, name));
-      const text = bytes.toString('utf8');
-      const frontMatter = FRONT_MATTER.exec(text);
-      if (!frontMatter?.[1]) {
+      const file = readPolicyFile(readFileSync(path.join(PRIVACY_POLICY_DIR, name)));
+      if (!file) {
         throw new Error(`${name} does not start with the front matter "---\\nupdated: YYYY-MM-DD\\n---\\n"`);
       }
 
-      return {
-        body: text.slice(frontMatter[0].length),
-        bytes,
-        language: path.basename(name, '.md'),
-        updated: frontMatter[1],
-      };
+      return { ...file, language: path.basename(name, '.md') };
     });
 }
 
@@ -82,11 +61,11 @@ function shippedTexts(): ShippedText[] {
 describe('the standard privacy policy (#934)', () => {
   it('pins every shipped standard text to the date in its front matter', () => {
     const unpinned = shippedTexts()
-      .filter(({ bytes, language, updated }) => STANDARD_PRIVACY_POLICY_HASHES[language]?.[updated] !== sha256(bytes))
+      .filter(({ hash, language, updated }) => STANDARD_PRIVACY_POLICY_HASHES[language]?.[updated] !== hash)
       .map(
-        ({ bytes, language, updated }) =>
+        ({ hash, language, updated }) =>
           `${language}.md (updated ${updated}) is not pinned: when its text changes, move "updated" to today ` +
-          `and add today's date to STANDARD_PRIVACY_POLICY_HASHES.${language} with the hash ${sha256(bytes)}. ` +
+          `and add today's date to STANDARD_PRIVACY_POLICY_HASHES.${language} with the hash ${hash}. ` +
           'Add a new date entry; never edit an older one.',
       );
 
@@ -115,5 +94,26 @@ describe('the standard privacy policy (#934)', () => {
     );
 
     expect(found).toEqual([]);
+  });
+});
+
+describe('readPolicyFile (#934)', () => {
+  const lf = '---\nupdated: 2026-11-18\n---\n\n# Privacy\n\nText.\n';
+
+  it('reads the date, and the body below the blank lines after the front matter', () => {
+    expect(readPolicyFile(Buffer.from(lf))).toMatchObject({ updated: '2026-11-18', body: '# Privacy\n\nText.\n' });
+  });
+
+  it('answers null for a file without the front matter', () => {
+    expect(readPolicyFile(Buffer.from('# Privacy\n'))).toBeNull();
+  });
+
+  // A standard text checked out with CRLF line endings (`core.autocrlf`), or
+  // saved unchanged by an editor that writes them or a byte order mark, is
+  // still the standard text, so its hash must not move.
+  it('reads a byte order mark and CRLF line endings as a Unix editor would save the file, hash included', () => {
+    const windows = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(lf.replaceAll('\n', '\r\n'))]);
+
+    expect(readPolicyFile(windows)).toEqual(readPolicyFile(Buffer.from(lf)));
   });
 });

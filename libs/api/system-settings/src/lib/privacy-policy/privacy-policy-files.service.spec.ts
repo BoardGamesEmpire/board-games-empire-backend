@@ -64,6 +64,27 @@ describe('PrivacyPolicyFilesService (#934)', () => {
     );
   });
 
+  // `eng` canonicalizes to `en`, so eng.md names the fallback's file too. Which
+  // of two such files sorts first must not decide whether the server starts:
+  // with one usable, the other is skipped with a warning. On Linux, `EN.md`
+  // sorts before `en.md` the way en.md sorts before eng.md here.
+  it('boots on a usable file in English beside an unusable alias, whichever sorts first', async () => {
+    await write({ 'en.md': policy('# Privacy\n'), 'eng.md': '# Privacy\n' });
+
+    const first = await boot();
+
+    expect(first.get('en')).toMatchObject({ markdown: '# Privacy\n' });
+    expect(warnings()).toEqual([expect.stringMatching(/ eng\.md, which can't be used \(no-valid-date\).* en\.md /)]);
+
+    warn.mockClear();
+    await write({ 'en.md': '# Privacy\n', 'eng.md': policy('# English\n') });
+
+    const second = await boot();
+
+    expect(second.get('en')).toMatchObject({ markdown: '# English\n' });
+    expect(warnings()).toEqual([expect.stringMatching(/ en\.md, which can't be used \(no-valid-date\).* eng\.md /)]);
+  });
+
   // Docker makes a directory where a bind mount's file is missing on the host,
   // so `ls` shows an en.md that isn't one.
   it('fails the boot saying en.md is not a file when it is a directory', async () => {

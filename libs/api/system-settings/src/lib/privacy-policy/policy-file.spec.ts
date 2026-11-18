@@ -1,5 +1,5 @@
 import { sanitizeMarkdown } from '@bge/content-format';
-import { PRIVACY_POLICY_DIR } from '@bge/i18n';
+import { PRIVACY_POLICY_DIR, readPolicyFile } from '@bge/i18n';
 import { readdirSync, readFileSync } from 'node:fs';
 import * as path from 'node:path';
 import { parsePolicyFile } from './policy-file';
@@ -110,7 +110,16 @@ describe('parsePolicyFile (#934)', () => {
     ]);
     const english = readFileSync(path.join(PRIVACY_POLICY_DIR, 'en.md'));
 
+    // Saved unchanged by an editor that writes a byte order mark and CRLF line
+    // endings, or checked out with CRLF line endings, it serves the same text,
+    // so it stays standard.
+    const windows = shipped.map(([name, bytes]): [string, Buffer] => [
+      name,
+      Buffer.concat([BOM, Buffer.from(bytes.toString('utf8').replaceAll('\n', '\r\n'))]),
+    ]);
+
     expect(sources(shipped)).toEqual(shipped.map(([name]) => [name, 'standard']));
+    expect(sources(windows)).toEqual(shipped.map(([name]) => [name, 'standard']));
     expect(sources(edited)).toEqual(shipped.map(([name]) => [name, 'operator']));
     // A hash counts only for the language it is pinned under.
     expect(sources([['en-GB.md', english]])).toEqual([['en-GB.md', 'operator']]);
@@ -124,11 +133,8 @@ describe('the standard privacy policy (#934)', () => {
   it("is unchanged by the server's Markdown sanitizing", () => {
     // The body as served: after the front matter and the blank lines below it.
     const changed = shippedFiles()
-      .map(
-        ([name, bytes]) =>
-          [name, bytes.toString('utf8').replace(/^---\nupdated: [^\n]*\n---\n(?:[ \t]*\n)*/, '')] as const,
-      )
-      .filter(([, body]) => sanitizeMarkdown(body) !== body)
+      .map(([name, bytes]) => [name, readPolicyFile(bytes)?.body] as const)
+      .filter(([, body]) => body === undefined || sanitizeMarkdown(body) !== body)
       .map(([name]) => name);
 
     expect(changed).toEqual([]);

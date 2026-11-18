@@ -105,7 +105,7 @@ What a server tells a client about itself. Before anyone signs in: its identity,
 _Avoid_: tier 1 and tier 2 discovery
 
 **Privacy policy**:
-What a server tells people about the data it keeps, why, and where it goes. The server ships a standard privacy policy, and in any language a server admin can replace it in the app, or the operator can mount their own files in its place. Either replacement is the operator's privacy policy.
+What a server tells people about the data it keeps, why, and where it goes. The server ships a standard privacy policy, and in any language a server admin can replace it in the app, or the operator can mount their own files in its place. Either replacement is the operator's privacy policy: the operator answers for it, whoever writes it.
 
 ### People
 

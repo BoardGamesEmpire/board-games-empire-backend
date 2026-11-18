@@ -10,13 +10,15 @@ export {
   I18N_CATALOG_DIR,
   I18nMessage,
   PRIVACY_POLICY_DIR,
-  STANDARD_PRIVACY_POLICY_HASHES,
   i18nValidationMessage,
   isI18nMessage,
+  isStandardPrivacyPolicy,
+  readPolicyFile,
   t,
   type I18nPath,
   type I18nTranslations,
   type I18nValidationPath,
+  type PolicyFileContents,
 } from '@bge/i18n-core';
 export { ClsLocaleResolver } from './lib/cls-locale.resolver';
 export { CodedHttpException, type CodedHttpExceptionOptions } from './lib/coded-http.exception';
