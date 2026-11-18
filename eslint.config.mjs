@@ -372,6 +372,10 @@ export default [
     files: ['**/*.ts', '**/*.tsx', '**/*.cts', '**/*.mts', '**/*.js', '**/*.jsx', '**/*.cjs', '**/*.mjs'],
     plugins: { bge: bgePlugin },
     rules: {
+      // Every if/else/for/while/do body takes braces (#1320). This block comes
+      // after the Nx spreads, which pull in eslint-config-prettier's `curly: 0`,
+      // so it wins; the 'all' option is one Prettier can print.
+      curly: ['error', 'all'],
       'bge/no-nested-ceiling': 'error',
       'bge/no-uncoded-exception-body': 'error',
     },
