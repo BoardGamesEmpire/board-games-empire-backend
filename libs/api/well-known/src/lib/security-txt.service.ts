@@ -96,6 +96,7 @@ export class SecurityTxtService {
     }
 
     const expiry = DateTime.fromJSDate(now).toUTC().plus({ years: 1 }).startOf('day');
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- luxon types toISO as string | null, null only for an invalid DateTime; one built from the clock's Date is valid (#1321)
     return expiry.toISO() as string;
   }
 }
