@@ -1,4 +1,5 @@
 import nx from '@nx/eslint-plugin';
+import stylistic from '@stylistic/eslint-plugin';
 
 // Repo-wide `no-restricted-imports` paths, keyed so individual libs can compose
 // their own narrowly-scoped exceptions (see actor-context-transport) instead of
@@ -396,12 +397,15 @@ export default [
   },
   {
     files: ['**/*.ts', '**/*.tsx', '**/*.cts', '**/*.mts', '**/*.js', '**/*.jsx', '**/*.cjs', '**/*.mjs'],
-    plugins: { bge: bgePlugin },
+    plugins: { bge: bgePlugin, '@stylistic': stylistic },
     rules: {
       // Every if/else/for/while/do body takes braces (#1320). This block comes
       // after the Nx spreads, which pull in eslint-config-prettier's `curly: 0`,
       // so it wins; the 'all' option is one Prettier can print.
       curly: ['error', 'all'],
+      // A blank line after every block-like statement, so the end of a block
+      // reads as the end of a step (#1319).
+      '@stylistic/padding-line-between-statements': ['error', { blankLine: 'always', prev: 'block-like', next: '*' }],
       'bge/no-nested-ceiling': 'error',
       'bge/no-uncoded-exception-body': 'error',
     },

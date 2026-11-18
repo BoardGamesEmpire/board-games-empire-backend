@@ -18,6 +18,9 @@ const ESM_PACKAGES = [
   // PrismaClient dynamically imports on first query is pure ESM, and it is
   // reached only by suites that talk to an actual database (the e2e harness).
   '@prisma/client/runtime',
+  // The root eslint.config.mjs imports it, and the bge rule specs in
+  // libs/scripts load that config (#1319).
+  '@stylistic',
   '@thallesp/nestjs-better-auth',
   'axios',
   'better-auth',
