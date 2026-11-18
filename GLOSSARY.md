@@ -695,7 +695,7 @@ _Avoid_: game type, expansion type; not to be confused with content format
 
 **Override**:
 A value set at a narrower level that replaces the broader one: a release's over its platform game's, and a platform game's over its game's. A user's customization overrides for that user only.
-_Avoid_: override for an add-on link's adjustments, which add rather than replace; override for a direct permission
+_Avoid_: override for an add-on link's player count and play time modifiers, which add rather than replace (its minimum and maximum player overrides do replace the game's range); override for a direct permission
 
 **Credit**:
 A person or company credited on a game: a designer, artist or publisher.
