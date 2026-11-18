@@ -12,6 +12,7 @@ import {
   Action,
   EventParticipationStatus,
   GameAdditionMode,
+  liveEventWhere,
   NominationStatus,
   Prisma,
   ResourceType,
@@ -79,6 +80,8 @@ describe('EventGameNominationService', () => {
     compose = jest.spyOn(ctx.module.get(ScopeComposer), 'compose');
     db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1' } as EventAttendee);
     db.event.findUnique.mockResolvedValue({ id: 'event-1', householdId: null } as Event);
+    // The event is live under each write's lock (#1065).
+    db.event.count.mockResolvedValue(1);
     // The attendee read that names a lineup game's supplier, and a
     // nomination's nominator and supplier; a test that asserts on one mocks
     // its own answer.
@@ -644,6 +647,7 @@ describe('EventGameNominationService', () => {
 
       tx.eventGameNomination.update.mockResolvedValue(nominationRow({ status: NominationStatus.Withdrawn }));
       tx.eventAttendee.findMany.mockResolvedValue([]);
+      tx.event.count.mockResolvedValue(1);
     });
 
     // Read after the commit, a failed read would answer 500 for a withdraw
@@ -687,10 +691,12 @@ describe('EventGameNominationService', () => {
 
       await service.withdraw('event-1', 'nom-1');
 
-      const [[lock]] = tx.$queryRaw.mock.calls;
+      // After the event's row, which comes first (#1065).
+      const [[eventLock], [lock]] = tx.$queryRaw.mock.calls;
+      expect(rawQueryText(eventLock)).toMatch(/^SELECT id FROM events WHERE id = \? FOR SHARE$/);
       expect(rawQueryText(lock)).toMatch(/^SELECT status FROM event_game_nominations WHERE id = \? FOR NO KEY UPDATE$/);
       expect((lock as Prisma.Sql).values).toEqual(['nom-1']);
-      expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      expect(tx.$queryRaw.mock.invocationCallOrder[1]).toBeLessThan(
         tx.eventGameNomination.update.mock.invocationCallOrder[0],
       );
     });
@@ -1399,6 +1405,7 @@ describe('EventGameNominationService', () => {
       tx.eventGameNomination.create.mockResolvedValue(nominationRow({ status: NominationStatus.Passed }));
       tx.eventGame.create.mockResolvedValue({ id: 'eg-1', nominationId: 'nom-1' } as EventGame);
       tx.eventAttendee.findMany.mockResolvedValue([]);
+      tx.event.count.mockResolvedValue(1);
     });
 
     it('answers with elevatedTo set when its game joined the lineup (#799)', async () => {
@@ -1563,6 +1570,127 @@ describe('EventGameNominationService', () => {
       addedById: 'att-1',
       role: ScheduledGameRole.Primary,
     });
+  });
+
+  // Each answers the 404 the event's read gives, and writes nothing. The
+  // check runs under the event's row lock, so a delete that commits after the
+  // first read can't slip between the check and the write (#1065).
+  describe('a write on a deleted event, or one whose household is deleted (#1065)', () => {
+    const isEventShare = (query: unknown) =>
+      /^SELECT id FROM events WHERE id = \? FOR SHARE$/.test(rawQueryText(query));
+
+    beforeEach(() => {
+      db.event.count.mockResolvedValue(0);
+      db.eventPolicy.findUnique.mockResolvedValue({
+        gameAdditionMode: GameAdditionMode.Direct,
+        votingWindowHours: null,
+      } as EventPolicy);
+    });
+
+    /**
+     * A nomination by the actor in `status`, and each raw read finding its
+     * row: the supplier for the supply checks, the nomination for the rest.
+     */
+    const arrangeNomination = (status: NominationStatus) => {
+      db.eventGameNomination.findUnique.mockResolvedValue(nominationRow({ status }));
+      db.$queryRaw.mockImplementation(((query: unknown) =>
+        Promise.resolve(
+          /FROM attendee_game_lists/.test(rawQueryText(query)) ? [lockedSupplier()] : [{ status, occurrenceId: null }],
+        )) as never);
+    };
+
+    const writes = [
+      {
+        name: 'nominate',
+        supplies: true,
+        status: NominationStatus.Open,
+        run: () => service.nominate('event-1', { platformGameId: 'pg-1', suppliedFromId: 'gl-1' } as NominateGameDto),
+      },
+      {
+        name: 'directAddGame',
+        supplies: true,
+        status: NominationStatus.Open,
+        run: () => service.directAddGame('event-1', { platformGameId: 'pg-1', suppliedById: 'gl-1' } as never),
+      },
+      {
+        name: 'withdraw',
+        supplies: false,
+        status: NominationStatus.Open,
+        run: () => service.withdraw('event-1', 'nom-1'),
+      },
+      {
+        name: 'castVote',
+        supplies: false,
+        status: NominationStatus.Open,
+        run: () => service.castVote('event-1', 'nom-1', { voteType: VoteType.For }),
+      },
+      {
+        name: 'resolveNomination',
+        supplies: true,
+        status: NominationStatus.Open,
+        run: () => service.resolveNomination('event-1', 'nom-1'),
+      },
+      {
+        name: 'hostApprove',
+        supplies: true,
+        status: NominationStatus.AwaitingApproval,
+        run: () => service.hostApprove('event-1', 'nom-1'),
+      },
+      {
+        name: 'hostReject',
+        supplies: true,
+        status: NominationStatus.AwaitingApproval,
+        run: () => service.hostReject('event-1', 'nom-1'),
+      },
+    ];
+
+    it.each(writes)("$name refuses a deleted event under the event's row lock (#1065)", async ({ status, run }) => {
+      arrangeNomination(status);
+
+      await expect(run()).rejects.toBeInstanceOf(NotFoundException);
+
+      const share = db.$queryRaw.mock.calls.findIndex(([query]) => isEventShare(query));
+      expect(share).toBeGreaterThanOrEqual(0);
+      expect(db.$queryRaw.mock.invocationCallOrder[share]).toBeLessThan(db.event.count.mock.invocationCallOrder[0]);
+      expect(db.event.count).toHaveBeenCalledWith({ where: { id: 'event-1', ...liveEventWhere() } });
+      expect(db.eventGameNomination.create).not.toHaveBeenCalled();
+      expect(db.eventGameNomination.update).not.toHaveBeenCalled();
+      expect(db.eventGame.create).not.toHaveBeenCalled();
+      expect(db.eventGameVote.upsert).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    // A supply check locks the supplier's rows before the event's, the order
+    // a supplier leaving takes them in; the rest lock the event's row before
+    // anything else (#1065).
+    it.each(writes)("$name takes the event's row lock in its place (#1065)", async ({ supplies, status, run }) => {
+      arrangeNomination(status);
+
+      await run().catch(() => undefined);
+
+      expect(db.$queryRaw.mock.calls.findIndex(([query]) => isEventShare(query))).toBe(supplies ? 1 : 0);
+    });
+
+    // The supplier's answer is judged only once the event's is: a supplier
+    // who left as the event was deleted still gets the deleted event's 404,
+    // not a 409 for the supplier (#1065).
+    it.each(writes.filter(({ name }) => name === 'nominate' || name === 'directAddGame'))(
+      "$name answers the event's 404 before judging a supplier who also left (#1065)",
+      async ({ status, run }) => {
+        arrangeNomination(status);
+        db.$queryRaw.mockImplementation(((query: unknown) =>
+          Promise.resolve(
+            /FROM attendee_game_lists/.test(rawQueryText(query))
+              ? [lockedSupplier({ status: EventParticipationStatus.NotAttending })]
+              : [],
+          )) as never);
+
+        const rejection: unknown = await run().catch((e: unknown) => e);
+
+        expect(rejection).toBeInstanceOf(NotFoundException);
+        expect((rejection as NotFoundException).getResponse()).toEqual(t('errors.event.not_found', { id: 'event-1' }));
+      },
+    );
   });
 });
 

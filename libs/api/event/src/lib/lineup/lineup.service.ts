@@ -149,7 +149,7 @@ export class LineupService {
     const snapshot = await this.db.$transaction(async (tx) => {
       // FOR NO KEY UPDATE, the lock a date write takes, so this takes turns
       // with those writes and with every write that can leave a lineup game
-      // with nobody bringing it (`lockEventDates`'s FOR SHARE). Under the
+      // with nobody bringing it (`shareLiveEvent`'s FOR SHARE). Under the
       // shared lock alone, a removal and a supplier leaving could both read
       // the same game, and each would report deleting it. A cancel or reopen
       // updates the row, so the cancel it reads holds until this commits.

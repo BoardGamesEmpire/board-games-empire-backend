@@ -568,7 +568,18 @@ describe('leaving an event', () => {
         const occurrenceId = await confirmedDate(eventId, new Date(Date.now() - DAY));
         const entry = await arrangeListEntry(db.client, eventId, leaver.user.id);
 
-        const { moved, left, gameId } = await withBarrier(async (barrier) => {
+        // Added before the move holds the event's row: a direct add takes it
+        // as a share, which a date write's lock holds off (#1065).
+        const { id: gameId } = eventGameEnvelope(
+          await request(baseUrl)
+            .post(`${EVENTS_PATH}/${eventId}/nominations/direct-add`)
+            .set(host.headers)
+            .send({ ...entry, occurrenceId })
+            .expect(201),
+          'POST /api/events/:eventId/nominations/direct-add as the host',
+        );
+
+        const { moved, left } = await withBarrier(async (barrier) => {
           const { holder } = barrier;
 
           await holder.begin();
@@ -593,15 +604,6 @@ describe('leaving an event', () => {
           });
           expect(moving.query).toMatch(/UPDATE[\s\S]*event_occurrences/);
 
-          const { id: gameId } = eventGameEnvelope(
-            await request(baseUrl)
-              .post(`${EVENTS_PATH}/${eventId}/nominations/direct-add`)
-              .set(host.headers)
-              .send({ ...entry, occurrenceId })
-              .expect(201),
-            'POST /api/events/:eventId/nominations/direct-add as the host',
-          );
-
           const leaving = fire(() => send({ leaver, eventId, leaverId, entryId: entry.suppliedById }));
 
           // Queued on the event's row behind the move, which is queued behind
@@ -620,7 +622,7 @@ describe('leaving an event', () => {
           // budget, and an expired budget surfaces as a 500.
           await holder.rollback();
 
-          return { moved: await move.settled, left: await leaving.settled, gameId };
+          return { moved: await move.settled, left: await leaving.settled };
         });
 
         expect(moved.status).toBe(200);
