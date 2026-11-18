@@ -4,7 +4,9 @@ import type { OutstandingInviteStatus } from './constants/invite.constants';
 import { OUTSTANDING_INVITE_STATUSES } from './constants/invite.constants';
 
 export function isOutstandingInviteStatus(status: InviteStatus): status is OutstandingInviteStatus {
-  return (OUTSTANDING_INVITE_STATUSES as readonly InviteStatus[]).includes(status);
+  const outstanding: readonly InviteStatus[] = OUTSTANDING_INVITE_STATUSES;
+
+  return outstanding.includes(status);
 }
 
 /** The two columns lazy expiry is decided from. */

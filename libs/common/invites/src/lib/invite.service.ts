@@ -157,13 +157,14 @@ function project<Select extends Prisma.InviteSelect>(
   row: InviteTransitionRow,
   select: Select,
 ): Prisma.InviteGetPayload<{ select: Select }> {
-  const source = row as Record<string, unknown>;
+  const source: Record<string, unknown> = row;
   const view: Record<string, unknown> = {};
 
   for (const key of Object.keys(select)) {
     view[key] = source[key];
   }
 
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- the payload of a generic `Select` is a type TypeScript can't evaluate, so it can't check the key-by-key copy against it (#1321)
   return view as Prisma.InviteGetPayload<{ select: Select }>;
 }
 
@@ -320,6 +321,7 @@ export class InviteService {
       throw new Error(`Invite ${row.id} is a ${type} invite that names no ${type.toLowerCase()}`);
     }
 
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- a computed key looked up by the generic `Type` widens to a string index, which TypeScript can't relate to `InviteScopeOf<Type>` (#1321)
     return { [column]: contextId } as InviteScopeOf<Type>;
   }
 
