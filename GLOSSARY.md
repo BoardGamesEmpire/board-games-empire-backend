@@ -104,6 +104,9 @@ The permanent, unique identifier a server gives itself when it is first set up, 
 What a server tells a client about itself. Before anyone signs in: its identity, its name and the ways to sign in. Once signed in, a fuller view adds which core areas the server offers, such as households and events, and the plugins running on it.
 _Avoid_: tier 1 and tier 2 discovery
 
+**Privacy policy**:
+What a server tells people about the data it keeps, why, and where it goes. The server ships a standard privacy policy, and in any language a server admin can replace it in the app, or the operator can mount their own files in its place.
+
 ### People
 
 **User**:
