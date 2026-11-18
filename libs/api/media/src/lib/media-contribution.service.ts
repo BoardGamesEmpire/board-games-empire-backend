@@ -140,6 +140,7 @@ export class MediaContributionService {
     return this.db.$transaction(async (tx) => {
       await this.flipOwnership(tx, contribution.mediaObjectId, serviceAccount.id);
       await this.mediaLink.attachWithin(tx, contribution.mediaObjectId, {
+        // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- the column holds any ResourceType; a contribution is only made for a linkable model subject, and attachWithin refuses a type with no link handler (#1321)
         subjectType: contribution.subjectType as ModelResourceType,
         subjectId: contribution.subjectId,
         context: { category: contribution.category ?? undefined },
