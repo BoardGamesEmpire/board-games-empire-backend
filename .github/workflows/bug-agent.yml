@@ -17,15 +17,25 @@ permissions:
   contents: read
   issues: read
 
-concurrency:
-  group: bug-agent-${{ github.event.issue.number }}
-  cancel-in-progress: false
-
 jobs:
   bug-agent:
     if: github.event.label.name == 'bug' && github.event.sender.type == 'User'
-    # At `master`, unpinned: the shared workflow reads its prompts and scripts
-    # from master whatever ref this names, so a pin would freeze nothing.
+    # One run per issue at a time, and on the job, not the workflow: every
+    # label added to the issue starts this workflow, the agent's own labels
+    # included, and a run that joined the group would cancel a `bug` run
+    # waiting in it. A skipped job never joins. `queue: max` keeps a second
+    # `bug` run waiting instead of replacing the one already waiting (#1220).
+    # actionlint doesn't know `queue` yet and reports it as an unknown key.
+    concurrency:
+      group: bug-agent-${{ github.event.issue.number }}
+      cancel-in-progress: false
+      queue: max
+    # At `master`, unpinned, so a change to the shared workflow applies here
+    # without a PR in this repository. A pin would freeze the workflow
+    # itself: its jobs, their permissions, and which steps receive the
+    # secrets. It would not freeze its prompts and scripts, which it reads
+    # from automation's `master` whatever ref this names, and which receive
+    # the API key and the app's short-lived token.
     uses: BoardGamesEmpire/automation/.github/workflows/bug-agent.yml@master
     with:
       bge-agent-client-id: ${{ vars.BGE_AGENT_CLIENT_ID }}
