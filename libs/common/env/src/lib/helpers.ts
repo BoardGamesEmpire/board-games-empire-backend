@@ -11,6 +11,7 @@ export function splitTrimFilter<T = string>(value: string | T[], delimiter = ','
 
 export function removeUndefinedFields<T>(obj: T): T {
   if (obj === null || obj === undefined) {
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- the contract maps undefined to null as well, which the generic `T` can't express (#1321)
     return null as T;
   }
 
