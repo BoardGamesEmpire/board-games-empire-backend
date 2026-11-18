@@ -30,6 +30,9 @@
       "path": "../../common/permissions/tsconfig.lib.json"
     },
     {
+      "path": "../../common/shared/tsconfig.lib.json"
+    },
+    {
       "path": "../../common/locale/tsconfig.lib.json"
     },
     {

@@ -1,0 +1,63 @@
+import { Controller, Get, Header, Headers, Query, Res } from '@nestjs/common';
+import { ApiHeader, ApiOkResponse, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { Http } from '@status/codes';
+import { AllowAnonymous } from '@thallesp/nestjs-better-auth';
+import type { Response } from 'express';
+import { PRIVACY_POLICY_LANG_MAX_LENGTH, PrivacyPolicyQueryDto } from './dto/privacy-policy-query.dto';
+import { PrivacyPolicyResponseDto } from './dto/privacy-policy.dto';
+import { PrivacyPolicyService } from './privacy-policy.service';
+
+@ApiTags('privacy-policy')
+@Controller('privacy-policy')
+export class PrivacyPolicyController {
+  constructor(private readonly privacyPolicyService: PrivacyPolicyService) {}
+
+  /**
+   * The privacy policy, to anyone, signed in or not (#934). `AllowAnonymous`
+   * sits on this handler, not the class, so any other route on this
+   * controller needs sign-in.
+   *
+   * Never served stale. The route stays out of the api's response cache: a
+   * server admin re-reads the policy after an edit, and a cached read would
+   * show the text from before it for the whole TTL (#530). `no-cache` lets an
+   * HTTP cache keep a copy but makes it revalidate on every use, and the ETag
+   * Express sets lets an unchanged policy answer 304 without its body.
+   */
+  @ApiOperation({
+    summary: 'Read the privacy policy',
+    description:
+      'Needs no sign-in. Answers the policy in the best language the server has it in: `lang` first, then ' +
+      '`Accept-Language`, then English.',
+  })
+  @ApiHeader({
+    name: 'Accept-Language',
+    required: false,
+    description: 'The languages the reader prefers, tried after `lang`, in their order of preference.',
+  })
+  @ApiOkResponse({
+    type: PrivacyPolicyResponseDto,
+    description: 'The policy: `{ privacyPolicy }`.',
+    headers: {
+      'Content-Language': { description: 'The language tag the policy is served in.', schema: { type: 'string' } },
+    },
+  })
+  @ApiResponse({
+    status: Http.BadRequest,
+    description: `A \`lang\` longer than ${PRIVACY_POLICY_LANG_MAX_LENGTH} characters, or an unknown query parameter`,
+  })
+  @AllowAnonymous()
+  @Get()
+  @Header('Cache-Control', 'no-cache')
+  async read(
+    @Query() query: PrivacyPolicyQueryDto,
+    @Headers('accept-language') acceptLanguage: string | undefined,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<PrivacyPolicyResponseDto> {
+    const privacyPolicy = await this.privacyPolicyService.read({ acceptLanguage, lang: query.lang });
+    res.setHeader('Content-Language', privacyPolicy.language);
+    // The language depends on Accept-Language; `vary` appends, keeping the Vary values CORS and compression set.
+    res.vary('Accept-Language');
+
+    return { privacyPolicy };
+  }
+}
