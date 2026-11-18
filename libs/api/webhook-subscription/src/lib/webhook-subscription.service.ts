@@ -279,6 +279,7 @@ export class WebhookSubscriptionService {
 
     const existing = await this.getWritable(id);
     const abilities = await this.withRecordedKey(existing, actorAbilities);
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- the column is a plain string; this service writes only validated WebhookEventType values to it (#1321)
     const types = existing.eventTypes.map((row) => row.eventType as WebhookEventType);
 
     this.assertCanReceiveTypes(types, abilities);
