@@ -1,4 +1,4 @@
-import { Action, DatabaseService, JobStatus, JobType, Prisma, ResourceType } from '@bge/database';
+import { Action, DatabaseService, JobType, Prisma, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService, resolveScopeSubjectId, ScopeComposer } from '@bge/permissions';
 import type { PaginatedRows, PaginationQueryDto } from '@bge/shared';
@@ -195,6 +195,7 @@ export class GameImportStatusService {
   }
 
   private toBatchDto(batchId: string, jobs: JobRow[]): ImportBatchStatusResponseDto {
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Prisma types a JSON column as JsonValue; this lib's producers write the job's payload in this shape (#1321)
     const basePayload = (jobs.find((job) => job.parentJobId === null)?.payload ?? {}) as { correlationId?: string };
 
     return {
@@ -206,16 +207,18 @@ export class GameImportStatusService {
   }
 
   private toJobDto(job: JobRow): ImportJobStatusDto {
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Prisma types a JSON column as JsonValue; this lib's producers write the job's payload in this shape (#1321)
     const payload = (job.payload ?? {}) as {
       expansionExternalIds?: string[];
       externalId?: string;
       origin: ImportJobOrigin;
     };
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Prisma types a JSON column as JsonValue; this lib's processors write the job's result in this shape (#1321)
     const result = (job.result ?? undefined) as Partial<PersistedJobResult & PersistedJobFailure> | undefined;
 
     return {
       jobId: job.id,
-      status: job.status as JobStatus,
+      status: job.status,
       // Every producer stamps it on the row's payload (#971).
       origin: payload.origin,
       parentJobId: job.parentJobId,
@@ -231,8 +234,9 @@ export class GameImportStatusService {
       errorCode: result?.errorCode,
       // Translated from the machine-readable `errorCode`, not the English `error`
       // the worker persisted at failure time, so it renders in the reader's
-      // locale. Marker cast to the DTO's string field: I18nResponseInterceptor
+      // locale. The marker fills the DTO's string field: I18nResponseInterceptor
       // renders it to a string before serialization, so the wire value is a string.
+      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- an I18nMessage marker the response interceptor renders to a string; the marker type shares nothing with string, so the cast goes through unknown (#1321)
       error: result?.errorCode ? (importErrorMarker(result.errorCode) as unknown as string) : undefined,
       startedAt: job.startedAt,
       completedAt: job.completedAt,
