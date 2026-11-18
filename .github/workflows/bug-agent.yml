@@ -40,14 +40,20 @@ jobs:
     with:
       bge-agent-client-id: ${{ vars.BGE_AGENT_CLIENT_ID }}
       fix-tools: 'Bash(npm run nx:*)'
-      # Schema and migrations, the gRPC contracts and dependencies each need a
-      # person's review.
+      # Schema and migrations, the gRPC contracts, dependencies and the Nx
+      # workspace config each need a person's review. A fix once carried a
+      # rewritten buf.lock and a new .nxignore into its PR unnoticed (#733,
+      # #1375).
       protected-paths: |
         prisma/*
         *.proto
         package.json
         */package.json
         package-lock.json
+        */buf.yaml
+        */buf.lock
+        nx.json
+        .nxignore
       test-paths: |
         *.spec.ts
         *.e2e-spec.ts
