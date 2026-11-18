@@ -483,6 +483,21 @@ const topLevelTypeImports = {
 // at runtime (#1317). With them the rule skips those files entirely.
 export const decoratorParserOptions = { emitDecoratorMetadata: true, experimentalDecorators: true };
 
+// Test code may cast; everything else states or drops its casts (#1321). The
+// list is spec files, the e2e apps and test support: the image smoke test,
+// @bge/testing, the e2e harness in testing-e2e, the DataGateway driver
+// contract tests, and fixtures.
+export const castExemptFiles = [
+  '**/*.spec.ts',
+  '**/*.e2e-spec.ts',
+  'apps/*-e2e/**',
+  'apps/image-smoke/**',
+  'libs/common/testing/**',
+  'libs/common/testing-e2e/**',
+  'libs/gateway/driver/contract-testing/**',
+  '**/*.fixture.ts',
+];
+
 // Interface and type-literal members sort alphabetically (#1374): natural
 // order (field2 before field10), case-insensitive, one list per body. Blank
 // lines neither partition the sort nor get touched by it; bge/member-blank-lines
@@ -643,6 +658,23 @@ export default [
       'bge/no-nested-ceiling': 'error',
       'bge/no-uncoded-exception-body': 'error',
     },
+  },
+  {
+    // Outside tests, a value is made to match a type with `satisfies` or an
+    // annotation, which the compiler checks, not a cast (#1321). `as const` is
+    // not a cast and stays allowed. A cast that has to stay carries a disable
+    // comment with its reason.
+    //
+    // Each project lints through its own config, which spreads this one, and a
+    // glob matches relative to the config that loads it. `basePath` anchors this
+    // block's globs at the repo root, so `apps/*-e2e/**` means the same thing
+    // from every project.
+    basePath: import.meta.dirname,
+    // Turned on lib group by lib group as the triage lands: libs/plugin
+    // first; libs/api and then everything else follow (#1321).
+    files: ['libs/plugin/**/*.{ts,tsx,cts,mts}'],
+    ignores: castExemptFiles,
+    rules: { '@typescript-eslint/consistent-type-assertions': ['error', { assertionStyle: 'never' }] },
   },
   {
     // Generated and gitignored: Prisma's client and the proto stubs open with a
