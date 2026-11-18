@@ -141,6 +141,84 @@ The server sends email through an SMTP server you choose: password reset links, 
 - **A reset link works for `passwordResetLinkLifetimeMinutes`**: 1440 minutes (24 hours) by default, at least 15 and at most 10080 (a week). The email tells the user how long they have, and a link works only once.
 - **To check the settings**, a server admin sends a test email with `POST /api/system-settings/mail-test`. It goes to the server admin's own address, and a notification then says whether it was sent or why not.
 
+## Your server's privacy policy
+
+As the operator, you are responsible for the privacy policy your server gives the people who use it (#934). The server ships a standard privacy policy in English. It says what the server itself keeps about people, why, and where it sends it. It can't say how people reach you, or how long you keep logs and backups, so read it, and replace it where it doesn't fit how you run the server.
+
+Anyone can read the policy without signing in, at `GET /api/privacy-policy`, which `/.well-known/bge-identity` names in `bge_privacy_policy_endpoint`. The answer is the policy in the best language the server has it in, with the date its text last changed, whether it is the standard privacy policy or the operator's privacy policy, and the languages it can be read in.
+
+You replace the policy one language at a time, through the API or with files. In each language, a text a server admin saves through the API wins over a file. A reader whose language has neither gets the policy in the next language they ask for, or in English.
+
+**Through the API:** a server admin saves the operator's privacy policy in a language with `PUT /api/privacy-policy/<language tag>` and a body of `{ "markdown": "…" }`, such as `PUT /api/privacy-policy/de`. It is served from the next request, with no restart. The language must be one the server knows, though the app need not be translated into it. `DELETE /api/privacy-policy/<language tag>` removes it, and that language's file is served again, if there is one. Server admins hold the `manage:privacy_policy` permission both need, and each change is audited.
+
+**With files:** the api reads the policy files from a directory that holds nothing else: `/app/apps/api/dist/privacy-policy` in the BGE image, or `apps/api/dist/privacy-policy` in a build from source. To replace the files, mount a directory of your own over it. Mount the whole directory, not single files (`subPath`, in Kubernetes). Your directory then takes the place of the shipped one, so it must hold an `en.md`: your own, or the standard one. To start from the shipped files, copy them out of a running api:
+
+```sh
+docker compose --profile split cp api:/app/apps/api/dist/privacy-policy ./privacy-policy
+```
+
+Under Compose, mount the directory in a `compose.override.yaml`:
+
+```yaml
+services:
+  api:
+    volumes:
+      - ./privacy-policy:/app/apps/api/dist/privacy-policy:ro
+```
+
+In Kubernetes, keep the files in a ConfigMap, one key per file:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bge-privacy-policy
+data:
+  en.md: |
+    ---
+    updated: 2026-12-01
+    ---
+
+    # Privacy policy
+
+    This policy explains what this server keeps about you, why it keeps it, and where it goes.
+```
+
+Then mount it on the api's container, in the pod template:
+
+```yaml
+containers:
+  - name: api
+    volumeMounts:
+      - name: privacy-policy
+        mountPath: /app/apps/api/dist/privacy-policy
+        readOnly: true
+volumes:
+  - name: privacy-policy
+    configMap:
+      name: bge-privacy-policy
+```
+
+The api reads the files once, at boot, so a change to them applies when it restarts. In Kubernetes, an edited ConfigMap reaches the mounted directory on its own, but the api serves the change only after it restarts. The api runs as the `node` user (uid 1000), so the files must be readable by it.
+
+**The files:**
+
+- Each file is named after its language tag: `en.md`, `de.md`, `pt-BR.md`.
+- Each starts with front matter holding only the date its text last changed, in exactly these three lines, and the policy's Markdown follows:
+
+  ```markdown
+  ---
+  updated: 2026-12-01
+  ---
+  ```
+
+- The Markdown is at most 20,000 characters, as a text saved through the API is. Both are sanitized as every Markdown the server stores is: raw HTML is removed, and a link that isn't `http`, `https` or `mailto` is reduced to its text. Headings and lists are kept, so a screen reader can move through the policy.
+- A file that is byte for byte a standard privacy policy the server shipped is served as the standard one. Any other file is served as the operator's privacy policy.
+
+**A file the api can't use:** a missing or malformed `en.md` stops the api at boot, and the log names the file and what is wrong with it. English is the language read when nothing else matches, so the server can't start without it. Any other file the api can't use, such as one whose name isn't a language tag or whose front matter is malformed, is skipped with a warning in the log. Readers of its language get another language until you fix the file and restart the api.
+
+**When you change the text:** set `updated` to the day you change it. A client uses the date to tell readers the policy changed since they last read it, so a change under the old date goes unnoticed. A text saved through the API takes the time it was saved, and saving the same text again leaves its date as it was.
+
 ## Behind a reverse proxy
 
 The api answers only at its own names: the hosts in `BETTER_AUTH_URL`, `TRUSTED_ORIGINS` and `MEDIA_BASE_URL`, plus `localhost` and any IP address. Any other `Host` gets a 421 with the code `HOST_NOT_ALLOWED` (#977). A Socket.IO handshake is refused in Socket.IO's own way, a 403 on polling and a 400 on a websocket, with the code in the message. This stops a malicious page from reaching the server through DNS rebinding, where the page points its own domain at your server's address so that the visitor's browser treats the two as one site.
