@@ -1,4 +1,5 @@
-import { createFakeFetch, readFixture, type FakeFetch } from '@boardgamesempire/gateway-driver-contract-testing';
+import type { FakeFetch } from '@boardgamesempire/gateway-driver-contract-testing';
+import { createFakeFetch, readFixture } from '@boardgamesempire/gateway-driver-contract-testing';
 import { bggFixtureKey } from './bgg-fixture-key';
 
 /**

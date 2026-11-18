@@ -1,5 +1,6 @@
 import { PlatformType, Prisma, VocabularyLinkOrigin, VocabularyLinkStatus } from '@bge/database';
-import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { createTestingModuleWithDb } from '@bge/testing';
 import { VocabularyLinkService } from './vocabulary-link.service';
 
 const uniqueViolation = () =>

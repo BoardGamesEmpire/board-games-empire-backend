@@ -1,4 +1,5 @@
-import { type Actor, clonePluginUnit } from '@bge/actor-context';
+import type { Actor } from '@bge/actor-context';
+import { clonePluginUnit } from '@bge/actor-context';
 import type { PluginActorView } from '@boardgamesempire/plugin-contract';
 import { UnknownActorKindError } from './context.errors';
 

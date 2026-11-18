@@ -27,28 +27,20 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import assert from 'node:assert';
-import {
-  LINEUP_GAME_SNAPSHOT_SELECT,
-  lockEventDates,
-  lockSupplier,
-  type LineupGameSnapshot,
-  type LockedSupplier,
-} from '../attendee/attendance';
-import { readableAttendees, type AttendeeSummary } from '../attendee/attendee-summary';
+import type { LineupGameSnapshot, LockedSupplier } from '../attendee/attendance';
+import { LINEUP_GAME_SNAPSHOT_SELECT, lockEventDates, lockSupplier } from '../attendee/attendance';
+import type { AttendeeSummary } from '../attendee/attendee-summary';
+import { readableAttendees } from '../attendee/attendee-summary';
 import { NOT_REMOVED } from '../constants/not-removed.constant';
 import { PLATFORM_GAME_SUMMARY_SELECT } from '../constants/platform-game-summary.constant';
 import { CastVoteDto } from '../dto/cast-vote.dto';
 import { assertEventExists, requireEvent, resolveActingAttendeeId } from '../event-access.helpers';
 import { ResolutionResult, VotingPolicy } from '../interfaces/vote.interface';
-import {
-  LINEUP_GAME_SELECT,
-  lineupGameSubject,
-  toLineupGameRow,
-  withSuppliers,
-  type LineupGame,
-} from '../lineup/lineup-game';
+import type { LineupGame } from '../lineup/lineup-game';
+import { LINEUP_GAME_SELECT, lineupGameSubject, toLineupGameRow, withSuppliers } from '../lineup/lineup-game';
 import { readableLineupGamesByNomination } from '../lineup/lineup-scope';
-import { foldPolicy, type EffectivePolicy } from '../policy/effective-policy';
+import type { EffectivePolicy } from '../policy/effective-policy';
+import { foldPolicy } from '../policy/effective-policy';
 import { GAME_VOTE_SLUG, voterGrantSelect } from '../vote/vote-grant';
 import { AttendeeStub, VoteResolver } from '../vote/vote-resolver';
 import { DirectAddGameDto } from './dto/direct-add-game.dto';

@@ -1,4 +1,5 @@
-import { type PrismaClient, ProviderLinkingPolicy } from '@bge/database';
+import type { PrismaClient } from '@bge/database';
+import { ProviderLinkingPolicy } from '@bge/database';
 import type { I18nPath } from '@bge/i18n';
 
 /**

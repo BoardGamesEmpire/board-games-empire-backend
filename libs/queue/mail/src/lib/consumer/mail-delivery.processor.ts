@@ -1,5 +1,6 @@
 import { MailFailureCode } from '@bge/mail';
-import { ActorAwareWorkerHost, type JobMetaEnvelope } from '@bge/queue-actor-context';
+import type { JobMetaEnvelope } from '@bge/queue-actor-context';
+import { ActorAwareWorkerHost } from '@bge/queue-actor-context';
 import { OnWorkerEvent, Processor } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job, UnrecoverableError } from 'bullmq';

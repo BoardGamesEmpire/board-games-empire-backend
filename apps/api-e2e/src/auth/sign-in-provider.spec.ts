@@ -1,5 +1,6 @@
 import { ProviderLinkingPolicy } from '@bge/database';
-import { createActors, pollUntil, type Actors } from '@bge/testing-e2e';
+import type { Actors } from '@bge/testing-e2e';
+import { createActors, pollUntil } from '@bge/testing-e2e';
 import { createHash, randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { postToAuth } from '../support/auth-routes';
@@ -15,7 +16,8 @@ import { useProviderLinkingPolicy } from '../support/provider-linking-policy';
 import { ageStoredSession } from '../support/session-age';
 import { useSettingSwitch } from '../support/setting-switch';
 import { fakeProviderUrl, sessionCookieOf, signInThroughProvider } from '../support/sign-in-provider';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 
 const GET_SESSION_PATH = '/api/auth/get-session';
 const SIGN_OUT_PATH = '/api/auth/sign-out';

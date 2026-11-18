@@ -1,4 +1,5 @@
-import { DatabaseService, type Plugin } from '@bge/database';
+import type { Plugin } from '@bge/database';
+import { DatabaseService } from '@bge/database';
 import {
   PluginDirectoryNotFoundError,
   PluginDirectoryResolverService,

@@ -1,7 +1,8 @@
 import { IgdbDriver } from '@bge/gateway-driver-igdb';
 import { createDriverLogger, DATA_GATEWAY_DRIVER, DataGatewayController, nodeUpstreamFetch } from '@bge/gateway-host';
 import { BGE_VERSION } from '@bge/version';
-import { Inject, Module, type OnModuleInit } from '@nestjs/common';
+import type { OnModuleInit } from '@nestjs/common';
+import { Inject, Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { configuration } from '../igdb/configuration';
 import type { IGDBConfig } from '../igdb/configuration/igdb.config';

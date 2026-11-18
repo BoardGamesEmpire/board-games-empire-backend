@@ -1,3 +1,4 @@
+import type { WishlistPriority } from '@bge/database';
 import {
   Action,
   constraintIdentity,
@@ -9,7 +10,6 @@ import {
   ListKind,
   Prisma,
   ResourceType,
-  type WishlistPriority,
 } from '@bge/database';
 import type { CodedHttpException } from '@bge/i18n';
 import { AbilityService, ScopeComposer } from '@bge/permissions';

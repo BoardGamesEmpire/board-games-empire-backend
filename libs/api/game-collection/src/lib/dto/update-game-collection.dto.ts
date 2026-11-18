@@ -1,7 +1,8 @@
 import { i18nValidationMessage } from '@bge/i18n';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsBoolean, IsInt, IsNotEmpty, IsOptional, IsPositive, IsString, Max, Min, ValidateIf } from 'class-validator';
-import { CollectionReachProperty, type CollectionReach } from './create-game-collection.dto';
+import type { CollectionReach } from './create-game-collection.dto';
+import { CollectionReachProperty } from './create-game-collection.dto';
 
 /**
  * Standard REST PATCH semantics: omitted fields are preserved, explicit `null`

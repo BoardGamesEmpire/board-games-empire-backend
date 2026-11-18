@@ -1,3 +1,4 @@
+import type { GameShare } from '@bge/database';
 import {
   Action,
   blockWith,
@@ -11,11 +12,11 @@ import {
   lockLiveHousehold,
   Prisma,
   ResourceType,
-  type GameShare,
 } from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
-import { PaginationQueryDto, type PaginatedRows } from '@bge/shared';
+import type { PaginatedRows } from '@bge/shared';
+import { PaginationQueryDto } from '@bge/shared';
 import {
   BadRequestException,
   ConflictException,

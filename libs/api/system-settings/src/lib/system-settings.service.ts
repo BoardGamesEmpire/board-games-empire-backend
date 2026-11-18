@@ -6,7 +6,8 @@ import { EncryptionService } from '@bge/services';
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { Http } from '@status/codes';
 import { UpdateSystemSettingsDto } from './dto/update-system-settings.dto';
-import { SYSTEM_SETTINGS_ROW_SELECT, toView, type SystemSettingsView } from './read-shapes';
+import type { SystemSettingsView } from './read-shapes';
+import { SYSTEM_SETTINGS_ROW_SELECT, toView } from './read-shapes';
 
 @Injectable()
 export class SystemSettingsService {

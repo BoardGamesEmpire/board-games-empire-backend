@@ -1,4 +1,5 @@
-import { Prisma, SystemRole } from '@bge/database';
+import type { Prisma } from '@bge/database';
+import { SystemRole } from '@bge/database';
 import { SHOWN_NAME_SELECT } from './shown-name';
 
 /**

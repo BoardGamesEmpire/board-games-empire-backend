@@ -1,4 +1,5 @@
-import Redis, { type RedisOptions } from 'iovalkey';
+import type { RedisOptions } from 'iovalkey';
+import Redis from 'iovalkey';
 import type { BgeRedisConnectionConfig } from './redis-connection.config';
 
 const DEFAULT_KEEP_ALIVE_MS = 30_000;

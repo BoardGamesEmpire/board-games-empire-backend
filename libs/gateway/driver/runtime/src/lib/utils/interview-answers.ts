@@ -1,12 +1,5 @@
-import {
-  ContentFormat,
-  ContentType,
-  DataGatewayCapability,
-  LanguageCodeFormat,
-  PlatformType,
-  SearchFilterAxis,
-  Upstream,
-} from '@bge/database';
+import type { ContentFormat, LanguageCodeFormat, Upstream } from '@bge/database';
+import { ContentType, DataGatewayCapability, PlatformType, SearchFilterAxis } from '@bge/database';
 import type { DescribeResponse, GatewayPingResponse } from '@boardgamesempire/proto-gateway';
 import {
   toStoredCapability,

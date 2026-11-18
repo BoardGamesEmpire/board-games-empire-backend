@@ -1,5 +1,5 @@
+import type { DatabaseService } from '@bge/database';
 import {
-  DatabaseService,
   PluginCategory,
   PluginExecutionMode,
   PluginGrantScope,
@@ -8,12 +8,8 @@ import {
   Prisma,
   RiskLevel,
 } from '@bge/database';
-import {
-  batchTransactionCall,
-  createMockDatabaseService,
-  UNIT_BOUND_RULES,
-  type MockDatabaseService,
-} from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { batchTransactionCall, createMockDatabaseService, UNIT_BOUND_RULES } from '@bge/testing';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
 import { PluginConsentCheckClassifier } from '../consent/plugin-consent-check-classifier.service';
@@ -25,11 +21,8 @@ import {
   PluginInventoryNotFoundError,
   PluginInventoryTombstonedError,
 } from './inventory.errors';
-import {
-  PluginInventoryService,
-  type PluginInventoryCeiling,
-  type PluginServerInventoryCeiling,
-} from './plugin-inventory.service';
+import type { PluginInventoryCeiling, PluginServerInventoryCeiling } from './plugin-inventory.service';
+import { PluginInventoryService } from './plugin-inventory.service';
 
 describe('PluginInventoryService', () => {
   const options = buildPluginModuleOptions();

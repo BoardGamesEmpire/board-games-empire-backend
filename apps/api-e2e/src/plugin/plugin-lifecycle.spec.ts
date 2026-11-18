@@ -1,18 +1,13 @@
-import {
-  PluginGrantScope,
-  PluginGrantStatus,
-  PluginLifecycleEventType,
-  PluginScope,
-  RiskLevel,
-  type Plugin,
-  type Prisma,
-} from '@bge/database';
-import { createActors, pollUntil, type Actors, type SessionActor } from '@bge/testing-e2e';
+import type { Plugin, Prisma } from '@bge/database';
+import { PluginGrantScope, PluginGrantStatus, PluginLifecycleEventType, PluginScope, RiskLevel } from '@bge/database';
+import type { Actors, SessionActor } from '@bge/testing-e2e';
+import { createActors, pollUntil } from '@bge/testing-e2e';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { FIXTURE_ACT_ID, pluginRowData, stagedUpdateColumns } from './plugin-row-fixtures';
 
 /**

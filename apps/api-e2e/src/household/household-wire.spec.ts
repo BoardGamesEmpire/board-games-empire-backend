@@ -1,3 +1,4 @@
+import type { HttpResponseLike } from './household-wire';
 import {
   constraintTargetNames,
   createEnvelope,
@@ -8,7 +9,6 @@ import {
   memberGameSampleIds,
   readEnvelope,
   restorableListEnvelope,
-  type HttpResponseLike,
 } from './household-wire';
 
 /**

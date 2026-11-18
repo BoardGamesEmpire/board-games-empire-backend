@@ -4,13 +4,8 @@ import type { PluginModuleOptions } from '@bge/plugin';
 import { MODULE_OPTIONS_TOKEN } from '@bge/plugin';
 import { parsePluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
 import { PLUGIN_SLUG_PATTERN } from '@boardgamesempire/plugin-manifest';
-import {
-  type BeforeApplicationShutdown,
-  Inject,
-  Injectable,
-  Logger,
-  type OnApplicationBootstrap,
-} from '@nestjs/common';
+import type { BeforeApplicationShutdown, OnApplicationBootstrap } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { createId } from '@paralleldrive/cuid2';
 import type { Stats } from 'node:fs';

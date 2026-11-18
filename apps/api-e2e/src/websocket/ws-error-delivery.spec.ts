@@ -1,11 +1,14 @@
-import { WsErrorEvents, type WsErrorPayload } from '@bge/shared';
-import { createActors, type Actors, type SessionCredentials } from '@bge/testing-e2e';
+import type { WsErrorPayload } from '@bge/shared';
+import { WsErrorEvents } from '@bge/shared';
+import type { Actors, SessionCredentials } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { Socket } from 'socket.io-client';
 import { requireBaseUrl } from '../support/e2e-env';
 import { connect, nextEvent, openSocket } from '../support/socket';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 
 /** What socket.io-client hands a `connect_error` listener for a middleware refusal. */
 type ConnectError = Error & { readonly data?: WsErrorPayload };

@@ -1,4 +1,5 @@
-import { PluginGrantScope, PluginGrantStatus, PluginScope, RiskLevel, type PrismaClient } from '@bge/database';
+import type { PrismaClient } from '@bge/database';
+import { PluginGrantScope, PluginGrantStatus, PluginScope, RiskLevel } from '@bge/database';
 import { randomUUID } from 'node:crypto';
 import { FIXTURE_ACT_ID, pluginRowData } from './plugin-row-fixtures';
 

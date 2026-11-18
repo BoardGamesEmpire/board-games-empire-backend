@@ -1,5 +1,6 @@
 import type { AppliedMigrationRow } from '@bge/database';
-import { SpanStatusCode, type Span, type Tracer } from '@opentelemetry/api';
+import type { Span, Tracer } from '@opentelemetry/api';
+import { SpanStatusCode } from '@opentelemetry/api';
 import type { MigrationCredential } from './migration-credential';
 import type {
   BootstrapLock,

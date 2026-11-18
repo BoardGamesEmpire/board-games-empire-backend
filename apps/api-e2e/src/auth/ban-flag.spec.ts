@@ -1,7 +1,9 @@
-import { createActors, prepareSignup, type Actors } from '@bge/testing-e2e';
+import type { Actors } from '@bge/testing-e2e';
+import { createActors, prepareSignup } from '@bge/testing-e2e';
 import { postToAuth, signInAgain } from '../support/auth-routes';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 
 const ADMIN_UPDATE_USER_PATH = '/api/auth/admin/update-user';
 const ADMIN_CREATE_USER_PATH = '/api/auth/admin/create-user';

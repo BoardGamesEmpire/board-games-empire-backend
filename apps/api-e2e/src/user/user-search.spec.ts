@@ -1,17 +1,13 @@
 import { FriendshipStatus, Reach, ResourceType } from '@bge/database';
-import {
-  arrangeExtendedNetwork,
-  arrangeFriendship,
-  befriend,
-  createActors,
-  type Actors,
-  type SessionActor,
-} from '@bge/testing-e2e';
+import type { Actors, SessionActor } from '@bge/testing-e2e';
+import { arrangeExtendedNetwork, arrangeFriendship, befriend, createActors } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
-import { mintApiKey, type Caller } from '../support/api-key';
+import type { Caller } from '../support/api-key';
+import { mintApiKey } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { userSearchPage } from './user-wire';
 
 /**

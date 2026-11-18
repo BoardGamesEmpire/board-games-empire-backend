@@ -1,5 +1,6 @@
 import { AuditContextService } from '@bge/actor-context';
-import { isI18nMessage, type I18nTranslations } from '@bge/i18n-core';
+import type { I18nTranslations } from '@bge/i18n-core';
+import { isI18nMessage } from '@bge/i18n-core';
 import { CallHandler, ExecutionContext, Injectable, NestInterceptor } from '@nestjs/common';
 import { I18nService } from 'nestjs-i18n';
 import { Observable } from 'rxjs';

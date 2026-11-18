@@ -1,11 +1,11 @@
-import { AuditContextService } from '@bge/actor-context';
+import type { AuditContextService } from '@bge/actor-context';
 import { FeedbackCategory, FeedbackContext } from '@bge/database';
 import type { FeedbackReportSubmittedEvent } from '@bge/feedback';
 import { JOB_META_KEY } from '@bge/queue-actor-context';
 import type { Queue } from 'bullmq';
 import { FEEDBACK_DELIVERY_JOB } from '../constants/feedback-queue.constants';
 import type { FeedbackSink } from '../contract/feedback-sink';
-import { FeedbackSinkRegistry } from '../sinks/feedback-sink.registry';
+import type { FeedbackSinkRegistry } from '../sinks/feedback-sink.registry';
 import { FeedbackDispatcherService } from './feedback-dispatcher.service';
 
 function sink(slug: string): FeedbackSink {

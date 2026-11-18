@@ -1,4 +1,5 @@
-import { CACHE_REDIS_CLIENT, type Redis } from '@bge/redis';
+import type { Redis } from '@bge/redis';
+import { CACHE_REDIS_CLIENT } from '@bge/redis';
 import { Inject, Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { SAFE_HTTP_POLICY_UPDATE_CHANNEL } from '../constants/safe-http.constants';
 import type { SafeHttpPolicyEventHandler, SafeHttpPolicyUpdatedEvent } from './safe-http-policy-event.interface';

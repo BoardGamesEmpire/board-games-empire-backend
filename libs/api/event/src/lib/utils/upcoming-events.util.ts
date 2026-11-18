@@ -1,13 +1,10 @@
-import { liveEventWhere, OccurrenceStatus, Prisma, type DatabaseService } from '@bge/database';
-import { type PaginatedRows } from '@bge/shared';
+import type { DatabaseService } from '@bge/database';
+import { liveEventWhere, OccurrenceStatus, Prisma } from '@bge/database';
+import type { PaginatedRows } from '@bge/shared';
 import { OCCURRENCE_ORDER } from '../constants/occurrence-order.constant';
 import { dateNotPassedWhere } from './date-end.util';
-import {
-  readEventAttendance,
-  withEventAttendance,
-  type EventListRow,
-  type OwnAttendeeWhere,
-} from './event-attendance.util';
+import type { EventListRow, OwnAttendeeWhere } from './event-attendance.util';
+import { readEventAttendance, withEventAttendance } from './event-attendance.util';
 import { withEventStatus } from './event-status.util';
 
 /**

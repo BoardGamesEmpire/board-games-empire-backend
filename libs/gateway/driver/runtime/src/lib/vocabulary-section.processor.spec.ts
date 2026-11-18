@@ -1,5 +1,6 @@
 import { DataGatewayCapability, DataGatewaySectionFailure } from '@bge/database';
-import { wrapJobData, type JobMetaEnvelope } from '@bge/queue-actor-context';
+import type { JobMetaEnvelope } from '@bge/queue-actor-context';
+import { wrapJobData } from '@bge/queue-actor-context';
 import { InMemoryGatewayDriver } from '@boardgamesempire/gateway-driver-contract-testing';
 import { Logger } from '@nestjs/common';
 import type { Job } from 'bullmq';

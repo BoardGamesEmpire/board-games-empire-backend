@@ -7,7 +7,8 @@ import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { InviteTokenDto, ListSentInvitesQueryDto } from '../dto';
-import { PartyInviteService, type HouseholdInviteAcceptance } from './party-invite.service';
+import type { HouseholdInviteAcceptance } from './party-invite.service';
+import { PartyInviteService } from './party-invite.service';
 
 /** The third case `UnscopedList` documents: bound by a rule of its own, with no ceiling to compose. */
 const RECEIVED_INVITES_SCOPE = Unscoped(

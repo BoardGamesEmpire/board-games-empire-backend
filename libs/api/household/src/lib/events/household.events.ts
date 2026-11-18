@@ -1,5 +1,6 @@
 import { MutationEvent } from '@bge/actor-context';
-import { ResourceType, type GameShareSnapshot } from '@bge/database';
+import type { GameShareSnapshot } from '@bge/database';
+import { ResourceType } from '@bge/database';
 import { HouseholdEvents } from '../constants/household-events.constant';
 
 /**

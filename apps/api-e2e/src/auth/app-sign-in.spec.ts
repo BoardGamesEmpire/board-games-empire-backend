@@ -3,17 +3,16 @@ import { SIGN_IN_ANONYMOUS_PATH, waitForProvisionedRoleNames } from '@bge/testin
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { apiCacheHas } from '../support/api-cache';
+import type { AppSignInThroughProvider, StartedAppSignIn } from '../support/app-sign-in';
 import {
   APP_SIGN_IN_RETURN_PATH,
   APP_USER_AGENT,
-  type AppSignInThroughProvider,
   appSignInThroughProvider,
   exchangeAppSignInCode,
   nextLocation,
   pkcePair,
   postAppSignInToken,
   startAppSignIn,
-  type StartedAppSignIn,
 } from '../support/app-sign-in';
 import { requireBaseUrl, SIGNED_FAKE_PROVIDER_ID } from '../support/e2e-env';
 import { ID_TOKEN_FAULTS } from '../support/fake-sign-in-provider';
@@ -25,7 +24,8 @@ import {
   sessionCookieOf,
   signInThroughProvider,
 } from '../support/sign-in-provider';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 
 const DISCOVERY_PATH = '/.well-known/bge-identity';
 const GET_SESSION_PATH = '/api/auth/get-session';

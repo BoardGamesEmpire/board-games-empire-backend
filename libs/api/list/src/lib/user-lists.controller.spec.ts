@@ -3,7 +3,7 @@ import { ListScopeNotComposedError } from '@bge/shared';
 import { paginationQuery } from '@bge/testing';
 import { ClsServiceManager } from 'nestjs-cls';
 import { firstValueFrom } from 'rxjs';
-import { ListService } from './list.service';
+import type { ListService } from './list.service';
 import { UserListsController } from './user-lists.controller';
 
 const PAGINATION = paginationQuery({ limit: 20 });

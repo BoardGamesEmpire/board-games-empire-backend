@@ -1,4 +1,5 @@
-import { Test, type TestingModule } from '@nestjs/testing';
+import type { TestingModule } from '@nestjs/testing';
+import { Test } from '@nestjs/testing';
 import type { NextFunction, Request, Response } from 'express';
 import { AbilityService } from '../ability.service';
 import { AbilityContextMiddleware } from './ability-context.middleware';

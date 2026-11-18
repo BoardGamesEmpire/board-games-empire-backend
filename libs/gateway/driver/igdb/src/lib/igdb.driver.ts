@@ -1,12 +1,9 @@
-import {
-  unsupportedOperation,
-  type DataGatewayDriver,
-  type DriverLogger,
-  type UpstreamFetch,
-} from '@boardgamesempire/gateway-driver-contract';
+import type { DataGatewayDriver, DriverLogger, UpstreamFetch } from '@boardgamesempire/gateway-driver-contract';
+import { unsupportedOperation } from '@boardgamesempire/gateway-driver-contract';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { randomUUID } from 'node:crypto';
-import { defer, EMPTY, from, merge, Observable, of } from 'rxjs';
+import type { Observable } from 'rxjs';
+import { defer, EMPTY, from, merge, of } from 'rxjs';
 import { catchError, endWith, expand, filter, map, mergeMap, reduce, shareReplay, tap } from 'rxjs/operators';
 import type { IgdbRequest } from './client/igdb-client.interface';
 import { IgdbCaller } from './igdb-caller';

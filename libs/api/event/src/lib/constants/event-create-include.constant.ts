@@ -1,5 +1,6 @@
-import { Prisma } from '@bge/database';
-import { POLICY_VIEW_INCLUDE, type EventPolicyView } from '../policy/policy-view';
+import type { Prisma } from '@bge/database';
+import type { EventPolicyView } from '../policy/policy-view';
+import { POLICY_VIEW_INCLUDE } from '../policy/policy-view';
 import { ATTENDEE_ORDER } from './attendee-order.constant';
 import { OCCURRENCE_ORDER } from './occurrence-order.constant';
 

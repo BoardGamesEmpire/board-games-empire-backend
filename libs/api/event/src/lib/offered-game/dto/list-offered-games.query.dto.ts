@@ -1,5 +1,6 @@
 import { ContentType, GameMedium, PlatformType } from '@bge/database';
-import { type GameRangeFilter, INT32_MAX, INT32_MIN, TransformRangeBound } from '@bge/game-search';
+import type { GameRangeFilter } from '@bge/game-search';
+import { INT32_MAX, INT32_MIN, TransformRangeBound } from '@bge/game-search';
 import { i18nValidationMessage } from '@bge/i18n';
 import { DefaultPaginationQueryDto, NotLessThanProperty, TransformBoolean, TransformList } from '@bge/shared';
 import { ApiPropertyOptional } from '@nestjs/swagger';

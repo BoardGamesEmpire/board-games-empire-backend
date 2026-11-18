@@ -1,4 +1,5 @@
-import { SERVER_PLUGIN_UNIT, type Actor, type UserActor } from '@bge/actor-context';
+import type { Actor, UserActor } from '@bge/actor-context';
+import { SERVER_PLUGIN_UNIT } from '@bge/actor-context';
 import { UnknownActorKindError } from './context.errors';
 import { toPluginActorView } from './plugin-actor-view.projection';
 

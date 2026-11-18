@@ -1,5 +1,7 @@
-import { PluginCategory, PluginScope, RiskLevel, type Plugin, type PrismaClient } from '@bge/database';
-import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
+import type { Plugin, PrismaClient } from '@bge/database';
+import { PluginCategory, PluginScope, RiskLevel } from '@bge/database';
+import type { PluginManifest } from '@boardgamesempire/plugin-manifest';
+import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { randomUUID } from 'node:crypto';
 import type { Check } from './manifest-checks';
 import { INVENTORY_STAGING_ID, pluginRowData, stagedUpdateColumns } from './plugin-row-fixtures';

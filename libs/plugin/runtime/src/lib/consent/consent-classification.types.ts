@@ -1,4 +1,5 @@
-import { assertNeverPluginUnit, type PluginUnit } from '@bge/actor-context';
+import type { PluginUnit } from '@bge/actor-context';
+import { assertNeverPluginUnit } from '@bge/actor-context';
 import type { RiskLevel } from '@bge/database';
 import type { PluginConsentScopeValue } from '@boardgamesempire/plugin-manifest';
 import type { ConsentUngrantableCause } from '../grants/consent-grantability';

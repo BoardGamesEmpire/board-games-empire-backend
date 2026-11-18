@@ -3,7 +3,8 @@ import { structuredLogMessage } from '@bge/logger';
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PgAdvisoryLock } from './advisory-lock';
-import { BOOTSTRAP_OPTIONS, CACHE_FLUSH, type BootstrapModuleOptions } from './bootstrap-options';
+import type { BootstrapModuleOptions } from './bootstrap-options';
+import { BOOTSTRAP_OPTIONS, CACHE_FLUSH } from './bootstrap-options';
 import { RegistryDataMigrations } from './data-migrations-phase';
 import {
   databaseRoleIn,
@@ -13,7 +14,8 @@ import {
 } from './migration-credential';
 import type { BootstrapLogger, CacheFlush } from './ports';
 import { PrismaSchemaLedger } from './prisma-ledger';
-import { runBootstrapSequence, type BootstrapSummary } from './runner';
+import type { BootstrapSummary } from './runner';
+import { runBootstrapSequence } from './runner';
 import { RunSeedsSeeder } from './seeder';
 
 /**

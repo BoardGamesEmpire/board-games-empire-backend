@@ -1,4 +1,5 @@
-import { parsePluginArtifactSha256, type PluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
+import type { PluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
+import { parsePluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
 
 /**
  * A checksum as a server admin sends it, trimmed and lowercased, or `null`

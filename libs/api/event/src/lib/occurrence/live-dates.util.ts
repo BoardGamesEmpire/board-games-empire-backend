@@ -1,4 +1,5 @@
-import { OccurrenceStatus, type Prisma } from '@bge/database';
+import type { Prisma } from '@bge/database';
+import { OccurrenceStatus } from '@bge/database';
 
 /**
  * The statuses of a date still in play: proposed or confirmed. A declined or

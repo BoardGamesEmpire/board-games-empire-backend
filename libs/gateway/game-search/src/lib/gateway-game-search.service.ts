@@ -1,19 +1,16 @@
 import { convertToMarkdown } from '@bge/content-format';
-import { type ContentFormat, DatabaseService, DataGatewayCapability, type SearchFilterAxis } from '@bge/database';
-import {
-  GatewayRegistryService,
-  type GatewayResolution,
-  GatewayRoutingRefusedError,
-  type SearchResolution,
-  type SearchRoute,
-} from '@bge/gateway-registry';
+import type { ContentFormat, SearchFilterAxis } from '@bge/database';
+import { DatabaseService, DataGatewayCapability } from '@bge/database';
+import type { GatewayResolution, SearchResolution, SearchRoute } from '@bge/gateway-registry';
+import { GatewayRegistryService, GatewayRoutingRefusedError } from '@bge/gateway-registry';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { Cache } from 'cache-manager';
 import { defer, EMPTY, from, Observable, of } from 'rxjs';
 import { catchError, concatMap, endWith, map, mergeMap, tap } from 'rxjs/operators';
-import { filterFor, matchesFilter, type ResultFilter, toResultFilter, unfilterableAxes } from './search-filter';
+import type { ResultFilter } from './search-filter';
+import { filterFor, matchesFilter, toResultFilter, unfilterableAxes } from './search-filter';
 
 /**
  * Cap for concurrent per-game dedup lookups on the cache-replay path. Live

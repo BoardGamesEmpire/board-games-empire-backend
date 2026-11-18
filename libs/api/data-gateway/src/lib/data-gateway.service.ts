@@ -16,7 +16,8 @@ import {
 } from '@bge/gateway-registry';
 import { t } from '@bge/i18n';
 import { AbilityService, ScopeComposer, Unscoped } from '@bge/permissions';
-import { PaginationQueryDto, type PaginatedRows } from '@bge/shared';
+import type { PaginatedRows } from '@bge/shared';
+import { PaginationQueryDto } from '@bge/shared';
 import {
   BadRequestException,
   ForbiddenException,
@@ -26,7 +27,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { connectionFieldRequired, pluginConnectionFields, pluginRowDelete } from './data-gateway.errors';
-import { WITH_SECTIONS, type DataGatewayWithSections } from './data-gateway.view';
+import type { DataGatewayWithSections } from './data-gateway.view';
+import { WITH_SECTIONS } from './data-gateway.view';
 import { CreateDataGatewayDto, UpdateDataGatewayDto } from './dto';
 
 @Injectable()

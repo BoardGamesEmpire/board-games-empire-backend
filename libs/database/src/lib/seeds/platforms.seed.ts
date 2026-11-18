@@ -1,5 +1,6 @@
 import type { Logger } from '@nestjs/common';
-import { PlatformType, type PrismaClient } from '../client';
+import type { PrismaClient } from '../client';
+import { PlatformType } from '../client';
 
 /**
  * Seeds system-owned Platform records.

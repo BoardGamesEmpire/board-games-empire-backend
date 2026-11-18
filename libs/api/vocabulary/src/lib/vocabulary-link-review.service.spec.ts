@@ -1,6 +1,7 @@
 import { PlatformType, Prisma, VocabularyLinkOrigin, VocabularyLinkStatus } from '@bge/database';
 import { t } from '@bge/i18n';
-import { batchTransactionCall, createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { batchTransactionCall, createTestingModuleWithDb } from '@bge/testing';
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { DEFAULT_VOCABULARY_REVIEW_STATUSES, VocabularyLinkReviewService } from './vocabulary-link-review.service';
 import { VocabularyLinkService } from './vocabulary-link.service';

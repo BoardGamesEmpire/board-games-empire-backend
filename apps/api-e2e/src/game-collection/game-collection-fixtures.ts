@@ -1,4 +1,5 @@
-import { GameMedium, type PrismaClient, type Reach } from '@bge/database';
+import type { PrismaClient, Reach } from '@bge/database';
+import { GameMedium } from '@bge/database';
 import { randomUUID } from 'node:crypto';
 import { tabletopPlatform } from '../support/seeded-platforms';
 

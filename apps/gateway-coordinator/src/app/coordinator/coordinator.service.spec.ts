@@ -4,7 +4,7 @@ import { createTestingModuleWithDb } from '@bge/testing';
 import { getFlowProducerToken } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { FlowProducer } from 'bullmq';
+import type { FlowProducer } from 'bullmq';
 import { CoordinatorService } from './coordinator.service';
 import { GameImportEnqueuerService } from './services/game-import-enqueuer.service';
 

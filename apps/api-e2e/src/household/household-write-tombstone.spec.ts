@@ -1,10 +1,13 @@
 import { QuotaScope, ResourceType } from '@bge/database';
-import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
+import type { Actors, SessionActor } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import { WebhookEventType } from '@bge/webhooks';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
-import { expectLockWaiter, withBarrier, type Barrier } from '../support/lock-barrier';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { Barrier } from '../support/lock-barrier';
+import { expectLockWaiter, withBarrier } from '../support/lock-barrier';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { SOFT_DELETE_HOUSEHOLD } from './lock-fixtures';
 
 /**

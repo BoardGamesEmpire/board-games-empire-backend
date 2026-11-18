@@ -1,4 +1,5 @@
-import { APP_SIGN_IN_FLOW_INVALID, APP_SIGN_IN_UNAVAILABLE, type AppSignInErrorCode } from './app-sign-in-codes';
+import type { AppSignInErrorCode } from './app-sign-in-codes';
+import { APP_SIGN_IN_FLOW_INVALID, APP_SIGN_IN_UNAVAILABLE } from './app-sign-in-codes';
 import { appSignInReturnPage } from './app-sign-in-paths';
 import type { AppSignInStore } from './app-sign-in-store';
 import { appReturnUrl } from './return-address';

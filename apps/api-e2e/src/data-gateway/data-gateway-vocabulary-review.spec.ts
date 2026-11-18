@@ -1,8 +1,11 @@
-import { AuthType, PlatformType, VocabularyLinkOrigin, VocabularyLinkStatus, type DataGateway } from '@bge/database';
-import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
+import type { DataGateway } from '@bge/database';
+import { AuthType, PlatformType, VocabularyLinkOrigin, VocabularyLinkStatus } from '@bge/database';
+import type { Actors, SessionActor } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 
 /** Every record and supplied name this spec makes starts so, so `afterEach` can find the platforms it added. */
 const PREFIX = 'E2E Vocab';

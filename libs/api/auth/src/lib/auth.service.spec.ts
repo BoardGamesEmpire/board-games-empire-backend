@@ -1,5 +1,6 @@
 import type { AuditContextService } from '@bge/actor-context';
-import { CodedHttpException, translateException, type I18nTranslations } from '@bge/i18n';
+import type { I18nTranslations } from '@bge/i18n';
+import { CodedHttpException, translateException } from '@bge/i18n';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
 import { betterAuth } from 'better-auth';
 import { memoryAdapter } from 'better-auth/adapters/memory';

@@ -1,5 +1,7 @@
-import { Prisma, type DatabaseService } from '@bge/database';
-import { createMockDatabaseService, rawQueryText, type MockDatabaseService } from '@bge/testing';
+import type { DatabaseService } from '@bge/database';
+import { Prisma } from '@bge/database';
+import type { MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService, rawQueryText } from '@bge/testing';
 import { ExtendedNetworkService, REBUILD_ALL_BATCH_SIZE } from './extended-network.service';
 
 /**

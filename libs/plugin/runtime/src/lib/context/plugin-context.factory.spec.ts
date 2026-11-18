@@ -1,9 +1,9 @@
-import { AuditContextService, type Actor } from '@bge/actor-context';
+import type { Actor, AuditContextService } from '@bge/actor-context';
 import type { SafeHttpRequestOptions, SecureHttpService } from '@bge/secure-http';
 import type { PluginManifest } from '@boardgamesempire/plugin-manifest';
 import { Logger } from '@nestjs/common';
-import { EventEmitter2 } from '@nestjs/event-emitter';
-import { PluginConfigService } from '../config/plugin-config.service';
+import type { EventEmitter2 } from '@nestjs/event-emitter';
+import type { PluginConfigService } from '../config/plugin-config.service';
 import { PluginEmitNotDeclaredError } from '../loader/loader.errors';
 import { PluginContextFactory } from './plugin-context.factory';
 

@@ -1,12 +1,13 @@
-import { EventParticipationStatus, Prisma } from '@bge/database';
-import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
+import type { Prisma } from '@bge/database';
+import { EventParticipationStatus } from '@bge/database';
+import type { MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService } from '@bge/testing';
+import type { EventAttendance, EventAttendanceRow } from './event-attendance.util';
 import {
   EVENT_ATTENDANCE_SELECT,
   readEventAttendance,
   toEventAttendance,
   withEventAttendance,
-  type EventAttendance,
-  type EventAttendanceRow,
 } from './event-attendance.util';
 
 const RSVP_DATE = new Date('2026-11-01T12:00:00Z');

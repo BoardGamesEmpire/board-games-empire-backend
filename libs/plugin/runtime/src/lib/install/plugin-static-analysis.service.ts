@@ -2,7 +2,8 @@ import type { PluginArtifactDirectory } from '@boardgamesempire/plugin-contract'
 import { classifyImportSpecifier, resolveAliasedPackageName } from '@boardgamesempire/plugin-manifest';
 import { Injectable, Logger } from '@nestjs/common';
 import { init, parse as parseEsm } from 'es-module-lexer';
-import { parse as parseAst, type ESTree } from 'meriyah';
+import type { ESTree } from 'meriyah';
+import { parse as parseAst } from 'meriyah';
 import { readdir, readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { isPlainJsonObject } from '../is-plain-json-object';
@@ -14,16 +15,14 @@ import {
   resolvedParserVersion,
   SCRIPT_PARSE_OPTIONS,
 } from './parser-capabilities';
-import {
-  isGatingFinding,
-  MAX_ADVISORY_FINDINGS,
-  MAX_GATING_EXAMPLES_PER_SPECIFIER,
-  type StaticAnalysisFinding,
-  type StaticAnalysisFindingKind,
-  type StaticAnalysisReport,
-  type StaticAnalysisScanScope,
-  type StaticAnalysisSeverity,
+import type {
+  StaticAnalysisFinding,
+  StaticAnalysisFindingKind,
+  StaticAnalysisReport,
+  StaticAnalysisScanScope,
+  StaticAnalysisSeverity,
 } from './static-analysis.types';
+import { isGatingFinding, MAX_ADVISORY_FINDINGS, MAX_GATING_EXAMPLES_PER_SPECIFIER } from './static-analysis.types';
 
 const SCANNABLE_EXTENSIONS = ['.js', '.mjs', '.cjs'] as const;
 const NODE_MODULES = 'node_modules';

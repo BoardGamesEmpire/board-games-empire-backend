@@ -3,7 +3,7 @@ import { RiskLevel } from '@bge/database';
 import type { NormalizedPermissionRequest, PluginConsentScopeValue } from '@boardgamesempire/plugin-manifest';
 import { buildPluginModuleOptions } from '../testing/plugin-module-options.fixture';
 import type { ClassifiedConsentCheck, ConsentCheckClassification } from './consent-classification.types';
-import { PluginConsentCheckClassifier } from './plugin-consent-check-classifier.service';
+import type { PluginConsentCheckClassifier } from './plugin-consent-check-classifier.service';
 import { PluginConsentStandingService } from './plugin-consent-standing.service';
 
 describe('PluginConsentStandingService (#1149)', () => {

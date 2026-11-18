@@ -1,5 +1,6 @@
-import { AuthService } from '@bge/auth';
-import { CodedHttpException, t, type I18nTranslations, type LocaleResolutionService } from '@bge/i18n';
+import type { AuthService } from '@bge/auth';
+import type { I18nTranslations, LocaleResolutionService } from '@bge/i18n';
+import { CodedHttpException, t } from '@bge/i18n';
 import { Logger, ServiceUnavailableException } from '@nestjs/common';
 import type { I18nService } from 'nestjs-i18n';
 import type { Namespace, Socket } from 'socket.io';

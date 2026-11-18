@@ -1,5 +1,6 @@
 import { DatabaseService } from '@bge/database';
-import { Test, type TestingModule } from '@nestjs/testing';
+import type { TestingModule } from '@nestjs/testing';
+import { Test } from '@nestjs/testing';
 import { ClsModule } from 'nestjs-cls';
 import { I18nService } from 'nestjs-i18n';
 import { ClsLocaleResolver } from './cls-locale.resolver';

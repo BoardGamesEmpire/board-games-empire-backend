@@ -1,5 +1,6 @@
 import type { Redis } from '@bge/redis';
-import { PluginConfigEventsService, type PluginConfigReloadEvent } from './plugin-config-events.service';
+import type { PluginConfigReloadEvent } from './plugin-config-events.service';
+import { PluginConfigEventsService } from './plugin-config-events.service';
 import { PLUGIN_CONFIG_UPDATE_CHANNEL } from './plugin-config.constants';
 
 type MessageHandler = (channel: string, message: string) => void;

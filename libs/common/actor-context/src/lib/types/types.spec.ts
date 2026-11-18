@@ -1,11 +1,5 @@
+import type { Actor, AnonymousActor, ApiKeyActor, ExternalActor, PluginActor, SystemActor, UserActor } from './index';
 import {
-  type Actor,
-  type AnonymousActor,
-  type ApiKeyActor,
-  type ExternalActor,
-  type PluginActor,
-  type SystemActor,
-  type UserActor,
   actorHasValidPluginUnits,
   actorUserId,
   assertPluginUnit,

@@ -1,4 +1,5 @@
-import { lockLiveHousehold, Prisma, type DatabaseService, type SystemRole } from '@bge/database';
+import type { DatabaseService, SystemRole } from '@bge/database';
+import { lockLiveHousehold, Prisma } from '@bge/database';
 import { t } from '@bge/i18n';
 import { InternalServerErrorException, NotFoundException } from '@nestjs/common';
 

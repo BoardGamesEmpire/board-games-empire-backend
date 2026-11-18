@@ -1,6 +1,7 @@
 import type { I18nPath } from '@bge/i18n';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { createHostCheck, type HostCheck } from './host-check';
+import type { HostCheck } from './host-check';
+import { createHostCheck } from './host-check';
 import { createHostRule } from './host-rule';
 
 const FORGED_FORWARDED_HOST = { 'x-forwarded-host': 'bge.example' };

@@ -1,9 +1,11 @@
 import { DataGatewayCapability } from '@bge/database';
-import { wrapJobData, type JobMetaEnvelope } from '@bge/queue-actor-context';
+import type { JobMetaEnvelope } from '@bge/queue-actor-context';
+import { wrapJobData } from '@bge/queue-actor-context';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Injectable, Logger } from '@nestjs/common';
 import type { Queue } from 'bullmq';
 import * as crypto from 'node:crypto';
+import type { VocabularySectionJob } from './constants/vocabulary-section.constants';
 import {
   SECTION_ATTEMPTS,
   SECTION_BACKOFF_MS,
@@ -11,7 +13,6 @@ import {
   SECTION_SPACING_MS,
   VOCABULARY_SECTION_JOB,
   VOCABULARY_SECTION_QUEUE,
-  type VocabularySectionJob,
 } from './constants/vocabulary-section.constants';
 
 const errorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));

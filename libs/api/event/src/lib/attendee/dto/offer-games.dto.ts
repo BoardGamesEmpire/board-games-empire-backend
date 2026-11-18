@@ -1,6 +1,7 @@
 import { i18nValidationMessage } from '@bge/i18n';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
+import type { ValidationOptions } from 'class-validator';
 import {
   ArrayMaxSize,
   ArrayNotEmpty,
@@ -9,7 +10,6 @@ import {
   IsString,
   registerDecorator,
   ValidateNested,
-  type ValidationOptions,
 } from 'class-validator';
 
 /** The most collection entries one batch offer may name, counting expansions (#1188). */

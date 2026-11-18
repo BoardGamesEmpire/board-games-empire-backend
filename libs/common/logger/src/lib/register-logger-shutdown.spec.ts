@@ -1,5 +1,6 @@
 import type { Logger as PinoInstance } from 'pino';
-import { createLoggerShutdown, registerLoggerShutdown, type ShutdownableApp } from './register-logger-shutdown';
+import type { ShutdownableApp } from './register-logger-shutdown';
+import { createLoggerShutdown, registerLoggerShutdown } from './register-logger-shutdown';
 
 interface MockLogger {
   error: jest.Mock;

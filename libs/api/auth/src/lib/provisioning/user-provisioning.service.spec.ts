@@ -1,7 +1,9 @@
-import { ListKind, SystemRole, type User } from '@bge/database';
+import type { User } from '@bge/database';
+import { ListKind, SystemRole } from '@bge/database';
 import { PermissionsService } from '@bge/permissions';
 import { ServiceAccountService } from '@bge/services';
-import { createMockDatabaseService, createTestingModuleWithDb, makeUser, MockDatabaseService } from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService, createTestingModuleWithDb, makeUser } from '@bge/testing';
 import { UserProvisioningService } from './user-provisioning.service';
 
 describe('UserProvisioningService', () => {

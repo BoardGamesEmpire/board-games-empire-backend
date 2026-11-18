@@ -1,5 +1,6 @@
 import { Action, EventParticipationStatus, ListKind, Prisma, ResourceType } from '@bge/database';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
+import type { MockAbilityService, MockDatabaseService } from '@bge/testing';
 import {
   batchTransactionCall,
   createMockAbilityService,
@@ -7,8 +8,6 @@ import {
   MOCK_ACTING_USER_ID,
   paginationQuery,
   unwrapTransaction,
-  type MockAbilityService,
-  type MockDatabaseService,
 } from '@bge/testing';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';

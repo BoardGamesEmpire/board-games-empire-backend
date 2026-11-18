@@ -1,3 +1,4 @@
+import type { DrainableQueue, QueueLike } from './queues';
 import {
   countPendingJobs,
   drainQueue,
@@ -5,8 +6,6 @@ import {
   markQueueEvents,
   testQueueConnection,
   waitForStableJobCount,
-  type DrainableQueue,
-  type QueueLike,
 } from './queues';
 
 /**

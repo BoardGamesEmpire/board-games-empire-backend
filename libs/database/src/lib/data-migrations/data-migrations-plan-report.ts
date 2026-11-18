@@ -1,6 +1,8 @@
-import { indent, type PlanReport } from '../catalog/catalog-plan-report';
+import type { PlanReport } from '../catalog/catalog-plan-report';
+import { indent } from '../catalog/catalog-plan-report';
 import type { DataMigrationEntry } from './data-migration-entry';
-import { assertDataMigrationRegistry, describeMismatch, type DataMigrationsPlan } from './plan-data-migrations';
+import type { DataMigrationsPlan } from './plan-data-migrations';
+import { assertDataMigrationRegistry, describeMismatch } from './plan-data-migrations';
 
 /**
  * The ledger half of what `npm run db:plan` prints (#236), beside the

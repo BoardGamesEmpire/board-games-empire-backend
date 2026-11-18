@@ -41,7 +41,8 @@ import {
 } from './attendance';
 import { AddAttendeeDto } from './dto/add-attendee.dto';
 import { AddGameToListDto } from './dto/add-game-to-list.dto';
-import { OfferGamesDto, type OfferGameItemDto } from './dto/offer-games.dto';
+import type { OfferGameItemDto } from './dto/offer-games.dto';
+import { OfferGamesDto } from './dto/offer-games.dto';
 import { UpdateAttendeeStatusDto } from './dto/update-attendee-status.dto';
 import {
   AttendeeAddedEvent,
@@ -51,7 +52,8 @@ import {
   GameRemovedFromListEvent,
 } from './events/attendee.events';
 import { assertInvitable } from './invitable';
-import { OfferRefusal, offerRefusalMessage, type OfferResult } from './offer-outcome';
+import type { OfferResult } from './offer-outcome';
+import { OfferRefusal, offerRefusalMessage } from './offer-outcome';
 
 /** An attendee row with their user and role. */
 type AttendeeRow = Prisma.EventAttendeeGetPayload<{ include: typeof ATTENDEE_USER_AND_ROLE_INCLUDE }>;

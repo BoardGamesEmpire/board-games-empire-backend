@@ -1,7 +1,8 @@
 import { FeedbackCategory, FeedbackContext, FeedbackSeverity } from '@bge/database';
 import { MAX_CLIENT_REQUEST_ID_LENGTH } from '@bge/shared';
 import { plainToInstance } from 'class-transformer';
-import { validate, ValidationError } from 'class-validator';
+import type { ValidationError } from 'class-validator';
+import { validate } from 'class-validator';
 import { FEEDBACK_BREADCRUMBS_MAX_BYTES, FEEDBACK_MAX_STACK_TRACE_LENGTH } from '../constants/feedback.constants';
 import {
   FEEDBACK_MAX_MESSAGE_LENGTH,

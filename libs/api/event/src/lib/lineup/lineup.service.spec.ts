@@ -9,6 +9,7 @@ import {
 import { t } from '@bge/i18n';
 import { LineupRemovalReason } from '@bge/notifications-service';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
+import type { MockAbilityService, MockDatabaseService } from '@bge/testing';
 import {
   batchTransactionCall,
   createMockAbilityService,
@@ -16,8 +17,6 @@ import {
   MOCK_ACTING_USER_ID,
   rawQueryText,
   unwrapTransaction,
-  type MockAbilityService,
-  type MockDatabaseService,
 } from '@bge/testing';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';

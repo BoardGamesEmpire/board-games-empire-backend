@@ -1,4 +1,5 @@
-import { SmtpSecurity, type Prisma } from '@bge/database';
+import type { Prisma } from '@bge/database';
+import { SmtpSecurity } from '@bge/database';
 import { requireMailpit } from './e2e-env';
 import type { TestDatabase } from './test-db';
 

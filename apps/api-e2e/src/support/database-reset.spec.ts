@@ -1,3 +1,4 @@
+import type { TableRef } from './database-reset';
 import {
   missingPreservedTables,
   PRESERVED_MAY_BE_EMPTY_TABLE_NAMES,
@@ -5,7 +6,6 @@ import {
   quoteQualifiedTable,
   tablesToAssertPopulated,
   tablesToTruncate,
-  type TableRef,
 } from './database-reset';
 
 describe('database-reset (pure logic)', () => {

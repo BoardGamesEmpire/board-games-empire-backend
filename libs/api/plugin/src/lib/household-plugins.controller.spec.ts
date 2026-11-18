@@ -1,31 +1,30 @@
 import type { AuditContextService } from '@bge/actor-context';
-import { Action, PluginGrantStatus, ResourceType, RiskLevel, type DatabaseService } from '@bge/database';
+import type { DatabaseService } from '@bge/database';
+import { Action, PluginGrantStatus, ResourceType, RiskLevel } from '@bge/database';
 import { HouseholdLivenessGuard } from '@bge/household';
 import type { SupportedLocalesService } from '@bge/i18n';
-import {
-  CHECK_POLICIES_KEY,
-  PoliciesGuard,
-  ScopeComposer,
-  type AbilityService,
-  type AppAbility,
-} from '@bge/permissions';
-import {
-  PluginConsentActLocaleError,
-  type PluginConsentActService,
-  type PluginConsentPresentation,
-  type PluginConsentPresentationService,
-  type PluginFeatureStateService,
-  type PluginFeatureUnitState,
-  type PluginInventoryService,
-  type PluginUnitLifecycleService,
+import type { AbilityService, AppAbility } from '@bge/permissions';
+import { CHECK_POLICIES_KEY, PoliciesGuard, ScopeComposer } from '@bge/permissions';
+import type {
+  PluginConsentActService,
+  PluginConsentPresentation,
+  PluginConsentPresentationService,
+  PluginFeatureStateService,
+  PluginFeatureUnitState,
+  PluginInventoryService,
+  PluginUnitLifecycleService,
 } from '@bge/plugin';
+import { PluginConsentActLocaleError } from '@bge/plugin';
 import { ListScopeNotComposedError } from '@bge/shared';
-import { createMockAbilityService, MOCK_ACTING_USER_ID, type MockAbilityService } from '@bge/testing';
-import { ForbiddenException, NotFoundException, RequestMethod, type ExecutionContext } from '@nestjs/common';
+import type { MockAbilityService } from '@bge/testing';
+import { createMockAbilityService, MOCK_ACTING_USER_ID } from '@bge/testing';
+import type { ExecutionContext } from '@nestjs/common';
+import { ForbiddenException, NotFoundException, RequestMethod } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ClsServiceManager } from 'nestjs-cls';
 import 'reflect-metadata';
-import { firstValueFrom, type Observable } from 'rxjs';
+import type { Observable } from 'rxjs';
+import { firstValueFrom } from 'rxjs';
 import { HouseholdPluginsController } from './household-plugins.controller';
 
 const PRESENTATION = {

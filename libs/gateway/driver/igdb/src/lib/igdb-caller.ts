@@ -1,5 +1,7 @@
-import { fromAbortable, type DriverLogger, type UpstreamFetch } from '@boardgamesempire/gateway-driver-contract';
-import { from, Observable, throwError, timer } from 'rxjs';
+import type { DriverLogger, UpstreamFetch } from '@boardgamesempire/gateway-driver-contract';
+import { fromAbortable } from '@boardgamesempire/gateway-driver-contract';
+import type { Observable } from 'rxjs';
+import { from, throwError, timer } from 'rxjs';
 import { catchError, switchMap } from 'rxjs/operators';
 import { fetchAccessToken, TWITCH_TOKEN_URL } from './client/fetch-access-token';
 import type { IgdbRequest } from './client/igdb-client.interface';

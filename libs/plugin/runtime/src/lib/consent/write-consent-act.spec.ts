@@ -1,14 +1,10 @@
-import {
-  PluginConsentActKind,
-  PluginGrantScope,
-  PluginGrantStatus,
-  RiskLevel,
-  type PluginGrant,
-  type Prisma,
-} from '@bge/database';
-import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
+import type { PluginGrant, Prisma } from '@bge/database';
+import { PluginConsentActKind, PluginGrantScope, PluginGrantStatus, RiskLevel } from '@bge/database';
+import type { MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService } from '@bge/testing';
 import type { ConsentActDecision, ConsentActPresentation } from './plugin-consent-act.types';
-import { writeConsentAct, type ConsentActWrite } from './write-consent-act';
+import type { ConsentActWrite } from './write-consent-act';
+import { writeConsentAct } from './write-consent-act';
 
 describe('writeConsentAct', () => {
   const DECIDED_AT = new Date('2026-11-17T10:00:00.000Z');

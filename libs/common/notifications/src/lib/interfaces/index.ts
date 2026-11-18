@@ -1,5 +1,10 @@
-import type { DataGatewayCapability, EventParticipationStatus, JobType, ResourceType } from '@bge/database';
-import { NotificationType } from '@bge/database';
+import type {
+  DataGatewayCapability,
+  EventParticipationStatus,
+  JobType,
+  NotificationType,
+  ResourceType,
+} from '@bge/database';
 import type { I18nMessage } from '@bge/i18n';
 import type { MailFailureCode } from '@bge/mail';
 

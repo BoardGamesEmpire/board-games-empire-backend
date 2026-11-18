@@ -4,7 +4,8 @@ import { joinHostPort, walkDir } from '@bge/utils';
 import type { INestMicroservice, Type } from '@nestjs/common';
 import type { ConfigFactory, ConfigFactoryKeyHost } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
-import { Transport, type AsyncMicroserviceOptions, type GrpcOptions } from '@nestjs/microservices';
+import type { AsyncMicroserviceOptions, GrpcOptions } from '@nestjs/microservices';
+import { Transport } from '@nestjs/microservices';
 import { Logger } from 'nestjs-pino';
 import type { Logger as PinoLogger } from 'pino';
 

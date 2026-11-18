@@ -1,4 +1,5 @@
-import { DatabaseService, Prisma, VocabularyLinkOrigin, VocabularyLinkStatus } from '@bge/database';
+import type { DatabaseService, VocabularyLinkOrigin } from '@bge/database';
+import { Prisma, VocabularyLinkStatus } from '@bge/database';
 import type { PaginatedRows } from '@bge/shared';
 import type {
   EntryOf,

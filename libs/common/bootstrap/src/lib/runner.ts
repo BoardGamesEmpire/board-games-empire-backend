@@ -1,20 +1,21 @@
 import type { MigrationState, MigrationStateKind } from '@bge/database';
 import { classifyMigrationState, DEVELOPMENT_DATABASE_RESET_LINE, divergedFixLines } from '@bge/database';
-import { SpanStatusCode, trace, type Span, type Tracer } from '@opentelemetry/api';
-import { DATABASE_URL_VARIABLE, MIGRATION_URL_VARIABLE, type MigrationCredential } from './migration-credential';
-import {
-  DEFAULT_WAIT_MS,
-  systemClock,
-  type BootstrapLock,
-  type BootstrapLogger,
-  type Clock,
-  type DataMigrationsPhase,
-  type DataMigrationsSummary,
-  type Migrator,
-  type ReconcileSummary,
-  type SchemaLedger,
-  type SeedsPhase,
+import type { Span, Tracer } from '@opentelemetry/api';
+import { SpanStatusCode, trace } from '@opentelemetry/api';
+import type { MigrationCredential } from './migration-credential';
+import { DATABASE_URL_VARIABLE, MIGRATION_URL_VARIABLE } from './migration-credential';
+import type {
+  BootstrapLock,
+  BootstrapLogger,
+  Clock,
+  DataMigrationsPhase,
+  DataMigrationsSummary,
+  Migrator,
+  ReconcileSummary,
+  SchemaLedger,
+  SeedsPhase,
 } from './ports';
+import { DEFAULT_WAIT_MS, systemClock } from './ports';
 
 /** How often a waiting process re-reads the ledger. */
 export const DEFAULT_SCHEMA_POLL_MS = 5_000;

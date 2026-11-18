@@ -2,8 +2,10 @@ import { FEEDBACK_QUEUE_NAME } from '@bge/queue-feedback';
 import request from 'supertest';
 import { resetDatabase } from '../support/database-reset';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestQueue, type TestQueue } from '../support/queues';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestQueue } from '../support/queues';
+import { createTestQueue } from '../support/queues';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { consumersOf } from '../support/worker';
 
 const ISOLATION_USERNAME = 'e2e-harness-isolation';

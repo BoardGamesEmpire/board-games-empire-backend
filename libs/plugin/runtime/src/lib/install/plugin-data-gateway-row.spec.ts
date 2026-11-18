@@ -1,6 +1,7 @@
 import type { Prisma } from '@bge/database';
 import { uniqueViolation, uniqueViolationWithoutMeta } from '@bge/database/testing';
-import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService } from '@bge/testing';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { PluginInstallDataGatewayNameConflictError } from './install.errors';
 import {

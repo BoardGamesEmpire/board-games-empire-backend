@@ -1,5 +1,6 @@
 import { setTimeout as sleep } from 'node:timers/promises';
-import { Client, type QueryResultRow } from 'pg';
+import type { QueryResultRow } from 'pg';
+import { Client } from 'pg';
 import { schemaFromDatabaseUrl } from './e2e-env';
 
 /**

@@ -1,5 +1,6 @@
 import { AuditContextService } from '@bge/actor-context';
-import { I18N_CATALOG_DIR, i18nValidationMessage, type I18nTranslations } from '@bge/i18n-core';
+import type { I18nTranslations } from '@bge/i18n-core';
+import { I18N_CATALOG_DIR, i18nValidationMessage } from '@bge/i18n-core';
 import { Test } from '@nestjs/testing';
 import { IsIn, IsString, IsUUID } from 'class-validator';
 import { I18nModule, I18nService, I18nValidationException, I18nValidationPipe } from 'nestjs-i18n';

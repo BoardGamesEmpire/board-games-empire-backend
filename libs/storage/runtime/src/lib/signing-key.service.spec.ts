@@ -1,6 +1,7 @@
 import type { DatabaseService, SystemSetting } from '@bge/database';
 import type { EncryptionService } from '@bge/services';
-import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService } from '@bge/testing';
 import { StorageMisconfiguredError } from '@boardgamesempire/storage-contract';
 import { SigningKeyService } from './signing-key.service.js';
 

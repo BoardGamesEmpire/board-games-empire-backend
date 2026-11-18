@@ -1,16 +1,12 @@
 import { Reach, SystemRole } from '@bge/database';
-import {
-  createActors,
-  HOUSEHOLD_ROLE_NAMES,
-  type Actors,
-  type HouseholdRoleName,
-  type SessionActor,
-} from '@bge/testing-e2e';
+import type { Actors, HouseholdRoleName, SessionActor } from '@bge/testing-e2e';
+import { createActors, HOUSEHOLD_ROLE_NAMES } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { arrangeCollectionEntry } from '../game-collection/game-collection-fixtures';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { createMemberClient } from './household-request';
 import { memberEnvelope } from './household-wire';
 

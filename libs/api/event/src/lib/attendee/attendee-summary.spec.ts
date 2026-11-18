@@ -1,6 +1,8 @@
-import { Action, type DatabaseService, ResourceType } from '@bge/database';
+import type { DatabaseService } from '@bge/database';
+import { Action, ResourceType } from '@bge/database';
 import type { ScopeComposer } from '@bge/permissions';
-import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService } from '@bge/testing';
 import { ATTENDEE_SUMMARY_SELECT, readableAttendees } from './attendee-summary';
 
 const CEILING = { id: { in: ['a', 'b'] }, AND: [{ id: 'sentinel-condition' }] };

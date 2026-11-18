@@ -1,4 +1,5 @@
-import { SystemRole, type CatalogSnapshot, type PermissionSlug } from '@bge/database';
+import type { CatalogSnapshot, PermissionSlug } from '@bge/database';
+import { SystemRole } from '@bge/database';
 import { CodedHttpException, t } from '@bge/i18n';
 import { Http } from '@status/codes';
 

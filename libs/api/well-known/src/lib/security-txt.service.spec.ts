@@ -1,5 +1,6 @@
 import { ConfigService } from '@nestjs/config';
-import { Test, TestingModule } from '@nestjs/testing';
+import type { TestingModule } from '@nestjs/testing';
+import { Test } from '@nestjs/testing';
 import { DateTime } from 'luxon';
 import { SecurityTxtService } from './security-txt.service';
 

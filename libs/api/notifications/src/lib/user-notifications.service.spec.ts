@@ -1,11 +1,7 @@
 import { Action, ResourceType } from '@bge/database';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
-import {
-  createMockAbilityService,
-  createTestingModuleWithDb,
-  type MockAbilityService,
-  type MockDatabaseService,
-} from '@bge/testing';
+import type { MockAbilityService, MockDatabaseService } from '@bge/testing';
+import { createMockAbilityService, createTestingModuleWithDb } from '@bge/testing';
 import { UserNotificationsService } from './user-notifications.service';
 
 /** Stands in for the caller's ceiling, so each assertion can tell it from the read's own clauses. */

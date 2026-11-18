@@ -1,4 +1,5 @@
-import { SERVER_PLUGIN_UNIT, type HouseholdPluginUnit } from '@bge/actor-context';
+import type { HouseholdPluginUnit } from '@bge/actor-context';
+import { SERVER_PLUGIN_UNIT } from '@bge/actor-context';
 import { PluginGrantStatus, RiskLevel } from '@bge/database';
 import type { NormalizedPermissionRequest } from '@boardgamesempire/plugin-manifest';
 import type { ConsentUngrantableCause } from '../grants/consent-grantability';

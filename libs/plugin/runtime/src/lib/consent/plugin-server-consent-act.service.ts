@@ -7,7 +7,8 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
 import { PluginLifecycleAuthorityError } from '../lifecycle/lifecycle.errors';
 import { revalidateStoredManifest } from '../manifest/stored-manifest';
-import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
+import type { PluginModuleOptions } from '../plugin-module.options';
+import { MODULE_OPTIONS_TOKEN } from '../plugin-module.options';
 import { loadLivingPlugin } from '../units/living-plugin';
 import {
   PluginUnitManifestError,
@@ -15,7 +16,8 @@ import {
   PluginUnitPluginTombstonedError,
 } from '../units/unit.errors';
 import { planConsentAct } from './consent-act-plan';
-import { emitDecisionEvents, type WrittenDecision } from './consent-decision-events';
+import type { WrittenDecision } from './consent-decision-events';
+import { emitDecisionEvents } from './consent-decision-events';
 import { decisionsStand } from './consent-decision-stands';
 import { PluginConsentActStaleError } from './plugin-consent-act.errors';
 import type { ConsentActAnswer } from './plugin-consent-act.types';

@@ -1,8 +1,10 @@
-import { createActors, type Actors } from '@bge/testing-e2e';
+import type { Actors } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import request from 'supertest';
 import { postToAuth, signInAgain } from '../support/auth-routes';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 
 const IMPERSONATE_PATH = '/api/auth/admin/impersonate-user';
 const LIST_USERS_PATH = '/api/auth/admin/list-users';

@@ -1,4 +1,5 @@
-import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService } from '@bge/testing';
 import { buildPluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
 import { PLUGIN_ARTIFACT_TTL_MS, PluginArtifactStore } from './plugin-artifact.store';
 

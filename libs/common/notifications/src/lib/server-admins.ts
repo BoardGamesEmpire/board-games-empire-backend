@@ -1,4 +1,5 @@
-import { DatabaseService, SERVER_ADMIN_ROLE_WHERE } from '@bge/database';
+import type { DatabaseService } from '@bge/database';
+import { SERVER_ADMIN_ROLE_WHERE } from '@bge/database';
 
 /** The ids of the server admins: the users holding the Owner or Admin server role (#763). */
 export async function findServerAdminIds(db: DatabaseService): Promise<string[]> {

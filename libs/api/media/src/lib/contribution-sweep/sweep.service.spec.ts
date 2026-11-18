@@ -1,6 +1,8 @@
 import { AuditContextService, SystemActorScope } from '@bge/actor-context';
-import { ContributionOrigin, MediaContribution, MediaContributionStatus, ResourceType } from '@bge/database';
-import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
+import type { MediaContribution } from '@bge/database';
+import { ContributionOrigin, MediaContributionStatus, ResourceType } from '@bge/database';
+import type { MockDatabaseService } from '@bge/testing';
+import { createTestingModuleWithDb } from '@bge/testing';
 import { getQueueToken } from '@nestjs/bullmq';
 import { MediaJobNames, MediaQueueNames } from '../constants/media-queue.constants';
 import { MediaContributionSweepService } from './sweep.service';

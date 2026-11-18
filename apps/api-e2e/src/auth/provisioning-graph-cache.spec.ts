@@ -1,10 +1,12 @@
 import { PermissionsService } from '@bge/permissions';
-import { createActors, performSignup, waitForProvisionedRoleNames, type Actors } from '@bge/testing-e2e';
+import type { Actors } from '@bge/testing-e2e';
+import { createActors, performSignup, waitForProvisionedRoleNames } from '@bge/testing-e2e';
 import request from 'supertest';
 import { permissionsCacheHas } from '../support/api-cache';
 import { requireBaseUrl } from '../support/e2e-env';
 import { expectBackendsQueuedBehind, withBarrier } from '../support/lock-barrier';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { holdProvisioningAtRoleWrite } from './lock-fixtures';
 
 const HOUSEHOLDS_PATH = '/api/households';

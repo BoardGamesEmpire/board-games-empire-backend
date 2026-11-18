@@ -1,18 +1,16 @@
-import { PluginCategory, PluginExecutionMode, PluginScope, Prisma, type Plugin } from '@bge/database';
+import type { Plugin } from '@bge/database';
+import { PluginCategory, PluginExecutionMode, PluginScope, Prisma } from '@bge/database';
 import type { PluginLoadRecordRow } from '@bge/database/testing';
 import { fakePluginLoadRecords } from '@bge/database/testing';
-import { createMockDatabaseService, rawQueryText, type MockDatabaseService } from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService, rawQueryText } from '@bge/testing';
 import { PluginEvent } from '@boardgamesempire/plugin-contract';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { Logger } from '@nestjs/common';
 import { PluginConfigValidationError } from '../config/config-schema.errors';
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
-import {
-  PluginConfigUpdatedEvent,
-  PluginDisabledEvent,
-  PluginEnabledEvent,
-  PluginUninstalledEvent,
-} from '../events/plugin.events';
+import type { PluginDisabledEvent } from '../events/plugin.events';
+import { PluginConfigUpdatedEvent, PluginEnabledEvent, PluginUninstalledEvent } from '../events/plugin.events';
 import type { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
 import type { PluginInstanceRegistry } from '../loader/plugin-instance-registry';
 import type { ClaimedPluginRow } from '../manifest/manifest-move';

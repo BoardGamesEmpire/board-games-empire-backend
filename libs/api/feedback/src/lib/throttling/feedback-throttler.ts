@@ -1,7 +1,9 @@
 import { actorUserId, getActorSnapshotFromCls } from '@bge/actor-context';
-import { applyDecorators, SetMetadata, type ExecutionContext } from '@nestjs/common';
+import type { ExecutionContext } from '@nestjs/common';
+import { applyDecorators, SetMetadata } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { Throttle, type ThrottlerGetTrackerFunction, type ThrottlerOptions } from '@nestjs/throttler';
+import type { ThrottlerGetTrackerFunction, ThrottlerOptions } from '@nestjs/throttler';
+import { Throttle } from '@nestjs/throttler';
 
 /**
  * Tiered rate limiting for feedback submission (issue #45): a per-source-IP

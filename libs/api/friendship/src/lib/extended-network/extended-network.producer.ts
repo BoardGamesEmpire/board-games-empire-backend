@@ -1,15 +1,14 @@
-import { type Actor, AuditContextService } from '@bge/actor-context';
-import { type JobActorMeta, type JobMetaEnvelope, wrapJobData } from '@bge/queue-actor-context';
+import type { Actor } from '@bge/actor-context';
+import { AuditContextService } from '@bge/actor-context';
+import type { JobActorMeta, JobMetaEnvelope } from '@bge/queue-actor-context';
+import { wrapJobData } from '@bge/queue-actor-context';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Injectable, Logger } from '@nestjs/common';
 import type { JobsOptions, Queue } from 'bullmq';
 import { randomUUID } from 'node:crypto';
 import { EXTENDED_NETWORK_JOB_RETRY } from './extended-network-job-options';
-import {
-  EXTENDED_NETWORK_QUEUE,
-  type ExtendedNetworkJob,
-  ExtendedNetworkJobNames,
-} from './extended-network-queue.constants';
+import type { ExtendedNetworkJob } from './extended-network-queue.constants';
+import { EXTENDED_NETWORK_QUEUE, ExtendedNetworkJobNames } from './extended-network-queue.constants';
 
 /**
  * How long a user's rebuild waits before it runs. A change to the same user

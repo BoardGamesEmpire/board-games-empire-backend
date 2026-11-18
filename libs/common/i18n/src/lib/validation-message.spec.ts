@@ -1,4 +1,5 @@
-import { i18nValidationMessage, type I18nTranslations, type I18nValidationPath } from '@bge/i18n-core';
+import type { I18nTranslations, I18nValidationPath } from '@bge/i18n-core';
+import { i18nValidationMessage } from '@bge/i18n-core';
 import type { ValidationArguments } from 'class-validator';
 import { i18nValidationMessage as vendorI18nValidationMessage } from 'nestjs-i18n';
 

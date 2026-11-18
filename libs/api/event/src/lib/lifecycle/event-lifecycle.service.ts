@@ -15,13 +15,8 @@ import { BadRequestException, ForbiddenException, Injectable, Logger } from '@ne
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import assert from 'node:assert';
 import { eventWebhookIds } from '../event.service';
-import {
-  deriveEventStatus,
-  EVENT_STATUS_DATE_SELECT,
-  withEventStatus,
-  type EventStatusDate,
-  type EventWithStatus,
-} from '../utils/event-status.util';
+import type { EventStatusDate, EventWithStatus } from '../utils/event-status.util';
+import { deriveEventStatus, EVENT_STATUS_DATE_SELECT, withEventStatus } from '../utils/event-status.util';
 import { lockLiveEvent } from '../utils/lock-live-event.util';
 import type { CancelEventDto } from './dto/cancel-event.dto';
 import {

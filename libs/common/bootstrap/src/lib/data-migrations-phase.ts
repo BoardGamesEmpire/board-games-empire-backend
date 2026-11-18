@@ -1,9 +1,5 @@
-import {
-  applyDataMigrations,
-  DATA_MIGRATIONS,
-  type DataMigrationEntry,
-  type DataMigrationsClient,
-} from '@bge/database';
+import type { DataMigrationEntry, DataMigrationsClient } from '@bge/database';
+import { applyDataMigrations, DATA_MIGRATIONS } from '@bge/database';
 import { Logger } from '@nestjs/common';
 import type { CacheFlush, DataMigrationsPhase, DataMigrationsSummary } from './ports';
 

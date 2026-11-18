@@ -1,13 +1,17 @@
 import { AuthType, PluginCategory, PluginScope } from '@bge/database';
-import { buildPluginTarball, type PluginTarballEntry } from '@bge/plugin-artifacts';
-import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
-import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
+import type { PluginTarballEntry } from '@bge/plugin-artifacts';
+import { buildPluginTarball } from '@bge/plugin-artifacts';
+import type { Actors, SessionActor } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
+import type { PluginManifest } from '@boardgamesempire/plugin-manifest';
+import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { createHash, randomBytes } from 'node:crypto';
 import request from 'supertest';
 import { deferredRequest } from '../support/deferred-request';
 import { requireBaseUrl } from '../support/e2e-env';
 import { expectErrorEnvelope } from '../support/error-envelope';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { readArtifactShownRisks, readStagedShownRisks } from './consent-act-fixtures';
 import { pluginRowData, stagedUpdateColumns } from './plugin-row-fixtures';
 

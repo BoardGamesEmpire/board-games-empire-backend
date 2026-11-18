@@ -1,5 +1,6 @@
 import * as proto from '@boardgamesempire/proto-gateway';
-import { EMPTY, lastValueFrom, Observable, of, throwError, toArray } from 'rxjs';
+import type { Observable } from 'rxjs';
+import { EMPTY, lastValueFrom, of, throwError, toArray } from 'rxjs';
 import { GRPC_STATUS_INVALID_ARGUMENT } from './driver-observables.js';
 import { fetchEachGame } from './fetch-each-game.js';
 

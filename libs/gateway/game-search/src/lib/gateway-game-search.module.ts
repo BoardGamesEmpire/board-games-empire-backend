@@ -1,5 +1,6 @@
 import { DatabaseModule } from '@bge/database';
-import { CACHE_REDIS_CLIENT, createCacheStore, type Redis } from '@bge/redis';
+import type { Redis } from '@bge/redis';
+import { CACHE_REDIS_CLIENT, createCacheStore } from '@bge/redis';
 import { CacheModule } from '@nestjs/cache-manager';
 import { Module } from '@nestjs/common';
 import { GatewayGameSearchService } from './gateway-game-search.service';

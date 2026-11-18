@@ -1,5 +1,7 @@
-import { I18N_CATALOG_DIR, type I18nTranslations } from '@bge/i18n-core';
-import { Test, type TestingModule } from '@nestjs/testing';
+import type { I18nTranslations } from '@bge/i18n-core';
+import { I18N_CATALOG_DIR } from '@bge/i18n-core';
+import type { TestingModule } from '@nestjs/testing';
+import { Test } from '@nestjs/testing';
 import { I18nModule, I18nService } from 'nestjs-i18n';
 import { renderMail } from './render-mail';
 

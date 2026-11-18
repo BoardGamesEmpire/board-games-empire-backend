@@ -1,5 +1,6 @@
 import { createFakeFetch } from '@boardgamesempire/gateway-driver-contract-testing';
-import { firstValueFrom, type Observable } from 'rxjs';
+import type { Observable } from 'rxjs';
+import { firstValueFrom } from 'rxjs';
 import { createBggClient } from '../client/bgg-client';
 import type { BggClientLike, BggSearchQueryParams, BggThingQueryParams } from '../client/bgg-client.interface';
 import { BggThingType, DEFAULT_BGG_SEARCH_TYPES } from '../constants';

@@ -1,6 +1,7 @@
 import type { I18nPath } from '@bge/i18n';
 import { APIError } from 'better-auth/api';
-import { idsAllowingUnverifiedEmail, type OidcProviderConfig } from './configuration/oidc-providers';
+import type { OidcProviderConfig } from './configuration/oidc-providers';
+import { idsAllowingUnverifiedEmail } from './configuration/oidc-providers';
 import { isProviderSignInPath } from './provider-picture';
 
 export const SIGN_IN_PROVIDER_EMAIL_UNVERIFIED = 'SIGN_IN_PROVIDER_EMAIL_UNVERIFIED';

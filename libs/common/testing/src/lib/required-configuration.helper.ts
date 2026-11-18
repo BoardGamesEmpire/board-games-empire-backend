@@ -1,8 +1,10 @@
-import { environments, type Environment } from '@bge/env';
+import type { Environment } from '@bge/env';
+import { environments } from '@bge/env';
 import { beforeAll, describe, expect, it } from '@jest/globals';
 import type { DynamicModule, FactoryProvider, ForwardReference, Type } from '@nestjs/common';
 import { MODULE_METADATA } from '@nestjs/common/constants.js';
-import { ConfigModule, type ConfigFactory, type ConfigModuleOptions } from '@nestjs/config';
+import type { ConfigFactory, ConfigModuleOptions } from '@nestjs/config';
+import { ConfigModule } from '@nestjs/config';
 import { parse } from 'dotenv';
 import { readFileSync } from 'node:fs';
 import * as path from 'node:path';

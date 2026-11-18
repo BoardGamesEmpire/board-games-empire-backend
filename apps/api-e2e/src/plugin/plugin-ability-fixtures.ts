@@ -1,18 +1,11 @@
-import {
-  PluginGrantScope,
-  type DatabaseService,
-  type PluginActiveManifestReader,
-  type PluginConfigVerdict,
-  type PrismaClient,
-} from '@bge/database';
+import type { DatabaseService, PluginActiveManifestReader, PluginConfigVerdict, PrismaClient } from '@bge/database';
+import { PluginGrantScope } from '@bge/database';
 import { PermissionsService } from '@bge/permissions';
-import {
-  PluginManifestValidationError,
-  validatePluginManifest,
-  type PluginConsentScopeValue,
-} from '@boardgamesempire/plugin-manifest';
+import type { PluginConsentScopeValue } from '@boardgamesempire/plugin-manifest';
+import { PluginManifestValidationError, validatePluginManifest } from '@boardgamesempire/plugin-manifest';
 import addFormats from 'ajv-formats';
-import Ajv2020, { type ValidateFunction } from 'ajv/dist/2020';
+import type { ValidateFunction } from 'ajv/dist/2020';
+import Ajv2020 from 'ajv/dist/2020';
 
 /**
  * The consent scope a manifest names, as the decision scope a grant row

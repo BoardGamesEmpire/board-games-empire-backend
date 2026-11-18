@@ -1,3 +1,4 @@
+import type { Plugin } from '@bge/database';
 import {
   PluginConsentActKind,
   PluginGrantScope,
@@ -5,17 +6,19 @@ import {
   PluginLifecycleEventType,
   PluginScope,
   RiskLevel,
-  type Plugin,
 } from '@bge/database';
-import { createActors, pollUntil, type Actors, type SessionActor } from '@bge/testing-e2e';
-import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
+import type { Actors, SessionActor } from '@bge/testing-e2e';
+import { createActors, pollUntil } from '@bge/testing-e2e';
+import type { PluginManifest } from '@boardgamesempire/plugin-manifest';
+import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { restoreShippedCatalog } from '../permission-catalog/shipped-catalog';
 import { deferredRequest } from '../support/deferred-request';
 import { requireBaseUrl } from '../support/e2e-env';
 import { errorText } from '../support/error-text';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import {
   readConsentSurface,
   readStagedShownRisks,

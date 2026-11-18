@@ -1,4 +1,5 @@
-import { derivePluginUnitDormancy, retainedConfigOf, type HouseholdPlugin } from '@bge/database';
+import type { HouseholdPlugin } from '@bge/database';
+import { derivePluginUnitDormancy, retainedConfigOf } from '@bge/database';
 import type { PluginManifestValidationResult } from '@boardgamesempire/plugin-manifest';
 import { PluginConfigSchemaUnusableError } from '../config/config-schema.errors';
 import type { PluginConfigSchemaService } from '../config/plugin-config-schema.service';

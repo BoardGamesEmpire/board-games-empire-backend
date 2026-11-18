@@ -1,21 +1,20 @@
-import { ContentType, GameMedium, ListKind, Reach, ResourceType, type Prisma } from '@bge/database';
-import { createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
+import type { Prisma } from '@bge/database';
+import { ContentType, GameMedium, ListKind, Reach, ResourceType } from '@bge/database';
+import type { Actors, AuthenticatedActor } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import { setTimeout } from 'node:timers/promises';
 import request from 'supertest';
 import { arrangeList, arrangePlatformGame as arrangeSiblingPlatformGame, findWishlist } from '../list/list-fixtures';
-import { mintApiKey, type Caller } from '../support/api-key';
+import type { Caller } from '../support/api-key';
+import { mintApiKey } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import { tabletopPlatform } from '../support/seeded-platforms';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import type { HttpResponseLike, RequestDescription } from '../support/wire';
-import {
-  collectionRowPlatformGame,
-  listCollectionsEnvelope,
-  readCollectionEnvelope,
-  type CollectionRowPlatformGameWire,
-  type PlayerAndPlayTimeField,
-} from './game-collection-wire';
+import type { CollectionRowPlatformGameWire, PlayerAndPlayTimeField } from './game-collection-wire';
+import { collectionRowPlatformGame, listCollectionsEnvelope, readCollectionEnvelope } from './game-collection-wire';
 
 /**
  * What a collection row embeds of its game and platform game (#1070), against

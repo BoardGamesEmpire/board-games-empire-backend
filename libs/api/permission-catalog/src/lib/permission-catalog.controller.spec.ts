@@ -1,5 +1,6 @@
 import { Action, ResourceType, RiskLevel } from '@bge/database';
-import { CHECK_POLICIES_KEY, PoliciesGuard, type AppAbility } from '@bge/permissions';
+import type { AppAbility } from '@bge/permissions';
+import { CHECK_POLICIES_KEY, PoliciesGuard } from '@bge/permissions';
 import { createTestingModuleWithDb } from '@bge/testing';
 import { ROUTE_ARGS_METADATA } from '@nestjs/common/constants';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';

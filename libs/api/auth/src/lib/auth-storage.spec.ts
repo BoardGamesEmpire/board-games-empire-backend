@@ -1,7 +1,9 @@
 import type { Redis } from '@bge/redis';
 import Keyv from 'keyv';
-import { createAuthStorage, createRedisAuthStorage, type CompleteAuthStorage } from './auth-storage';
-import { withStorageFailureRecord, type StorageFailureRecord } from './storage-failure-record';
+import type { CompleteAuthStorage } from './auth-storage';
+import { createAuthStorage, createRedisAuthStorage } from './auth-storage';
+import type { StorageFailureRecord } from './storage-failure-record';
+import { withStorageFailureRecord } from './storage-failure-record';
 
 /** An in-memory store that raises failures, as the api's Redis-backed one is built to. */
 const memoryStore = () => new Keyv({ throwOnErrors: true });

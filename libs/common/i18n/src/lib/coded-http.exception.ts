@@ -1,6 +1,7 @@
 import type { I18nMessage } from '@bge/i18n-core';
 import { HttpException } from '@nestjs/common';
-import { errorEnvelope, type ErrorCode } from './error-envelope';
+import type { ErrorCode } from './error-envelope';
+import { errorEnvelope } from './error-envelope';
 
 export interface CodedHttpExceptionOptions {
   /** Server-side context for logs. It never reaches the response body. */

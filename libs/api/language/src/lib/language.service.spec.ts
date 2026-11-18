@@ -1,5 +1,6 @@
 import { Prisma } from '@bge/database';
-import { batchTransactionCall, createTestingModuleWithDb, MockDatabaseService } from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { batchTransactionCall, createTestingModuleWithDb } from '@bge/testing';
 import { plainToInstance } from 'class-transformer';
 import { LanguageQueryDto } from './dto/language-query.dto';
 import { LanguageService } from './language.service';

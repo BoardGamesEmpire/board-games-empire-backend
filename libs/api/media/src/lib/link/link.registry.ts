@@ -1,4 +1,5 @@
-import { Prisma, ResourceType } from '@bge/database';
+import type { Prisma } from '@bge/database';
+import { ResourceType } from '@bge/database';
 import { linkKey } from '../constants/media-link.constants';
 
 /** Per-attachment context. Each handler reads the subset its join table supports. */

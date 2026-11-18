@@ -1,9 +1,12 @@
-import { createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
+import type { Actors, AuthenticatedActor } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import { setTimeout as sleep } from 'node:timers/promises';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
-import { expectBackendsQueuedBehind, expectLockWaiter, withBarrier, type Barrier } from '../support/lock-barrier';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { Barrier } from '../support/lock-barrier';
+import { expectBackendsQueuedBehind, expectLockWaiter, withBarrier } from '../support/lock-barrier';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { arrangeListEntry } from './event-fixtures';
 import { createEventClient, EVENTS_PATH } from './event-request';
 import { eventGameEnvelope } from './event-wire';

@@ -11,7 +11,8 @@ import {
 } from '@bge/database';
 import { CACHE_REDIS_CLIENT } from '@bge/redis';
 import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
-import { InMemoryGatewayDriver, type InMemoryGatewayFixtures } from '@boardgamesempire/gateway-driver-contract-testing';
+import type { InMemoryGatewayFixtures } from '@boardgamesempire/gateway-driver-contract-testing';
+import { InMemoryGatewayDriver } from '@boardgamesempire/gateway-driver-contract-testing';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -26,7 +27,8 @@ import { GatewayRoutingRefusedError } from './errors/gateway-routing-refused.err
 import { GatewayDisabledEvent } from './events/gateway-registry.events';
 import { GatewayConfigEventsService } from './gateway-config-events.service';
 import { GatewayInterviewService } from './gateway-interview.service';
-import { coverageOverlaps, GatewayRegistryService, type StoredCoverage } from './gateway-registry.service';
+import type { StoredCoverage } from './gateway-registry.service';
+import { coverageOverlaps, GatewayRegistryService } from './gateway-registry.service';
 import type { GatewayConfigEvent } from './interfaces';
 import { FakeDataGatewayTable } from './testing/fake-data-gateway-table';
 import { VocabularySectionQueue } from './vocabulary-section.queue';

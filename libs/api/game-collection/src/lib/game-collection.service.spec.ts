@@ -2,12 +2,8 @@ import type { GameCollection, GameRelease, PlatformGame } from '@bge/database';
 import { Action, GameMedium, GameRemovalReason, ListKind, Prisma, Reach, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
-import {
-  batchTransactionCall,
-  createTestingModuleWithDb,
-  paginationQuery,
-  type MockDatabaseService,
-} from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { batchTransactionCall, createTestingModuleWithDb, paginationQuery } from '@bge/testing';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { GameCollectionService } from './game-collection.service';
 

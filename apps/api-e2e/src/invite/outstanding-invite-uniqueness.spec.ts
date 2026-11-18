@@ -1,9 +1,12 @@
-import { constraintIdentity, InviteStatus, isPrismaUniqueConstraintError, Prisma } from '@bge/database';
-import { arrangeInvite, createActors, type Actors } from '@bge/testing-e2e';
+import type { Prisma } from '@bge/database';
+import { constraintIdentity, InviteStatus, isPrismaUniqueConstraintError } from '@bge/database';
+import type { Actors } from '@bge/testing-e2e';
+import { arrangeInvite, createActors } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import { inspect } from 'node:util';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 
 /**
  * The database half of #161: a second outstanding invite to the

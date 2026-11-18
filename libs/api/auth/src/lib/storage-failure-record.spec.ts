@@ -1,4 +1,5 @@
-import { noteStorageFailure, withStorageFailureRecord, type StorageFailureRecord } from './storage-failure-record';
+import type { StorageFailureRecord } from './storage-failure-record';
+import { noteStorageFailure, withStorageFailureRecord } from './storage-failure-record';
 
 /**
  * A request's record of whether a storage call failed, so the handler on

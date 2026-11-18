@@ -404,6 +404,84 @@ const memberBlankLines = {
   },
 };
 
+// #1317: a name imported only as a type goes in an `import type` statement of
+// its own. `@typescript-eslint/consistent-type-imports` never reports a
+// specifier that already says `type`, so this rule moves inline `type`
+// specifiers out of a value import into an `import type` statement above it.
+// An inline specifier is already erased, so the move is safe even in a file
+// whose decorators emit metadata. organize-imports merges a duplicate
+// `import type` statement afterwards. A comment inside the braces is reported
+// but not fixed, since the rebuilt statements would drop it.
+const topLevelTypeImports = {
+  meta: {
+    type: 'suggestion',
+    fixable: 'code',
+    schema: [],
+    messages: {
+      inlineTypeSpecifier:
+        'Import types in an `import type { … }` statement of their own, not as inline `type` specifiers (#1317).',
+    },
+  },
+  create(context) {
+    const sourceCode = context.sourceCode;
+
+    return {
+      ImportDeclaration(node) {
+        if (node.importKind !== 'value') {
+          return;
+        }
+
+        const named = node.specifiers.filter((specifier) => specifier.type === 'ImportSpecifier');
+        const typeSpecifiers = named.filter((specifier) => specifier.importKind === 'type');
+
+        if (typeSpecifiers.length === 0) {
+          return;
+        }
+
+        const hasInnerComment = sourceCode.getCommentsInside(node).length > 0;
+
+        context.report({
+          node,
+          messageId: 'inlineTypeSpecifier',
+          fix: hasInnerComment
+            ? null
+            : (fixer) => {
+                // The source, any import attributes and the semicolon, as written.
+                const tail = sourceCode.text.slice(node.source.range[0], node.range[1]);
+                const withoutType = (specifier) => sourceCode.getText(specifier).replace(/^type\s+/, '');
+                const typeStatement = `import type { ${typeSpecifiers.map(withoutType).join(', ')} } from ${tail}`;
+
+                const defaultSpecifier = node.specifiers.find(
+                  (specifier) => specifier.type === 'ImportDefaultSpecifier',
+                );
+                const valueNamed = named.filter((specifier) => specifier.importKind !== 'type');
+                const valueParts = [
+                  ...(defaultSpecifier ? [sourceCode.getText(defaultSpecifier)] : []),
+                  ...(valueNamed.length > 0
+                    ? [`{ ${valueNamed.map((specifier) => sourceCode.getText(specifier)).join(', ')} }`]
+                    : []),
+                ];
+
+                if (valueParts.length === 0) {
+                  return fixer.replaceText(node, typeStatement);
+                }
+
+                return fixer.replaceText(node, `${typeStatement}\nimport ${valueParts.join(', ')} from ${tail}`);
+              },
+        });
+      },
+    };
+  },
+};
+
+// The decorator settings most tsconfigs here turn on. No ESLint config sets
+// `parserOptions.project`, so the parser learns them from `parserOptions` alone.
+// Without them `@typescript-eslint/consistent-type-imports` checks files that
+// contain a decorator too, and its autofix turns a constructor-injected class
+// into `import type`: the emitted metadata becomes `Object`, and Nest DI fails
+// at runtime (#1317). With them the rule skips those files entirely.
+export const decoratorParserOptions = { emitDecoratorMetadata: true, experimentalDecorators: true };
+
 // Interface and type-literal members sort alphabetically (#1374): natural
 // order (field2 before field10), case-insensitive, one list per body. Blank
 // lines neither partition the sort nor get touched by it; bge/member-blank-lines
@@ -424,6 +502,7 @@ export const bgePlugin = {
     'member-blank-lines': memberBlankLines,
     'no-nested-ceiling': noNestedCeiling,
     'no-uncoded-exception-body': noUncodedExceptionBody,
+    'top-level-type-imports': topLevelTypeImports,
   },
 };
 
@@ -493,6 +572,22 @@ export default [
       // rule doesn't warn on the generated header.
       '**/i18n.generated.ts',
     ],
+  },
+  {
+    // Must follow the Nx spreads, which set the parser (#1317).
+    files: ['**/*.ts', '**/*.tsx', '**/*.cts', '**/*.mts'],
+    languageOptions: { parserOptions: decoratorParserOptions },
+    rules: {
+      // A name imported only as a type goes in an `import type` statement of
+      // its own (#1317). Files with a decorator are skipped, per the flags above.
+      // `typeof import('x')` annotations stay allowed: #1317 is about import
+      // statements, and specs use them in `jest.requireActual<…>()`.
+      '@typescript-eslint/consistent-type-imports': [
+        'error',
+        { prefer: 'type-imports', fixStyle: 'separate-type-imports', disallowTypeAnnotations: false },
+      ],
+      'bge/top-level-type-imports': 'error',
+    },
   },
   {
     files: ['**/*.ts', '**/*.tsx', '**/*.js', '**/*.jsx'],

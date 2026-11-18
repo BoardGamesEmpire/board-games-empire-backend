@@ -1,6 +1,8 @@
 import { DeploymentRuntime } from '@bge/database';
-import { Test, TestingModule } from '@nestjs/testing';
-import { DEPLOYMENT_SIGNALS, DeploymentInfoService, type DeploymentSignals } from './deployment-info.service';
+import type { TestingModule } from '@nestjs/testing';
+import { Test } from '@nestjs/testing';
+import type { DeploymentSignals } from './deployment-info.service';
+import { DEPLOYMENT_SIGNALS, DeploymentInfoService } from './deployment-info.service';
 
 /**
  * Pure-signal detection — every test injects a deterministic `DeploymentSignals`

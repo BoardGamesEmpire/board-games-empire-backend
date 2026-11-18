@@ -2,16 +2,8 @@ import { RiskLevel } from '@bge/database';
 import { i18nValidationMessage } from '@bge/i18n';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import {
-  IsBoolean,
-  IsEnum,
-  IsObject,
-  IsString,
-  NotContains,
-  ValidateBy,
-  ValidateIf,
-  type ValidationOptions,
-} from 'class-validator';
+import type { ValidationOptions } from 'class-validator';
+import { IsBoolean, IsEnum, IsObject, IsString, NotContains, ValidateBy, ValidateIf } from 'class-validator';
 
 /**
  * The value as the request sent it, not as the global pipe's implicit

@@ -1,7 +1,9 @@
-import { DatabaseService, Plugin, PluginCategory, PluginScope } from '@bge/database';
-import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
+import type { DatabaseService, Plugin } from '@bge/database';
+import { PluginCategory, PluginScope } from '@bge/database';
+import type { MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService } from '@bge/testing';
 import { Logger } from '@nestjs/common';
-import { PluginConfigEventsService, type PluginConfigReloadHandler } from './plugin-config-events.service';
+import type { PluginConfigEventsService, PluginConfigReloadHandler } from './plugin-config-events.service';
 import { PluginConfigService } from './plugin-config.service';
 
 const makePluginRow = (overrides: Partial<Plugin> = {}): Plugin =>

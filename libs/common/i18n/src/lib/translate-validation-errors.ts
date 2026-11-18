@@ -1,4 +1,4 @@
-import { AuditContextService } from '@bge/actor-context';
+import type { AuditContextService } from '@bge/actor-context';
 import type { I18nTranslations } from '@bge/i18n-core';
 import type { I18nService, I18nValidationException } from 'nestjs-i18n';
 // Not exported from the package root. These are the two functions its own

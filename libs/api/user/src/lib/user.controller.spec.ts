@@ -1,6 +1,8 @@
-import { AuthService, type AuthUser } from '@bge/auth';
+import type { AuthUser } from '@bge/auth';
+import { AuthService } from '@bge/auth';
 import { Action, ResourceType } from '@bge/database';
-import { AbilityService, CHECK_POLICIES_KEY, PoliciesGuard, type AppAbility } from '@bge/permissions';
+import type { AppAbility } from '@bge/permissions';
+import { AbilityService, CHECK_POLICIES_KEY, PoliciesGuard } from '@bge/permissions';
 import { ListScopeNotComposedError } from '@bge/shared';
 import { createMockAbilityService, createTestingModuleWithDb, MOCK_ACTING_USER_ID } from '@bge/testing';
 import { ForbiddenException } from '@nestjs/common';

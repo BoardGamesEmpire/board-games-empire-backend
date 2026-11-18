@@ -1,6 +1,7 @@
 import { AuditContextService } from '@bge/actor-context';
 import { I18N_CATALOG_DIR, i18nValidationMessage, t } from '@bge/i18n-core';
-import { Body, Controller, Get, type INestApplication, NotFoundException, Param, Post } from '@nestjs/common';
+import type { INestApplication } from '@nestjs/common';
+import { Body, Controller, Get, NotFoundException, Param, Post } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import { ArrayNotEmpty, ArrayUnique, IsEnum, IsIn, IsOptional, IsString } from 'class-validator';

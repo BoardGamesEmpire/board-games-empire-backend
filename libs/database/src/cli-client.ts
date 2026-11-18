@@ -1,4 +1,5 @@
-import { openStandaloneClient, type StandaloneClient } from './lib/standalone-client';
+import type { StandaloneClient } from './lib/standalone-client';
+import { openStandaloneClient } from './lib/standalone-client';
 
 /**
  * The client the CLIs beside this file run on (`seed-cli.ts`, `plan-cli.ts`):

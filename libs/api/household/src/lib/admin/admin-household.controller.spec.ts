@@ -1,5 +1,6 @@
 import { Action } from '@bge/database';
-import { CHECK_POLICIES_KEY, type AppAbility } from '@bge/permissions';
+import type { AppAbility } from '@bge/permissions';
+import { CHECK_POLICIES_KEY } from '@bge/permissions';
 import { ListScopeNotComposedError } from '@bge/shared';
 import { RequestMethod } from '@nestjs/common';
 import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';

@@ -1,12 +1,7 @@
 import { Action, Prisma, Reach, ResourceType } from '@bge/database';
 import { AbilityService } from '@bge/permissions';
-import {
-  createMockAbilityService,
-  createTestingModuleWithDb,
-  MOCK_ACTING_USER_ID,
-  type MockAbilityService,
-  type MockDatabaseService,
-} from '@bge/testing';
+import type { MockAbilityService, MockDatabaseService } from '@bge/testing';
+import { createMockAbilityService, createTestingModuleWithDb, MOCK_ACTING_USER_ID } from '@bge/testing';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { UpdateUserProfileDto } from '../dto/update-user-profile.dto';
 import { makeProfileRow } from './profile-row.fixture';

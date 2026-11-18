@@ -18,6 +18,7 @@ import { uniqueViolationWithoutMeta } from '@bge/database/testing';
 import { t } from '@bge/i18n';
 import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
 import { DefaultPaginationQueryDto } from '@bge/shared';
+import type { MockAbilityService, MockDatabaseService } from '@bge/testing';
 import {
   batchTransactionCall,
   createMockAbilityService,
@@ -30,8 +31,6 @@ import {
   MOCK_ACTING_USER_ID,
   rawQueryText,
   unwrapTransaction,
-  type MockAbilityService,
-  type MockDatabaseService,
 } from '@bge/testing';
 import { WebhookEventType } from '@bge/webhooks';
 import { BadRequestException, ForbiddenException, Logger, NotFoundException } from '@nestjs/common';

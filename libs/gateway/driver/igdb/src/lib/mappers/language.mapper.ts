@@ -1,5 +1,5 @@
 import * as proto from '@boardgamesempire/proto-gateway';
-import { IgdbLanguageEntry } from '../types';
+import type { IgdbLanguageEntry } from '../types';
 
 /**
  * Static registry of IGDB language records.

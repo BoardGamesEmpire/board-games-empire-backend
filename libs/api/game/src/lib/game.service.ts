@@ -1,4 +1,5 @@
 import { sanitizeMarkdown } from '@bge/content-format';
+import type { GameSummary } from '@bge/database';
 import {
   Action,
   DatabaseService,
@@ -8,22 +9,15 @@ import {
   Reach,
   readBaseGameLinks,
   ResourceType,
-  type GameSummary,
 } from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService, PermissionsService, resolveScopeSubjectId, ScopeComposer } from '@bge/permissions';
-import { sampleByOffsets, type PaginatedRows, type RandomSampleQueryDto } from '@bge/shared';
+import type { PaginatedRows, RandomSampleQueryDto } from '@bge/shared';
+import { sampleByOffsets } from '@bge/shared';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import type { DataGatewayLink } from './data-gateway-link';
-import {
-  CreateGameDto,
-  GAME_DESCRIPTION_MAX_LENGTH,
-  ListGamesQueryDto,
-  UpdateGameDto,
-  type GameDetailDto,
-  type GameListItemDto,
-  type GameSort,
-} from './dto';
+import type { GameDetailDto, GameListItemDto, GameSort } from './dto';
+import { CreateGameDto, GAME_DESCRIPTION_MAX_LENGTH, ListGamesQueryDto, UpdateGameDto } from './dto';
 import { GAME_DETAIL_INCLUDE } from './game-detail.include';
 import { gameListScope } from './game-list-scope';
 import { LINKED_GAME_SELECT } from './linked-game.select';

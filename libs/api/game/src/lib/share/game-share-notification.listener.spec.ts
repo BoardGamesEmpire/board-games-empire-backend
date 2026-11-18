@@ -1,6 +1,8 @@
-import { NotificationType, SystemRole, type GameShareSnapshot } from '@bge/database';
+import type { GameShareSnapshot } from '@bge/database';
+import { NotificationType, SystemRole } from '@bge/database';
 import { NotificationsService } from '@bge/notifications-service';
-import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { createTestingModuleWithDb } from '@bge/testing';
 import { Logger } from '@nestjs/common';
 import { GameShareNotificationListener } from './game-share-notification.listener';
 import { GameShareCreatedEvent } from './game-share.events';

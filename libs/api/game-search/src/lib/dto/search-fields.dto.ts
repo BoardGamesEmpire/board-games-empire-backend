@@ -4,7 +4,8 @@ import { CappedOffsetPaginationQueryDto, NotLessThanProperty, TransformBoolean }
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
-import { SEARCHABLE_CONTENT_TYPES, type SearchableContentType } from '../search-filter';
+import type { SearchableContentType } from '../search-filter';
+import { SEARCHABLE_CONTENT_TYPES } from '../search-filter';
 import { INT32_MAX, INT32_MIN, TransformRangeBound } from './range-bound';
 
 /**

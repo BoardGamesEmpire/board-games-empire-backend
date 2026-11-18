@@ -1,4 +1,5 @@
-import { InviteStatus, type Prisma } from '@bge/database';
+import type { Prisma } from '@bge/database';
+import { InviteStatus } from '@bge/database';
 import {
   effectiveInviteStatus,
   effectiveInviteStatusWhere,

@@ -1,4 +1,5 @@
-import { buildPluginArtifactSha256 as sha, type PluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
+import type { PluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
+import { buildPluginArtifactSha256 as sha } from '@boardgamesempire/plugin-contract';
 import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';

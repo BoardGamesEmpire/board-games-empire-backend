@@ -1,5 +1,7 @@
-import { AuthType, PluginLifecycleEventType, ResourceType, type Plugin } from '@bge/database';
-import { createActors, pollUntil, type Actors, type SessionActor } from '@bge/testing-e2e';
+import type { Plugin } from '@bge/database';
+import { AuthType, PluginLifecycleEventType, ResourceType } from '@bge/database';
+import type { Actors, SessionActor } from '@bge/testing-e2e';
+import { createActors, pollUntil } from '@bge/testing-e2e';
 import type { PluginManifest, PluginManifestOverrides } from '@boardgamesempire/plugin-manifest';
 import { join } from 'node:path';
 import request from 'supertest';
@@ -7,16 +9,11 @@ import { mintApiKey } from '../support/api-key';
 import { deferredRequest } from '../support/deferred-request';
 import { requireBaseUrl } from '../support/e2e-env';
 import { expectErrorEnvelope } from '../support/error-envelope';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { readStagedShownRisks } from './consent-act-fixtures';
-import {
-  artifactRoutes,
-  buildArtifact,
-  exists,
-  freshPluginSlug,
-  pluginsRoot,
-  type BuiltArtifact,
-} from './plugin-artifact-fixtures';
+import type { BuiltArtifact } from './plugin-artifact-fixtures';
+import { artifactRoutes, buildArtifact, exists, freshPluginSlug, pluginsRoot } from './plugin-artifact-fixtures';
 
 /**
  * Staging an update through the real routes (#1096): version 1.2.0 of a

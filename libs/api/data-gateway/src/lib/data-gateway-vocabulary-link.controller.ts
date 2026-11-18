@@ -1,16 +1,14 @@
 import { Action, ResourceType } from '@bge/database';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { paginated, PaginatedResponseDto, Unscoped } from '@bge/shared';
-import {
-  DEFAULT_VOCABULARY_REVIEW_STATUSES,
-  VocabularyLinkReviewService,
-  type ReviewedVocabularyKind,
-  type VocabularyLinkView,
-} from '@bge/vocabulary';
-import { Body, Controller, Get, HttpCode, Param, Post, Query, UseGuards, type Type } from '@nestjs/common';
+import type { ReviewedVocabularyKind, VocabularyLinkView } from '@bge/vocabulary';
+import { DEFAULT_VOCABULARY_REVIEW_STATUSES, VocabularyLinkReviewService } from '@bge/vocabulary';
+import type { Type } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
-import { from, type Observable } from 'rxjs';
+import type { Observable } from 'rxjs';
+import { from } from 'rxjs';
 import { concatMap, map } from 'rxjs/operators';
 import { DataGatewayService } from './data-gateway.service';
 import {

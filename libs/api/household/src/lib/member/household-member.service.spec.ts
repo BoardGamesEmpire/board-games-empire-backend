@@ -2,8 +2,10 @@ import { Action, HouseholdMembershipOrigin, Prisma, QuotaScope, ResourceType, Sy
 import { uniqueViolation, uniqueViolationWithoutMeta } from '@bge/database/testing';
 import { InviteService } from '@bge/invites';
 import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
-import { QuotaExceededException, QuotaService, type QuotaCheckResult, type QuotaSoftOverageEvent } from '@bge/quota';
+import type { QuotaCheckResult, QuotaSoftOverageEvent } from '@bge/quota';
+import { QuotaExceededException, QuotaService } from '@bge/quota';
 import { DEFAULT_PAGE_SIZE } from '@bge/shared';
+import type { MockDatabaseService } from '@bge/testing';
 import {
   batchTransactionCall,
   createTestingModuleWithDb,
@@ -13,7 +15,6 @@ import {
   rawQueryText,
   readPrismaModels,
   unwrapTransaction,
-  type MockDatabaseService,
 } from '@bge/testing';
 import { WebhookEventType } from '@bge/webhooks';
 import {
@@ -35,11 +36,8 @@ import {
 import type { AssignableHouseholdRole } from '../dto';
 import { HouseholdGameShareEndedEvent } from '../events/household.events';
 import { MEMBER_SELECT } from '../read-shapes';
-import {
-  HouseholdMemberService,
-  type AdmissibleMembershipOrigin,
-  type HouseholdMemberWithRelations,
-} from './household-member.service';
+import type { AdmissibleMembershipOrigin, HouseholdMemberWithRelations } from './household-member.service';
+import { HouseholdMemberService } from './household-member.service';
 
 /*
  * Module-scoped because THREE independent raw statements now reach this

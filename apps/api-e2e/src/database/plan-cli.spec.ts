@@ -2,7 +2,8 @@ import { CATALOG_MANIFEST, DATA_MIGRATIONS, MIGRATION_NAMES, reconcileCatalog, S
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import * as path from 'node:path';
-import { createTestDatabase, requireDatabaseUrl, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase, requireDatabaseUrl } from '../support/test-db';
 
 /**
  * `npm run db:plan` against a real database (#236): the plan-only CLI in the

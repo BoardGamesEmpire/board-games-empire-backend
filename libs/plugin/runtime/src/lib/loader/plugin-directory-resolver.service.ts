@@ -1,9 +1,9 @@
+import type { PluginArtifactDirectory } from '@boardgamesempire/plugin-contract';
 import {
   PLUGIN_ARTIFACT_SHA256_PATTERN,
   PLUGIN_MANIFEST_FILENAME,
   PLUGIN_PACKAGE_JSON_FILENAME,
   parsePluginArtifactSha256,
-  type PluginArtifactDirectory,
 } from '@boardgamesempire/plugin-contract';
 import { PLUGIN_SLUG_PATTERN } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable } from '@nestjs/common';

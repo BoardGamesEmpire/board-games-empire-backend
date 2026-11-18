@@ -1,7 +1,8 @@
 import { AuditContextService } from '@bge/actor-context';
 import { WsActorScope } from '@bge/actor-context-transport';
 import { AbilityService } from '@bge/permissions';
-import { type CanActivate, Injectable } from '@nestjs/common';
+import type { CanActivate } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import type { Socket } from 'socket.io';
 
 /**

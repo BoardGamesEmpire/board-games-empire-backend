@@ -1,5 +1,7 @@
-import { PluginGrantStatus, riskCovers, type RiskLevel } from '@bge/database';
-import { resolveLocalizedStringDetailed, type NormalizedPermissionRequest } from '@boardgamesempire/plugin-manifest';
+import type { RiskLevel } from '@bge/database';
+import { PluginGrantStatus, riskCovers } from '@bge/database';
+import type { NormalizedPermissionRequest } from '@boardgamesempire/plugin-manifest';
+import { resolveLocalizedStringDetailed } from '@boardgamesempire/plugin-manifest';
 import type { ConsentManifestSource } from './consent-classification.types';
 import { byPermissionSlugCodeUnit } from './decision-lock-order';
 import type { ConsentActStaleRisk } from './plugin-consent-act.errors';

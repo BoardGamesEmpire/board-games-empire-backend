@@ -12,14 +12,11 @@ import {
   UserPluginDisabledEvent,
 } from '../events/plugin.events';
 import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
-import {
-  bindManifest,
-  classifyManifestMove,
-  type ClaimedPluginRow,
-  type ManifestSnapshot,
-} from '../manifest/manifest-move';
+import type { ClaimedPluginRow, ManifestSnapshot } from '../manifest/manifest-move';
+import { bindManifest, classifyManifestMove } from '../manifest/manifest-move';
 import { revalidateStoredManifest } from '../manifest/stored-manifest';
-import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
+import type { PluginModuleOptions } from '../plugin-module.options';
+import { MODULE_OPTIONS_TOKEN } from '../plugin-module.options';
 import { assertHouseholdAdmin } from './household-admin-assertion';
 import { assertHouseholdSurface, loadLivingPlugin } from './living-plugin';
 import {

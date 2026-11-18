@@ -1,8 +1,11 @@
 import { env } from '@bge/env';
-import { Logger, type INestApplication } from '@nestjs/common';
+import type { INestApplication } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Test, TestingModule } from '@nestjs/testing';
-import { get, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import type { TestingModule } from '@nestjs/testing';
+import { Test } from '@nestjs/testing';
+import type { IncomingMessage, Server, ServerResponse } from 'node:http';
+import { get } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { DatabaseService } from './database.service';
 

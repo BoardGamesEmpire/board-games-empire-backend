@@ -1,5 +1,6 @@
 import type Keyv from 'keyv';
-import { createAuthStorage, type CompleteAuthStorage } from './auth-storage';
+import type { CompleteAuthStorage } from './auth-storage';
+import { createAuthStorage } from './auth-storage';
 
 /** How many requests a rate-limit key has counted, and when its window closes. */
 interface CountWindow {

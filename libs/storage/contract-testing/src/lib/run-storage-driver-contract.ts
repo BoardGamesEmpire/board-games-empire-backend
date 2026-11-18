@@ -1,4 +1,5 @@
-import { ObjectNotFoundError, type StorageDriver } from '@boardgamesempire/storage-contract';
+import type { StorageDriver } from '@boardgamesempire/storage-contract';
+import { ObjectNotFoundError } from '@boardgamesempire/storage-contract';
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import { Buffer } from 'node:buffer';
 import { createHash } from 'node:crypto';

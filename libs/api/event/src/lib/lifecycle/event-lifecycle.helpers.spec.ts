@@ -1,6 +1,7 @@
 import type { Prisma } from '@bge/database';
 import { t } from '@bge/i18n';
-import { createMockDatabaseService, rawQueryText, type MockDatabaseService } from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService, rawQueryText } from '@bge/testing';
 import { BadRequestException } from '@nestjs/common';
 import { assertEventNotCancelled } from './event-lifecycle.helpers';
 

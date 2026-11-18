@@ -1,5 +1,6 @@
 import { PLUGIN_UNIT_DORMANCY_CODES } from '@bge/database';
-import { derivePluginUnitState, PLUGIN_UNIT_STATE_CODES, type PluginUnitStateCode } from './plugin-unit-state';
+import type { PluginUnitStateCode } from './plugin-unit-state';
+import { derivePluginUnitState, PLUGIN_UNIT_STATE_CODES } from './plugin-unit-state';
 
 describe('derivePluginUnitState (#1149)', () => {
   type Input = Parameters<typeof derivePluginUnitState>[0];

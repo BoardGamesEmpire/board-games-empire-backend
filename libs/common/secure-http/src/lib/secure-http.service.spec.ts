@@ -2,11 +2,13 @@ import { Logger } from '@nestjs/common';
 import { Http } from '@status/codes';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import type { IncomingMessage, Server, ServerResponse } from 'node:http';
+import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Agent, MockAgent, type Dispatcher, type Interceptable } from 'undici';
+import type { Dispatcher, Interceptable } from 'undici';
+import { Agent, MockAgent } from 'undici';
 import type { DnsResolver, ResolvedAddress } from './dns/dns-resolver.interface';
 import { DnsResolutionError } from './dns/dns-resolver.interface';
 import {

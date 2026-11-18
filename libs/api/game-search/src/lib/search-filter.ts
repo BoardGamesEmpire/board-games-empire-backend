@@ -1,4 +1,5 @@
-import { ContentType, type PlatformType, type Prisma } from '@bge/database';
+import type { PlatformType, Prisma } from '@bge/database';
+import { ContentType } from '@bge/database';
 import { toProtoContentType, toProtoPlatformType } from '@bge/gateway-registry';
 import * as proto from '@boardgamesempire/proto-gateway';
 

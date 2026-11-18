@@ -1,11 +1,6 @@
 import { i18nValidationMessage } from '@bge/i18n';
-import {
-  registerDecorator,
-  type ValidationArguments,
-  type ValidationOptions,
-  ValidatorConstraint,
-  type ValidatorConstraintInterface,
-} from 'class-validator';
+import type { ValidationArguments, ValidationOptions, ValidatorConstraintInterface } from 'class-validator';
+import { registerDecorator, ValidatorConstraint } from 'class-validator';
 
 /**
  * Refuses the "most recently deleted" order over live households only

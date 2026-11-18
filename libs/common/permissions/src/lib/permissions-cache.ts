@@ -1,5 +1,7 @@
-import { createCacheStore, type Redis } from '@bge/redis';
-import { createCache, type Cache } from 'cache-manager';
+import type { Redis } from '@bge/redis';
+import { createCacheStore } from '@bge/redis';
+import type { Cache } from 'cache-manager';
+import { createCache } from 'cache-manager';
 
 /**
  * The namespace permission graphs and their version tokens live under, the

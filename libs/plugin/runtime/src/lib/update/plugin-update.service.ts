@@ -1,4 +1,5 @@
 import { AuditContextService } from '@bge/actor-context';
+import type { HouseholdPlugin, Permission, Plugin, PluginConsentAct, PluginGrant, UserPlugin } from '@bge/database';
 import {
   DatabaseService,
   PluginCategory,
@@ -8,21 +9,18 @@ import {
   Prisma,
   RiskLevel,
   SERVER_SCOPE_SENTINEL,
-  type HouseholdPlugin,
-  type Permission,
-  type Plugin,
-  type PluginConsentAct,
-  type PluginGrant,
-  type UserPlugin,
 } from '@bge/database';
-import { parsePluginArtifactSha256, type PluginArtifactDirectory } from '@boardgamesempire/plugin-contract';
+import type { PluginArtifactDirectory } from '@boardgamesempire/plugin-contract';
+import { parsePluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
+import type {
+  ManifestWarning,
+  NormalizedPermissionRequest,
+  PluginManifestValidationResult,
+} from '@boardgamesempire/plugin-manifest';
 import {
   PluginManifestValidationError,
   resolveLocalizedString,
   validatePluginManifest,
-  type ManifestWarning,
-  type NormalizedPermissionRequest,
-  type PluginManifestValidationResult,
 } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -30,17 +28,16 @@ import { createId } from '@paralleldrive/cuid2';
 import { readFile } from 'node:fs/promises';
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
 import { retainedServerConfig } from '../config/retained-server-config';
-import { emitDecisionEvents, type WrittenDecision } from '../consent/consent-decision-events';
+import type { WrittenDecision } from '../consent/consent-decision-events';
+import { emitDecisionEvents } from '../consent/consent-decision-events';
 import { PluginConsentActStaleError } from '../consent/plugin-consent-act.errors';
 import type { ShownRisk } from '../consent/plugin-consent-act.types';
-import {
-  consentCatalogFlags,
-  decideConsentCheck,
-  type ConsentCheckDecisionInput,
-} from '../consent/plugin-consent-check-classifier.service';
+import type { ConsentCheckDecisionInput } from '../consent/plugin-consent-check-classifier.service';
+import { consentCatalogFlags, decideConsentCheck } from '../consent/plugin-consent-check-classifier.service';
 import { planServerAcceptance, planServerApproval, staleShownRisks } from '../consent/server-acceptance';
 import { writeConsentAct } from '../consent/write-consent-act';
 import { grantSnapshot, householdSwitchSnapshot, userSwitchSnapshot } from '../events/plugin-event-snapshots';
+import type { GrantedPermissionRecord, PluginProvenance } from '../events/plugin.events';
 import {
   HouseholdPluginReconsentRequestedEvent,
   PluginGrantRevokedEvent,
@@ -48,8 +45,6 @@ import {
   PluginUpdatePendingEvent,
   PluginUpdateRejectedEvent,
   UserPluginReconsentRequestedEvent,
-  type GrantedPermissionRecord,
-  type PluginProvenance,
 } from '../events/plugin.events';
 import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
 import {
@@ -68,10 +63,12 @@ import {
   pluginDataGatewayName,
 } from '../install/plugin-data-gateway-row';
 import { PluginStaticAnalysisService } from '../install/plugin-static-analysis.service';
-import { gatingFindings, type StaticAnalysisReport } from '../install/static-analysis.types';
+import type { StaticAnalysisReport } from '../install/static-analysis.types';
+import { gatingFindings } from '../install/static-analysis.types';
 import { PluginDirectoryLayoutError } from '../loader/loader.errors';
 import { PluginDirectoryResolverService } from '../loader/plugin-directory-resolver.service';
-import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
+import type { PluginModuleOptions } from '../plugin-module.options';
+import { MODULE_OPTIONS_TOKEN } from '../plugin-module.options';
 import { MANIFEST_CATEGORY_TO_PRISMA } from '../registry/plugin-category.map';
 import { compareForEscalations, deniedRequiredServerSlugs } from './escalation-comparator';
 import { CLEARED_STAGED_UPDATE } from './staged-update.columns';

@@ -1,10 +1,6 @@
 import { SearchFilterAxis } from '@bge/database';
-import {
-  type CoverageFilter,
-  toCoverageFilter,
-  toStoredContentType,
-  toStoredPlatformType,
-} from '@bge/gateway-registry';
+import type { CoverageFilter } from '@bge/gateway-registry';
+import { toCoverageFilter, toStoredContentType, toStoredPlatformType } from '@bge/gateway-registry';
 import type * as proto from '@boardgamesempire/proto-gateway';
 
 /**

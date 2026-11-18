@@ -2,13 +2,12 @@ import { Action, GAME_SUMMARY_SELECT, Prisma, ResourceType } from '@bge/database
 import { t } from '@bge/i18n';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
 import { RandomSampleQueryDto } from '@bge/shared';
+import type { MockAbilityService, MockDatabaseService } from '@bge/testing';
 import {
   createMockAbilityService,
   createMockDatabaseService,
   createTestingModuleWithDb,
   MOCK_ACTING_USER_ID,
-  type MockAbilityService,
-  type MockDatabaseService,
 } from '@bge/testing';
 import { ForbiddenException } from '@nestjs/common';
 import { gamePoolEntryScope } from './game-pool-scope';

@@ -1,4 +1,6 @@
-import { SERVER_PLUGIN_UNIT, type PluginUnit } from '@bge/actor-context';
+import type { PluginUnit } from '@bge/actor-context';
+import { SERVER_PLUGIN_UNIT } from '@bge/actor-context';
+import type { PluginProcessRole, PluginUnitDormancy } from '@bge/database';
 import {
   DatabaseService,
   derivePluginUnitDormancy,
@@ -7,11 +9,10 @@ import {
   PluginScope,
   Prisma,
   retainedConfigOf,
-  type PluginProcessRole,
-  type PluginUnitDormancy,
 } from '@bge/database';
 import { parsePluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
-import { resolveLocalizedString, type PluginManifestValidationResult } from '@boardgamesempire/plugin-manifest';
+import type { PluginManifestValidationResult } from '@boardgamesempire/plugin-manifest';
+import { resolveLocalizedString } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable } from '@nestjs/common';
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
 import { PluginConsentStandingService } from '../consent/plugin-consent-standing.service';
@@ -21,8 +22,10 @@ import { PluginDirectoryLayoutError } from '../loader/loader.errors';
 import { restartProcessRoles } from '../loader/process-role';
 import { activeManifestOf } from '../manifest/active-manifest';
 import { revalidateStoredManifest } from '../manifest/stored-manifest';
-import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
-import { derivePluginUnitState, type PluginUnitStateCode } from '../units/plugin-unit-state';
+import type { PluginModuleOptions } from '../plugin-module.options';
+import { MODULE_OPTIONS_TOKEN } from '../plugin-module.options';
+import type { PluginUnitStateCode } from '../units/plugin-unit-state';
+import { derivePluginUnitState } from '../units/plugin-unit-state';
 import {
   PluginInventoryManifestError,
   PluginInventoryNotFoundError,

@@ -1,9 +1,11 @@
 import { FEEDBACK_DELIVERY_JOB, FEEDBACK_QUEUE_NAME } from '@bge/queue-feedback';
-import { createActors, type Actors } from '@bge/testing-e2e';
+import type { Actors } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import { requireBaseUrl } from '../support/e2e-env';
 import { isolateQueue } from '../support/queue-isolation';
 import { countPendingJobs, obliterateQueue, waitForStableJobCount } from '../support/queues';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { createFeedbackClient, freshFeedbackKey, reportPayload } from './feedback-request';
 import { LOCAL_FEEDBACK_SINK_SLUG, submitEnvelope } from './feedback-wire';
 

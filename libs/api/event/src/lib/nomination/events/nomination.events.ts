@@ -1,5 +1,6 @@
 import { MutationEvent } from '@bge/actor-context';
-import { ResourceType, type EventGame, type EventGameNomination, type EventGameVote } from '@bge/database';
+import type { EventGame, EventGameNomination, EventGameVote } from '@bge/database';
+import { ResourceType } from '@bge/database';
 import type { LineupRemovalReason } from '@bge/notifications-service';
 import { NominationEvent } from '../constants';
 

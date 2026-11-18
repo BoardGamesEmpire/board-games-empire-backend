@@ -1,5 +1,7 @@
-import { ENVELOPE_FIELDS, errorEnvelope, type ErrorEnvelope } from '@bge/i18n';
-import { WsErrorEvents, type WsErrorPayload, type WsStructuredErrorPayload } from '@bge/shared';
+import type { ErrorEnvelope } from '@bge/i18n';
+import { ENVELOPE_FIELDS, errorEnvelope } from '@bge/i18n';
+import type { WsErrorPayload, WsStructuredErrorPayload } from '@bge/shared';
+import { WsErrorEvents } from '@bge/shared';
 import { setTimeout } from 'node:timers/promises';
 import type { Socket } from 'socket.io';
 

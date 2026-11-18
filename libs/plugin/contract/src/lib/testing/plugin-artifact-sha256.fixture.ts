@@ -1,4 +1,5 @@
-import { parsePluginArtifactSha256, type PluginArtifactSha256 } from '../loader/plugin-artifact-directory.js';
+import type { PluginArtifactSha256 } from '../loader/plugin-artifact-directory.js';
+import { parsePluginArtifactSha256 } from '../loader/plugin-artifact-directory.js';
 
 /**
  * For tests (#1117): the checksum made of one hex character repeated 64

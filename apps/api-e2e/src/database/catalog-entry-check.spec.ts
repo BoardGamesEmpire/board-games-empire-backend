@@ -1,6 +1,7 @@
 import type { PermissionSeedDefinition } from '@bge/database';
 import { PERMISSION_CATALOG, Prisma, probeConditions, ResourceType } from '@bge/database';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 
 /**
  * The entry check's probe against a real database (#772).

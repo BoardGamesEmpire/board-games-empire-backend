@@ -1,10 +1,12 @@
 import { CACHE_REDIS_CLIENT, QUEUE_REDIS_CLIENT } from '@bge/redis';
 import { StorageService } from '@bge/storage';
-import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { createTestingModuleWithDb } from '@bge/testing';
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { HealthCheckResult, HttpHealthIndicator, TerminusModule } from '@nestjs/terminus';
-import { TestingModule } from '@nestjs/testing';
+import type { HealthCheckResult } from '@nestjs/terminus';
+import { HttpHealthIndicator, TerminusModule } from '@nestjs/terminus';
+import type { TestingModule } from '@nestjs/testing';
 import { HealthController } from './health.controller';
 import { CacheRedisHealthIndicator } from './indicators/cache-redis.health-indicator';
 import { PrismaHealthIndicator } from './indicators/prisma.health-indicator';

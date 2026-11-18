@@ -1,5 +1,6 @@
 import type { DriverLogger } from '@boardgamesempire/gateway-driver-contract';
-import { createFakeFetch, type FakeFetchReply } from '@boardgamesempire/gateway-driver-contract-testing';
+import type { FakeFetchReply } from '@boardgamesempire/gateway-driver-contract-testing';
+import { createFakeFetch } from '@boardgamesempire/gateway-driver-contract-testing';
 import { defer, firstValueFrom, of, throwError } from 'rxjs';
 import { BggCaller } from './bgg-caller';
 import { createBggClient } from './client/bgg-client';

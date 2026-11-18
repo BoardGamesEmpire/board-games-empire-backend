@@ -1,4 +1,5 @@
-import { PluginGrantScope, PluginGrantStatus, requestedByManifest, riskCovers, type RiskLevel } from '@bge/database';
+import type { RiskLevel } from '@bge/database';
+import { PluginGrantScope, PluginGrantStatus, requestedByManifest, riskCovers } from '@bge/database';
 import { requestedPermissionsOf } from '../manifest/active-manifest';
 import type {
   GrantComparisonView,

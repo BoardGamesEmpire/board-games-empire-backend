@@ -1,7 +1,8 @@
 import type { LoggerService } from '@nestjs/common';
 import { decodeJwt } from 'jose';
 import type { OidcProviderConfig } from './configuration/oidc-providers';
-import { mergeProviderClaims, type ProviderClaims, type ProviderProfile } from './provider-claims';
+import type { ProviderClaims, ProviderProfile } from './provider-claims';
+import { mergeProviderClaims } from './provider-claims';
 
 /** How long a request to a sign-in provider may take: its discovery document, or UserInfo (#993). */
 export const PROVIDER_REQUEST_TIMEOUT_MS = 10_000;

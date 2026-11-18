@@ -1,4 +1,5 @@
-import { wrapJobData, type JobActorMeta } from '@bge/queue-actor-context';
+import type { JobActorMeta } from '@bge/queue-actor-context';
+import { wrapJobData } from '@bge/queue-actor-context';
 import type { FlowJob, JobsOptions } from 'bullmq';
 import { JobNames, QueueNames } from '../constants/queue.constants';
 import type { ExpansionImportJobPayload, GameImportJobPayload } from '../interfaces/import-job.interface';

@@ -1,12 +1,7 @@
 import { i18nValidationMessage } from '@bge/i18n';
 import { parseCidr } from '@bge/secure-http';
-import {
-  registerDecorator,
-  type ValidationArguments,
-  type ValidationOptions,
-  ValidatorConstraint,
-  type ValidatorConstraintInterface,
-} from 'class-validator';
+import type { ValidationArguments, ValidationOptions, ValidatorConstraintInterface } from 'class-validator';
+import { registerDecorator, ValidatorConstraint } from 'class-validator';
 import { isFQDN } from 'validator';
 
 /**

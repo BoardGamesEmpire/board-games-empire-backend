@@ -1,4 +1,5 @@
-import { cacheStoreKey, createCacheStore, type Redis } from '@bge/redis';
+import type { Redis } from '@bge/redis';
+import { cacheStoreKey, createCacheStore } from '@bge/redis';
 import type { BetterAuthOptions } from 'better-auth';
 import type Keyv from 'keyv';
 import { noteStorageFailure } from './storage-failure-record';

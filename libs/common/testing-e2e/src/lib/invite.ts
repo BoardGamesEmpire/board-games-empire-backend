@@ -1,4 +1,5 @@
-import { InviteStatus, InviteType, type Invite, type PrismaClient } from '@bge/database';
+import type { Invite, PrismaClient } from '@bge/database';
+import { InviteStatus, InviteType } from '@bge/database';
 import { randomUUID } from 'node:crypto';
 import type { AuthenticatedActor } from './types.js';
 

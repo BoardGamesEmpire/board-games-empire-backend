@@ -1,10 +1,9 @@
+import type { SafeHttpResponse, SecureHttpService } from '@bge/secure-http';
 import {
   canonicalHostname,
   HostNotAllowedError,
   RedirectToDisallowedTargetError,
   SafeHttpError,
-  type SafeHttpResponse,
-  type SecureHttpService,
 } from '@bge/secure-http';
 import type { PluginHttp, PluginHttpRequest } from '@boardgamesempire/plugin-contract';
 import {

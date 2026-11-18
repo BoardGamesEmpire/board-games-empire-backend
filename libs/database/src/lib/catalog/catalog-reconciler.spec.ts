@@ -1,4 +1,5 @@
-import { Action, PermissionOwner, Prisma, ResourceType, RiskLevel, SystemRole, type PrismaClient } from '../client';
+import type { PrismaClient } from '../client';
+import { Action, PermissionOwner, Prisma, ResourceType, RiskLevel, SystemRole } from '../client';
 import { CATALOG_EDIT_LOCK_NAME } from './catalog-edit-lock';
 import type { EntryProblem } from './catalog-entry-check';
 import type { CatalogManifest, CatalogSnapshot, ReconcilePlan } from './catalog-reconcile-plan';

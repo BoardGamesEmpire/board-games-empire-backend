@@ -18,7 +18,8 @@ import {
   PluginUpdateService,
   restartProcessRoles,
 } from '@bge/plugin';
-import { PluginArtifactStager, type PluginArtifactStagingResult } from '@bge/plugin-artifacts';
+import type { PluginArtifactStagingResult } from '@bge/plugin-artifacts';
+import { PluginArtifactStager } from '@bge/plugin-artifacts';
 import { paginated, PaginatedResponseDto } from '@bge/shared';
 import { Body, Controller, Get, HttpCode, Param, Patch, Post, Query, UseFilters, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';

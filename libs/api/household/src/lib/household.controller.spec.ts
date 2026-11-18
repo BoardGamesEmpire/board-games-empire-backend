@@ -1,5 +1,6 @@
 import { Action, ResourceType } from '@bge/database';
-import { CHECK_POLICIES_KEY, type AppAbility } from '@bge/permissions';
+import type { AppAbility } from '@bge/permissions';
+import { CHECK_POLICIES_KEY } from '@bge/permissions';
 import { ListScopeNotComposedError, RandomSampleQueryDto } from '@bge/shared';
 import { paginationQuery } from '@bge/testing';
 import { RequestMethod } from '@nestjs/common';
@@ -11,7 +12,7 @@ import { firstValueFrom } from 'rxjs';
 import type { HouseholdGamePoolService } from './game-pool/household-game-pool.service';
 import { ALLOWS_DELETED_HOUSEHOLD_KEY } from './guards/household-liveness.guard';
 import { HouseholdController } from './household.controller';
-import { HouseholdService } from './household.service';
+import type { HouseholdService } from './household.service';
 
 const PAGINATION = paginationQuery({ limit: 10 });
 

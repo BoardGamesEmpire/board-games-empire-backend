@@ -1,5 +1,6 @@
 import { PrismaError } from '@status/codes';
-import { Prisma, type PrismaClient } from '../client';
+import type { PrismaClient } from '../client';
+import { Prisma } from '../client';
 import type { DataMigrationLedgerRow } from './data-migration-entry';
 
 /**

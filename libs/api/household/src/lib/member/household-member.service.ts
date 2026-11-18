@@ -1,3 +1,4 @@
+import type { ConstraintIdentity, GameShare } from '@bge/database';
 import {
   Action,
   constraintIdentity,
@@ -11,13 +12,13 @@ import {
   Prisma,
   ResourceType,
   SystemRole,
-  type ConstraintIdentity,
-  type GameShare,
 } from '@bge/database';
 import { t } from '@bge/i18n';
-import { InviteService, type InviteDomainEvent } from '@bge/invites';
+import type { InviteDomainEvent } from '@bge/invites';
+import { InviteService } from '@bge/invites';
 import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
-import { QuotaExceededException, QuotaService, type QuotaSoftOverageEvent } from '@bge/quota';
+import type { QuotaSoftOverageEvent } from '@bge/quota';
+import { QuotaExceededException, QuotaService } from '@bge/quota';
 import { PaginatedRows, PaginationQueryDto } from '@bge/shared';
 import { webhookEnvelope, WebhookEventType } from '@bge/webhooks';
 import {
@@ -37,12 +38,10 @@ import {
   HOUSEHOLD_MEMBER_UNIQUE_CONSTRAINT,
   HOUSEHOLD_MEMBER_UNIQUE_FIELDS,
 } from '../constants/household.constants';
-import { isAssignableHouseholdRole, UpdateMemberRoleDto, type AssignableHouseholdRole } from '../dto';
-import {
-  HouseholdGameShareEndedEvent,
-  HouseholdOwnershipTransferredEvent,
-  type HouseholdOwnershipSnapshot,
-} from '../events/household.events';
+import type { AssignableHouseholdRole } from '../dto';
+import { isAssignableHouseholdRole, UpdateMemberRoleDto } from '../dto';
+import type { HouseholdOwnershipSnapshot } from '../events/household.events';
+import { HouseholdGameShareEndedEvent, HouseholdOwnershipTransferredEvent } from '../events/household.events';
 import {
   assertHouseholdExists,
   lockExistingHousehold,

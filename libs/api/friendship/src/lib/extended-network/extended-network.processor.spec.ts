@@ -1,6 +1,8 @@
 import type { JobMetaEnvelope } from '@bge/queue-actor-context';
-import { DelayedError, type Job, UnrecoverableError } from 'bullmq';
-import { type ExtendedNetworkJob, ExtendedNetworkJobNames } from './extended-network-queue.constants';
+import type { Job } from 'bullmq';
+import { DelayedError, UnrecoverableError } from 'bullmq';
+import type { ExtendedNetworkJob } from './extended-network-queue.constants';
+import { ExtendedNetworkJobNames } from './extended-network-queue.constants';
 import { ExtendedNetworkProcessor } from './extended-network.processor';
 import type { ExtendedNetworkService } from './extended-network.service';
 

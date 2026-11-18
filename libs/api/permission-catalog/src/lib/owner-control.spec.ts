@@ -1,14 +1,5 @@
-import {
-  Action,
-  CATALOG_MANIFEST,
-  PermissionOwner,
-  planReconcile,
-  RiskLevel,
-  SystemRole,
-  type CatalogSnapshot,
-  type PermissionSnapshotRow,
-  type RolePermissionSnapshotRow,
-} from '@bge/database';
+import type { CatalogSnapshot, PermissionSnapshotRow, RolePermissionSnapshotRow } from '@bge/database';
+import { Action, CATALOG_MANIFEST, PermissionOwner, planReconcile, RiskLevel, SystemRole } from '@bge/database';
 import { HttpStatus } from '@nestjs/common';
 import { OWNER_PERMISSION_SLUG, ownerKeepsControl, refuseOwnerLockout } from './owner-control';
 

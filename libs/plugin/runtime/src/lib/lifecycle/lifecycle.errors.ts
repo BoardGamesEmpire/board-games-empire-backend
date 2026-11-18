@@ -1,5 +1,6 @@
 import type { ManifestIssue } from '@boardgamesempire/plugin-manifest';
-import { describeManifestMove, type PluginChangeKind } from '../manifest/manifest-move';
+import type { PluginChangeKind } from '../manifest/manifest-move';
+import { describeManifestMove } from '../manifest/manifest-move';
 
 /**
  * Typed failures for the server lifecycle surface (#320): enable, disable,

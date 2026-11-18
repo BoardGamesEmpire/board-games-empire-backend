@@ -1,5 +1,6 @@
 import { LOCALE_CLS_KEY } from '@bge/actor-context';
-import { Test, type TestingModule } from '@nestjs/testing';
+import type { TestingModule } from '@nestjs/testing';
+import { Test } from '@nestjs/testing';
 import { ClsModule, ClsService } from 'nestjs-cls';
 import { ClsLocaleResolver } from './cls-locale.resolver';
 

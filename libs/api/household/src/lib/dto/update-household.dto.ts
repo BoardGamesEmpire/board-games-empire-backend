@@ -3,12 +3,8 @@ import { i18nValidationMessage } from '@bge/i18n';
 import { ApiPropertyOptional, OmitType, PartialType } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsEnum, IsObject, IsOptional, ValidateIf, ValidateNested } from 'class-validator';
-import {
-  CreateHouseholdDto,
-  HouseholdNameProperty,
-  HouseholdReachProperty,
-  type HouseholdReach,
-} from './create-household.dto';
+import type { HouseholdReach } from './create-household.dto';
+import { CreateHouseholdDto, HouseholdNameProperty, HouseholdReachProperty } from './create-household.dto';
 
 /**
  * A household's own settings (#166), as its owners and admins change them.

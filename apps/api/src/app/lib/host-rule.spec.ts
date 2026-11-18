@@ -1,4 +1,5 @@
-import { allowsEveryHost, createHostRule, type ServerNames } from './host-rule';
+import type { ServerNames } from './host-rule';
+import { allowsEveryHost, createHostRule } from './host-rule';
 
 describe('createHostRule (#977)', () => {
   const names: ServerNames = {

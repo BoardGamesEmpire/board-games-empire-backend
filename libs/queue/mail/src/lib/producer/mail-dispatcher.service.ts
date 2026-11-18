@@ -1,4 +1,5 @@
-import { AuditContextService, type Actor } from '@bge/actor-context';
+import type { Actor } from '@bge/actor-context';
+import { AuditContextService } from '@bge/actor-context';
 import type { MailMessage } from '@bge/mail';
 import { wrapJobData } from '@bge/queue-actor-context';
 import { InjectQueue } from '@nestjs/bullmq';

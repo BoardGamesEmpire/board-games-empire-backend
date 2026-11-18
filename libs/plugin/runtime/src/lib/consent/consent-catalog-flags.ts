@@ -1,4 +1,5 @@
-import { bindsConsentUnit, PluginGrantScope, type Permission } from '@bge/database';
+import type { Permission } from '@bge/database';
+import { bindsConsentUnit, PluginGrantScope } from '@bge/database';
 import type { NormalizedPermissionRequest } from '@boardgamesempire/plugin-manifest';
 import type { ConsentCheckDecisionInput } from './plugin-consent-check-classifier.service';
 

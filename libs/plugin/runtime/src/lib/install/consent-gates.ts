@@ -1,15 +1,7 @@
-import {
-  bindsConsentUnit,
-  CONSENT_UNIT_BINDING_REFUSAL,
-  PluginGrantScope,
-  RiskLevel,
-  type Permission,
-} from '@bge/database';
-import {
-  parsePluginPermissionSlug,
-  type NormalizedPermissionRequest,
-  type PluginManifestValidationResult,
-} from '@boardgamesempire/plugin-manifest';
+import type { Permission } from '@bge/database';
+import { bindsConsentUnit, CONSENT_UNIT_BINDING_REFUSAL, PluginGrantScope, RiskLevel } from '@bge/database';
+import type { NormalizedPermissionRequest, PluginManifestValidationResult } from '@boardgamesempire/plugin-manifest';
+import { parsePluginPermissionSlug } from '@boardgamesempire/plugin-manifest';
 import { CONSENT_SCOPE_TO_GRANT_SCOPE } from '../grants/consent-scope.map';
 import { isPluginAdministrationSlug } from '../grants/plugin-admin-permissions';
 import type { StaticAnalysisFinding } from './static-analysis.types';

@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { lookup } from 'node:dns/promises';
 import { IpFamily } from '../ip';
-import { DnsResolutionError, type DnsResolver, type ResolvedAddress } from './dns-resolver.interface';
+import type { DnsResolver, ResolvedAddress } from './dns-resolver.interface';
+import { DnsResolutionError } from './dns-resolver.interface';
 
 /**
  * Default `DnsResolver` implementation backed by `dns.promises.lookup`.

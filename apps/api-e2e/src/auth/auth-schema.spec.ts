@@ -1,6 +1,7 @@
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 
 const OK_PATH = '/api/auth/ok';
 

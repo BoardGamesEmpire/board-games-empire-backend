@@ -1,8 +1,10 @@
-import { DatabaseService, NotificationType, Prisma, SystemRole, type GameShareSnapshot } from '@bge/database';
+import type { GameShareSnapshot } from '@bge/database';
+import { DatabaseService, NotificationType, Prisma, SystemRole } from '@bge/database';
 import { NotificationsService } from '@bge/notifications-service';
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
-import { GameShareEvents, type GameShareCreatedEvent } from './game-share.events';
+import type { GameShareCreatedEvent } from './game-share.events';
+import { GameShareEvents } from './game-share.events';
 
 /**
  * What the sharer's name is read from. The household lib's `shownName` rule,

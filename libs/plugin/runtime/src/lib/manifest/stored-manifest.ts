@@ -1,9 +1,5 @@
-import {
-  PluginManifestValidationError,
-  validatePluginManifest,
-  type ManifestIssue,
-  type PluginManifestValidationResult,
-} from '@boardgamesempire/plugin-manifest';
+import type { ManifestIssue, PluginManifestValidationResult } from '@boardgamesempire/plugin-manifest';
+import { PluginManifestValidationError, validatePluginManifest } from '@boardgamesempire/plugin-manifest';
 import type { PluginModuleOptions } from '../plugin-module.options';
 
 /**

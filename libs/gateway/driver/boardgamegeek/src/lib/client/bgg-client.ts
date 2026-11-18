@@ -1,4 +1,5 @@
-import { discardBody, type UpstreamFetch } from '@boardgamesempire/gateway-driver-contract';
+import type { UpstreamFetch } from '@boardgamesempire/gateway-driver-contract';
+import { discardBody } from '@boardgamesempire/gateway-driver-contract';
 import { setTimeout as wait } from 'node:timers/promises';
 import type { BggClientLike, BggSearchQueryParams, BggThingQueryParams } from './bgg-client.interface';
 import { BggHttpError } from './bgg-http.error';

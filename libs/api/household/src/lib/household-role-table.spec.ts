@@ -7,7 +7,8 @@ import {
   ROLE_PERMISSION_CATALOG,
   SystemRole,
 } from '@bge/database';
-import { AbilityFactory, type AppAbility, type RoleWithPermissions } from '@bge/permissions';
+import type { AppAbility, RoleWithPermissions } from '@bge/permissions';
+import { AbilityFactory } from '@bge/permissions';
 import { catalogPermission } from '@bge/testing';
 import { subject } from '@casl/ability';
 import { readFileSync } from 'node:fs';

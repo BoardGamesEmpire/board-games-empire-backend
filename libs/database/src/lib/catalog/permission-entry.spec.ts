@@ -1,6 +1,7 @@
 import { Action, ResourceType, RiskLevel } from '../client';
 import { assertJsonConditions } from './catalog-integrity';
-import { type CatalogSubject, type DefinedPermission, permission } from './permission-entry';
+import type { CatalogSubject, DefinedPermission } from './permission-entry';
+import { permission } from './permission-entry';
 import type { PermissionSlug } from './permission.catalog';
 
 // `permission()` is a compile-time guard: an entry's `conditions` and

@@ -72,6 +72,7 @@ import {
   PluginUpdateUnknownCorePermissionError,
   PluginUpdateVersionConflictError,
 } from '@bge/plugin';
+import type { PluginArtifactDownloadFailure, PluginArtifactLinkRefusal } from '@bge/plugin-artifacts';
 import {
   PluginArchiveRefusedError,
   PluginArtifactBelongsToAnotherPluginError,
@@ -80,8 +81,6 @@ import {
   PluginArtifactLinkRefusedError,
   PluginArtifactNotFoundError,
   PluginArtifactTooLargeError,
-  type PluginArtifactDownloadFailure,
-  type PluginArtifactLinkRefusal,
 } from '@bge/plugin-artifacts';
 import type { PluginArchiveRule } from '@boardgamesempire/plugin-manifest';
 import { ArgumentsHost, Catch, Logger } from '@nestjs/common';

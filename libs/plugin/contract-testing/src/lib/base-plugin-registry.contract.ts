@@ -1,5 +1,5 @@
+import type { BasePluginRegistry } from '@boardgamesempire/plugin-contract';
 import {
-  BasePluginRegistry,
   DuplicatePluginRegistrationError,
   PluginDisabledError,
   PluginNotRegisteredError,

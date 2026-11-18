@@ -1,5 +1,6 @@
 import type { Friendship } from '@bge/database';
-import { envelopeFailure, isRecord, type HttpResponseLike, type RequestDescription, type Wire } from '../support/wire';
+import type { HttpResponseLike, RequestDescription, Wire } from '../support/wire';
+import { envelopeFailure, isRecord } from '../support/wire';
 
 /**
  * Fail-loud parsers for the friendship envelopes, on the pattern

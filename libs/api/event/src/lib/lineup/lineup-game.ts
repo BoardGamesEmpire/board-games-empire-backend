@@ -1,6 +1,7 @@
 import type { Prisma } from '@bge/database';
 import type { ScopeComposer } from '@bge/permissions';
-import { readableAttendees, type AttendeeSummary } from '../attendee/attendee-summary';
+import type { AttendeeSummary } from '../attendee/attendee-summary';
+import { readableAttendees } from '../attendee/attendee-summary';
 import { PLATFORM_GAME_SUMMARY_SELECT } from '../constants/platform-game-summary.constant';
 
 /**

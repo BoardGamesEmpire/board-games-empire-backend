@@ -1,8 +1,9 @@
 import type { Actor, ActorContextInit, AuditContextInternalService } from '@bge/actor-context';
 import { BGE_ACTOR_HEADER, CORRELATION_ID_HEADER, TRACEPARENT_HEADER } from '@bge/shared';
 import { Metadata } from '@grpc/grpc-js';
-import { BadRequestException, type CallHandler, type ExecutionContext, UnauthorizedException } from '@nestjs/common';
-import { Reflector } from '@nestjs/core';
+import type { CallHandler, ExecutionContext } from '@nestjs/common';
+import { BadRequestException, UnauthorizedException } from '@nestjs/common';
+import type { Reflector } from '@nestjs/core';
 import { firstValueFrom, of } from 'rxjs';
 import { SKIP_ACTOR_CONTEXT_KEY } from '../decorators/skip-actor-context.decorator';
 import { GrpcInternalActorInterceptor, validateActorShape } from './grpc-internal-actor.interceptor';

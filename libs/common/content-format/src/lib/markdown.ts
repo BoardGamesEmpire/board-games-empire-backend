@@ -1,7 +1,8 @@
 import type { Nodes, Parents, Root, Text } from 'mdast';
 import { fromMarkdown } from 'mdast-util-from-markdown';
 import { gfmFromMarkdown, gfmToMarkdown } from 'mdast-util-gfm';
-import { type Handle, toMarkdown } from 'mdast-util-to-markdown';
+import type { Handle } from 'mdast-util-to-markdown';
+import { toMarkdown } from 'mdast-util-to-markdown';
 import { gfm } from 'micromark-extension-gfm';
 
 /**

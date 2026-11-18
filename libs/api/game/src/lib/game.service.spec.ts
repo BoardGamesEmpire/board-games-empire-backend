@@ -3,6 +3,7 @@ import { Action, GAME_SUMMARY_SELECT, Prisma, Reach, ResourceType } from '@bge/d
 import { t } from '@bge/i18n';
 import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
 import { RandomSampleQueryDto } from '@bge/shared';
+import type { MockAbilityService, MockDatabaseService, PageQueryInit } from '@bge/testing';
 import {
   batchTransactionCall,
   boundPageQuery,
@@ -10,12 +11,11 @@ import {
   createMockDatabaseService,
   createTestingModuleWithDb,
   MOCK_ACTING_USER_ID,
-  type MockAbilityService,
-  type MockDatabaseService,
-  type PageQueryInit,
 } from '@bge/testing';
-import { BadRequestException, ForbiddenException, HttpException, Logger, NotFoundException } from '@nestjs/common';
-import { GAME_DESCRIPTION_MAX_LENGTH, ListGamesQueryDto, type CreateGameDto, type UpdateGameDto } from './dto';
+import type { HttpException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Logger, NotFoundException } from '@nestjs/common';
+import type { CreateGameDto, UpdateGameDto } from './dto';
+import { GAME_DESCRIPTION_MAX_LENGTH, ListGamesQueryDto } from './dto';
 import { GAME_DETAIL_INCLUDE } from './game-detail.include';
 import { gameListScope } from './game-list-scope';
 import { GameService } from './game.service';

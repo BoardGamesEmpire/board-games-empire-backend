@@ -1,4 +1,5 @@
-import { AuthType, type DataGateway } from '@bge/database';
+import type { DataGateway } from '@bge/database';
+import { AuthType } from '@bge/database';
 import type { RoutedPlugin } from '../plugin-driver-source';
 
 type Where = Readonly<Record<string, unknown>>;

@@ -1,5 +1,6 @@
 import type { DriverLogger } from '@boardgamesempire/gateway-driver-contract';
-import { Observable, throwError, timer } from 'rxjs';
+import type { Observable } from 'rxjs';
+import { throwError, timer } from 'rxjs';
 import { catchError, switchMap } from 'rxjs/operators';
 import type { BggClientLike, BggRequest } from './client/bgg-client.interface';
 import { BggHttpError } from './client/bgg-http.error';

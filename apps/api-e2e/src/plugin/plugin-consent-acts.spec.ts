@@ -1,3 +1,4 @@
+import type { Plugin } from '@bge/database';
 import {
   PluginConsentActKind,
   PluginGrantScope,
@@ -6,17 +7,20 @@ import {
   PluginScope,
   RiskLevel,
   SystemRole,
-  type Plugin,
 } from '@bge/database';
-import { createActors, pollUntil, type Actors, type SessionActor } from '@bge/testing-e2e';
-import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
+import type { Actors, SessionActor } from '@bge/testing-e2e';
+import { createActors, pollUntil } from '@bge/testing-e2e';
+import type { PluginManifest } from '@boardgamesempire/plugin-manifest';
+import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { inspect } from 'node:util';
 import request from 'supertest';
 import { createMemberClient } from '../household/household-request';
 import { restoreShippedCatalog } from '../permission-catalog/shipped-catalog';
 import { deferredRequest } from '../support/deferred-request';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
+import type { ConsentActUnit, ConsentSurface } from './consent-act-fixtures';
 import {
   readConsentSurface,
   readStagedShownRisks,
@@ -27,10 +31,9 @@ import {
   switchOnBody,
   toggleBody,
   unitPluginsPath,
-  type ConsentActUnit,
-  type ConsentSurface,
 } from './consent-act-fixtures';
-import { MANAGE_DIGEST_CHECK, type Check } from './manifest-checks';
+import type { Check } from './manifest-checks';
+import { MANAGE_DIGEST_CHECK } from './manifest-checks';
 import { pluginAbilitySlugsForHousehold } from './plugin-ability-fixtures';
 import { FIXTURE_ACT_ID, INVENTORY_STAGING_ID, pluginRowData, stagedUpdateColumns } from './plugin-row-fixtures';
 

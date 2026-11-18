@@ -1,7 +1,8 @@
 import type { SystemActorScope } from '@bge/actor-context';
 import { PLUGIN_LOAD_STALE_MS } from '@bge/database';
 import { buildPluginModuleOptions } from '@bge/plugin';
-import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService } from '@bge/testing';
 import { buildPluginArtifactSha256 as sha } from '@boardgamesempire/plugin-contract';
 import { Logger } from '@nestjs/common';
 import { lstat, mkdir, mkdtemp, readdir, rename, rm, symlink, utimes, writeFile } from 'node:fs/promises';

@@ -1,4 +1,5 @@
-import { SystemRole, type Prisma } from '../client';
+import type { Prisma } from '../client';
+import { SystemRole } from '../client';
 
 /**
  * The roles that make a user one of the server admins: Owner and Admin

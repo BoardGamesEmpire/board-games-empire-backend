@@ -1,15 +1,11 @@
 import type { PrismaClient } from '@bge/database';
-import { FALLBACK_LOCALE, type I18nTranslations } from '@bge/i18n';
+import type { I18nTranslations } from '@bge/i18n';
+import { FALLBACK_LOCALE } from '@bge/i18n';
 import { Logger } from '@nestjs/common';
 import { isAPIError } from 'better-auth/api';
 import type { I18nService } from 'nestjs-i18n';
-import {
-  createSettingGates,
-  fallbackLocaleRenderer,
-  settingGateDeps,
-  type SettingGateDeps,
-  type SettingSwitches,
-} from './setting-gates';
+import type { SettingGateDeps, SettingSwitches } from './setting-gates';
+import { createSettingGates, fallbackLocaleRenderer, settingGateDeps } from './setting-gates';
 
 const ALL_OPEN: SettingSwitches = {
   allowUserRegistration: true,

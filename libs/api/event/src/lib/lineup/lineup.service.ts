@@ -10,7 +10,8 @@ import { emitRemovedGames, LINEUP_GAME_SNAPSHOT_SELECT, lineupStillAhead } from 
 import { assertEventExists, requireEvent } from '../event-access.helpers';
 import { lockLiveEvent } from '../utils/lock-live-event.util';
 import type { ListLineupQueryDto } from './dto/list-lineup.query.dto';
-import { LINEUP_GAME_SELECT, lineupGameSubject, withSuppliers, type LineupGame } from './lineup-game';
+import type { LineupGame } from './lineup-game';
+import { LINEUP_GAME_SELECT, lineupGameSubject, withSuppliers } from './lineup-game';
 import { readableLineupWhere } from './lineup-scope';
 
 /**

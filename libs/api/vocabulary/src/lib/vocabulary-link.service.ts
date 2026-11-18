@@ -7,14 +7,8 @@ import {
 } from '@bge/database';
 import { Injectable, Logger } from '@nestjs/common';
 import { toSlug } from './slug';
-import {
-  ADAPTERS,
-  REVIEWED_ADAPTERS,
-  type LinkResolution,
-  type LinkWrite,
-  type ReviewedVocabularyAdapter,
-  type VocabularyAdapter,
-} from './vocabulary-adapters';
+import type { LinkResolution, LinkWrite, ReviewedVocabularyAdapter, VocabularyAdapter } from './vocabulary-adapters';
+import { ADAPTERS, REVIEWED_ADAPTERS } from './vocabulary-adapters';
 import type { AcceptOutcome, EntryOf, LoadSummary, ReviewedVocabularyKind, VocabularyKind } from './vocabulary.types';
 
 /** How one entry was settled, and the record it resolves to, if any. */

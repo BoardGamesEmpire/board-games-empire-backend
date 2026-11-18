@@ -5,7 +5,8 @@ import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundEx
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { createHash } from 'node:crypto';
 import { QuotaEvents } from './constants/quota-events.constant';
-import { DEFAULT_SCOPE_ID, type QuotaResource } from './constants/quota-resource';
+import type { QuotaResource } from './constants/quota-resource';
+import { DEFAULT_SCOPE_ID } from './constants/quota-resource';
 import type { QuotaView } from './dto/quota-response.dto';
 import type { SetQuotaDto } from './dto/set-quota.dto';
 import type {

@@ -1,7 +1,8 @@
 import { DatabaseModule, DatabaseService } from '@bge/database';
 import { PermissionsModule, PermissionsService } from '@bge/permissions';
 import { CACHE_REDIS_CLIENT } from '@bge/redis';
-import { Test, type TestingModule } from '@nestjs/testing';
+import type { TestingModule } from '@nestjs/testing';
+import { Test } from '@nestjs/testing';
 import Redis from 'iovalkey';
 import { ClsModule } from 'nestjs-cls';
 import { permissionsCacheKey } from '../support/api-cache';

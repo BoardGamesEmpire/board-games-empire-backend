@@ -1,9 +1,12 @@
-import { PluginScope, type Plugin } from '@bge/database';
-import { createActors, type Actors } from '@bge/testing-e2e';
+import type { Plugin } from '@bge/database';
+import { PluginScope } from '@bge/database';
+import type { Actors } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import request from 'supertest';
 import { arrangeInventoryPlugin } from '../plugin/inventory-fixtures';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 
 /**
  * Signed-in server discovery on the wire (#78): who may read it, its shape,

@@ -1,8 +1,10 @@
 import { t } from '@bge/i18n-core';
 import { ForbiddenException } from '@nestjs/common';
-import { Test, type TestingModule } from '@nestjs/testing';
+import type { TestingModule } from '@nestjs/testing';
+import { Test } from '@nestjs/testing';
 import { ClsModule, ClsService } from 'nestjs-cls';
-import { SERVER_PLUGIN_UNIT, type Actor } from '../types';
+import type { Actor } from '../types';
+import { SERVER_PLUGIN_UNIT } from '../types';
 import { ACTOR_CLS_KEY, AuditContextService, CORRELATION_ID_CLS_KEY, SOURCE_CLS_KEY } from './audit-context.service';
 
 describe('AuditContextService', () => {

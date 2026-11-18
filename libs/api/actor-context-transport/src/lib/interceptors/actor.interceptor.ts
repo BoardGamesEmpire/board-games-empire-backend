@@ -1,4 +1,5 @@
-import { AuditContextInternalService, type EventSource } from '@bge/actor-context';
+import type { EventSource } from '@bge/actor-context';
+import { AuditContextInternalService } from '@bge/actor-context';
 import type { CallHandler, ExecutionContext, NestInterceptor } from '@nestjs/common';
 import { Logger } from '@nestjs/common';
 import type { Observable } from 'rxjs';

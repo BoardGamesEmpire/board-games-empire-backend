@@ -6,13 +6,15 @@ import {
   PlatformType,
 } from '@bge/database';
 import { GatewayLanguageInput, LanguageLinkService } from '@bge/language';
-import { VocabularyLinkService, type PlatformEntry } from '@bge/vocabulary';
+import type { PlatformEntry } from '@bge/vocabulary';
+import { VocabularyLinkService } from '@bge/vocabulary';
 import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
 import type { GatewayLanguageEntry } from '@boardgamesempire/proto-gateway';
 import { status } from '@grpc/grpc-js';
 import { Injectable, Logger } from '@nestjs/common';
 import * as crypto from 'node:crypto';
-import { timeout, type Observable } from 'rxjs';
+import type { Observable } from 'rxjs';
+import { timeout } from 'rxjs';
 import { SECTION_LIST_TIMEOUT_MS } from './constants/vocabulary-section.constants';
 import { VocabularySectionError } from './errors/vocabulary-section.error';
 import { firstAnswer } from './utils/first-answer';

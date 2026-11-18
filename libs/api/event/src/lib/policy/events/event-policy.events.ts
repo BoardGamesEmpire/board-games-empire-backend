@@ -1,5 +1,6 @@
 import { MutationEvent } from '@bge/actor-context';
-import { ResourceType, type EventOccurrencePolicy, type EventPolicy } from '@bge/database';
+import type { EventOccurrencePolicy, EventPolicy } from '@bge/database';
+import { ResourceType } from '@bge/database';
 import { EventEvents } from '../../constants/event-events.constant';
 import { OccurrenceEvents } from '../../occurrence/constants';
 import type { EventPolicyView, OccurrencePolicyView } from '../policy-view';

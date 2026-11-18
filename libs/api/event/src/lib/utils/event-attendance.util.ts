@@ -1,4 +1,4 @@
-import { EventParticipationStatus, Prisma } from '@bge/database';
+import type { EventParticipationStatus, Prisma } from '@bge/database';
 import type { EventWithStatus } from './event-status.util';
 
 /**

@@ -1,5 +1,6 @@
-import { QUEUE_REDIS_CLIENT, type Redis } from '@bge/redis';
-import { Provider } from '@nestjs/common';
+import type { Redis } from '@bge/redis';
+import { QUEUE_REDIS_CLIENT } from '@bge/redis';
+import type { Provider } from '@nestjs/common';
 import { TerminusModule } from '@nestjs/terminus';
 import { Test } from '@nestjs/testing';
 import { QueueRedisHealthIndicator } from './queue-redis.health-indicator';

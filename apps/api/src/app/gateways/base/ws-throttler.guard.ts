@@ -1,5 +1,6 @@
 import { actorUserId, getActorSnapshotFromCls } from '@bge/actor-context';
-import { type ExecutionContext, Injectable } from '@nestjs/common';
+import type { ExecutionContext } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import type { ThrottlerGuard, ThrottlerRequest } from '@nestjs/throttler';
 import type { Socket } from 'socket.io';
 import { RateLimitGuard } from '../../lib/rate-limit.guard';

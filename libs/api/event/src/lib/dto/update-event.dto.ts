@@ -1,5 +1,6 @@
 import { OmitType, PartialType } from '@nestjs/swagger';
-import { CreateEventDto, EventReachProperty, type EventReach } from './create-event.dto';
+import type { EventReach } from './create-event.dto';
+import { CreateEventDto, EventReachProperty } from './create-event.dto';
 
 /**
  * `householdId` is create-only (#454). Attaching an event to a household is

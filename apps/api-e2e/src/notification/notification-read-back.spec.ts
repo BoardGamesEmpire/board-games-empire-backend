@@ -1,10 +1,13 @@
-import { JobType, NotificationType, type DatabaseService } from '@bge/database';
+import type { DatabaseService } from '@bge/database';
+import { JobType, NotificationType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { NotificationsService } from '@bge/notifications-service';
-import { createActors, type Actors } from '@bge/testing-e2e';
+import type { Actors } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { unreadNotifications } from './notification-wire';
 
 /**

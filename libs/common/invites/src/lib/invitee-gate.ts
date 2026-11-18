@@ -1,4 +1,5 @@
-import { friendOfFriendOf, FriendshipStatus, InviteType, Prisma, Reach } from '@bge/database';
+import type { Prisma } from '@bge/database';
+import { friendOfFriendOf, FriendshipStatus, InviteType, Reach } from '@bge/database';
 import { t } from '@bge/i18n';
 import { ForbiddenException } from '@nestjs/common';
 import { normalizeInviteeEmail } from './invite.service';

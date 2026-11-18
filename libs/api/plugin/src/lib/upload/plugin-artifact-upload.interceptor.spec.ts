@@ -2,20 +2,8 @@ import { AuditContextService } from '@bge/actor-context';
 import { MODULE_OPTIONS_TOKEN, PluginGrantAuthorityService, PluginInstallAuthorityError } from '@bge/plugin';
 import { PluginArchiveRefusedError, PluginArtifactTooLargeError } from '@bge/plugin-artifacts';
 import { PLUGIN_ARCHIVE_MAX_COMPRESSED_BYTES } from '@boardgamesempire/plugin-manifest';
-import {
-  Body,
-  Catch,
-  Controller,
-  Logger,
-  Module,
-  Post,
-  Req,
-  UseFilters,
-  UseInterceptors,
-  type ArgumentsHost,
-  type ExceptionFilter,
-  type INestApplication,
-} from '@nestjs/common';
+import type { ArgumentsHost, ExceptionFilter, INestApplication } from '@nestjs/common';
+import { Body, Catch, Controller, Logger, Module, Post, Req, UseFilters, UseInterceptors } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { MulterError } from 'multer';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';

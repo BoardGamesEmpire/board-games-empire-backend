@@ -1,7 +1,7 @@
-import { SERVER_PLUGIN_UNIT, type Actor, type PluginUnit } from '../types';
-import type { ActorContextInit } from './audit-context-internal.service';
-import { AuditContextInternalService } from './audit-context-internal.service';
-import { AuditContextService } from './audit-context.service';
+import type { Actor, PluginUnit } from '../types';
+import { SERVER_PLUGIN_UNIT } from '../types';
+import type { ActorContextInit, AuditContextInternalService } from './audit-context-internal.service';
+import type { AuditContextService } from './audit-context.service';
 import { PluginActorScope } from './plugin-actor-scope.service';
 
 describe('PluginActorScope', () => {

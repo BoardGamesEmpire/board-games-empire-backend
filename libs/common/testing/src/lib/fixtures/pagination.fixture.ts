@@ -1,5 +1,7 @@
-import { DefaultPaginationQueryDto, PaginationQueryDto } from '@bge/shared';
-import { plainToInstance, type ClassConstructor } from 'class-transformer';
+import type { PaginationQueryDto } from '@bge/shared';
+import { DefaultPaginationQueryDto } from '@bge/shared';
+import type { ClassConstructor } from 'class-transformer';
+import { plainToInstance } from 'class-transformer';
 
 /**
  * The fields a test may set on a page-based query DTO: every input it

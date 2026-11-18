@@ -3,14 +3,8 @@ import { Action, ContentType, PlatformType, ResourceType } from '@bge/database';
 import { gameListScope, GameService } from '@bge/game';
 import { t } from '@bge/i18n';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
-import {
-  createMockAbilityService,
-  createTestingModuleWithDb,
-  makeGame,
-  MOCK_ACTING_USER_ID,
-  type MockAbilityService,
-  type MockDatabaseService,
-} from '@bge/testing';
+import type { MockAbilityService, MockDatabaseService } from '@bge/testing';
+import { createMockAbilityService, createTestingModuleWithDb, makeGame, MOCK_ACTING_USER_ID } from '@bge/testing';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';

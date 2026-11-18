@@ -1,25 +1,25 @@
 import type { PluginUnit } from '@bge/actor-context';
+import type { Prisma, RiskLevel } from '@bge/database';
 import {
   CONSENT_UNIT_BINDING_REFUSAL,
   DatabaseService,
   grantScopeCoordinatesForUnit,
   PluginGrantStatus,
   riskCovers,
-  type Prisma,
-  type RiskLevel,
 } from '@bge/database';
 import type { NormalizedPermissionRequest } from '@boardgamesempire/plugin-manifest';
 import { Injectable, Logger } from '@nestjs/common';
 import { consentUngrantableCause } from '../grants/consent-grantability';
 import { CONSENT_SCOPE_TO_GRANT_SCOPE } from '../grants/consent-scope.map';
-import { consentCatalogFlags, type ConsentCatalogPermission } from './consent-catalog-flags';
-import {
-  unitConsumesConsentScope,
-  type ClassifiedConsentCheck,
-  type ConsentCheckClassification,
-  type ConsentCheckDecision,
-  type ConsentManifestSource,
+import type { ConsentCatalogPermission } from './consent-catalog-flags';
+import { consentCatalogFlags } from './consent-catalog-flags';
+import type {
+  ClassifiedConsentCheck,
+  ConsentCheckClassification,
+  ConsentCheckDecision,
+  ConsentManifestSource,
 } from './consent-classification.types';
+import { unitConsumesConsentScope } from './consent-classification.types';
 import { presentedRiskLevel } from './presented-risk-level';
 
 /**

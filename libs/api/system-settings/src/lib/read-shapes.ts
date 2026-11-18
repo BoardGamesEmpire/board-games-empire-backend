@@ -1,4 +1,4 @@
-import { Prisma } from '@bge/database';
+import type { Prisma } from '@bge/database';
 
 /**
  * What `GET /system-settings` and `PATCH /system-settings/:id` return (#572).

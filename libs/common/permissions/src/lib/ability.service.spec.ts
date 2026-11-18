@@ -1,9 +1,13 @@
-import { type Actor, AuditContextService } from '@bge/actor-context';
-import { Action, type Prisma, ResourceType } from '@bge/database';
-import { ExtractSubjectType, SubjectRawRule } from '@casl/ability';
-import { createPrismaAbility, PrismaQuery } from '@casl/prisma';
+import type { Actor } from '@bge/actor-context';
+import { AuditContextService } from '@bge/actor-context';
+import type { Prisma } from '@bge/database';
+import { Action, ResourceType } from '@bge/database';
+import type { ExtractSubjectType, SubjectRawRule } from '@casl/ability';
+import type { PrismaQuery } from '@casl/prisma';
+import { createPrismaAbility } from '@casl/prisma';
 import { ForbiddenException, InternalServerErrorException, Logger } from '@nestjs/common';
-import { Test, type TestingModule } from '@nestjs/testing';
+import type { TestingModule } from '@nestjs/testing';
+import { Test } from '@nestjs/testing';
 import { AbilityFactory } from './ability.factory';
 import { AbilityService } from './ability.service';
 import { AbilityContextNotPrimedError } from './errors/ability-context-not-primed.error';

@@ -1,28 +1,24 @@
 import { PluginGrantStatus, RiskLevel } from '@bge/database';
-import { createActors, type Actors } from '@bge/testing-e2e';
+import type { Actors } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import type { PluginManifest } from '@boardgamesempire/plugin-manifest';
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import request from 'supertest';
 import { restoreShippedCatalog } from '../permission-catalog/shipped-catalog';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
+import type { ConsentActUnit } from './consent-act-fixtures';
 import {
   readConsentSurface,
   sendSwitchOn,
   shownServerRisks,
   switchOnBody,
   unitPluginsPath,
-  type ConsentActUnit,
 } from './consent-act-fixtures';
-import {
-  ARTIFACTS_PATH,
-  artifactRoutes,
-  buildArtifact,
-  exists,
-  pluginsRoot,
-  type BuiltArtifact,
-} from './plugin-artifact-fixtures';
+import type { BuiltArtifact } from './plugin-artifact-fixtures';
+import { ARTIFACTS_PATH, artifactRoutes, buildArtifact, exists, pluginsRoot } from './plugin-artifact-fixtures';
 
 /**
  * The install ingress end to end (#1094): a plugin artifact posted by upload,

@@ -1,12 +1,9 @@
 import { GameAdditionMode, OccurrenceOverrideScope, PlatformType, VoteThresholdType } from '@bge/database';
-import { t, type I18nPath } from '@bge/i18n';
+import type { I18nPath } from '@bge/i18n';
+import { t } from '@bge/i18n';
 import { makeEventOccurrencePolicy } from '@bge/testing';
-import {
-  assertWithinOverrideScope,
-  occurrencesExceedingScope,
-  type EventRestrictions,
-  type OccurrenceRestrictions,
-} from './override-scope';
+import type { EventRestrictions, OccurrenceRestrictions } from './override-scope';
+import { assertWithinOverrideScope, occurrencesExceedingScope } from './override-scope';
 
 const { None, TightenOnly, Any } = OccurrenceOverrideScope;
 

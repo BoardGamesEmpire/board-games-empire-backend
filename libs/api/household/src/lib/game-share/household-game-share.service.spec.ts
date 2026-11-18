@@ -1,12 +1,8 @@
-import { Action, MemberSharePolicy, Prisma, ResourceType, SystemRole, type GameShare } from '@bge/database';
+import type { GameShare } from '@bge/database';
+import { Action, MemberSharePolicy, Prisma, ResourceType, SystemRole } from '@bge/database';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
-import {
-  batchTransactionCall,
-  createTestingModuleWithDb,
-  paginationQuery,
-  unwrapTransaction,
-  type MockDatabaseService,
-} from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { batchTransactionCall, createTestingModuleWithDb, paginationQuery, unwrapTransaction } from '@bge/testing';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Http } from '@status/codes';

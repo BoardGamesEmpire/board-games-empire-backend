@@ -1,4 +1,5 @@
-import { Action, type ResourceType } from '@bge/database';
+import type { ResourceType } from '@bge/database';
+import { Action } from '@bge/database';
 import { accessibleBy } from '@casl/prisma';
 import { abilityOfRules } from '../ability-of-rules';
 import type { AppAbility, ModelResourceType } from '../interfaces';

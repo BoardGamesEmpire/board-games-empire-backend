@@ -1,10 +1,10 @@
+import type { ShippedStatement } from './shipped-sql';
 import {
   bindTemplate,
   extractSqlTemplate,
   extractValueTemplate,
   parameterMismatch,
   shapeMismatch,
-  type ShippedStatement,
 } from './shipped-sql';
 
 /**

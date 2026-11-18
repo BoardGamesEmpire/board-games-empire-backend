@@ -1,4 +1,5 @@
-import { envelopeFailure, isRecord, type HttpResponseLike, type RequestDescription } from '../support/wire';
+import type { HttpResponseLike, RequestDescription } from '../support/wire';
+import { envelopeFailure, isRecord } from '../support/wire';
 
 /**
  * Fail-loud parsers for the import status envelopes, on the pattern

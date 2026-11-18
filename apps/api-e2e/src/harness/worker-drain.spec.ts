@@ -1,13 +1,15 @@
 import { FeedbackSubmissionStatus } from '@bge/database';
 import { wrapJobData } from '@bge/queue-actor-context';
 import { FEEDBACK_DELIVERY_JOB, FEEDBACK_QUEUE_NAME } from '@bge/queue-feedback';
-import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
+import type { Actors, SessionActor } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import { createFeedbackClient, freshFeedbackKey, reportPayload } from '../feedback/feedback-request';
 import { LOCAL_FEEDBACK_SINK_SLUG, submitEnvelope } from '../feedback/feedback-wire';
 import { requireBaseUrl } from '../support/e2e-env';
 import { drainQueue, markQueueEvents } from '../support/queues';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { useWorker } from '../support/worker';
 
 /** A slug no sink registers, so the real processor's delivery fails. */

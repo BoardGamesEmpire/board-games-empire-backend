@@ -1,12 +1,15 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { DEFAULT_PRIVATE_CIDRS, PERMANENT_BLOCKED_CIDRS, PERMANENT_BLOCKED_HOSTNAMES } from '../constants';
-import { DnsResolutionError, type DnsResolver, type ResolvedAddress } from '../dns/dns-resolver.interface';
+import type { DnsResolver, ResolvedAddress } from '../dns/dns-resolver.interface';
+import { DnsResolutionError } from '../dns/dns-resolver.interface';
 import type { SafeHttpPolicySnapshot } from '../interfaces/safe-http-policy-snapshot.interface';
 import { DNS_RESOLVER } from '../safe-http.tokens';
 import { canonicalHostname } from './canonical-hostname';
-import { findContainingCidr, parseCidrList, type ParsedCidr } from './cidr';
+import type { ParsedCidr } from './cidr';
+import { findContainingCidr, parseCidrList } from './cidr';
 import { hostnameMatchesAny } from './hostname-matcher';
-import { parseIp, type ParsedIp } from './ip';
+import type { ParsedIp } from './ip';
+import { parseIp } from './ip';
 import type { IpPolicyDecision, IpPolicyReject } from './ip-policy.types';
 
 const PERMANENT_BLOCKED_PARSED: readonly ParsedCidr[] = parseCidrList(PERMANENT_BLOCKED_CIDRS);

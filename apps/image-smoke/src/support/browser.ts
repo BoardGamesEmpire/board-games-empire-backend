@@ -1,4 +1,5 @@
-import { errors, type Browser, type ConsoleMessage, type Response } from 'playwright';
+import type { Browser, ConsoleMessage, Response } from 'playwright';
+import { errors } from 'playwright';
 import { isProblemMessage } from './web-client';
 
 /**

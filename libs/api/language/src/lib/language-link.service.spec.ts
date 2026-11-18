@@ -1,5 +1,6 @@
 import { LanguageCodeFormat, LanguageLinkStatus, LanguageTagSource } from '@bge/database';
-import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { createTestingModuleWithDb } from '@bge/testing';
 import { LanguageLinkService } from './language-link.service';
 
 describe('LanguageLinkService', () => {

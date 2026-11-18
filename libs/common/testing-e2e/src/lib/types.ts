@@ -1,4 +1,5 @@
-import { SystemRole, type PrismaClient, type User } from '@bge/database';
+import type { PrismaClient, User } from '@bge/database';
+import { SystemRole } from '@bge/database';
 
 /**
  * Dependencies the factories receive by injection from the consuming e2e

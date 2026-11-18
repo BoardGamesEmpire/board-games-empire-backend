@@ -13,12 +13,8 @@ import { AbilityService, resolveActingUserIdOrNull, resolveScopeSubjectId, Scope
 import { PaginatedRows, PaginationQueryDto, pickDefined } from '@bge/shared';
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Http } from '@status/codes';
-import {
-  changedSince,
-  COLLECTION_INCLUDE,
-  type GameCollectionRow,
-  type GameCollectionWithRelations,
-} from './collection-row';
+import type { GameCollectionRow, GameCollectionWithRelations } from './collection-row';
+import { changedSince, COLLECTION_INCLUDE } from './collection-row';
 import {
   CreateGameCollectionDto,
   GameCollectionDto,

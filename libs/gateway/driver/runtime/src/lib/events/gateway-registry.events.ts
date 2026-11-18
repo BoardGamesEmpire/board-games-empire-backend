@@ -1,5 +1,6 @@
 import { MutationEvent } from '@bge/actor-context';
-import { ResourceType, type DataGateway } from '@bge/database';
+import type { DataGateway } from '@bge/database';
+import { ResourceType } from '@bge/database';
 import { GATEWAY_CAPABILITIES_CHANGED_EVENT, GATEWAY_DISABLED_EVENT } from '../constants/gateway-registry.constants';
 
 /**

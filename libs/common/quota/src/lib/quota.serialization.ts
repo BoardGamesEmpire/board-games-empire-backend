@@ -1,5 +1,6 @@
 import type { Quota } from '@bge/database';
-import { DEFAULT_SCOPE_ID, type QuotaResource } from './constants/quota-resource';
+import type { QuotaResource } from './constants/quota-resource';
+import { DEFAULT_SCOPE_ID } from './constants/quota-resource';
 import type { QuotaView } from './dto/quota-response.dto';
 
 /**

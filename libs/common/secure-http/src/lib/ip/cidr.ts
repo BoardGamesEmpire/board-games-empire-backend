@@ -1,4 +1,5 @@
-import { IpFamily, parseIp, type ParsedIp } from './ip';
+import type { IpFamily, ParsedIp } from './ip';
+import { parseIp } from './ip';
 
 /**
  * A parsed CIDR notation entry. `family` lets callers skip mismatched-family

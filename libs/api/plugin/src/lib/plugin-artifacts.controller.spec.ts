@@ -1,9 +1,12 @@
 import type { AuditContextService } from '@bge/actor-context';
 import { Action, ResourceType, RiskLevel } from '@bge/database';
 import type { SupportedLocalesService } from '@bge/i18n';
-import { CHECK_POLICIES_KEY, PoliciesGuard, ScopeComposer, type AppAbility } from '@bge/permissions';
-import { PluginConsentActLocaleError, type PluginInventoryService, type PluginUpdateAssessment } from '@bge/plugin';
-import { createMockAbilityService, MOCK_ACTING_USER_ID, type MockAbilityService } from '@bge/testing';
+import type { AppAbility } from '@bge/permissions';
+import { CHECK_POLICIES_KEY, PoliciesGuard, ScopeComposer } from '@bge/permissions';
+import type { PluginInventoryService, PluginUpdateAssessment } from '@bge/plugin';
+import { PluginConsentActLocaleError } from '@bge/plugin';
+import type { MockAbilityService } from '@bge/testing';
+import { createMockAbilityService, MOCK_ACTING_USER_ID } from '@bge/testing';
 import 'reflect-metadata';
 import { firstValueFrom } from 'rxjs';
 import { PluginArtifactSourceError } from './plugin-artifact-source.error';

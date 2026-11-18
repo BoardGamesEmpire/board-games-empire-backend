@@ -1,6 +1,7 @@
 import type { Game, GameCollection, Platform, PlatformGame } from '@bge/database';
 import type { ExpansionLinkWire } from '../game/game-wire';
-import { envelopeFailure, isRecord, type HttpResponseLike, type RequestDescription, type Wire } from '../support/wire';
+import type { HttpResponseLike, RequestDescription, Wire } from '../support/wire';
+import { envelopeFailure, isRecord } from '../support/wire';
 
 /**
  * Fail-loud parsers for the game-collection envelopes (#484), on the pattern

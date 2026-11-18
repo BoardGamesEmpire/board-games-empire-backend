@@ -11,7 +11,8 @@ import {
   ROLE_PERMISSION_CATALOG,
 } from '@bge/database';
 import type { SupportedLocalesService } from '@bge/i18n';
-import { CHECK_POLICIES_KEY, ScopeComposer, type AppAbility } from '@bge/permissions';
+import type { AppAbility } from '@bge/permissions';
+import { CHECK_POLICIES_KEY, ScopeComposer } from '@bge/permissions';
 import type {
   PluginConsentPresentation,
   PluginConsentPresentationService,
@@ -36,16 +37,13 @@ import {
 } from '@bge/plugin';
 import type { PluginArtifactStager } from '@bge/plugin-artifacts';
 import { ListScopeNotComposedError } from '@bge/shared';
-import {
-  createMockAbilityService,
-  MOCK_ACTING_USER_ID,
-  shippedReadReaches,
-  type MockAbilityService,
-} from '@bge/testing';
+import type { MockAbilityService } from '@bge/testing';
+import { createMockAbilityService, MOCK_ACTING_USER_ID, shippedReadReaches } from '@bge/testing';
 import { RequestMethod } from '@nestjs/common';
 import { ClsServiceManager } from 'nestjs-cls';
 import 'reflect-metadata';
-import { firstValueFrom, type Observable } from 'rxjs';
+import type { Observable } from 'rxjs';
+import { firstValueFrom } from 'rxjs';
 import { PluginsController, SERVER_PLUGIN_LIST_SCOPE } from './plugins.controller';
 import { SERVER_PLUGIN_COLUMN } from './policies/read-server-plugins.policy';
 

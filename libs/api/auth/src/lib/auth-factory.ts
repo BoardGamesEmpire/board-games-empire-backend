@@ -6,7 +6,8 @@ import type { PrismaClient } from '@bge/database';
 import { isTrue, splitTrimFilter } from '@bge/env';
 import type { I18nTranslations } from '@bge/i18n';
 import type { MailDispatcherService } from '@bge/queue-mail';
-import { Logger, type LoggerService } from '@nestjs/common';
+import type { LoggerService } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { EventEmitter2 } from '@nestjs/event-emitter';
 import { betterAuth } from 'better-auth';
@@ -31,12 +32,8 @@ import { appSignIn } from './app-sign-in';
 import type { CompleteAuthStorage } from './auth-storage';
 import { createBanFlagGate } from './ban-flag-gate';
 import { betterAuthLogger } from './better-auth-logger';
-import {
-  idsAllowingUnverifiedEmail,
-  type OidcProviderConfig,
-  readOidcProviders,
-  unlistedOidcVariables,
-} from './configuration/oidc-providers';
+import type { OidcProviderConfig } from './configuration/oidc-providers';
+import { idsAllowingUnverifiedEmail, readOidcProviders, unlistedOidcVariables } from './configuration/oidc-providers';
 import { AUTH_BASE_PATH, AUTH_CLIENT_IP_HEADER, AUTH_COOKIE_PREFIX, SESSION_FRESH_AGE_SECONDS } from './constants';
 import { UserCreatedEvent } from './events/auth.events';
 import { createIdTokenGate } from './id-token-gate';

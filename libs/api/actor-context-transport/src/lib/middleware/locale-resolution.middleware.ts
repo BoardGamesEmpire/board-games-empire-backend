@@ -1,6 +1,7 @@
 import { actorUserId, AuditContextInternalService, AuditContextService } from '@bge/actor-context';
 import { FALLBACK_LOCALE, LocaleResolutionService } from '@bge/i18n';
-import { Injectable, Logger, type NestMiddleware } from '@nestjs/common';
+import type { NestMiddleware } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import type { NextFunction, Request, Response } from 'express';
 
 /**

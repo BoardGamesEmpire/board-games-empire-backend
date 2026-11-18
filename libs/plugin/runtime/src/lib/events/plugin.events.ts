@@ -1,7 +1,9 @@
-import { MutationEvent, type PluginUnit } from '@bge/actor-context';
+import type { PluginUnit } from '@bge/actor-context';
+import { MutationEvent } from '@bge/actor-context';
 import type { HouseholdPlugin, Plugin, PluginGrant, UserPlugin } from '@bge/database';
 import { ResourceType } from '@bge/database';
-import { PluginEvent, type PluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
+import type { PluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
+import { PluginEvent } from '@boardgamesempire/plugin-contract';
 import type { PluginConsentScopeValue } from '@boardgamesempire/plugin-manifest';
 import type { StaticAnalysisFinding } from '../install/static-analysis.types';
 import type { UpdateEscalation } from '../update/update-escalation.types';

@@ -1,6 +1,7 @@
 import { BGE_VERSION } from '@bge/version';
 import * as proto from '@boardgamesempire/proto-gateway';
-import { firstValueFrom, lastValueFrom, toArray, type Observable } from 'rxjs';
+import type { Observable } from 'rxjs';
+import { firstValueFrom, lastValueFrom, toArray } from 'rxjs';
 import {
   STUB_BASE_GAME,
   STUB_CATEGORIES,

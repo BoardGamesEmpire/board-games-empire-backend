@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 
 import { expectBlocked, expectNotBlocked, withBarrier } from '../support/lock-barrier';
 import { readShippedSql } from '../support/shipped-sql';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { arrangePlugin, SERVER_GRANT_INSERT } from './lock-fixtures';
 
 /**

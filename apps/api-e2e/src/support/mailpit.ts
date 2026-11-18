@@ -1,7 +1,9 @@
 // The subpath, for the reason given in global-setup, which imports this file.
 import { pollUntil } from '@bge/testing-e2e/poll';
-import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers';
-import { MAILPIT_IMAGE, requireMailpit, type MailpitEndpoint } from './e2e-env';
+import type { StartedTestContainer } from 'testcontainers';
+import { GenericContainer, Wait } from 'testcontainers';
+import type { MailpitEndpoint } from './e2e-env';
+import { MAILPIT_IMAGE, requireMailpit } from './e2e-env';
 
 /** Mailpit's SMTP port inside its container. */
 const MAILPIT_SMTP_PORT = 1025;

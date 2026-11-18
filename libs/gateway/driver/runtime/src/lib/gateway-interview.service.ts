@@ -1,13 +1,9 @@
 import { SystemActorScope } from '@bge/actor-context';
-import {
-  DatabaseService,
-  DataGatewayCapability,
-  DataGatewayInterviewFailure,
-  type DataGateway,
-  type Prisma,
-} from '@bge/database';
+import type { DataGateway, Prisma } from '@bge/database';
+import { DatabaseService, DataGatewayCapability, DataGatewayInterviewFailure } from '@bge/database';
 import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
-import { Capability, type GatewayPingResponse } from '@boardgamesempire/proto-gateway';
+import type { GatewayPingResponse } from '@boardgamesempire/proto-gateway';
+import { Capability } from '@boardgamesempire/proto-gateway';
 import { status } from '@grpc/grpc-js';
 import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';

@@ -1,6 +1,7 @@
 import { t } from '@bge/i18n-core';
 import { ForbiddenException } from '@nestjs/common';
-import { isUserActor, type Actor } from '../types';
+import type { Actor } from '../types';
+import { isUserActor } from '../types';
 
 /**
  * The acting user's id, or 403 unless the actor is a person signed in as

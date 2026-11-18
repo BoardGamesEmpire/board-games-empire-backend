@@ -1,22 +1,25 @@
 import { ContentType, EventParticipationStatus, GameMedium, PlatformType, Reach, ResourceType } from '@bge/database';
-import { createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
+import type { Actors, AuthenticatedActor } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { arrangeCollectionEntry } from '../game-collection/game-collection-fixtures';
 import { findWishlist } from '../list/list-fixtures';
-import { mintApiKey, type Caller } from '../support/api-key';
+import type { Caller } from '../support/api-key';
+import { mintApiKey } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
-import { arrangeOfferedGame, platformOfType, type OfferedGameFacts } from './event-fixtures';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
+import type { OfferedGameFacts } from './event-fixtures';
+import { arrangeOfferedGame, platformOfType } from './event-fixtures';
 import { attendeeGamesPath, attendeesPath, createEventClient, EVENTS_PATH } from './event-request';
+import type { ListOfferedGamesEnvelope, OfferedGameWire } from './event-wire';
 import {
   attendeeEnvelope,
   listAttendeeGamesEnvelope,
   listAttendeesEnvelope,
   listOfferedGamesEnvelope,
   offeredGameEnvelope,
-  type ListOfferedGamesEnvelope,
-  type OfferedGameWire,
 } from './event-wire';
 
 /**

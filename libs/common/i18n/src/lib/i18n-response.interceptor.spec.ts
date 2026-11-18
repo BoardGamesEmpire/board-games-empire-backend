@@ -1,6 +1,7 @@
 import { AuditContextService } from '@bge/actor-context';
 import { I18N_CATALOG_DIR, t } from '@bge/i18n-core';
-import { Controller, Get, type INestApplication } from '@nestjs/common';
+import type { INestApplication } from '@nestjs/common';
+import { Controller, Get } from '@nestjs/common';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import { I18nModule } from 'nestjs-i18n';

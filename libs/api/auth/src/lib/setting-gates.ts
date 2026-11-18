@@ -1,5 +1,6 @@
 import type { PrismaClient, SystemSetting } from '@bge/database';
-import { FALLBACK_LOCALE, type I18nPath, type I18nTranslations } from '@bge/i18n';
+import type { I18nPath, I18nTranslations } from '@bge/i18n';
+import { FALLBACK_LOCALE } from '@bge/i18n';
 import { Logger } from '@nestjs/common';
 import { APIError } from 'better-auth/api';
 import type { I18nService } from 'nestjs-i18n';

@@ -1,6 +1,7 @@
 import { DataGatewayCapability, DataGatewaySectionFailure, LanguageCodeFormat, PlatformType } from '@bge/database';
 import { LanguageLinkService } from '@bge/language';
-import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { createTestingModuleWithDb } from '@bge/testing';
 import { VocabularyLinkService } from '@bge/vocabulary';
 import { InMemoryGatewayDriver } from '@boardgamesempire/gateway-driver-contract-testing';
 import * as proto from '@boardgamesempire/proto-gateway';

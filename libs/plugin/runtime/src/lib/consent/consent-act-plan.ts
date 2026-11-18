@@ -1,17 +1,21 @@
 import type { PluginUnit } from '@bge/actor-context';
-import { PluginGrantStatus, type RiskLevel } from '@bge/database';
-import { resolveLocalizedStringDetailed, type NormalizedPermissionRequest } from '@boardgamesempire/plugin-manifest';
+import type { RiskLevel } from '@bge/database';
+import { PluginGrantStatus } from '@bge/database';
+import type { NormalizedPermissionRequest } from '@boardgamesempire/plugin-manifest';
+import { resolveLocalizedStringDetailed } from '@boardgamesempire/plugin-manifest';
 import type { ConsentCheckClassification, ConsentManifestSource } from './consent-classification.types';
 import { unitOwnsConsentScope } from './consent-classification.types';
 import { byPermissionSlugCodeUnit } from './decision-lock-order';
+import type {
+  ConsentActAnswerRule,
+  ConsentActStaleRisk,
+  ConsentActUngrantablePermission,
+} from './plugin-consent-act.errors';
 import {
   PluginConsentActAnswerError,
   PluginConsentActRequiredSetError,
   PluginConsentActStaleError,
   PluginConsentActUngrantableError,
-  type ConsentActAnswerRule,
-  type ConsentActStaleRisk,
-  type ConsentActUngrantablePermission,
 } from './plugin-consent-act.errors';
 import type {
   ConsentActAnswer,

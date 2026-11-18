@@ -1,12 +1,8 @@
-import { Action, PlatformType, ResourceType, type Prisma } from '@bge/database';
+import type { Prisma } from '@bge/database';
+import { Action, PlatformType, ResourceType } from '@bge/database';
 import type { AbilityService } from '@bge/permissions';
-import {
-  createMockAbilityService,
-  createMockDatabaseService,
-  makeEventPolicy,
-  type MockAbilityService,
-  type MockDatabaseService,
-} from '@bge/testing';
+import type { MockAbilityService, MockDatabaseService } from '@bge/testing';
+import { createMockAbilityService, createMockDatabaseService, makeEventPolicy } from '@bge/testing';
 import {
   canReadEventPolicy,
   eventPolicyReadArgs,

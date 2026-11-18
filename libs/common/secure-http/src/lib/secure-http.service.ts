@@ -1,7 +1,8 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { open, rm } from 'node:fs/promises';
-import { Transform, type TransformCallback } from 'node:stream';
+import type { TransformCallback } from 'node:stream';
+import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { request as undiciRequest } from 'undici';
 import type Dispatcher from 'undici/types/dispatcher';

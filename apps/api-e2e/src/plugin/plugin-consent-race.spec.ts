@@ -1,17 +1,15 @@
-import {
-  PluginConsentActKind,
-  PluginGrantScope,
-  PluginGrantStatus,
-  PluginScope,
-  RiskLevel,
-  type Plugin,
-} from '@bge/database';
-import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
-import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
+import type { Plugin } from '@bge/database';
+import { PluginConsentActKind, PluginGrantScope, PluginGrantStatus, PluginScope, RiskLevel } from '@bge/database';
+import type { Actors, SessionActor } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
+import type { PluginManifest } from '@boardgamesempire/plugin-manifest';
+import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { expectBackendsQueuedBehind, expectLockWaiter, withBarrier } from '../support/lock-barrier';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
+import type { ShownRiskBody } from './consent-act-fixtures';
 import {
   readConsentSurface,
   readStagedShownRisks,
@@ -19,9 +17,9 @@ import {
   sendToggle,
   switchOnBody,
   toggleBody,
-  type ShownRiskBody,
 } from './consent-act-fixtures';
-import { MANAGE_DIGEST_CHECK, type Check } from './manifest-checks';
+import type { Check } from './manifest-checks';
+import { MANAGE_DIGEST_CHECK } from './manifest-checks';
 import { INVENTORY_STAGING_ID, pluginRowData, stagedUpdateColumns } from './plugin-row-fixtures';
 
 /**

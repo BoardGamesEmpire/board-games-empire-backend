@@ -1,6 +1,7 @@
 import { SystemRole } from '../client';
 import { assertRolePermissionCatalog } from './catalog-integrity';
-import { PERMISSION_CATALOG, type PermissionSlug } from './permission.catalog';
+import type { PermissionSlug } from './permission.catalog';
+import { PERMISSION_CATALOG } from './permission.catalog';
 
 /**
  * Role → slug assignments. Two lists are DERIVED rather than enumerated:

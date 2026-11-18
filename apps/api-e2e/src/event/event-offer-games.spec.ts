@@ -1,12 +1,15 @@
 import { ContentType, GameMedium, PlatformType, Reach, SystemRole } from '@bge/database';
-import { createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
+import type { Actors, AuthenticatedActor } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import request from 'supertest';
 import { arrangeCollectionEntry } from '../game-collection/game-collection-fixtures';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { arrangeOfferedGame, platformOfType } from './event-fixtures';
 import { attendeesPath, createEventClient, offerGamesPath } from './event-request';
-import { attendeeEnvelope, listOfferedGamesEnvelope, offerResultsEnvelope, type OfferResultWire } from './event-wire';
+import type { OfferResultWire } from './event-wire';
+import { attendeeEnvelope, listOfferedGamesEnvelope, offerResultsEnvelope } from './event-wire';
 
 /**
  * Offering several games at once, each a game with a choice of its

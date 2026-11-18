@@ -1,3 +1,16 @@
+import type {
+  CatalogSnapshot,
+  CatalogView,
+  EntryProblem,
+  EntryWarning,
+  FieldChange,
+  PermissionSeedDefinition,
+  PermissionSnapshotRow,
+  PluginActiveManifestReader,
+  Prisma,
+  RolePermissionSnapshotRow,
+  RoleSnapshotRow,
+} from '@bge/database';
 import {
   CATALOG_MANIFEST,
   catalogViewFromSnapshot,
@@ -12,17 +25,6 @@ import {
   probeConditions,
   RECONCILE_TRANSACTION_TIMEOUT_MS,
   ROLE_SCOPE,
-  type CatalogSnapshot,
-  type CatalogView,
-  type EntryProblem,
-  type EntryWarning,
-  type FieldChange,
-  type PermissionSeedDefinition,
-  type PermissionSnapshotRow,
-  type PluginActiveManifestReader,
-  type Prisma,
-  type RolePermissionSnapshotRow,
-  type RoleSnapshotRow,
 } from '@bge/database';
 import { CodedHttpException, t } from '@bge/i18n';
 import { PermissionsService } from '@bge/permissions';
@@ -31,27 +33,21 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Http } from '@status/codes';
 import { isDeepStrictEqual } from 'node:util';
 import { countConsentDecisionsLost, loadConsentDecisionsInForce } from './consent-effect';
-import {
-  catalogGrant,
-  catalogListsGrant,
-  catalogPermission,
-  catalogRole,
-  codeUnitOrder,
-  type CatalogRoleDto,
-  type GrantEditDto,
-  type HandBackDto,
-  type PermissionCatalogDto,
-  type PermissionEditDto,
+import type {
+  CatalogRoleDto,
+  GrantEditDto,
+  HandBackDto,
+  PermissionCatalogDto,
+  PermissionEditDto,
 } from './dto/catalog.response';
+import { catalogGrant, catalogListsGrant, catalogPermission, catalogRole, codeUnitOrder } from './dto/catalog.response';
 import type { UpdatePermissionDto } from './dto/update-permission.dto';
 import type { UpdateRoleDto } from './dto/update-role.dto';
+import type { GrantSnapshot, PermissionSnapshot, RoleSnapshot } from './events/permission-catalog.events';
 import {
   PermissionUpdatedEvent,
   RolePermissionChangedEvent,
   RoleUpdatedEvent,
-  type GrantSnapshot,
-  type PermissionSnapshot,
-  type RoleSnapshot,
 } from './events/permission-catalog.events';
 import { refuseOwnerLockout } from './owner-control';
 

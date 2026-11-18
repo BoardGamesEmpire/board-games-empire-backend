@@ -1,21 +1,21 @@
 import { ContentFormat, ContentType, DataGatewayCapability, PlatformType, SearchFilterAxis } from '@bge/database';
-import {
-  coverageOverlaps,
-  GatewayRegistryService,
-  GatewayRoutingRefusedError,
-  type CoverageFilter,
-  type GatewayResolution,
-  type SearchResolution,
-  type SearchRoute,
-  type StoredCoverage,
+import type {
+  CoverageFilter,
+  GatewayResolution,
+  SearchResolution,
+  SearchRoute,
+  StoredCoverage,
 } from '@bge/gateway-registry';
-import { createTestingModuleWithDb, type CacheMock, type MockDatabaseService } from '@bge/testing';
+import { coverageOverlaps, GatewayRegistryService, GatewayRoutingRefusedError } from '@bge/gateway-registry';
+import type { CacheMock, MockDatabaseService } from '@bge/testing';
+import { createTestingModuleWithDb } from '@bge/testing';
 import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
 import { InMemoryGatewayDriver } from '@boardgamesempire/gateway-driver-contract-testing';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { Logger } from '@nestjs/common';
 import { setTimeout as delay } from 'node:timers/promises';
-import { from, lastValueFrom, toArray, type Observable } from 'rxjs';
+import type { Observable } from 'rxjs';
+import { from, lastValueFrom, toArray } from 'rxjs';
 import { GatewayGameSearchService } from './gateway-game-search.service';
 
 const {

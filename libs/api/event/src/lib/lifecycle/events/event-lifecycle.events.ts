@@ -1,5 +1,6 @@
 import { MutationEvent } from '@bge/actor-context';
-import { ResourceType, type Event } from '@bge/database';
+import type { Event } from '@bge/database';
+import { ResourceType } from '@bge/database';
 import { EventEvents } from '../../constants/event-events.constant';
 
 /**

@@ -1,10 +1,5 @@
-import {
-  bindManifest,
-  classifyManifestMove,
-  describeManifestMove,
-  type ClaimedPluginRow,
-  type ManifestSnapshot,
-} from './manifest-move';
+import type { ClaimedPluginRow, ManifestSnapshot } from './manifest-move';
+import { bindManifest, classifyManifestMove, describeManifestMove } from './manifest-move';
 
 const INSTALLED_AT = new Date('2026-01-01T00:00:00.000Z');
 

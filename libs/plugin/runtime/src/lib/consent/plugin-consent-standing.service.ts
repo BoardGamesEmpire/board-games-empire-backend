@@ -1,13 +1,12 @@
 import type { PluginUnit } from '@bge/actor-context';
 import { RiskLevel } from '@bge/database';
-import { resolveLocalizedString, type NormalizedPermissionRequest } from '@boardgamesempire/plugin-manifest';
+import type { NormalizedPermissionRequest } from '@boardgamesempire/plugin-manifest';
+import { resolveLocalizedString } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable } from '@nestjs/common';
-import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
-import {
-  unitConsumesConsentScope,
-  unitOwnsConsentScope,
-  type ClassifiedConsentCheck,
-} from './consent-classification.types';
+import type { PluginModuleOptions } from '../plugin-module.options';
+import { MODULE_OPTIONS_TOKEN } from '../plugin-module.options';
+import type { ClassifiedConsentCheck } from './consent-classification.types';
+import { unitConsumesConsentScope, unitOwnsConsentScope } from './consent-classification.types';
 import { PluginConsentCheckClassifier } from './plugin-consent-check-classifier.service';
 import type {
   ConsentOutstandingCheck,

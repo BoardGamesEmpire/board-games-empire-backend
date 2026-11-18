@@ -2,7 +2,8 @@ import type { Logger } from '@nestjs/common';
 import { performance } from 'node:perf_hooks';
 import type { PrismaClient } from '../client';
 import type { DataMigrationEntry } from './data-migration-entry';
-import { describeMismatch, planDataMigrations, type RevisionMismatch } from './plan-data-migrations';
+import type { RevisionMismatch } from './plan-data-migrations';
+import { describeMismatch, planDataMigrations } from './plan-data-migrations';
 import { readDataMigrationLedger } from './read-data-migration-ledger';
 
 /** What the apply needs of the client: the ledger model and interactive transactions. */

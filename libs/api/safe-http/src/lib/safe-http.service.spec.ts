@@ -1,7 +1,9 @@
-import { AuditContextService, type Actor } from '@bge/actor-context';
-import { type SafeHttpPolicy } from '@bge/database';
+import type { Actor } from '@bge/actor-context';
+import { AuditContextService } from '@bge/actor-context';
+import type { SafeHttpPolicy } from '@bge/database';
 import { SafeHttpPolicyEventsService } from '@bge/secure-http';
-import { createTestingModuleWithDb, MockDatabaseService } from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { createTestingModuleWithDb } from '@bge/testing';
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import type { UpdateSafeHttpPolicyDto } from './dto/update-safe-http-policy.dto';
 import { SafeHttpService } from './safe-http.service';

@@ -33,7 +33,8 @@ import { Http } from '@status/codes';
 import { from, of } from 'rxjs';
 import { catchError, concatMap, map, tap } from 'rxjs/operators';
 import { DataGatewayService } from './data-gateway.service';
-import { toDataGatewayView, type DataGatewayWithSections } from './data-gateway.view';
+import type { DataGatewayWithSections } from './data-gateway.view';
+import { toDataGatewayView } from './data-gateway.view';
 import type { GatewayCallFailureCode } from './dto';
 import {
   CreateDataGatewayDto,

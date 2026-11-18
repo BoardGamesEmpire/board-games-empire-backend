@@ -1,14 +1,8 @@
-import { Action, ResourceType, type Prisma } from '@bge/database';
+import type { Prisma } from '@bge/database';
+import { Action, ResourceType } from '@bge/database';
 import type { AbilityService } from '@bge/permissions';
-import {
-  POLICY_VIEW_INCLUDE,
-  toEventPolicyView,
-  toOccurrencePolicyView,
-  type EventPolicyRow,
-  type EventPolicyView,
-  type OccurrencePolicyRow,
-  type OccurrencePolicyView,
-} from './policy-view';
+import type { EventPolicyRow, EventPolicyView, OccurrencePolicyRow, OccurrencePolicyView } from './policy-view';
+import { POLICY_VIEW_INCLUDE, toEventPolicyView, toOccurrencePolicyView } from './policy-view';
 
 /**
  * The query for an event's policy under the `read:event_policy` ceiling, with
