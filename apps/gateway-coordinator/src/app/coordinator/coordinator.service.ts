@@ -4,6 +4,29 @@ import * as proto from '@boardgamesempire/proto-gateway';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as crypto from 'node:crypto';
+import { z } from 'zod';
+
+/**
+ * The shape the registry stores a DataGateway's auth parameters in. The api
+ * sends them as JSON text, so valid JSON that isn't an object (a number,
+ * null, an array) is refused here rather than stored (#1322).
+ */
+const authParametersSchema = z.record(z.string(), z.unknown());
+
+/**
+ * Parses the api's auth parameters. Invalid JSON throws its own SyntaxError,
+ * and JSON that isn't an object throws a plain error; the caller answers
+ * either one as a failed connect (#1322).
+ */
+function parseAuthParameters(authParametersJson: string): Record<string, unknown> {
+  const parsed = authParametersSchema.safeParse(JSON.parse(authParametersJson));
+
+  if (!parsed.success) {
+    throw new Error('authParametersJson must be a JSON object');
+  }
+
+  return parsed.data;
+}
 
 /**
  * The registry's reason when it refused the DataGateway, for the api to tell
@@ -30,9 +53,7 @@ export class CoordinatorService {
     }
 
     try {
-      const authParameters = request.authParametersJson
-        ? (JSON.parse(request.authParametersJson) as Record<string, unknown>)
-        : undefined;
+      const authParameters = request.authParametersJson ? parseAuthParameters(request.authParametersJson) : undefined;
 
       await this.registry.connect({
         gatewayId: request.gatewayId,

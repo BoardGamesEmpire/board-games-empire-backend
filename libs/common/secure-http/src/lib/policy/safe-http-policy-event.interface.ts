@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 /**
  * Payload published on the `safe_http.policy_updated` Redis channel after
  * the admin controller persists changes to the `SafeHttpPolicy` singleton
@@ -15,16 +17,18 @@
  * subscribers including the publishing connection. The refresh handler
  * must be idempotent, which it is: it always reads the current row from DB.
  */
-export interface SafeHttpPolicyUpdatedEvent {
+export const safeHttpPolicyUpdatedEventSchema = z.object({
   /**
    * ISO-8601 timestamp of the DB write that triggered this event.
    */
-  updatedAt: string;
+  updatedAt: z.iso.datetime(),
 
   /**
    * User ID of the admin who made the change, or `null` when system-initiated.
    */
-  updatedBy: string | null;
-}
+  updatedBy: z.string().nullable(),
+});
+
+export type SafeHttpPolicyUpdatedEvent = z.infer<typeof safeHttpPolicyUpdatedEventSchema>;
 
 export type SafeHttpPolicyEventHandler = (event: SafeHttpPolicyUpdatedEvent) => Promise<void> | void;

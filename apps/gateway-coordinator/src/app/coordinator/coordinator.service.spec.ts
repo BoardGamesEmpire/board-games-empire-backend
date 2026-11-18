@@ -131,5 +131,44 @@ describe('CoordinatorService', () => {
       expect(answer).toEqual({ success: false, error: '14 UNAVAILABLE' });
       expect(answer).not.toHaveProperty('refusalReason');
     });
+
+    // The api sends the DataGateway's auth parameters as JSON text, and the
+    // registry stores them as an object. Valid JSON that isn't an object
+    // stops here instead of reaching the registry (#1322).
+    it.each([
+      ['a number', '5'],
+      ['null', 'null'],
+      ['an array', '[]'],
+    ])(
+      'refuses auth parameters that are JSON but not an object, without calling the registry (#1322): %s',
+      async (_label, authParametersJson) => {
+        jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+
+        const answer = await service.connectGateway({ ...request, authParametersJson });
+
+        expect(answer).toEqual({ success: false, error: 'authParametersJson must be a JSON object' });
+        expect(answer).not.toHaveProperty('refusalReason');
+        expect(registry.connect).not.toHaveBeenCalled();
+      },
+    );
+
+    it('answers auth parameters that are not JSON with the parse error, without calling the registry (#1322)', async () => {
+      jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+
+      const answer = await service.connectGateway({ ...request, authParametersJson: '{' });
+
+      expect(answer).toEqual({ success: false, error: expect.stringContaining('JSON') });
+      expect(registry.connect).not.toHaveBeenCalled();
+    });
+
+    it('passes object auth parameters to the registry (#1322)', async () => {
+      registry.connect.mockResolvedValue(undefined);
+
+      await expect(service.connectGateway({ ...request, authParametersJson: '{"token":"t"}' })).resolves.toEqual({
+        success: true,
+      });
+
+      expect(registry.connect).toHaveBeenCalledWith(expect.objectContaining({ authParameters: { token: 't' } }));
+    });
   });
 });
