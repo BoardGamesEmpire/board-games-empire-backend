@@ -119,6 +119,7 @@ export class RedactionService {
       return node;
     };
 
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- walk returns an object for the object input the DTO validates, which its unknown return type can't express (#1321)
     const value = walk(input) as Record<string, unknown>;
 
     return { value, mutated };

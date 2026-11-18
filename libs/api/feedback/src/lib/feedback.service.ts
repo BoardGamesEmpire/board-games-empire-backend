@@ -110,8 +110,10 @@ export class FeedbackService {
             appVersion: dto.appVersion ?? null,
             platform: dto.platform ?? null,
             locale: dto.locale ?? null,
+            // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- the value came from a JSON request body, so it is JSON, which Record<string, unknown> can't tell Prisma's InputJsonValue (#1321)
             deviceInfo: redactedDeviceInfo !== null ? (redactedDeviceInfo as Prisma.InputJsonValue) : Prisma.DbNull,
             breadcrumbs:
+              // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- BreadcrumbDto is a class with no index signature, so it isn't comparable to Prisma's InputJsonValue and the cast goes through unknown (#1321)
               redactedBreadcrumbs !== null ? (redactedBreadcrumbs as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
             deploymentRuntime: runtime,
             deploymentVersion: version,
@@ -210,7 +212,8 @@ export class FeedbackService {
           userId,
           permissionId: permission.id,
           resourceType: ResourceType.FeedbackReport,
-          resourceId: null as unknown as string, // composite-unique allows null
+          // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- the compound unique allows a null resourceId, but Prisma types its fields as non-null; null shares nothing with string, so the cast goes through unknown (#1321)
+          resourceId: null as unknown as string,
         },
       },
       create: {

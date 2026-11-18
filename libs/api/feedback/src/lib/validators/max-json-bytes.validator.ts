@@ -33,7 +33,7 @@ export class MaxJsonBytesConstraint implements ValidatorConstraintInterface {
       return true;
     }
 
-    const [maxBytes] = args.constraints as [number];
+    const maxBytes: number = args.constraints[0];
 
     let serialized: string;
     try {
