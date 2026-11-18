@@ -617,6 +617,41 @@ _Avoid_: catalog on its own, catalogue, game library
 A game that stands on its own and that expansions, DLC and other add-ons attach to.
 _Avoid_: parent game, main game
 
+**Add-on**:
+A game that attaches to a base game: an expansion, standalone expansion, DLC, mod or accessory, as its content type says.
+_Avoid_: expansion (one kind of add-on), extension, child game
+
+**Expansion**:
+An add-on that extends a base game and needs it to be played, such as Catan: Seafarers.
+_Avoid_: expansion for add-ons in general; mini expansion (an expansion)
+
+**Standalone expansion**:
+An add-on that can also be played without its base game, such as Half-Life 2: Episode Two.
+
+**DLC**:
+A video game add-on delivered as downloadable content, such as Skyrim: Dawnguard. It is a full game in the game catalog.
+_Avoid_: DLC for a DLC item
+
+**DLC item**:
+Planned: a minor pack, such as a cosmetic pack, that its upstream marks as one. It is listed under its game without being a game itself.
+_Avoid_: DLC (a full game), pack on its own
+
+**Bundle**:
+A game made up of other games and sold as one product, such as Catan: Big Box or Mass Effect Trilogy.
+_Avoid_: compilation, big box (for bundles in general), collection (a user's owned games)
+
+**Add-on link**:
+The link from an add-on to a base game it attaches to. An add-on can have several. Planned: a link holds only on the platforms where both games have a platform game.
+_Avoid_: expansion link, parent link
+
+**Works-with link**:
+Planned: a two-way link between two games that are played together, such as Horizons of Spirit Island and Spirit Island, naming neither one as the base game.
+_Avoid_: integration, compatibility
+
+**Contents link**:
+Planned: the link from a bundle to each game it contains.
+_Avoid_: compilation link
+
 **Imported game**:
 A game brought in from a DataGateway. It belongs to the server, and everyone can see it.
 
@@ -655,12 +690,12 @@ _Avoid_: platform incarnation, PG
 The broad class of platform a game is played on, such as tabletop, console, PC or mobile.
 
 **Content type**:
-What a game is in relation to other games, such as a base game, expansion, DLC, accessory or bundle.
-_Avoid_: game type; not to be confused with content format
+What a game is in relation to other games, such as a base game, expansion, DLC, accessory or bundle. Planned: a platform game can have its own, since Jagged Earth is an expansion on tabletop and DLC on PC.
+_Avoid_: game type, expansion type; not to be confused with content format
 
 **Override**:
 A value set at a narrower level that replaces the broader one: a release's over its platform game's, and a platform game's over its game's. A user's customization overrides for that user only.
-_Avoid_: override for an expansion's adjustments, which add rather than replace; override for a direct permission
+_Avoid_: override for an add-on link's adjustments, which add rather than replace; override for a direct permission
 
 **Credit**:
 A person or company credited on a game: a designer, artist or publisher.
@@ -699,8 +734,15 @@ A label for what kind of game something is, such as a genre.
 _Avoid_: genre; category on its own for anything else (say plugin category, feedback category, document kind, house-rule area)
 
 **Family**:
-A named group of related games, such as a series.
-_Avoid_: collection (a user's owned games)
+A named group of related games: a series or a universe.
+_Avoid_: collection (a user's owned games); family for a topic such as a theme or a component
+
+**Series**:
+A family of games released as one line, such as Mario Kart or Uwe Rosenberg's Harvest games.
+
+**Universe**:
+A family of every game set in one world or built around one game, such as Catan or Warhammer 40,000.
+_Avoid_: franchise, setting
 
 **Tag**:
 A label users put on a game, which everyone sees. Who added it is recorded only as attribution.
@@ -902,7 +944,7 @@ _Avoid_: upsert; fetch (that is only the first half)
 Asking one DataGateway for a game's full data: the first half of an import, before the result is stored.
 
 **Import batch**:
-One import request, the game asked for plus any expansions chosen with it and any base game the server added because one of them needed it, tracked and reported as a group with one overall outcome.
+One import request, the game asked for plus any add-ons chosen with it and any base game the server added because one of them needed it, tracked and reported as a group with one overall outcome.
 _Avoid_: import flow, co-import
 
 **Re-import**:
@@ -926,7 +968,7 @@ Adding to, or replacing, the data of a record the server already has, using a Da
 _Avoid_: augmentation
 
 **Game watch**:
-Planned: a user's request to be told when a new expansion of a particular base game enters the game catalog, optionally importing it automatically.
+Planned: a user's request to be told when a new add-on of a particular base game enters the game catalog, optionally importing it automatically.
 _Avoid_: follow, subscription
 
 ### Languages
