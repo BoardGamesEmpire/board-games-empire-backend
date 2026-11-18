@@ -55,6 +55,7 @@ export class ImportBatchCompletionService {
       }
 
       const baseJob = jobs.find((job) => job.parentJobId === null) ?? jobs[0];
+      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Prisma types a JSON column as JsonValue; this lib's producers write the job's payload in this shape (#1321)
       const payload = (baseJob.payload ?? {}) as { correlationId?: string };
       const status = deriveBatchStatus(jobs.map((job) => job.status));
 

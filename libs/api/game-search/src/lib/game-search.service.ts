@@ -104,6 +104,7 @@ export class GameSearchService {
   localSearchScope(): LocalSearchScope {
     const userId = resolveScopeSubjectId(this.ability);
 
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- LocalSearchScope's brand is declared and never present at runtime; this is the one place that mints it (#472)
     return this.scopeComposer.compose(ResourceType.Game, Action.read, gameListScope(userId)) as LocalSearchScope;
   }
 

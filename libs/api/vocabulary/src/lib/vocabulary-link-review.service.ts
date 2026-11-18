@@ -80,7 +80,7 @@ export class VocabularyLinkReviewService {
   }
 
   private adapter(kind: ReviewedVocabularyKind): ReviewedVocabularyAdapter<ReviewedVocabularyKind> {
-    return REVIEWED_ADAPTERS[kind] as ReviewedVocabularyAdapter<ReviewedVocabularyKind>;
+    return REVIEWED_ADAPTERS[kind];
   }
 
   private async findOwned(

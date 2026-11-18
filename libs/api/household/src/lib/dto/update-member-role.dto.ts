@@ -27,7 +27,9 @@ export type AssignableHouseholdRole = (typeof ASSIGNABLE_HOUSEHOLD_ROLES)[number
  * `includes` check or — worse — casts.
  */
 export function isAssignableHouseholdRole(role: string): role is AssignableHouseholdRole {
-  return (ASSIGNABLE_HOUSEHOLD_ROLES as readonly string[]).includes(role);
+  const roles: readonly string[] = ASSIGNABLE_HOUSEHOLD_ROLES;
+
+  return roles.includes(role);
 }
 
 export class UpdateMemberRoleDto {

@@ -723,6 +723,7 @@ export class EventService {
       // The audit row records only the columns whose values changed, before
       // and after, and a patch that re-sends stored values changes none, so it
       // emits no event and no webhook (#728).
+      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Object.keys returns string[]; the dto is the update's data, so its keys are Event columns (#1321)
       const changed = changedKeys(existing, updated, Object.keys(dto) as (keyof Event)[]);
       if (changed.length > 0) {
         this.eventEmitter.emit(

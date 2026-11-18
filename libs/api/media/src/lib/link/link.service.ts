@@ -153,7 +153,7 @@ export class MediaLinkService {
     subjectId: string,
     client: Prisma.TransactionClient = this.db,
   ): Promise<void> {
-    // eslint-disable-next-line no-restricted-syntax -- single-row existence check on the link subject, not a collection read
+    // eslint-disable-next-line no-restricted-syntax, @typescript-eslint/consistent-type-assertions -- single-row existence check on the link subject, not a collection read; a subject type that isn't a model is refused below, a narrowing of the enum TypeScript can't make here (#1321)
     const AND = this.ability.getCurrentResourceConditions(subjectType as ModelResourceType, Action.read);
 
     let found: { id: string } | null;

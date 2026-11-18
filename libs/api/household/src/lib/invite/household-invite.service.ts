@@ -53,6 +53,7 @@ const APPROVE_FIELD = Prisma.InviteScalarFieldEnum.approvedById;
  */
 const PARTY_COLUMNS_SELECT = {
   id: true,
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Object.fromEntries types its result by value only; its keys are INVITE_SCALARS_PARTY_ONLY's own (#1321)
   ...(Object.fromEntries(Object.keys(INVITE_SCALARS_PARTY_ONLY).map((key) => [key, true])) as {
     readonly [Key in keyof typeof INVITE_SCALARS_PARTY_ONLY]: true;
   }),

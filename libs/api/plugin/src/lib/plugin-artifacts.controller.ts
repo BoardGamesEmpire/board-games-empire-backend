@@ -308,7 +308,7 @@ export class PluginArtifactsController {
           description: text(feature.description),
         })),
       },
-      checks: [...presentArtifactChecks(assessment, locale, defaultLocale)] as PluginArtifactResponseDto['checks'],
+      checks: [...presentArtifactChecks(assessment, locale, defaultLocale)],
       locale: locale ?? defaultLocale,
       criticalSlugsToReenter: [...assessment.criticalSlugsToReenter],
       forbiddenImportsToAccept: [...assessment.forbiddenImportsToAccept],

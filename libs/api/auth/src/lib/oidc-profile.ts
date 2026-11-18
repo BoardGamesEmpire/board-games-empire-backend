@@ -54,5 +54,12 @@ export function mapOidcProfile(profile: Record<string, unknown>): OidcProfileFie
     lastName: claim(profile, 'family_name'),
   };
 
-  return Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined)) as OidcProfileFields;
+  const present: OidcProfileFields = {};
+  for (const [key, value] of Object.entries(fields)) {
+    if (value !== undefined) {
+      present[key] = value;
+    }
+  }
+
+  return present;
 }

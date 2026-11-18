@@ -92,7 +92,9 @@ export class AuditPersistenceListener implements OnModuleInit, OnApplicationShut
       subjectId: event.subjectId,
       source,
       correlationId: this.auditContext.getCorrelationId(),
+      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- an instanceof check yields MutationEvent<unknown>, which types the snapshots as unknown; every subclass's snapshot is a row object (#1321)
       before: redactSnapshot(event.before as Record<string, unknown> | null, denylist),
+      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- an instanceof check yields MutationEvent<unknown>, which types the snapshots as unknown; every subclass's snapshot is a row object (#1321)
       after: redactSnapshot(event.after as Record<string, unknown> | null, denylist),
       initiatedAt: event.initiatedAt,
       occurredAt: event.occurredAt,

@@ -74,7 +74,8 @@ export function createOutboundActorMetadataInterceptor(): Interceptor {
         try {
           injectActorContextMetadata(metadata);
         } catch (error) {
-          logger.warn(`Failed to inject actor context into outbound gRPC metadata: ${(error as Error).message}`);
+          const reason = error instanceof Error ? error.message : String(error);
+          logger.warn(`Failed to inject actor context into outbound gRPC metadata: ${reason}`);
         }
 
         next(metadata, listener);

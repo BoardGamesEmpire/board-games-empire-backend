@@ -95,15 +95,16 @@ export function createUserCreatedHook(
 
     // better-auth surfaces the DB `username` column as `name` (see the
     // `user.fields` mapping below); `isAnonymous` comes from the anonymous
-    // plugin. Tolerate both shapes.
-    const record = user as User & { isAnonymous?: boolean | null; username?: string };
+    // plugin. Tolerate both shapes; neither is on better-auth's `User` type.
+    const username = 'username' in user && typeof user.username === 'string' ? user.username : undefined;
+    const isAnonymous = 'isAnonymous' in user && typeof user.isAnonymous === 'boolean' ? user.isAnonymous : undefined;
 
     const event = new UserCreatedEvent(
       {
         id: user.id,
-        username: record.username ?? user.name,
+        username: username ?? user.name,
         email: user.email,
-        isAnonymous: record.isAnonymous ?? false,
+        isAnonymous: isAnonymous ?? false,
       },
       initiatedAt,
       requestedUsername?.(context ?? null) ?? null,

@@ -13,7 +13,7 @@ import { registerDecorator, ValidatorConstraint } from 'class-validator';
 @ValidatorConstraint({ name: 'deletedSortNeedsDeletedRows', async: false })
 export class DeletedSortNeedsDeletedRowsConstraint implements ValidatorConstraintInterface {
   validate(value: unknown, args: ValidationArguments): boolean {
-    const { status } = args.object as { status?: unknown };
+    const status = 'status' in args.object ? args.object.status : undefined;
 
     return !(value === 'deleted' && status === 'live');
   }

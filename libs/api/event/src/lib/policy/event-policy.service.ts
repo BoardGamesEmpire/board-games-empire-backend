@@ -166,6 +166,7 @@ export class EventPolicyService {
       const { changed, before, after } = policyChange<EventPolicy>(
         existing,
         updated,
+        // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Object.keys returns string[]; columns is the policy write's data, so its keys are EventPolicy columns (#1321)
         Object.keys(columns) as (keyof EventPolicy)[],
         lists,
       );
@@ -276,6 +277,7 @@ export class EventPolicyService {
             changedKeys<OccurrencePolicyColumns>(
               existing,
               { ...existing, ...columns },
+              // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Object.keys returns string[]; columns is the policy write's data, so its keys are policy columns (#1321)
               Object.keys(columns) as (keyof OccurrencePolicyColumns)[],
             ).length > 0;
           if (!row && !changesSomething) {
@@ -313,6 +315,7 @@ export class EventPolicyService {
       const { changed, before, after } = policyChange<OccurrencePolicyColumns>(
         { ...existing, id: updated.id },
         updated,
+        // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Object.keys returns string[]; columns is the policy write's data, so its keys are policy columns (#1321)
         Object.keys(columns) as (keyof OccurrencePolicyColumns)[],
         lists,
       );

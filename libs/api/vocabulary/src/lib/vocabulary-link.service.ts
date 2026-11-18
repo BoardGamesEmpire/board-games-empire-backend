@@ -60,7 +60,7 @@ export class VocabularyLinkService {
     gatewayId: string,
     entry: EntryOf<K>,
   ): Promise<string | null> {
-    const adapter = ADAPTERS[kind] as VocabularyAdapter<K>;
+    const adapter: VocabularyAdapter<K> = ADAPTERS[kind];
     // Read only once the entry has missed every match.
     const review = () => this.reviewRequired(adapter);
 
@@ -81,7 +81,7 @@ export class VocabularyLinkService {
     entries: readonly EntryOf<K>[],
     signal?: AbortSignal,
   ): Promise<LoadSummary> {
-    const adapter = ADAPTERS[kind] as VocabularyAdapter<K>;
+    const adapter: VocabularyAdapter<K> = ADAPTERS[kind];
     const reviewing = await this.reviewRequired(adapter);
     const review = async () => reviewing;
     const summary: LoadSummary = { created: 0, matched: 0, pending: 0, kept: 0 };
@@ -119,7 +119,7 @@ export class VocabularyLinkService {
    * admin or another accept settled first is refused.
    */
   async acceptPending<K extends ReviewedVocabularyKind>(kind: K, linkId: string): Promise<AcceptOutcome> {
-    const adapter = REVIEWED_ADAPTERS[kind] as ReviewedVocabularyAdapter<K>;
+    const adapter: ReviewedVocabularyAdapter<K> = REVIEWED_ADAPTERS[kind];
     const stored = await adapter.findSupplied(this.db, linkId);
     if (stored?.status !== VocabularyLinkStatus.Pending) {
       return { accepted: false, reason: 'not_pending' };
