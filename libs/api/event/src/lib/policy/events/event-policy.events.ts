@@ -22,10 +22,8 @@ type EventPolicyUpdatedSnapshot = Readonly<Partial<EventPolicyView> & Pick<Event
  */
 export class EventPolicyUpdatedEvent extends MutationEvent<EventPolicy> {
   static readonly eventName = EventEvents.EventPolicyUpdated;
-
   declare readonly before: EventPolicyUpdatedSnapshot;
   declare readonly after: EventPolicyUpdatedSnapshot;
-
   readonly subject = ResourceType.EventPolicy;
   readonly subjectId: string;
 
@@ -52,10 +50,8 @@ type OccurrencePolicyUpdatedSnapshot = Readonly<Partial<OccurrencePolicyView> & 
  */
 export class OccurrencePolicyUpdatedEvent extends MutationEvent<EventOccurrencePolicy> {
   static readonly eventName = OccurrenceEvents.OccurrencePolicyUpdated;
-
   declare readonly before: OccurrencePolicyUpdatedSnapshot;
   declare readonly after: OccurrencePolicyUpdatedSnapshot;
-
   readonly subject = ResourceType.EventOccurrence;
   readonly subjectId: string;
 

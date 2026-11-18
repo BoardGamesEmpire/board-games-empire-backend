@@ -13,6 +13,7 @@ import type {
 export interface AdminHouseholdOwner {
   /** The profile's display name as stored: null when the user has none, or has no profile. */
   readonly displayName: string | null;
+
   readonly userId: string;
   readonly username: string;
 }

@@ -19,6 +19,7 @@ export interface WsLanguageData {
   iso6391?: string;
   iso6393?: string;
   name: string;
+
   /**
    * Canonical IETF BCP 47 tag ("en-US", "zh-Hant") — the system's preferred
    * language identifier. Always present for local results; may be absent on
@@ -45,6 +46,7 @@ export interface WsGameSearchResult {
    * itself (#971).
    */
   baseGameExternalIds: string[];
+
   contentType: string;
   externalId: string;
 
@@ -59,6 +61,7 @@ export interface WsGameSearchResult {
   inSystem: boolean;
 
   maxPlayers?: number;
+
   /**
    * Play time in minutes (#869). A game may carry just one of the two, and
    * that one is then its whole play time.
@@ -67,7 +70,6 @@ export interface WsGameSearchResult {
 
   minPlayers?: number;
   minPlayTime?: number;
-
   platforms: WsPlatformData[];
   sourceUrl?: string;
 

@@ -69,10 +69,12 @@ function createFakeWorld(
     firstHumanRoles?: readonly SystemRole[];
     laterHumanRoles?: readonly SystemRole[];
     preexistingHumans?: number;
+
     // Rows already in the database, for the cases a plain human cannot
     // arrange: a leftover guest, a NULL anonymous flag. Like the humans above,
     // they have been provisioned and hold a role.
     preexistingRows?: readonly Partial<User>[];
+
     // Human rows that exist but that provisioning has not reached yet: a
     // signup whose row committed and whose handler has not run (#430).
     unprovisionedHumans?: number;

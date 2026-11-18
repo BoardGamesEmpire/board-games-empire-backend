@@ -55,11 +55,13 @@ import { createUsernameVariants } from './username-variant';
 interface UserCreatedHookDeps {
   auditContext?: AuditContextService;
   eventEmitter?: EventEmitter2;
+
   /**
    * The username a sign-in asked for when it was replaced by a variant (#912),
    * read with the endpoint context `user.create.before` saw.
    */
   requestedUsername?: (context: object | null) => string | null;
+
   systemActorScope?: SystemActorScope;
 }
 

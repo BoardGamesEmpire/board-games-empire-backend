@@ -6,24 +6,26 @@ const DAY_MS = 24 * 60 * 60 * 1_000;
 
 export interface InviteArrangement {
   readonly approvedAt?: Date | null;
-
   readonly eventId?: string | null;
+
   /** A day from now when omitted. */
   readonly expiresAt?: Date;
 
   /** The context: a household, or an event when `eventId` is set instead. */
   readonly householdId?: string | null;
+
   readonly inviteeEmail?: string | null;
 
   /** Who it is to: an account by id, an address, or both, as the suite needs. */
   readonly inviteeId?: string | null;
 
   readonly inviter: Pick<AuthenticatedActor, 'user'>;
-
   readonly needsApproval?: boolean;
   readonly roleId?: string | null;
+
   /** `Pending` when omitted. */
   readonly status?: InviteStatus;
+
   readonly withheld?: boolean;
 }
 

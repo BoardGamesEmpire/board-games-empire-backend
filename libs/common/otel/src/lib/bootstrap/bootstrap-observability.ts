@@ -40,6 +40,7 @@ export interface BootstrapObservabilityResult {
    * layer its own per-context bindings on top.
    */
   readonly baseLogger: PinoInstance;
+
   readonly otel: OtelBootstrapHandle;
 }
 

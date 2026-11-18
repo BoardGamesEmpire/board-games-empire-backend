@@ -15,6 +15,7 @@ const GET_SESSION = getSession();
 export interface ProviderLinkFreshnessDeps {
   /** The clock, in epoch milliseconds; `Date.now` unless set. */
   readonly now?: () => number;
+
   /** Renders the refusal's catalog key. */
   readonly render: (key: I18nPath) => string;
 }

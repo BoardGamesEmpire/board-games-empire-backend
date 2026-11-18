@@ -69,6 +69,7 @@ export interface ManifestComparisonView {
     readonly consentScope: PluginConsentScopeValue;
     readonly required: boolean;
   }[];
+
   readonly outboundDomains: readonly string[] | 'configured';
   readonly writesCore: readonly string[];
 }
@@ -90,7 +91,9 @@ export interface UpdateEscalationComparison {
    * consents to it.
    */
   readonly deniedRequiredSlugs: readonly string[];
+
   readonly escalations: readonly UpdateEscalation[];
+
   /**
    * Household-scope slugs a unit must decide again: newly required, promoted
    * to required, risk-escalated above the risk the unit consented under, or
@@ -104,6 +107,7 @@ export interface UpdateEscalationComparison {
    * not consent for the Critical one it became.
    */
   readonly householdReconsentSlugs: readonly string[];
+
   /**
    * True when activation needs the server admin's explicit approval: a new
    * server-consentable permission, a permission moving TO server consent, a
@@ -120,6 +124,7 @@ export interface UpdateEscalationComparison {
    * re-consent it owes instead (#1149).
    */
   readonly serverGating: boolean;
+
   /**
    * Server-scope slugs whose catalog risk now exceeds the risk recorded on
    * their granted consent decision. Approval re-writes a required one at
@@ -128,6 +133,7 @@ export interface UpdateEscalationComparison {
    * confers nothing through it, and a review act answers it (#1336).
    */
   readonly serverRiskEscalatedSlugs: readonly string[];
+
   /**
    * User-scope slugs a user must decide again — the exact user-scope mirror
    * of `householdReconsentSlugs` (#225): newly required, promoted to

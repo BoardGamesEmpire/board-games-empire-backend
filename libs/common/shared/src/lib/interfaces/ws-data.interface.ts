@@ -14,6 +14,7 @@ export interface BaseClientData {
   };
 
   readonly correlationId: string;
+
   /**
    * The catalog locale the connection's copy renders in: the user's stored
    * preference, then the handshake's `Accept-Language`, then the fallback.

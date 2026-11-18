@@ -43,6 +43,7 @@ const clientPolicy = contentSecurityPolicy({
 export interface WebClientOptions {
   /** The directory holding the client's built files. */
   root: string;
+
   /** The server's own routes, as the api names them to Nest. The client never answers under them. */
   serverRoutes: readonly string[];
 }

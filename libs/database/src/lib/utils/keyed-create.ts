@@ -21,11 +21,15 @@ export interface KeyedCreateLogger {
 export interface KeyedCreateOptions<T> {
   /** Already normalized. `undefined` runs `create` unkeyed and never replays. */
   readonly clientRequestId: string | undefined;
+
   readonly create: () => Promise<T>;
+
   /** The row under (acting creator, key), ignoring soft-delete. */
   readonly find: (clientRequestId: string) => Promise<T | null>;
+
   /** Names the write in log lines, e.g. 'household create'. */
   readonly label: string;
+
   readonly logger: KeyedCreateLogger;
 }
 

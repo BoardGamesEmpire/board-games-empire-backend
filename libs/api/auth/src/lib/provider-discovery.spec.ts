@@ -20,7 +20,9 @@ const noUsers = new Proxy(
 interface FakeProvider {
   /** What its discovery document gives as the authorization endpoint. */
   readonly authorizationEndpoint: string;
+
   close(): Promise<void>;
+
   /** Its origin, with no trailing slash: the issuer. */
   readonly url: string;
 }

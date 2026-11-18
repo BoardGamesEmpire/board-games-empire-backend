@@ -54,8 +54,10 @@ export type EntryProblem =
   | { readonly kind: 'unbounded-on-floor-role'; readonly role: string; readonly slug: string }
   | {
       readonly kind: 'reads-past-reach';
+
       /** How much of the resource type the read reaches: every row, or every row a fixed filter admits. */
       readonly reads: ReadIgnoringReach['reads'];
+
       readonly role: string;
       readonly slug: string;
       readonly subject: string;
@@ -75,9 +77,12 @@ export type EntryWarning =
   | { readonly kind: 'unconditioned-global'; readonly role: string; readonly slug: string }
   | {
       readonly kind: 'unpaired';
+
       /** The slugs that would pair it, none of which the role holds. */
       readonly partners: readonly string[];
+
       readonly role: string;
+
       /** The slug the role holds. */
       readonly slug: string;
     };

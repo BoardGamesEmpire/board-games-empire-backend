@@ -29,12 +29,14 @@ export type OfferedGame = Omit<OfferedGameEntry, 'collection'> & {
       game: EntryPlatformGame['game'] & { baseGames: ExpansionLink[] };
     };
   };
+
   /**
    * Whether the game is on the acting user's wishlist (#1241); `null` for an
    * actor with no wishlist they can read, so "none that you can see" never
    * reads as "not wanted".
    */
   onWishlist: boolean | null;
+
   supplies: OfferedGameSupplies;
 };
 

@@ -52,12 +52,16 @@ type ForEverySubject<T extends Record<CatalogSubject, unknown>> = T;
 export type SubjectWhereInput = ForEverySubject<{
   all: never; // the wildcard filters nothing
   AuditLog: Prisma.AuditLogWhereInput;
+
   // Game
   Campaign: never; // no model
+
   DataGateway: Prisma.DataGatewayWhereInput;
   DataGatewaySearch: never; // no model (#1076)
+
   // Event
   Event: Prisma.EventWhereInput;
+
   EventAttendee: Prisma.EventAttendeeWhereInput;
   EventAttendeeGameList: Prisma.EventAttendeeGameListWhereInput;
   EventAvailabilityVote: Prisma.EventAvailabilityVoteWhereInput;
@@ -66,8 +70,10 @@ export type SubjectWhereInput = ForEverySubject<{
   EventGameVote: Prisma.EventGameVoteWhereInput;
   EventOccurrence: Prisma.EventOccurrenceWhereInput;
   EventPolicy: Prisma.EventPolicyWhereInput;
+
   // Feedback
   FeedbackReport: Prisma.FeedbackReportWhereInput;
+
   FeedbackSinkDispatch: never; // no model
   Friendship: Prisma.FriendshipWhereInput;
   Game: Prisma.GameWhereInput;
@@ -77,8 +83,10 @@ export type SubjectWhereInput = ForEverySubject<{
   GamePlayResult: Prisma.GamePlayResultWhereInput;
   GamePlaySession: Prisma.GamePlaySessionWhereInput;
   GameShare: Prisma.GameShareWhereInput;
+
   // Household
   Household: Prisma.HouseholdWhereInput;
+
   HouseholdBan: Prisma.HouseholdBanWhereInput;
   HouseholdMember: Prisma.HouseholdMemberWhereInput;
   HouseholdPlugin: Prisma.HouseholdPluginWhereInput;
@@ -90,12 +98,16 @@ export type SubjectWhereInput = ForEverySubject<{
   MediaContribution: Prisma.MediaContributionWhereInput;
   MediaObject: Prisma.MediaObjectWhereInput;
   Notification: Prisma.NotificationWhereInput;
+
   // Permission catalog
   Permission: Prisma.PermissionWhereInput;
+
   Platform: Prisma.PlatformWhereInput;
   PlatformGame: Prisma.PlatformGameWhereInput;
+
   // Plugin
   Plugin: Prisma.PluginWhereInput;
+
   PluginGrant: Prisma.PluginGrantWhereInput;
   PluginLifecycleEvent: Prisma.PluginLifecycleEventWhereInput;
   Quota: Prisma.QuotaWhereInput;
@@ -104,10 +116,13 @@ export type SubjectWhereInput = ForEverySubject<{
   RuleVariant: Prisma.RuleVariantWhereInput;
   SafeHttpPolicy: Prisma.SafeHttpPolicyWhereInput;
   SessionPlayer: Prisma.SessionPlayerWhereInput;
+
   // System
   SystemSetting: Prisma.SystemSettingWhereInput;
+
   // User
   User: Prisma.UserWhereInput;
+
   UserGameCustomization: Prisma.UserGameCustomizationWhereInput;
   UserPlugin: Prisma.UserPluginWhereInput;
   UserProfile: Prisma.UserProfileWhereInput;
@@ -118,12 +133,16 @@ export type SubjectWhereInput = ForEverySubject<{
 export type SubjectScalarField = ForEverySubject<{
   all: never; // the wildcard filters nothing
   AuditLog: Prisma.AuditLogScalarFieldEnum;
+
   // Game
   Campaign: never; // no model
+
   DataGateway: Prisma.DataGatewayScalarFieldEnum;
   DataGatewaySearch: never; // no model (#1076)
+
   // Event
   Event: Prisma.EventScalarFieldEnum;
+
   EventAttendee: Prisma.EventAttendeeScalarFieldEnum;
   EventAttendeeGameList: Prisma.EventAttendeeGameListScalarFieldEnum;
   EventAvailabilityVote: Prisma.EventAvailabilityVoteScalarFieldEnum;
@@ -132,8 +151,10 @@ export type SubjectScalarField = ForEverySubject<{
   EventGameVote: Prisma.EventGameVoteScalarFieldEnum;
   EventOccurrence: Prisma.EventOccurrenceScalarFieldEnum;
   EventPolicy: Prisma.EventPolicyScalarFieldEnum;
+
   // Feedback
   FeedbackReport: Prisma.FeedbackReportScalarFieldEnum;
+
   FeedbackSinkDispatch: never; // no model
   Friendship: Prisma.FriendshipScalarFieldEnum;
   Game: Prisma.GameScalarFieldEnum;
@@ -143,8 +164,10 @@ export type SubjectScalarField = ForEverySubject<{
   GamePlayResult: Prisma.GamePlayResultScalarFieldEnum;
   GamePlaySession: Prisma.GamePlaySessionScalarFieldEnum;
   GameShare: Prisma.GameShareScalarFieldEnum;
+
   // Household
   Household: Prisma.HouseholdScalarFieldEnum;
+
   HouseholdBan: Prisma.HouseholdBanScalarFieldEnum;
   HouseholdMember: Prisma.HouseholdMemberScalarFieldEnum;
   HouseholdPlugin: Prisma.HouseholdPluginScalarFieldEnum;
@@ -156,12 +179,16 @@ export type SubjectScalarField = ForEverySubject<{
   MediaContribution: Prisma.MediaContributionScalarFieldEnum;
   MediaObject: Prisma.MediaObjectScalarFieldEnum;
   Notification: Prisma.NotificationScalarFieldEnum;
+
   // Permission catalog
   Permission: Prisma.PermissionScalarFieldEnum;
+
   Platform: Prisma.PlatformScalarFieldEnum;
   PlatformGame: Prisma.PlatformGameScalarFieldEnum;
+
   // Plugin
   Plugin: Prisma.PluginScalarFieldEnum;
+
   PluginGrant: Prisma.PluginGrantScalarFieldEnum;
   PluginLifecycleEvent: Prisma.PluginLifecycleEventScalarFieldEnum;
   Quota: Prisma.QuotaScalarFieldEnum;
@@ -170,10 +197,13 @@ export type SubjectScalarField = ForEverySubject<{
   RuleVariant: Prisma.RuleVariantScalarFieldEnum;
   SafeHttpPolicy: Prisma.SafeHttpPolicyScalarFieldEnum;
   SessionPlayer: Prisma.SessionPlayerScalarFieldEnum;
+
   // System
   SystemSetting: Prisma.SystemSettingScalarFieldEnum;
+
   // User
   User: Prisma.UserScalarFieldEnum;
+
   UserGameCustomization: Prisma.UserGameCustomizationScalarFieldEnum;
   UserPlugin: Prisma.UserPluginScalarFieldEnum;
   UserProfile: Prisma.UserProfileScalarFieldEnum;

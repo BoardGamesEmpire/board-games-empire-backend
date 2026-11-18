@@ -23,6 +23,7 @@ export const INSTALL_PATH = '/api/plugins/install';
 
 export interface BuiltArtifact {
   readonly bytes: Buffer;
+
   /** The display name in the server default locale: the name a data-gateway plugin's DataGateway takes. */
   readonly displayName: string;
 

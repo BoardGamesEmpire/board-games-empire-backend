@@ -29,6 +29,7 @@ export interface IpPolicyAllow {
 
 export interface IpPolicyReject {
   allowed: false;
+
   /**
    * The hostname under evaluation. Always present.
    */

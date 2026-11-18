@@ -22,17 +22,22 @@ export interface DataGatewayInterviewFailureView {
 export interface DataGatewayInterviewStatus {
   /** The last failure, only while it's current. */
   failure: DataGatewayInterviewFailureView | null;
+
   firstInterviewedAt: Date | null;
+
   /** Whether an interview has ever succeeded. The DataGateway isn't used until one has. */
   interviewed: boolean;
+
   lastInterviewedAt: Date | null;
 }
 
 /** Where one list job's section stands, with the interview's rule for a current failure applied (#718). */
 export interface DataGatewaySectionView {
   capability: DataGatewayCapability;
+
   /** The last failure, only while it's current. */
   failure: { at: Date; code: DataGatewaySectionFailure } | null;
+
   lastLoadedAt: Date | null;
 }
 

@@ -99,6 +99,7 @@ export interface PluginServerInventoryOptions extends PluginInventoryOptions {
 export interface PluginInventoryPendingUpdate {
   /** `pendingSince`, never `updatedAt` — the latter moves on any row touch. */
   readonly since: Date;
+
   /**
    * The staging approve and reject must name (#357). Reported here as well as
    * on the staged-update read because this read never parses the staged
@@ -107,6 +108,7 @@ export interface PluginInventoryPendingUpdate {
    * rejected with this id.
    */
   readonly stagingId: string;
+
   readonly version: string;
 }
 
@@ -128,6 +130,7 @@ export interface PluginInventoryPendingUpdate {
 export interface PluginInventoryIdentity {
   readonly category: PluginCategory;
   readonly description: string | null;
+
   /**
    * Localized manifest `displayName` / `description`, or `null` when the
    * stored manifest could not be read (D-CG). Nullable rather than absent so
@@ -135,7 +138,9 @@ export interface PluginInventoryIdentity {
    * unambiguous discriminator.
    */
   readonly displayName: string | null;
+
   readonly id: string;
+
   /**
    * The D-CG marker: this row's stored manifest failed re-validation, so its
    * localized fields are missing and nothing manifest-derived about it can be
@@ -148,6 +153,7 @@ export interface PluginInventoryIdentity {
    * this is discovered at read time by whoever read the row.
    */
   readonly manifestUnreadable: boolean;
+
   readonly scope: PluginScope;
   readonly slug: string;
 }
@@ -162,8 +168,10 @@ export interface PluginInventoryIdentity {
  */
 export interface RunningServerPlugin {
   readonly category: PluginCategory;
+
   /** The plugin manifest's `displayName` in the requested locale, else the default locale's. */
   readonly displayName: string;
+
   readonly slug: string;
 }
 
@@ -174,6 +182,7 @@ export interface RunningServerPlugin {
 export interface PluginInventoryEntry extends PluginInventoryIdentity {
   /** The server-level kill switch. Unit enablement layers under it. */
   readonly enabled: boolean;
+
   readonly installedAt: Date;
   readonly pendingUpdate: PluginInventoryPendingUpdate | null;
   readonly provenance: PluginProvenance;
@@ -183,11 +192,15 @@ export interface PluginInventoryEntry extends PluginInventoryIdentity {
    * empty unless {@link restartRequired} (#1096).
    */
   readonly restartProcessRoles: readonly PluginProcessRole[];
+
   readonly restartRequired: boolean;
+
   /** Non-null only when the caller opted into tombstones (D-CH). */
   readonly uninstalledAt: Date | null;
+
   /** The Server unit's own standing (#1336). */
   readonly unit: PluginInventoryServerUnitState;
+
   /** Currently ACTIVE manifest version. */
   readonly version: string;
 }
@@ -207,12 +220,14 @@ export interface PluginInventoryServerUnitState {
    * since nothing manifest-derived about it can be trusted.
    */
   readonly consent: PluginConsentStanding;
+
   /**
    * `unavailable` when the stored manifest cannot be read, `null` for every
    * other row: the dormancy rule judges no configuration for the Server unit,
    * which holds no document of its own (#697).
    */
   readonly dormancy: PluginUnitDormancy | null;
+
   /** `off`, `on`, `review_pending` or `unavailable`, as the feature-state read reports for the Server unit. */
   readonly state: PluginUnitStateCode;
 }
@@ -229,12 +244,14 @@ export interface PluginInventoryUnitState {
    * unanchored on it — which is why this is distinct from `enabled: false`.
    */
   readonly anchored: boolean;
+
   /**
    * What this unit still owes the plugin, for the manifest's checks the unit
    * consumes. Empty for a row whose manifest cannot be read, since nothing
    * manifest-derived about it can be trusted ({@link PluginInventoryIdentity.manifestUnreadable}).
    */
   readonly consent: PluginConsentStanding;
+
   /**
    * What keeps the unit from running apart from the two switches, its own
    * and the Server switch (#1151): `unavailable` when the server cannot run
@@ -249,7 +266,9 @@ export interface PluginInventoryUnitState {
    * when it brings none, whatever the rule says about `{}`.
    */
   readonly dormancy: PluginUnitDormancy | null;
+
   readonly enabled: boolean;
+
   /**
    * The one code a client announces for this unit: `off`, `on`,
    * `review_pending`, `needs_configuration` or `unavailable`. It carries the
@@ -270,6 +289,7 @@ export interface PluginUnitInventoryEntry extends PluginInventoryIdentity {
    * `unit.enabled` so the two switches can never be misread for each other.
    */
   readonly serverEnabled: boolean;
+
   readonly unit: PluginInventoryUnitState;
 }
 
@@ -291,6 +311,7 @@ export type PluginHouseholdInventoryEntry = PluginUnitInventoryEntry;
 export interface PluginInventoryDetail extends PluginInventoryEntry {
   /** Effective isolation tier — seeded from the manifest hint, admin-overridable (#197). */
   readonly executionMode: PluginExecutionMode;
+
   /**
    * Localized manifest features. Empty when the manifest declares none —
    * never when it could not be read, because that path throws here (D-CG).

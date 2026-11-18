@@ -21,8 +21,10 @@ export type ConsentActKind = 'SwitchOn' | 'Toggle' | 'Review';
 export interface ConsentActAnswer {
   /** Canonical slug. */
   readonly permissionSlug: string;
+
   /** The risk the consent surface showed for this requested permission. */
   readonly riskLevel: RiskLevel;
+
   readonly status: PluginGrantStatus;
 }
 
@@ -34,6 +36,7 @@ export interface ConsentActAnswer {
 export interface ShownRisk {
   /** Canonical slug. */
   readonly permissionSlug: string;
+
   readonly riskLevel: RiskLevel;
 }
 
@@ -54,7 +57,9 @@ export interface ConsentActPresentationCheck {
 export interface ConsentActPresentation {
   /** Manifest order. */
   readonly checks: readonly ConsentActPresentationCheck[];
+
   readonly locale: string;
+
   /** Which manifest the act's sha named: the installed one or the staged update. */
   readonly source: ConsentManifestSource;
 }
@@ -68,7 +73,9 @@ export interface ConsentActDecision {
 export interface ConsentActPlan {
   /** Consent decisions to write, sorted by permissionSlug ascending (the lock order). */
   readonly decisions: readonly ConsentActDecision[];
+
   readonly presentation: ConsentActPresentation;
+
   /** A review refused a required permission, so the unit is switched off in the same transaction. */
   readonly switchesOff: boolean;
 }

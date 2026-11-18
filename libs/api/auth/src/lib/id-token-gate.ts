@@ -15,6 +15,7 @@ const ID_TOKEN_PATHS: ReadonlySet<string> = new Set(['/sign-in/social', '/link-s
 export interface IdTokenGateContext {
   /** The request body as sent, before the route validates it. */
   readonly body?: { readonly idToken?: unknown; readonly [field: string]: unknown } | null;
+
   readonly path?: string;
 }
 

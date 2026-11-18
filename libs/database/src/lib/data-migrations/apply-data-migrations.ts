@@ -11,8 +11,10 @@ export type DataMigrationsClient = Pick<PrismaClient, '$transaction' | 'dataMigr
 export interface DataMigrationsResult {
   /** The entries this call applied, in order. */
   readonly applied: readonly string[];
+
   /** Whether the invalidation port ran after the entries applied; false when none did, or no port was given. */
   readonly invalidated: boolean;
+
   /** Ledger rows this build's registry does not know; reported, never touched. */
   readonly unknown: readonly string[];
 }

@@ -55,12 +55,14 @@ export type WebhookEventMeta = {
    * receives `event.updated.v1`.
    */
   readonly requiredAction: Action;
+
   /**
    * CASL subject the event concerns. Drives the coarse create-time
    * `can(requiredAction, subject)` check and the per-instance
    * `accessibleBy(ability, requiredAction)` check at creation and dispatch.
    */
   readonly subject: ResourceType;
+
   /**
    * The event fires after its subject's soft delete has committed, so dispatch
    * checks the deleted row rather than refusing it: the audience is whoever can

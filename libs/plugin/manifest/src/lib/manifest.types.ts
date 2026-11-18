@@ -50,6 +50,7 @@ export interface DeclaredPluginPermission {
 export interface PluginManifestValidationResult {
   /** Every `declares[]` entry expanded to canonical form — the install pipeline's `PluginPermission` seed input. */
   readonly declaredPermissions: readonly DeclaredPluginPermission[];
+
   readonly externalPermissionChecks: readonly string[];
   readonly manifest: PluginManifest;
   readonly permissionChecks: readonly NormalizedPermissionRequest[];

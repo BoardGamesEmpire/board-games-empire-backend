@@ -14,8 +14,10 @@ const LOG_WINDOW_MS = 60 * 60 * 1000;
 
 export interface HostCheckDeps {
   readonly logger?: Pick<Logger, 'warn'>;
+
   /** Renders a catalog key. This runs ahead of Nest's i18n, so no request locale exists. */
   readonly render: (key: I18nPath) => string;
+
   readonly rule: HostRule;
 }
 
@@ -25,6 +27,7 @@ export interface HostCheck {
     req: IncomingMessage,
     callback: (message: string | undefined, success: boolean) => void,
   ) => void;
+
   /** For the Express app: REST, `/api/auth/*`, the OpenAPI routes and the web client. */
   readonly handler: (req: IncomingMessage, res: ServerResponse, next: () => void) => void;
 }

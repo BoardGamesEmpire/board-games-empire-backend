@@ -80,14 +80,17 @@ export interface ReconcileCatalogOptions {
    * and passes nothing, and a warning says the caches were not touched.
    */
   readonly invalidate?: (plan: ReconcilePlan) => Promise<void>;
+
   readonly logger?: ReconcileLogger;
 }
 
 export interface ReconcileResult {
   /** Whether the invalidation port was called and resolved. False when nothing was written, no port was given, or the port threw. */
   readonly invalidated: boolean;
+
   /** Rows written; zero means the database already matched the manifest. */
   readonly mutations: number;
+
   readonly plan: ReconcilePlan;
 }
 

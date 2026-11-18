@@ -22,30 +22,37 @@ import { idempotencyKeyFor } from '../utils/idempotency-key';
 export interface SpawnExpansionsInput {
   /** The base Job row id — becomes each expansion row's parentJobId. */
   baseJobId: string;
+
   batchId: string;
   correlationId: string;
   expansionExternalIds: string[];
   gatewayId: string;
   initiatorType: InitiatorType;
   locale?: string;
+
   /**
    * External id of the requested game — recorded on each expansion, which
    * links to it when its DataGateway names no base game (#971).
    */
   requestedExternalId: string;
+
   userId: string | null;
 }
 
 export interface SpawnBaseGameInput {
   batchId: string;
   correlationId: string;
+
   /** External id of the base game to add. */
   externalId: string;
+
   gatewayId: string;
   initiatorType: InitiatorType;
   locale?: string;
+
   /** The Job row id of the game that needs the base game — becomes its parentJobId. */
   parentJobId: string;
+
   userId: string | null;
 }
 

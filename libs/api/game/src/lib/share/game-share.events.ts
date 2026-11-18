@@ -25,10 +25,8 @@ export enum GameShareEvents {
  */
 export class GameShareCreatedEvent extends MutationEvent<GameShareSnapshot> {
   static readonly eventName = GameShareEvents.Created;
-
   declare readonly before: null;
   declare readonly after: GameShareSnapshot;
-
   readonly subject = ResourceType.GameShare;
   readonly subjectId: string;
 
@@ -44,10 +42,8 @@ export class GameShareCreatedEvent extends MutationEvent<GameShareSnapshot> {
  */
 export class GameShareDeletedEvent extends MutationEvent<GameShareSnapshot> {
   static readonly eventName = GameShareEvents.Deleted;
-
   declare readonly before: GameShareSnapshot;
   declare readonly after: null;
-
   readonly subject = ResourceType.GameShare;
   readonly subjectId: string;
 

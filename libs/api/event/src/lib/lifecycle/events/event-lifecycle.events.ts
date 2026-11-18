@@ -18,10 +18,8 @@ type EventCancelSnapshot = Readonly<
 /** The host called the event off; its dates were cancelled with it. */
 export class EventCancelledEvent extends MutationEvent<Event> {
   static readonly eventName = EventEvents.EventCancelled;
-
   declare readonly before: EventCancelSnapshot;
   declare readonly after: EventCancelSnapshot;
-
   readonly subject = ResourceType.Event;
   readonly subjectId: string;
 
@@ -42,10 +40,8 @@ type EventArchiveSnapshot = Readonly<Pick<Event, 'id' | 'householdId' | 'archive
 /** The host put a cancelled or finished event away. Audited; nobody is told. */
 export class EventArchivedEvent extends MutationEvent<Event> {
   static readonly eventName = EventEvents.EventArchived;
-
   declare readonly before: EventArchiveSnapshot;
   declare readonly after: EventArchiveSnapshot;
-
   readonly subject = ResourceType.Event;
   readonly subjectId: string;
 
@@ -58,10 +54,8 @@ export class EventArchivedEvent extends MutationEvent<Event> {
 /** The host took an archived event out again. Audited; nobody is told. */
 export class EventUnarchivedEvent extends MutationEvent<Event> {
   static readonly eventName = EventEvents.EventUnarchived;
-
   declare readonly before: EventArchiveSnapshot;
   declare readonly after: EventArchiveSnapshot;
-
   readonly subject = ResourceType.Event;
   readonly subjectId: string;
 
@@ -74,10 +68,8 @@ export class EventUnarchivedEvent extends MutationEvent<Event> {
 /** The host reopened a cancelled event; its dates stay as cancel left them. */
 export class EventReopenedEvent extends MutationEvent<Event> {
   static readonly eventName = EventEvents.EventReopened;
-
   declare readonly before: EventCancelSnapshot;
   declare readonly after: EventCancelSnapshot;
-
   readonly subject = ResourceType.Event;
   readonly subjectId: string;
 

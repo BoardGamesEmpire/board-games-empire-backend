@@ -12,6 +12,7 @@ type ConnectError = Error & { readonly data?: WsErrorPayload };
 interface SignedIn {
   /** The `Cookie` header a browser holding this session sends. */
   readonly cookie: string;
+
   readonly credentials: SessionCredentials;
 }
 

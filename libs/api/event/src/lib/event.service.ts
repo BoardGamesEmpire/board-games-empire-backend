@@ -881,11 +881,13 @@ export type EventDetail = Prisma.EventGetPayload<{
   };
 }> & {
   attendance: EventAttendance | null;
+
   /**
    * Each served date that has a policy row, under the event policy's ceiling; a date without one inherits
    * everything. `[]` when `policy` is `null` (#1211).
    */
   occurrencePolicies: OccurrencePolicyView[];
+
   policy: EventPolicyView | null;
   status: EventStatus;
 };

@@ -51,6 +51,7 @@ export interface GatewayLaunch {
 
   /** The variables the gateway's address config reads its host and port from. */
   readonly hostEnv: string;
+
   /** How the gateway is named in log lines and failure messages. */
   readonly label: string;
 
@@ -77,16 +78,20 @@ export interface GatewayDescribeReply {
   readonly capabilities: readonly string[];
   readonly contentFormat: string;
   readonly correlationId: string;
+
   readonly coverage: {
     readonly contentTypes: readonly string[];
     readonly platformTypes: readonly string[];
   } | null;
+
   readonly filterableAxes: readonly string[];
+
   readonly languageCodeFormats: {
     readonly acceptedRequestFormats: readonly string[];
     readonly passthroughSearchLanguage: boolean;
     readonly responseFormat: string;
   } | null;
+
   readonly upstream: string;
 }
 

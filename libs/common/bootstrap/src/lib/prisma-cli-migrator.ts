@@ -84,6 +84,7 @@ function resolveCli(projectRoot: string | undefined): ResolvedCli {
 export interface LineForwarder {
   /** Emits whatever the last chunk left unterminated. */
   end(): void;
+
   write(chunk: Buffer): void;
 }
 

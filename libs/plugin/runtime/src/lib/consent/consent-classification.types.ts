@@ -60,9 +60,12 @@ export type ConsentCheckDecision = 'granted' | 'denied' | 'pending';
 export interface ClassifiedConsentCheck {
   /** Risk recorded on the deciding row — `Granted` or `Denied`; `null` when no row exists. */
   readonly decidedRiskLevel: RiskLevel | null;
+
   readonly decision: ConsentCheckDecision;
+
   /** A `Granted` row exists but its `decidedRiskLevel` no longer covers today's risk (#59): reported pending, re-consent re-stamps. */
   readonly staleRisk: boolean;
+
   /**
    * Why this requested permission can never be granted at its deciding scope;
    * `null` when it can. Reported whether or not a decision exists (#1150).
@@ -77,6 +80,7 @@ export interface ConsentCheckClassification {
    * Absent = no catalog row.
    */
   readonly currentRiskBySlug: ReadonlyMap<string, RiskLevel>;
+
   /**
    * Keyed by canonical slug; ONLY unit-addressable checks appear
    * (`unitConsumesConsentScope`). A check absent here is decided per-unit on

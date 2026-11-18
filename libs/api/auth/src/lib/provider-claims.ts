@@ -18,6 +18,7 @@ export type MergedProviderClaims =
   | {
       readonly outcome: 'profile';
       readonly profile: ProviderProfile;
+
       /** Whether a UserInfo answer was there but left out, because it named no subject that could be read. */
       readonly userInfoSetAside: boolean;
     }

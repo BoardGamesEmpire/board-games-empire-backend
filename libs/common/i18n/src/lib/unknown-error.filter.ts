@@ -13,6 +13,7 @@ import { I18nExceptionFilter } from './i18n-exception.filter';
 interface HttpError {
   /** `false` when the error's text must not reach the client. */
   readonly expose: boolean;
+
   readonly message: string;
   readonly statusCode: number;
 }

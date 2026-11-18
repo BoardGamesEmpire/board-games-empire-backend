@@ -54,8 +54,10 @@ export interface OfferedGameFacts {
   readonly medium?: GameMedium;
   readonly minPlayers?: number | null;
   readonly minPlayTime?: number | null;
+
   /** The offered copy's platform type: the seeded Tabletop platform, or a platform of that type made for the suite. */
   readonly platformType?: PlatformType;
+
   readonly publishYear?: number | null;
   readonly subtitle?: string | null;
   readonly title?: string;

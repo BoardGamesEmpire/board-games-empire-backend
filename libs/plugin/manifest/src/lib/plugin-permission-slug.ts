@@ -28,10 +28,13 @@ export const PLUGIN_PERMISSION_ENVELOPE_PREFIX = `plugin${PLUGIN_PERMISSION_DELI
 export interface ParsedPluginPermissionSlug {
   /** Leading `Action` verb of the bare slug — the CASL rule action. */
   readonly action: PermissionActionVerb;
+
   /** The author-written bare slug, e.g. `manage:digest`. */
   readonly bareSlug: string;
+
   /** The declaring plugin's slug — the collision-free namespace. */
   readonly pluginSlug: string;
+
   /** Bare slug minus the verb, e.g. `storage:cloud` — the CASL rule subject path. */
   readonly subjectPath: string;
 }

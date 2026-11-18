@@ -35,8 +35,10 @@ const POOLER_QUEUE_HINT = 'as when a connection pooler has no server connection 
 export interface PgAdvisoryLockOptions {
   /** Shown in `pg_stat_activity` for whoever is waiting on us. */
   readonly applicationName: string;
+
   /** See {@link LOCK_ATTEMPT_GRACE_MS}. */
   readonly attemptGraceMs?: number;
+
   readonly attemptMs?: number;
   readonly clock?: Clock;
   readonly connectionString: string;
@@ -151,6 +153,7 @@ const UNANSWERED = Symbol('unanswered');
 export class PgAdvisoryLock implements BootstrapLock {
   private client: Client | undefined;
   private held = false;
+
   /** Why the connection failed while the lock was held. */
   private lost: Error | undefined;
 

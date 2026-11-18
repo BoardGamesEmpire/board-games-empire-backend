@@ -23,6 +23,7 @@ export interface StagePluginArtifactInput {
   readonly acknowledgeForbiddenImports?: readonly string[];
 
   readonly actorId: string;
+
   /** Extend static analysis into node_modules; its findings only advise. */
   readonly deepScan?: boolean;
 

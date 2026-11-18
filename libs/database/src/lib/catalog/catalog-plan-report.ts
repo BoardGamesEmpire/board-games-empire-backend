@@ -4,6 +4,7 @@ import { describeConflicts, describeDrift, describeWrites, summarizePlan } from 
 export interface PlanReport {
   /** 0 converged, 1 a reconcile would write, 2 a reconcile would refuse. */
   readonly exitCode: 0 | 1 | 2;
+
   readonly lines: readonly string[];
 }
 

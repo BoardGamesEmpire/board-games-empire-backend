@@ -10,7 +10,6 @@ type Intercept = Parameters<ActorInterceptor['intercept']>;
 @SurrogateDelegate()
 export abstract class ActorInterceptor implements NestInterceptor {
   protected logger = new Logger(this.constructor.name);
-
   protected readonly auditSource?: EventSource;
   protected abstract readonly executionContextType: string;
 

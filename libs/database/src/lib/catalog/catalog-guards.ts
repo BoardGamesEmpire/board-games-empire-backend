@@ -74,6 +74,7 @@ export type TemplateProblem =
 export interface ParsedTemplate {
   /** Empty when the template parses and uses only the token types the factory renders. */
   problems: readonly TemplateProblem[];
+
   /** The variables the template interpolates or sections on, once each, in order of first use. */
   variables: readonly string[];
 }

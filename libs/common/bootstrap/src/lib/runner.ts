@@ -21,20 +21,27 @@ export const DEFAULT_SCHEMA_POLL_MS = 5_000;
 
 export interface BootstrapSequenceOptions {
   readonly clock?: Clock;
+
   /** Runs after the seeds, in the process that ran them. See {@link DataMigrationsPhase}. */
   readonly dataMigrations: DataMigrationsPhase;
+
   /** The migrations this build was generated from, in apply order. */
   readonly expected: readonly string[];
+
   readonly ledger: SchemaLedger;
   readonly lock: BootstrapLock;
   readonly logger: BootstrapLogger;
+
   /** Where the migrator's URL came from; named in the summary and in the refusals after migrating. */
   readonly migrationCredential?: MigrationCredential;
+
   /** Present only in the api build. See {@link Migrator}. */
   readonly migrator?: Migrator;
+
   readonly schemaPollMs?: number;
   readonly seeder: SeedsPhase;
   readonly tracer?: Tracer;
+
   /** See {@link DEFAULT_WAIT_MS}. */
   readonly waitMs?: number;
 }
@@ -46,31 +53,38 @@ export interface BootstrapSummary {
    * when the seeds did not run.
    */
   readonly dataMigrations: DataMigrationsSummary | undefined;
+
   /**
    * The unknown migrations applied by a run before the last run that applied
    * migrations this build knows, as the last read of the ledger found them:
    * the history was rewritten (#1148). A subset of {@link unknownMigrations}.
    */
   readonly divergedMigrations: readonly string[];
+
   /**
    * The credential that applied {@link migrationsApplied}: whether migrations
    * reached Postgres directly or through the connection pooler is in its host.
    * Absent when none were applied.
    */
   readonly migrationCredential?: MigrationCredential;
-  readonly migrationsApplied: readonly string[];
 
+  readonly migrationsApplied: readonly string[];
   readonly phaseDurationsMs: Readonly<Record<string, number>>;
+
   /**
    * What the catalog reconcile wrote, by table, and whether the caches were
    * flushed after it. Absent when the seeds did not run.
    */
   readonly reconcile: ReconcileSummary | undefined;
+
   /** False for every process without a migrator, and for the api over a database that is ahead of it. */
   readonly seedsRun: boolean;
+
   /** What the first read of the ledger found. */
   readonly state: MigrationStateKind;
+
   readonly unknownMigrations: readonly string[];
+
   /**
    * Time from the start of the sequence until the read that found the schema up
    * had answered, time blocked on the lock included; 0 when the first read found

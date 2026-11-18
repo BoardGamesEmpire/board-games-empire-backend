@@ -10,6 +10,7 @@ export interface OidcProviderConfig {
    * operator turns it on: such an email may not be the user's own.
    */
   readonly allowUnverifiedEmail: boolean;
+
   readonly clientId: string;
   readonly clientSecret: string;
   readonly discoveryUrl: string;

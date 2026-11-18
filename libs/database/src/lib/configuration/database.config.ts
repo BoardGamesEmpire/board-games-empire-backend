@@ -4,12 +4,14 @@ import Joi from 'joi';
 
 export interface DatabaseConfig {
   logQueries: boolean;
+
   /**
    * The migration credential (#445), read only by the bootstrap: what `prisma
    * migrate deploy` connects with when the migrations have a database role of
    * their own. Empty when unset, and the migrations then use {@link url}.
    */
   migrationUrl: string;
+
   url: string;
 }
 

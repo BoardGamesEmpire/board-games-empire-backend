@@ -13,15 +13,17 @@ import type { PluginManifest } from '@boardgamesempire/plugin-manifest';
  */
 export interface LoadedPlugin {
   readonly category: PluginCategory;
+
   /** The plugin row's `installedAt` as the loader read it: which install this is (#1083). */
   readonly installedAt: Date;
+
   readonly instance: unknown;
   readonly manifest: PluginManifest;
   readonly pluginId: string;
-
   readonly scope: PluginScope;
 
   /** The artifact the plugin was loaded from, as the directory it ran from names it (#1094). */
   readonly sha256: PluginArtifactSha256;
+
   readonly slug: string;
 }

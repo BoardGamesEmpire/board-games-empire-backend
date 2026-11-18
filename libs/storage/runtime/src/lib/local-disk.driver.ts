@@ -79,20 +79,22 @@ class ProbeTimeoutError extends Error {
 @Injectable()
 export class LocalDiskDriver implements StorageDriver {
   private readonly logger = new Logger(LocalDiskDriver.name);
-
   readonly slug = 'localdisk';
   private readonly root: string;
   private readonly baseUrl: string;
   private readonly streamPath: string;
-
   private readonly mountCheck: ResolvedMountCheck;
+
   /** Root `st_dev` captured at construction; set only in `st_dev` mode. Immutable by design. */
   private readonly deviceBaseline: number | undefined;
+
   /** Absolute sentinel path; set only in `sentinel` mode. */
   private readonly sentinelPath: string | undefined;
+
   private readonly probeTimeoutMs: number;
   private readonly fatalThreshold: number;
   private consecutiveTimeouts = 0;
+
   /** Shared in-flight probe so concurrent callers dedupe onto one stat() + one counter update. */
   private inFlightProbe: Promise<StorageUnavailableError | undefined> | null = null;
 

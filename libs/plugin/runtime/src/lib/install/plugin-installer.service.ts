@@ -81,26 +81,33 @@ export interface PluginInstallInput {
    * violation appearing in a later tarball cannot ride an old acceptance.
    */
   readonly acknowledgeForbiddenImports?: readonly string[];
+
   /** Exact re-entry of every Critical + required permission slug. */
   readonly confirmCriticalSlugs?: readonly string[];
+
   /** Admin opt-in: extend static analysis into node_modules; findings advisory only. */
   readonly deepScan?: boolean;
+
   /**
    * The plugin artifact's directory, which the install ingress placed
    * (#1094); its checksum is the one the row records (#224). The
    * installer never opens the plugin artifact itself (#59).
    */
   readonly directory: PluginArtifactDirectory;
+
   /** The installing admin — server-admin authority is verified, never assumed. */
   readonly installerId: string;
+
   /**
    * The locale the server admin read the install's requested permissions in,
    * which the `InstallAccept` consent act records them in (#1336). Defaults to
    * the server's default locale.
    */
   readonly locale?: string;
+
   /** `PluginRegistrySource.slug` the artifact was discovered through (#84). */
   readonly registrySlug?: string;
+
   /**
    * The risk the artifact read showed for each server-scope requested
    * permission (#1336). A missing one, or one that is not today's, refuses
@@ -108,6 +115,7 @@ export interface PluginInstallInput {
    * always sends it; a caller that showed nothing omits it and is not checked.
    */
   readonly shownRisks?: readonly ShownRisk[];
+
   /**
    * The link the plugin artifact was fetched from (#84). Omitted for a manual
    * upload, which has a checksum but no link. The checksum is the artifact
@@ -123,36 +131,46 @@ export interface PluginInstallInput {
 export interface PluginInstallAssessment {
   readonly analysis: StaticAnalysisReport;
   readonly corePermissions: ReadonlyMap<string, Permission>;
+
   /** Critical slugs `install()` wants re-entered, sorted. */
   readonly criticalSlugsToReenter: readonly string[];
+
   /**
    * The name a data-gateway plugin's DataGateway row would take, when another
    * row holds it and `install()` would refuse (#1083). Null when the install
    * would create no row under a taken name, and for every other category.
    */
   readonly dataGatewayNameConflict: string | null;
+
   /** Forbidden import specifiers `install()` wants acknowledged, distinct. */
   readonly forbiddenImportsToAccept: readonly string[];
+
   /** The checks the install would seed `Granted` at server scope. */
   readonly serverChecks: readonly NormalizedPermissionRequest[];
+
   readonly validated: PluginManifestValidationResult;
 }
 
 export interface PluginInstallResult {
   /** Forbidden specifiers the installer accepted to bypass the analysis gate; empty on a clean install. */
   readonly acknowledgedForbiddenImports: readonly string[];
+
   /**
    * The `InstallAccept` consent act the install recorded for the Server unit
    * (#1336). Written on every install, even one whose manifest requests
    * nothing of the server, and named by every seeded consent decision.
    */
   readonly act: PluginConsentAct;
+
   /** Full analysis report — warnings and deep-scan advisories for the install response. */
   readonly analysis: StaticAnalysisReport;
+
   readonly declaredPermissions: readonly PluginPermission[];
   readonly plugin: Plugin;
+
   /** Server-scope consent decisions seeded by this install; per-unit consent starts empty. */
   readonly seededGrants: readonly PluginGrant[];
+
   /** Author-guidance warnings from manifest validation, surfaced but never gating. */
   readonly warnings: readonly ManifestWarning[];
 }

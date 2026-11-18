@@ -69,6 +69,7 @@ export interface SafeHttpDownloadResult {
   headers: Readonly<Record<string, string>>;
   redirectCount: number;
   status: number;
+
   /** What reached the file (2xx only): its length and lowercase hex SHA-256. */
   written: { bytes: number; sha256: string } | null;
 }

@@ -32,12 +32,13 @@ interface JobContext {
   correlationId: string;
 
   gatewayId: string;
-
   initiatorType: InitiatorType;
+
   /**
    * BGE Job.id — drives status updates and WS events
    */
   jobId: string;
+
   /** Why the job is in its batch. Also stored on its Job row's payload. */
   origin: ImportJobOrigin;
 

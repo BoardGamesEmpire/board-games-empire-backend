@@ -47,6 +47,7 @@ export interface PluginUninstallInput extends PluginLifecycleActionInput {
 export interface PluginUninstallResult {
   /** Household/user units that had the plugin enabled at uninstall time — the announcement seam (#324). */
   readonly affectedUnits: readonly PluginUnit[];
+
   readonly plugin: Plugin;
 }
 

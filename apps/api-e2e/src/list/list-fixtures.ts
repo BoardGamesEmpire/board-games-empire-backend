@@ -5,8 +5,10 @@ import { randomUUID } from 'node:crypto';
 export interface ArrangeListOptions {
   readonly description?: string;
   readonly kind?: ListKind;
+
   /** Defaults to a unique name for a Custom list and to none for a Wishlist, which may go unnamed (#1241). */
   readonly name?: string | null;
+
   readonly position?: number;
   readonly reach?: Reach;
 }

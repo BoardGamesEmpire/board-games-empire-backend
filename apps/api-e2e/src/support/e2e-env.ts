@@ -89,8 +89,10 @@ export const E2E_MAILPIT_VAR = 'BGE_E2E_MAILPIT';
 export interface MailpitEndpoint {
   /** The base URL of its HTTP API, such as `http://localhost:55001`. */
   readonly apiUrl: string;
+
   /** The host and port of its SMTP server: what the mail settings name. */
   readonly smtpHost: string;
+
   readonly smtpPort: number;
 }
 

@@ -27,6 +27,7 @@ import type { IgdbGame } from './types';
 export interface IgdbDriverOptions {
   /** IGDB's API. Defaults to `https://api.igdb.com/v4`. */
   baseUrl?: string;
+
   clientId: string;
   clientSecret: string;
 
@@ -34,6 +35,7 @@ export interface IgdbDriverOptions {
   fetch: UpstreamFetch;
 
   logger: DriverLogger;
+
   /** The driver's waits, which tests shorten. */
   timing?: {
     /** The wait before retrying a 429. Defaults to 1 second. */

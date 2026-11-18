@@ -43,6 +43,7 @@ import { writeConsentAct } from './write-consent-act';
 export interface ConsentActInput {
   /** The acting user: a household admin for a household unit, the user themself for a user unit. Verified here. */
   readonly actorId: string;
+
   readonly answers: readonly ConsentActAnswer[];
   readonly locale?: string;
   readonly manifestSha256: string;
@@ -58,13 +59,16 @@ export interface SwitchOnInput extends ConsentActInput {
 export interface ConsentActResult {
   /** Null when the act would have changed nothing: no act, no event (ADR 0002). */
   readonly act: PluginConsentAct | null;
+
   readonly changed: boolean;
+
   /**
    * A review refuses a required permission, so the unit is switched off: by
    * this act, or already, when the unit was off and the denial stood before
    * the review arrived (`changed` is then false).
    */
   readonly switchedOff: boolean;
+
   readonly unit: HouseholdPlugin | UserPlugin;
 }
 
@@ -74,6 +78,7 @@ type UnitEnablement = HouseholdPlugin | UserPlugin;
 interface NamedManifest {
   /** The ACTIVE manifest, which a staged review's answers are judged against too. */
   readonly active: PluginManifestValidationResult;
+
   readonly source: ConsentManifestSource;
   readonly validated: PluginManifestValidationResult;
   readonly version: string;
@@ -99,8 +104,10 @@ type ActOutcome =
   | (UnitEffects & {
       readonly act: PluginConsentAct;
       readonly changed: true;
+
       /** Only the decisions whose row changed: the ones an event announces. */
       readonly changedDecisions: readonly WrittenDecision[];
+
       readonly unit: UnitEnablement;
       readonly unitBefore: UnitEnablement | null;
     });
@@ -462,8 +469,10 @@ export class PluginConsentActService {
     expected: {
       /** A household switch-on writes a household surface, which the plugin's scope must still admit. */
       readonly householdSurface: boolean;
+
       /** `installedSha256` of the plugin row read before the transaction. */
       readonly installedSha256: string;
+
       readonly manifestSha256: string;
       readonly source: ConsentManifestSource;
     },

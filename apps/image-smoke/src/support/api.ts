@@ -127,6 +127,7 @@ export interface SearchResponse {
   readonly errors?: Readonly<Record<string, { readonly message: string }>>;
   readonly resultsBySource: Readonly<Record<string, readonly SearchHit[]>>;
   readonly unavailableSources?: readonly string[];
+
   /** The DataGateways not asked, because they can't apply a player-count or play-time range the search gave (#869). */
   readonly unfilterableSources?: readonly string[];
 }

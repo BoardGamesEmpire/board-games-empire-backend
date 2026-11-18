@@ -145,12 +145,16 @@ describe('plugin update consent (approve/reject/pending)', () => {
     overrides: {
       /** The ACTIVE manifest's requested permissions. Defaults to `[MANAGE_DIGEST_CHECK]`. */
       readonly activeChecks?: readonly Check[];
+
       /** The ACTIVE row's retained config, pre-activation. Defaults to `{}`. */
       readonly activeConfig?: Record<string, unknown>;
+
       /** Merged onto the pending manifest's `config` section (D-CN, #370). */
       readonly pendingConfig?: Partial<PluginManifest['config']>;
+
       /** The PENDING manifest's scope, for a re-scope (#1151). Defaults to `scope`. */
       readonly pendingScope?: PluginManifest['scope'];
+
       /** Defaults to 'server' — every existing caller's plugin. */
       readonly scope?: PluginManifest['scope'];
     } = {},

@@ -11,6 +11,7 @@ const MESSAGE: I18nPath = 'errors.auth.sign_in_provider_email_unverified';
 export interface ProviderEmailGateContext {
   /** The callback's path parameters: `id`, the sign-in provider's id, on `/callback/:id` (#1016). */
   readonly params?: { readonly id?: string };
+
   readonly path?: string;
 }
 

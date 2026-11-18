@@ -39,8 +39,10 @@ export interface InviteSnapshot {
   readonly expiresAt: Date;
   readonly householdId: string | null;
   readonly id: string;
+
   /** Stripped from persisted audit rows; in-process listeners still receive it. */
   readonly inviteeEmail: string | null;
+
   readonly inviteeId: string | null;
   readonly inviteeName: string | null;
   readonly inviterId: string;
@@ -109,10 +111,8 @@ const INVITE_AUDIT_EXCLUDED = ['inviteeEmail'] satisfies readonly (keyof InviteS
 export class InviteCreatedEvent extends MutationEvent<InviteSnapshot> {
   static readonly eventName = InviteEvents.Created;
   readonly eventName = InviteCreatedEvent.eventName;
-
   declare readonly before: null;
   declare readonly after: InviteSnapshot;
-
   readonly subject = ResourceType.Invite;
   readonly subjectId: string;
 
@@ -130,10 +130,8 @@ export class InviteCreatedEvent extends MutationEvent<InviteSnapshot> {
  */
 export abstract class InviteTransitionEvent extends MutationEvent<InviteSnapshot> {
   abstract readonly eventName: InviteEvents;
-
   declare readonly before: InviteSnapshot;
   declare readonly after: InviteSnapshot;
-
   readonly subject = ResourceType.Invite;
   readonly subjectId: string;
 

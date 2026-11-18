@@ -9,6 +9,7 @@ export const BGG_BASE_URL = 'https://boardgamegeek.com/xmlapi2';
 export interface BggClientOptions {
   /** How many times to ask again after a 202 before giving up. Defaults to 5. */
   acceptedRetries?: number;
+
   /** How long to wait before asking again after a 202. Defaults to 6 seconds. */
   acceptedRetryMs?: number;
 

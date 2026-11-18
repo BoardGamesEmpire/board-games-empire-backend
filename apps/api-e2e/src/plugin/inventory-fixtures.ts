@@ -10,6 +10,7 @@ export { INVENTORY_STAGING_ID };
 export interface InventoryPluginOptions {
   /** Requested permissions the manifest asks for beside its own required server-scope `manage:digest`. */
   readonly checks?: readonly Check[];
+
   /**
    * The manifest's scope and config section. A household unit's dormancy is
    * worked out from these, not from the row's `scope` column (#1151), so a
@@ -17,8 +18,10 @@ export interface InventoryPluginOptions {
    * `scope` follows the manifest's unless `row` names one.
    */
   readonly manifest?: { readonly config?: PluginManifest['config']; readonly scope?: PluginManifest['scope'] };
+
   /** Columns written over the installed defaults: `uninstalledAt`, `scope`, and so on. */
   readonly row?: Record<string, unknown>;
+
   /** Stages an update to this version: the same manifest, pending approval. */
   readonly stagedVersion?: string;
 }

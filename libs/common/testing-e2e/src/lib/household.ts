@@ -21,6 +21,7 @@ export interface HouseholdWithMembersOptions {
 
   /** Additional members, in order. The owner must not reappear here. */
   readonly members?: readonly HouseholdRosterEntry[];
+
   /** The household's member share policy (#810). The schema's default when omitted, as a created household has. */
   readonly memberSharePolicy?: MemberSharePolicy;
 
@@ -37,8 +38,10 @@ export interface HouseholdRosterMember {
 
 export interface HouseholdFixture {
   readonly household: Household;
+
   /** The non-owner roster, in input order. */
   readonly members: readonly HouseholdRosterMember[];
+
   readonly owner: HouseholdRosterMember;
 }
 

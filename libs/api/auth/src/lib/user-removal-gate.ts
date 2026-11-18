@@ -13,6 +13,7 @@ const MESSAGE: I18nPath = 'errors.auth.user_removal_blocked';
 export interface UserRemovalBlocker {
   readonly column: string;
   readonly table: string;
+
   /** Matches a user with at least one such row. */
   readonly where: Prisma.UserWhereInput;
 }
@@ -79,6 +80,7 @@ export const USER_REMOVAL_BLOCKERS: readonly UserRemovalBlocker[] = [
 export interface UserRemovalGateDeps {
   /** Whether any row in {@link USER_REMOVAL_BLOCKERS} reaches the user. */
   hasSharedData(userId: string): Promise<boolean>;
+
   /** Renders a refusal's catalog key. */
   render(key: I18nPath): string;
 }
@@ -91,6 +93,7 @@ export interface UserRemovalGateContext {
 export interface UserRemovalGate {
   /** `databaseHooks.account.delete.before`, run once per sign-in method of the user. */
   beforeAccountDelete(account: { readonly userId: string }, context: UserRemovalGateContext | null): Promise<void>;
+
   /** `databaseHooks.user.delete.before`. */
   beforeUserDelete(user: { readonly id: string }, context: UserRemovalGateContext | null): Promise<void>;
 }

@@ -182,8 +182,10 @@ export const compareExactReentry = (
 export interface ForbiddenAcknowledgementResolution {
   /** Distinct forbidden specifiers analysis reported, sorted. */
   readonly reported: readonly string[];
+
   /** Reported specifiers the acceptance did not name — outstanding consent. */
   readonly unacknowledged: readonly string[];
+
   /** Accepted specifiers analysis did not report — caller and server disagree about state. */
   readonly unexpected: readonly string[];
 }

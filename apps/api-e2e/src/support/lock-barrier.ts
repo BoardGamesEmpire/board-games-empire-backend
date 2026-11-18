@@ -102,9 +102,7 @@ export interface PendingStatement<TRow extends QueryResultRow = QueryResultRow> 
 
 export interface BarrierConnection {
   begin(): Promise<void>;
-
   close(): Promise<void>;
-
   commit(): Promise<void>;
 
   /** Issues a statement WITHOUT awaiting it. See {@link PendingStatement}. */
@@ -113,13 +111,14 @@ export interface BarrierConnection {
     params?: readonly unknown[],
     description?: string,
   ): PendingStatement<TRow>;
+
   /** Appears in failure messages — `holder`, `waiter`, `observer`. */
   readonly label: string;
+
   /** This connection's backend pid, as `pg_locks` reports it. */
   readonly pid: number;
 
   query<TRow extends QueryResultRow = QueryResultRow>(sql: string, params?: readonly unknown[]): Promise<TRow[]>;
-
   rollback(): Promise<void>;
 }
 

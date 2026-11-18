@@ -71,8 +71,10 @@ export interface CandidateImages {
 /** What a container's state says about it, from `docker inspect`. */
 export interface ContainerState {
   readonly exitCode: number;
+
   /** Undefined for a service without a healthcheck. */
   readonly health: string | undefined;
+
   readonly oomKilled: boolean;
   readonly restartCount: number;
   readonly service: string;
@@ -82,6 +84,7 @@ export interface ContainerState {
 interface InspectedContainer {
   readonly Config: { readonly Labels: Record<string, string> };
   readonly RestartCount: number;
+
   readonly State: {
     readonly ExitCode: number;
     readonly Health?: { readonly Status: string };

@@ -18,8 +18,10 @@ export type MailState = { configured: boolean; lifetimeMinutes: number } | null;
 export interface PasswordResetDeps {
   readonly enqueue: (recipientUserId: string, message: MailMessage) => Promise<void>;
   readonly now: () => Date;
+
   /** What a reset needs from the settings row, or `null` when the row is missing. */
   readonly readMailState: () => Promise<MailState>;
+
   /** Renders a refusal's catalog key. */
   readonly render: (key: I18nPath) => string;
 }

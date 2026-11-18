@@ -24,10 +24,13 @@ export type EntryOf<K extends VocabularyKind> = K extends 'platform' ? PlatformE
 export interface LoadSummary {
   /** No record matched, so one was made, with its link. */
   created: number;
+
   /** Already linked, in any status, and left as it was. */
   kept: number;
+
   /** Linked to a record of the same slug or a similar name. */
   matched: number;
+
   /** Matched nothing while review was on, so it waits for an admin. */
   pending: number;
 }
@@ -52,10 +55,14 @@ export interface VocabularyLinkView {
   origin: VocabularyLinkOrigin;
   record: VocabularyRecordView | null;
   status: VocabularyLinkStatus;
+
   /** Platforms only. */
   suppliedAbbreviation: string | null;
+
   suppliedName: string;
+
   /** Platforms only. */
   suppliedPlatformType: PlatformType | null;
+
   updatedAt: Date;
 }

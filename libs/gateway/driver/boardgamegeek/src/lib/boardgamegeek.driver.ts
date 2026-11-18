@@ -53,11 +53,13 @@ const SEARCH_THINGS_DEADLINE_MS = 12_000;
 
 export interface BoardGameGeekDriverOptions {
   apiKey: string;
+
   /** BGG's XML API 2. Defaults to `https://boardgamegeek.com/xmlapi2`. */
   baseUrl?: string;
 
   /** How the driver reaches BGG; it has no other way (#1082). */
   fetch: UpstreamFetch;
+
   logger: DriverLogger;
 
   /** The driver's waits, which tests shorten. Each defaults to what BGG needs. */

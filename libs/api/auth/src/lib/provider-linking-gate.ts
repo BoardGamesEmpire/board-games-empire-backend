@@ -16,8 +16,10 @@ const LINK_ACCOUNT = 'link-account';
 export interface ProviderLinkingGateDeps {
   /** better-auth's OAuth state for this request: getOAuthState from 'better-auth/api'. */
   readonly readOAuthState: () => Promise<{ readonly link?: unknown } | null>;
+
   /** The row's policy, or null when the row is missing. */
   readonly readPolicy: () => Promise<ProviderLinkingPolicy | null>;
+
   readonly render: (key: I18nPath) => string;
 }
 

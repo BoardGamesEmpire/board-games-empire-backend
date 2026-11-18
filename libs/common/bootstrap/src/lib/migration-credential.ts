@@ -17,6 +17,7 @@ export interface MigrationCredential {
 export interface ResolvedMigrationCredential {
   /** What the boot summary and the refusals say about it. */
   readonly credential: MigrationCredential;
+
   /** What the migrator connects with. */
   readonly url: string;
 }

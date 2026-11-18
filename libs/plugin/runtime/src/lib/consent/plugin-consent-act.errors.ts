@@ -11,6 +11,7 @@ import type { ConsentUngrantableCause } from '../grants/consent-grantability';
 export interface ConsentActStaleRisk {
   readonly currentRiskLevel: RiskLevel;
   readonly permissionSlug: string;
+
   /** Null when an install or approval named no risk for a permission it would grant (#1336). */
   readonly shownRiskLevel: RiskLevel | null;
 }

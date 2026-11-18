@@ -10,8 +10,10 @@ import type { CacheFlush, DataMigrationsPhase, DataMigrationsSummary } from './p
 export interface RegistryDataMigrationsOptions {
   /** The entries to apply; the shipped registry unless a test supplies its own. */
   readonly entries?: readonly DataMigrationEntry[];
+
   /** The api's cache flush; absent in a build without one. */
   readonly flush?: CacheFlush;
+
   /** Where the entries log; a Nest `Logger` named `DataMigrations` by default. */
   readonly logger?: Logger;
 }

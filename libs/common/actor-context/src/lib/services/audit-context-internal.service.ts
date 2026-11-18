@@ -12,6 +12,7 @@ import {
 export interface ActorContextInit {
   readonly actor: Actor | null;
   readonly correlationId: string;
+
   /**
    * Resolved catalog locale (a `systemSupported` `LanguageTag.tag`). Optional:
    * seams that carry a pre-resolved locale (a WebSocket connection, #180;

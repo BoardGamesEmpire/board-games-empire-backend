@@ -63,6 +63,7 @@ export interface PluginArtifactReceipt {
   readonly artifact: PluginArtifact;
   readonly assessment: PluginInstallAssessment;
   readonly directory: PluginArtifactDirectory;
+
   /** The plugin row with the artifact's slug, if any; `version` is that row's. */
   readonly installedPlugin: {
     readonly state: 'none' | 'installed' | 'uninstalled';
@@ -79,18 +80,24 @@ export interface PluginArtifactReceipt {
 
 export interface ReceivePluginArtifactByLinkInput {
   readonly actorId: string;
+
   /** The checksum the server admin expects, in either case, with or without spaces around it. */
   readonly expectedSha256: string;
+
   readonly url: string;
 }
 
 export interface ReceivePluginArtifactUploadInput {
   readonly actorId: string;
+
   /** Where the upload storage wrote the archive. Once called, the receiver owns it and removes it. */
   readonly archivePath: string;
+
   readonly bytes: number;
+
   /** The checksum the server admin expects, in either case, with or without spaces around it. */
   readonly expectedSha256: string;
+
   /** The archive's checksum and size, which the upload storage counted as the bytes arrived. */
   readonly sha256: string;
 }
@@ -116,6 +123,7 @@ interface ReceivedArchive {
   readonly archivePath: string;
   readonly bytes: number;
   readonly sha256: string;
+
   /** The link it came from; null for an upload. */
   readonly url: string | null;
 }

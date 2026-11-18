@@ -6,9 +6,12 @@ import { PluginConfigSchemaUnusableError, type PluginConfigIssue } from './confi
 
 export interface PluginConfigValidationInput {
   readonly config: Record<string, unknown>;
+
   /** The manifest's `config.schema` document, opaque until here. */
   readonly schema: Record<string, unknown>;
+
   readonly slug: string;
+
   /** The ACTIVE manifest version — the cache key half that makes recompiles follow updates. */
   readonly version: string;
 }
@@ -46,6 +49,7 @@ export interface PluginConfigValidationInput {
 @Injectable()
 export class PluginConfigSchemaService {
   private readonly validators = new Map<string, ValidateFunction>();
+
   /** Why each schema that cannot be used was refused, by the validators' key. */
   private readonly unusable = new Map<string, string>();
 

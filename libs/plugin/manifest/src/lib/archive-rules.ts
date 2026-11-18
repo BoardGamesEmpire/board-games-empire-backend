@@ -46,6 +46,7 @@ export interface PluginArchiveEntry {
 export type PluginArchiveRefusal = {
   /** The offending entry's name, where there is one. */
   readonly entry?: string;
+
   readonly ok: false;
   readonly rule: PluginArchiveRule;
 };

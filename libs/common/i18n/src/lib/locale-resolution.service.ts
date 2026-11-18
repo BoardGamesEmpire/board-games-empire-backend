@@ -45,9 +45,7 @@ export class LocaleResolutionService {
   static readonly PREFERENCE_TTL_MS = 60_000;
 
   private static readonly PREFERENCE_CACHE_MAX_ENTRIES = 10_000;
-
   private readonly logger = new Logger(LocaleResolutionService.name);
-
   private readonly preferenceCache = new Map<string, { expiresAt: number; tag: string | null }>();
 
   constructor(

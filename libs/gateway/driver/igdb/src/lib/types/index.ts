@@ -119,15 +119,14 @@ export interface IgdbReleaseDate {
    * Unix timestamp (seconds). Present when IGDB has a precise date.
    */
   date?: number;
+
   /**
    * Human-readable date string from IGDB (e.g. "Apr 23, 2019", "2020 Q3").
    */
   human?: string;
 
   id: number;
-
   platform: IgdbPlatform;
-
   region?: IgdbRegion;
 }
 
@@ -227,8 +226,8 @@ export type IgdbGameStatus = 0 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | number;
  */
 export interface IgdbExternalGame {
   external_game_source?: number;
-
   id: number;
+
   /** The game's id at that service, such as a Steam app id. */
   uid?: string;
 }
@@ -236,16 +235,15 @@ export interface IgdbExternalGame {
 export interface IgdbGame {
   age_ratings?: IgdbAgeRating[];
   collections?: IgdbNamedEntity[];
-
   cover?: IgdbCover;
   expansions?: number[];
-
   external_games?: IgdbExternalGame[];
 
   /**
    * Unix timestamp
    */
   first_release_date?: number;
+
   franchises?: IgdbNamedEntity[];
   game_status?: IgdbGameStatus;
   game_type?: IgdbGameType;
@@ -254,10 +252,12 @@ export interface IgdbGame {
   involved_companies?: IgdbInvolvedCompany[];
   language_supports?: IgdbLanguageSupport[];
   name: string;
+
   /**
    * Populated on DLC (category 1) and expansion (category 2).
    */
   parent_game?: number;
+
   platforms?: IgdbPlatform[];
   release_dates?: IgdbReleaseDate[];
   standalone_expansions?: number[];
@@ -265,7 +265,6 @@ export interface IgdbGame {
   themes?: IgdbNamedEntity[];
   total_rating?: number;
   total_rating_count?: number;
-
   url?: string;
 
   /**

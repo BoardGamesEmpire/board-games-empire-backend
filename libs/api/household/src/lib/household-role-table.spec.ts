@@ -34,8 +34,10 @@ type HouseholdRoleName =
 interface TableRow {
   /** The row's text in the README, exactly. */
   readonly action: string;
+
   /** Asks the actor's ability, holding `actor` in `hh-1`, the question the route asks. */
   readonly ask: (ability: AppAbility, actor: HouseholdRoleName) => string;
+
   readonly cells: Readonly<Record<HouseholdRoleName, Cell>>;
   readonly grantedBy: 'Household role' | 'User';
 }

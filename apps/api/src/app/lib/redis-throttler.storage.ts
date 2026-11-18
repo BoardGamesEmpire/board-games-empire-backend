@@ -204,6 +204,7 @@ export class RedisThrottlerStorage implements ThrottlerStorage {
 
   /** Fail-open bookkeeping, so an outage is one log line and not one per request. */
   private failuresSinceLastLog = 0;
+
   private lastFailureLogAt = 0;
 
   constructor(private readonly redis: Redis) {}

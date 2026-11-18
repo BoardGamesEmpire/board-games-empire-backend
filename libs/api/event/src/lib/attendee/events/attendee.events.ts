@@ -29,10 +29,8 @@ type AttendeeRevivedSnapshot = Readonly<Pick<EventAttendee, 'id' | 'status' | 'i
  */
 export class AttendeeAddedEvent extends MutationEvent<EventAttendee> {
   static readonly eventName = AttendeeEvents.AttendeeAdded;
-
   declare readonly before: AttendeeRevivedSnapshot | null;
   declare readonly after: AttendeeAddedSnapshot & Partial<Pick<EventAttendee, 'removedAt'>>;
-
   readonly subject = ResourceType.EventAttendee;
   readonly subjectId: string;
 
@@ -56,10 +54,8 @@ type AttendeeRemovedSnapshot = Readonly<
  */
 export class AttendeeRemovedEvent extends MutationEvent<EventAttendee> {
   static readonly eventName = AttendeeEvents.AttendeeRemoved;
-
   declare readonly before: AttendeeRemovedSnapshot;
   declare readonly after: AttendeeRemovedSnapshot;
-
   readonly subject = ResourceType.EventAttendee;
   readonly subjectId: string;
 
@@ -80,10 +76,8 @@ type AttendeeStatusSnapshot = Readonly<Pick<EventAttendee, 'id' | 'eventId' | 'u
 
 export class AttendeeStatusUpdatedEvent extends MutationEvent<EventAttendee> {
   static readonly eventName = AttendeeEvents.AttendeeStatusUpdated;
-
   declare readonly before: AttendeeStatusSnapshot;
   declare readonly after: AttendeeStatusSnapshot;
-
   readonly subject = ResourceType.EventAttendee;
   readonly subjectId: string;
 
@@ -111,10 +105,8 @@ type GameListEntrySnapshot = Readonly<Pick<EventAttendeeGameList, 'id' | 'attend
  */
 export class GameAddedToListEvent extends MutationEvent<EventAttendeeGameList> {
   static readonly eventName = AttendeeEvents.GameAddedToList;
-
   declare readonly before: GameListEntrySnapshot | null;
   declare readonly after: GameListEntrySnapshot;
-
   readonly subject = ResourceType.EventAttendeeGameList;
   readonly subjectId: string;
 
@@ -137,10 +129,8 @@ export class GameAddedToListEvent extends MutationEvent<EventAttendeeGameList> {
  */
 export class GameRemovedFromListEvent extends MutationEvent<EventAttendeeGameList> {
   static readonly eventName = AttendeeEvents.GameRemovedFromList;
-
   declare readonly before: GameListEntrySnapshot;
   declare readonly after: GameListEntrySnapshot;
-
   readonly subject = ResourceType.EventAttendeeGameList;
   readonly subjectId: string;
 
