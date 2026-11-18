@@ -131,6 +131,7 @@ function clean(parent: Parents, unsafeIds: ReadonlySet<string>, htmlBlocks = tru
   }
 
   if (changed) {
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- `parent` is a union of mdast parents, and `tidy` keeps each one's content model, which TypeScript can't relate back to this parent's own children (#1321)
     parent.children = tidy(parent, kept) as typeof parent.children;
   }
 
@@ -149,6 +150,7 @@ function tidy(parent: Parents, children: RootContent[]): RootContent[] {
     return children;
   }
 
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- a phrasing parent holds only phrasing content, but checking its type against a Set doesn't narrow its children (#1321)
   const joined = joinText(children as PhrasingContent[]);
   return TRIMMED_PARENTS.has(parent.type) ? trimPhrasing(joined) : joined;
 }

@@ -150,6 +150,7 @@ function parse(source: string): BbNode[] {
       leaveUnclosed(stack);
     }
 
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- the root stays at the bottom of the stack and `depth` is above it, so `pop()` returns an element; TypeScript can't see that invariant (#1321)
     const element = stack.pop() as OpenElement;
     const parent = top();
     if (KNOWN_TAGS.has(name)) {
@@ -180,6 +181,7 @@ function openDepth(stack: readonly OpenElement[], name: string): number {
 
 /** Pops an element that was never closed: its opening tag, and a list's items, are only text. */
 function leaveUnclosed(stack: OpenElement[]): void {
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- called only while an element sits above the root, so `pop()` returns one; TypeScript can't see that invariant (#1321)
   const element = stack.pop() as OpenElement;
   const parent = stack[stack.length - 1];
 
