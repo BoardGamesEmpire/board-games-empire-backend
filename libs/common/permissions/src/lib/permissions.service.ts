@@ -146,7 +146,7 @@ export class PermissionsService {
       (graph) => graph.roles.length > 0,
     );
 
-    return userGraph as UserWithRoles | null;
+    return userGraph;
   }
 
   /**
@@ -163,7 +163,7 @@ export class PermissionsService {
    * applies per request: banned with no expiry, or with one still to come.
    */
   async loadUserRoleGraphWithin(tx: Prisma.TransactionClient, userId: string): Promise<UserWithRoles | null> {
-    return (await this.loadUserGraph(tx, userId, PermissionsService.notBannedNow())) as UserWithRoles | null;
+    return this.loadUserGraph(tx, userId, PermissionsService.notBannedNow());
   }
 
   /**
@@ -179,10 +179,10 @@ export class PermissionsService {
       return new Map();
     }
 
-    const graphs = (await this.db.user.findMany({
+    const graphs: UserWithRoles[] = await this.db.user.findMany({
       where: { id: { in: [...userIds] }, AND: PermissionsService.notBannedNow() },
       select: PermissionsService.userGraphSelect(),
-    })) as UserWithRoles[];
+    });
 
     return new Map(graphs.map((graph) => [graph.id, graph]));
   }
@@ -324,7 +324,7 @@ export class PermissionsService {
       () => this.loadApiKeyGraph(apiKeyId),
     );
 
-    return apiKey as ApikeyWithScopes | null;
+    return apiKey;
   }
 
   /**
@@ -385,6 +385,7 @@ export class PermissionsService {
     ttlFor: (value: T) => number = () => PermissionsService.CACHE_TTL_IN_MILLISECONDS,
     cacheable: (value: T) => boolean = () => true,
   ): Promise<T | null> {
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- data from outside the process; parse it through a schema (#1322)
     const [cached, currentVersion] = (await this.cache.mget([
       cacheKey,
       PermissionsService.cacheVersionKey(cacheKey),

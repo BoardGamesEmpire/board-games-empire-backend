@@ -85,12 +85,14 @@ export class ScopeComposer {
     }
 
     if (isUnscoped(intrinsicScope)) {
+      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- `WhereInput<TResource>` is a lookup on a generic model name, so TypeScript can't relate an object literal to it (#1321)
       return { AND: conditions } as WhereInput<TResource>;
     }
 
     // An intrinsic scope may carry its own `AND` — a membership clause beside a
     // soft-delete filter, say. Spreading and then assigning would drop it
     // silently and widen the read, so the two are concatenated instead.
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- `WhereInput<TResource>` is a lookup on a generic model name, so TypeScript can't read its `AND` member or rest its other fields (#1321)
     const { AND: scopeAnd, ...rest } = intrinsicScope as Record<string, unknown> & {
       AND?: WhereInput<TResource> | WhereInput<TResource>[];
     };
@@ -98,6 +100,7 @@ export class ScopeComposer {
     const merged =
       scopeAnd === undefined ? conditions : [...(Array.isArray(scopeAnd) ? scopeAnd : [scopeAnd]), ...conditions];
 
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- `WhereInput<TResource>` is a lookup on a generic model name, so TypeScript can't relate an object literal to it (#1321)
     return { ...rest, AND: merged } as WhereInput<TResource>;
   }
 }
