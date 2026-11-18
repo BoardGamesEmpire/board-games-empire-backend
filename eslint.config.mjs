@@ -577,6 +577,17 @@ export default [
     // Must follow the Nx spreads, which set the parser (#1317).
     files: ['**/*.ts', '**/*.tsx', '**/*.cts', '**/*.mts'],
     languageOptions: { parserOptions: decoratorParserOptions },
+    rules: {
+      // A name imported only as a type goes in an `import type` statement of
+      // its own (#1317). Files with a decorator are skipped, per the flags above.
+      // `typeof import('x')` annotations stay allowed: #1317 is about import
+      // statements, and specs use them in `jest.requireActual<…>()`.
+      '@typescript-eslint/consistent-type-imports': [
+        'error',
+        { prefer: 'type-imports', fixStyle: 'separate-type-imports', disallowTypeAnnotations: false },
+      ],
+      'bge/top-level-type-imports': 'error',
+    },
   },
   {
     files: ['**/*.ts', '**/*.tsx', '**/*.js', '**/*.jsx'],
