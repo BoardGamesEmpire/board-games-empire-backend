@@ -85,6 +85,7 @@ export function nestLoggerFromPino(pino: PinoLike): LoggerService {
     }
 
     if (typeof message === 'object' && message !== null) {
+      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Nest passes the message as `unknown`, and TypeScript has no narrowing from `object` to an indexable record; `msg` is checked below (#1321)
       const { msg, ...fields } = message as StructuredLogMessage;
       pino[level]({ ...base, ...fields }, typeof msg === 'string' ? msg : undefined);
       return;
