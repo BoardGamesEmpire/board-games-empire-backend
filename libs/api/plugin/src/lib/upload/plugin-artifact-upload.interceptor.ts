@@ -15,6 +15,9 @@ import { PluginArtifactUploadStorage } from './plugin-artifact-upload.storage';
 
 const UPLOAD_FIELD = 'file';
 
+/** Multer's single-file middleware, an Express handler. */
+type UploadHandler = ReturnType<ReturnType<typeof multer>['single']>;
+
 /**
  * Multer's own size limit can fire before the storage's counter does (the
  * limit is one byte over the cap), so it maps to the same domain error. Every
@@ -55,7 +58,7 @@ export const transformUploadError = (error: unknown): unknown => {
 @Injectable()
 export class PluginArtifactUploadInterceptor implements NestInterceptor {
   private readonly logger = new Logger(PluginArtifactUploadInterceptor.name);
-  private readonly upload: ReturnType<ReturnType<typeof multer>['single']>;
+  private readonly upload: UploadHandler;
 
   constructor(
     @Inject(MODULE_OPTIONS_TOKEN) options: PluginModuleOptions,
@@ -75,10 +78,10 @@ export class PluginArtifactUploadInterceptor implements NestInterceptor {
     }
 
     const http = context.switchToHttp();
-    const request = http.getRequest<{ file?: PluginArtifactUploadedFile }>();
+    const request = http.getRequest<Parameters<UploadHandler>[0] & { file?: PluginArtifactUploadedFile }>();
 
     await new Promise<void>((resolve, reject) =>
-      this.upload(request as never, http.getResponse(), (error: unknown) =>
+      this.upload(request, http.getResponse(), (error: unknown) =>
         error ? reject(transformUploadError(error)) : resolve(),
       ),
     );
