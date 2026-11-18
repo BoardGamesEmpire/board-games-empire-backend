@@ -13,7 +13,7 @@ export interface PrometheusConfig {
 }
 
 export default registerAs('prometheus', () =>
-  env.provideMany(
+  env.provideMany<PrometheusConfig>(
     [
       {
         key: 'PROMETHEUS_DEFAULT_METRICS_ENABLED',
@@ -39,15 +39,14 @@ export default registerAs('prometheus', () =>
         mutators: isTrue,
       },
     ],
-    (record) =>
-      <PrometheusConfig>{
-        defaultMetrics: {
-          enabled: record.enabled,
-          prefix: record.prefix,
-          timeout: record.timeout,
-        },
-        collectDefaultMetrics: record.collectDefaultMetrics,
+    (record) => ({
+      defaultMetrics: {
+        enabled: record.enabled,
+        prefix: record.prefix,
+        timeout: record.timeout,
       },
+      collectDefaultMetrics: record.collectDefaultMetrics,
+    }),
   ),
 );
 
