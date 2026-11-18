@@ -27,10 +27,13 @@
       "path": "../../queue/mail/tsconfig.lib.json"
     },
     {
-      "path": "../../common/permissions/tsconfig.lib.json"
+      "path": "../../common/actor-context/tsconfig.lib.json"
     },
     {
       "path": "../../common/shared/tsconfig.lib.json"
+    },
+    {
+      "path": "../../common/permissions/tsconfig.lib.json"
     },
     {
       "path": "../../common/locale/tsconfig.lib.json"

@@ -6,9 +6,17 @@
  */
 export const PRIVACY_POLICY_MAX_LENGTH = 20_000;
 
-/** The stable codes the privacy policy's errors carry, so a client can tell them apart (#934). */
-export enum PrivacyPolicyErrorCode {
-  LanguageTagNotFound = 'PRIVACY_POLICY_LANGUAGE_TAG_NOT_FOUND',
-  NotFound = 'PRIVACY_POLICY_NOT_FOUND',
-  Empty = 'PRIVACY_POLICY_EMPTY',
-}
+/**
+ * The stable codes the privacy policy's errors carry, so a client can tell them
+ * apart (#934). An object of string literals rather than an enum, as
+ * `MailFailureCode` is: `CodedHttpException` takes an upper-case string, and an
+ * enum member is not one to the compiler.
+ */
+export const PrivacyPolicyErrorCode = {
+  LanguageTagNotFound: 'PRIVACY_POLICY_LANGUAGE_TAG_NOT_FOUND',
+  NotFound: 'PRIVACY_POLICY_NOT_FOUND',
+  Empty: 'PRIVACY_POLICY_EMPTY',
+  TooLong: 'PRIVACY_POLICY_TOO_LONG',
+} as const;
+
+export type PrivacyPolicyErrorCode = (typeof PrivacyPolicyErrorCode)[keyof typeof PrivacyPolicyErrorCode];

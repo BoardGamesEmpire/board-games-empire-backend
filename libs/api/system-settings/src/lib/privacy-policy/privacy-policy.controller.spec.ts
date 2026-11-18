@@ -1,6 +1,10 @@
+import { Action, ResourceType } from '@bge/database';
+import type { AppAbility } from '@bge/permissions';
+import { CHECK_POLICIES_KEY, PoliciesGuard } from '@bge/permissions';
 import { CACHE_RESPONSE_KEY } from '@bge/shared';
 import { createTestingModuleWithDb } from '@bge/testing';
-import { HEADERS_METADATA } from '@nestjs/common/constants';
+import { HttpStatus } from '@nestjs/common';
+import { GUARDS_METADATA, HEADERS_METADATA, HTTP_CODE_METADATA } from '@nestjs/common/constants';
 import { AllowAnonymous } from '@thallesp/nestjs-better-auth';
 import type { Response } from 'express';
 import type { PrivacyPolicyDto } from './dto/privacy-policy.dto';
@@ -25,12 +29,17 @@ const policy: PrivacyPolicyDto = {
 describe('PrivacyPolicyController (#934)', () => {
   let controller: PrivacyPolicyController;
   const read = jest.fn();
+  const put = jest.fn();
+  const remove = jest.fn();
 
   beforeEach(async () => {
     read.mockReset().mockResolvedValue(policy);
+    put.mockReset().mockResolvedValue(policy);
+    remove.mockReset().mockResolvedValue(undefined);
     const { module } = await createTestingModuleWithDb({
       controllers: [PrivacyPolicyController],
-      providers: [{ provide: PrivacyPolicyService, useValue: { read } }],
+      providers: [{ provide: PrivacyPolicyService, useValue: { put, read, remove } }],
+      overrideGuards: [PoliciesGuard],
     });
 
     controller = module.get(PrivacyPolicyController);
@@ -63,5 +72,56 @@ describe('PrivacyPolicyController (#934)', () => {
   // show the text from before it for the whole TTL (#530).
   it('never opts into the response cache', () => {
     expect(Reflect.getMetadata(CACHE_RESPONSE_KEY, PrivacyPolicyController.prototype.read)).toBeUndefined();
+  });
+
+  it('replaces the policy in a language and answers it as { privacyPolicy }', async () => {
+    await expect(controller.replace('de', { markdown: '# Datenschutz\n' })).resolves.toEqual({
+      privacyPolicy: policy,
+    });
+
+    expect(put).toHaveBeenCalledWith('de', '# Datenschutz\n');
+  });
+
+  it('removes the policy in a language and answers 204', async () => {
+    await expect(controller.remove('de')).resolves.toBeUndefined();
+
+    expect(remove).toHaveBeenCalledWith('de');
+    expect(Reflect.getMetadata(HTTP_CODE_METADATA, PrivacyPolicyController.prototype.remove)).toBe(
+      HttpStatus.NO_CONTENT,
+    );
+  });
+
+  // The class carries no guard, so the read stays open to anyone. Each write
+  // binds PoliciesGuard itself: the global auth guard only signs a caller in,
+  // and without the guard CheckPolicies is never read, so any signed-in user
+  // would pass.
+  it.each(['replace', 'remove'] as const)(
+    '%s lets only a holder of manage on PrivacyPolicy through, behind PoliciesGuard',
+    (method) => {
+      const handler = PrivacyPolicyController.prototype[method];
+      const policies = Reflect.getMetadata(CHECK_POLICIES_KEY, handler) as Array<(ability: AppAbility) => boolean>;
+      const can = jest.fn();
+      const ability = { can } as unknown as AppAbility;
+
+      expect(Reflect.getMetadata(GUARDS_METADATA, handler)).toEqual([PoliciesGuard]);
+      expect(policies).toHaveLength(1);
+
+      // The policy's answer is the ability's, both ways, so a policy that asked
+      // and ignored the answer would fail here.
+      can.mockReturnValue(true);
+      expect(policies[0](ability)).toBe(true);
+      can.mockReturnValue(false);
+      expect(policies[0](ability)).toBe(false);
+
+      expect(can).toHaveBeenCalledTimes(2);
+      expect(can).toHaveBeenNthCalledWith(1, Action.manage, ResourceType.PrivacyPolicy);
+      expect(can).toHaveBeenNthCalledWith(2, Action.manage, ResourceType.PrivacyPolicy);
+    },
+  );
+
+  it('asks no permission of the read, and puts no guard on the class', () => {
+    expect(Reflect.getMetadata(CHECK_POLICIES_KEY, PrivacyPolicyController.prototype.read)).toBeUndefined();
+    expect(Reflect.getMetadata(GUARDS_METADATA, PrivacyPolicyController.prototype.read)).toBeUndefined();
+    expect(Reflect.getMetadata(GUARDS_METADATA, PrivacyPolicyController)).toBeUndefined();
   });
 });
