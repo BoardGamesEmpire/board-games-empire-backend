@@ -3,10 +3,11 @@ import { Action, MemberSharePolicy, Prisma, ResourceType, SystemRole } from '@bg
 import { AbilityService, ScopeComposer } from '@bge/permissions';
 import type { MockDatabaseService } from '@bge/testing';
 import { batchTransactionCall, createTestingModuleWithDb, paginationQuery, unwrapTransaction } from '@bge/testing';
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Http } from '@status/codes';
 import { HouseholdEvents } from '../constants/household-events.constant';
+import { HouseholdEventPublisher } from '../events/household-event.publisher';
 import { HouseholdGameShareApprovedEvent } from '../events/household.events';
 import { HouseholdGameShareService } from './household-game-share.service';
 
@@ -68,6 +69,9 @@ describe('HouseholdGameShareService', () => {
         // test the merge the list depends on.
         ScopeComposer,
         { provide: AbilityService, useValue: abilityService },
+        // The real publisher over the mocked emitter, so the `emitter.emit`
+        // assertions below see what the service publishes (#245).
+        HouseholdEventPublisher,
         { provide: EventEmitter2, useValue: emitter },
       ],
     });
@@ -325,6 +329,21 @@ describe('HouseholdGameShareService', () => {
       };
       expect(event.before).toEqual({ ...columns, approvedById: null, approvedAt: null });
       expect(event.after).toEqual({ ...columns, approvedById: 'owner-1', approvedAt: CREATED });
+    });
+
+    it('still answers the approval when a listener throws, since it has committed (#245)', async () => {
+      const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      emitter.emit.mockImplementation(() => {
+        throw new Error('audit listener exploded');
+      });
+
+      await expect(service.approve('hh-1', 'share-1')).resolves.toMatchObject({ id: 'share-1' });
+
+      expect(logged).toHaveBeenCalledWith(
+        expect.stringContaining(`for ${HouseholdEvents.GameShareApproved} (GameShare share-1)`),
+        expect.stringContaining('Error: '),
+      );
+      logged.mockRestore();
     });
 
     it('announces nothing when the transaction fails', async () => {

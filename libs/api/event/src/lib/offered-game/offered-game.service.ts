@@ -3,7 +3,7 @@ import {
   DatabaseService,
   ListKind,
   Prisma,
-  readBaseGameLinks,
+  readBaseGameLinksOnPlatform,
   readWishlistedPlatformGames,
   ResourceType,
 } from '@bge/database';
@@ -142,9 +142,11 @@ export class OfferedGameService {
    * ceiling: in the entry's select, Prisma would drop a deny-all ceiling and
    * serve every row (#559).
    *
-   * - Base games: the links whose base game is live and the caller could
-   *   open, as collection rows read them (#1070). A game offered more than
-   *   once is read once.
+   * - Base games: the links whose base game is live, the caller could open,
+   *   and has a platform game on the entry's platform, as collection rows
+   *   read them (#1070, #1391). They are keyed by platform game, so one
+   *   add-on offered on two platforms can list different base games on each.
+   *   A game offered more than once is read once.
    * - Supplies: the open nominations naming the entry, and its lineup games
    *   still ahead at `now`. Each is `null` for a caller with no read on that
    *   kind of record at all, and not read.
@@ -158,9 +160,9 @@ export class OfferedGameService {
 
     const entryIds = entries.map((entry) => entry.id);
     const [links, nominations, lineup, wishlisted] = await Promise.all([
-      readBaseGameLinks(
+      readBaseGameLinksOnPlatform(
         this.db,
-        [...new Set(entries.map((entry) => entry.collection.platformGame.game.id))],
+        entries.map(({ collection }) => collection.platformGame),
         this.scopeComposer.compose(ResourceType.Game, Action.read, { deletedAt: null }),
       ),
       this.tallyNominations(entryIds),
@@ -174,7 +176,7 @@ export class OfferedGameService {
         ...collection,
         platformGame: {
           ...platformGame,
-          game: { ...platformGame.game, baseGames: links.get(platformGame.game.id) ?? [] },
+          game: { ...platformGame.game, baseGames: links.get(platformGame.id) ?? [] },
         },
       },
       supplies: {

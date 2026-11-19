@@ -1,3 +1,4 @@
+import { emitAfterCommit } from '@bge/actor-context';
 import {
   constraintIdentity,
   DatabaseService,
@@ -751,22 +752,13 @@ export class InviteService {
    * by then the transition is committed, and surfacing a listener's failure as
    * the request's failure would report a 500 for an operation that succeeded.
    *
-   * A listener declared with `@OnEvent` is wrapped by Nest's loader, which
-   * awaits it and logs a throw or a rejection (`suppressErrors` defaults to
-   * true), so its failure never reaches the catch below. The catch is for a
-   * listener registered on the emitter directly (`onAny`, as the audit
-   * persistence listener is): `EventEmitterModule` runs without
-   * `ignoreErrors`, so its synchronous throw propagates out of `emit()`. It is
-   * logged and the remaining domain events still go out. Such a listener's
-   * rejected promise is its own to catch, as both in the app do.
+   * Each is emitted through `emitAfterCommit`, which logs a listener's throw
+   * rather than rethrowing it and says why, so the remaining domain events
+   * still go out.
    */
   emit(events: readonly InviteDomainEvent[]): void {
     for (const event of events) {
-      try {
-        this.events.emit(event.eventName, event);
-      } catch (error) {
-        this.logger.error(`Listener failed for ${event.eventName} (invite ${event.subjectId})`, error);
-      }
+      emitAfterCommit(this.events, this.logger, event.eventName, event, `invite ${event.subjectId}`);
     }
   }
 

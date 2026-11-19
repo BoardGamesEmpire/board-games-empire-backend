@@ -20,7 +20,7 @@ import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissi
 import type { QuotaSoftOverageEvent } from '@bge/quota';
 import { QuotaExceededException, QuotaService } from '@bge/quota';
 import { PaginatedRows, PaginationQueryDto } from '@bge/shared';
-import { webhookEnvelope, WebhookEventType } from '@bge/webhooks';
+import { WebhookEventType } from '@bge/webhooks';
 import {
   BadRequestException,
   ConflictException,
@@ -31,7 +31,6 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { EventEmitter2 } from '@nestjs/event-emitter';
 import { isBannedWithin } from '../ban/household-ban.helpers';
 import {
   HOUSEHOLD_MEMBER_UNIQUE_COLUMNS,
@@ -40,8 +39,16 @@ import {
 } from '../constants/household.constants';
 import type { AssignableHouseholdRole } from '../dto';
 import { isAssignableHouseholdRole, UpdateMemberRoleDto } from '../dto';
+import { HouseholdEventPublisher, householdWebhook } from '../events/household-event.publisher';
 import type { HouseholdOwnershipSnapshot } from '../events/household.events';
-import { HouseholdGameShareEndedEvent, HouseholdOwnershipTransferredEvent } from '../events/household.events';
+import {
+  HouseholdGameShareEndedEvent,
+  HouseholdMemberAdmittedEvent,
+  HouseholdMemberRemovedEvent,
+  HouseholdMemberRoleChangedEvent,
+  HouseholdOwnershipTransferredEvent,
+  MembershipEndCause,
+} from '../events/household.events';
 import {
   assertHouseholdExists,
   lockExistingHousehold,
@@ -177,13 +184,40 @@ interface ScopedMemberDenials {
 
 /**
  * A membership just removed, and the caller's post-commit homework: the
- * removed member's ability cache to evict, and the invites revoked and game
- * shares ended with it to announce (#747, #782, #810).
+ * removed member's ability cache to evict, the invites revoked with it to
+ * announce, the membership's end to publish through
+ * {@link HouseholdMemberService.emitMemberRemoved} (#245), and the game shares
+ * ended with it to announce (#747, #782, #810).
  */
 export interface RemovedMembership {
   readonly endedShares: readonly GameShare[];
   readonly removed: HouseholdMemberWithRelations;
   readonly revoked: readonly InviteDomainEvent[];
+
+  /**
+   * The member's household role by name as the household lock found it, or
+   * null for a member with no role: the role the member-removed domain event
+   * records (#245). `removed.role` is the read before the lock.
+   */
+  readonly role: string | null;
+}
+
+/**
+ * The ids that name one membership: all a membership change's webhook carries
+ * ({@link householdWebhook}), so its role, origin and cause stay in the audit
+ * entry (#245).
+ */
+interface MembershipIds {
+  readonly householdId: string;
+  readonly memberId: string;
+  readonly userId: string;
+}
+
+/** A member's household role by name, or null for a member with no role (#245). */
+function householdRoleName(member: {
+  readonly role: { readonly role: { readonly name: string } } | null;
+}): string | null {
+  return member.role?.role.name ?? null;
 }
 
 @Injectable()
@@ -194,7 +228,7 @@ export class HouseholdMemberService {
     private readonly db: DatabaseService,
     private readonly abilityService: AbilityService,
     private readonly permissions: PermissionsService,
-    private readonly events: EventEmitter2,
+    private readonly publisher: HouseholdEventPublisher,
     private readonly quotas: QuotaService,
     private readonly scopeComposer: ScopeComposer,
     private readonly invites: InviteService,
@@ -313,13 +347,16 @@ export class HouseholdMemberService {
    * relation is optional on the model, so a role-less member row gets a role
    * created rather than an update miss. Fetch, guards, write, and re-read run
    * in one transaction; the target's ability cache is evicted after commit so
-   * the new role's grants resolve on their next request.
+   * the new role's grants resolve on their next request. Then the change is
+   * published (#245), from the role read under the lock to the role the
+   * write left, and only when they differ.
    */
   async updateMemberRole(
     householdId: string,
     memberId: string,
     updateMemberRoleDto: UpdateMemberRoleDto,
   ): Promise<HouseholdMemberWithRelations> {
+    const initiatedAt = new Date();
     const actorUserId = this.abilityService.getActingUserId();
     await assertHouseholdExists(this.db, householdId);
 
@@ -331,7 +368,7 @@ export class HouseholdMemberService {
     } satisfies Prisma.HouseholdMemberWhereInput;
 
     try {
-      const updated = await this.db.$transaction(async (tx) => {
+      const { lockedRole, updated } = await this.db.$transaction(async (tx) => {
         const member = await this.findScopedMemberOrThrow(
           tx,
           scopedWhere,
@@ -420,12 +457,18 @@ export class HouseholdMemberService {
           update: { roleId },
         });
 
-        return tx.householdMember.findUniqueOrThrow({ where: { id: member.id }, select: MEMBER_SELECT });
+        return {
+          // The role the change replaces is the one read under the lock, for
+          // the reasons above: the read before it can be stale (#245).
+          lockedRole: householdRoleName(locked),
+          updated: await tx.householdMember.findUniqueOrThrow({ where: { id: member.id }, select: MEMBER_SELECT }),
+        };
       });
 
       // The target's grants changed — evict their cached ability graph so the
       // new role takes effect immediately rather than after the cache TTL.
       await this.permissions.invalidateUser(updated.userId);
+      this.emitMemberRoleChanged(lockedRole, updated, initiatedAt);
 
       return updated;
     } catch (error) {
@@ -660,8 +703,9 @@ export class HouseholdMemberService {
    *   window would be invisible.
    * - `QuotaService.emitSoftOverages(result.softOverages)` — see
    *   {@link AddMemberResult}.
-   * - Domain events / audit (#245) — the household aggregate emits nothing for
-   *   member-added yet.
+   * - {@link emitMemberAdmitted} (#245), and only when
+   *   {@link AddMemberResult.admitted} is true: a membership returned rather
+   *   than written admitted nobody.
    *
    * ## Idempotency
    *
@@ -962,6 +1006,7 @@ export class HouseholdMemberService {
     } satisfies Prisma.HouseholdMemberWhereInput;
 
     return this.deleteMembership(
+      MembershipEndCause.Removed,
       scopedWhere,
       { id: memberId, householdId },
       {
@@ -997,6 +1042,7 @@ export class HouseholdMemberService {
     } satisfies Prisma.HouseholdMemberWhereInput;
 
     return this.deleteMembership(
+      MembershipEndCause.Left,
       scopedWhere,
       { householdId, userId: actorUserId },
       {
@@ -1021,8 +1067,10 @@ export class HouseholdMemberService {
    * removal's, and the last owner with 400. Their invites are revoked as
    * leaving revokes them (#747).
    *
-   * The caller evicts the removed user's ability cache and announces the
-   * revoked invites after its commit, as {@link deleteMembership} does.
+   * After its commit the caller evicts the removed user's ability cache,
+   * announces the revoked invites, publishes the membership's end through
+   * {@link emitMemberRemoved} with its cause (#245), and announces the ended
+   * game shares, as {@link deleteMembership} does.
    */
   async removeUserWithin(
     tx: Prisma.TransactionClient,
@@ -1062,27 +1110,29 @@ export class HouseholdMemberService {
    * the target under the caller's scoped `where`, enforce the last-owner
    * invariant, then delete the membership and its dependents in one
    * transaction ({@link deleteMembershipWithin}), evicting the removed user's
-   * ability cache after commit, then announcing the invites it revoked and the
-   * game shares it ended (#810).
+   * ability cache after commit, then announcing the invites it revoked, the
+   * membership's end with `cause` (#245) and the game shares it ended (#810).
    */
   private async deleteMembership(
+    cause: MembershipEndCause,
     scopedWhere: Prisma.HouseholdMemberWhereInput & { householdId: string },
     unscopedWhere: Prisma.HouseholdMemberWhereInput,
     denials: ScopedMemberDenials,
   ): Promise<HouseholdMemberWithRelations> {
     try {
       const initiatedAt = new Date();
-      const { removed, revoked, endedShares } = await this.db.$transaction((tx) =>
+      const membership = await this.db.$transaction((tx) =>
         this.deleteMembershipWithin(tx, scopedWhere, unscopedWhere, denials),
       );
 
       // The household just left this user's ability surface — evict their
       // cached graph so stale Household* abilities don't linger for the TTL.
-      await this.permissions.invalidateUser(removed.userId);
-      this.invites.emit(revoked);
-      this.emitGameSharesEnded(endedShares, initiatedAt);
+      await this.permissions.invalidateUser(membership.removed.userId);
+      this.invites.emit(membership.revoked);
+      this.emitMemberRemoved(membership, cause, initiatedAt);
+      this.emitGameSharesEnded(membership.endedShares, initiatedAt);
 
-      return removed;
+      return membership.removed;
     } catch (error) {
       throw this.rethrowMutationFailure(error, t('common.forbidden.delete'), {
         ...unscopedWhere,
@@ -1111,8 +1161,10 @@ export class HouseholdMemberService {
    * Leaving and being removed also end the member's game shares into the
    * household (#810): the shares of the games they created, which they
    * shared on the standing the membership gave them. Their shares into other
-   * households stay. The revoked invites and the ended shares are handed back
-   * for the caller to announce after its commit, the invites first.
+   * households stay. The revoked invites, the ended shares and the member's
+   * role as the lock found it are handed back for the caller to announce
+   * after its commit: the invites, then the membership's end (#245), then the
+   * shares.
    */
   private async deleteMembershipWithin(
     tx: Prisma.TransactionClient,
@@ -1162,13 +1214,20 @@ export class HouseholdMemberService {
     // (#168), matches nothing once the role row is deleted. The lock keeps
     // the answer standing through the deletes, since every role transition,
     // and every member leaving or being removed, in this household takes it too.
+    //
+    // It reads the member's role too, the one the member-removed domain event
+    // records (#245): a role change that committed while this waited for the
+    // lock is in it, where `member.role`, read before the lock, would record
+    // a role the member no longer held.
     const reachable = await tx.householdMember.findFirst({
       where: { ...scopedWhere, id: member.id },
-      select: { id: true },
+      select: { id: true, role: { select: { role: { select: { name: true } } } } },
     });
 
     if (!reachable) {
-      await denials.onHidden();
+      // `onHidden` always throws; returning it, rather than only awaiting
+      // it, is what lets the compiler know `reachable` is set below.
+      return denials.onHidden();
     }
 
     if (ownerMemberIds.includes(member.id) && ownerMemberIds.length <= 1) {
@@ -1197,7 +1256,7 @@ export class HouseholdMemberService {
       member.userId,
     );
 
-    return { removed: member, revoked: events, endedShares };
+    return { removed: member, role: householdRoleName(reachable), revoked: events, endedShares };
   }
 
   /**
@@ -1231,21 +1290,58 @@ export class HouseholdMemberService {
   }
 
   /**
-   * Announces the game shares a departure ended, one event each: a member
-   * leaving, being removed or being banned (#782). The departure is committed
-   * by then, so a listener's throw is logged rather than answered as a 500,
-   * for the reason `emitOwnershipTransferred` gives.
+   * Publishes a membership an admission wrote, after the admission commits
+   * (#245), with the role it gives and the `origin` that says how the member
+   * came to belong. The caller calls it only when the admission wrote the row
+   * ({@link AddMemberResult.admitted}), and every admission path calls it: the
+   * invite accept, and the join approval of #231. Its webhook carries the
+   * membership's ids only, so the role and the origin stay in the audit entry.
+   */
+  emitMemberAdmitted(
+    member: HouseholdMemberWithRelations,
+    origin: AdmissibleMembershipOrigin,
+    initiatedAt: Date,
+  ): void {
+    const membership: MembershipIds = { householdId: member.householdId, memberId: member.id, userId: member.userId };
+
+    this.publisher.publish(
+      new HouseholdMemberAdmittedEvent({ ...membership, role: householdRoleName(member), origin }, initiatedAt),
+      householdWebhook(WebhookEventType.HouseholdMemberAdmitted, membership),
+    );
+  }
+
+  /**
+   * Publishes the end of a membership, after the departure commits (#245): a
+   * member leaving, being removed from the household or being banned (#782),
+   * with `cause` saying which. It records the role read under the household
+   * lock ({@link RemovedMembership.role}). Its webhook carries the
+   * membership's ids and no cause, so a membership a ban ended reads to a
+   * subscriber as any other.
+   */
+  emitMemberRemoved(membership: RemovedMembership, cause: MembershipEndCause, initiatedAt: Date): void {
+    const ids: MembershipIds = {
+      householdId: membership.removed.householdId,
+      memberId: membership.removed.id,
+      userId: membership.removed.userId,
+    };
+
+    this.publisher.publish(
+      new HouseholdMemberRemovedEvent({ ...ids, role: membership.role }, cause, initiatedAt),
+      householdWebhook(WebhookEventType.HouseholdMemberRemoved, ids),
+    );
+  }
+
+  /**
+   * Announces the game shares a departure ended, one event each, after the
+   * departure commits: a member leaving, being removed from the household or
+   * being banned (#782). Each share is published on its own through
+   * {@link HouseholdEventPublisher}, so a listener that throws for one share
+   * is logged, for the reason the publisher gives, and the others are still
+   * announced.
    */
   emitGameSharesEnded(shares: readonly GameShare[], initiatedAt: Date): void {
     for (const share of shares) {
-      try {
-        this.events.emit(
-          HouseholdGameShareEndedEvent.eventName,
-          new HouseholdGameShareEndedEvent(gameShareSnapshot(share), initiatedAt),
-        );
-      } catch (error) {
-        this.logger.error('Departure committed but a game share emission failed', { error, shareId: share.id });
-      }
+      this.publisher.publish(new HouseholdGameShareEndedEvent(gameShareSnapshot(share), initiatedAt));
     }
   }
 
@@ -1323,79 +1419,58 @@ export class HouseholdMemberService {
   }
 
   /**
-   * Fans the completed transfer out to the two emit-driven subsystems: the
-   * `MutationEvent` (audit row, via `AuditPersistenceListener`'s `onAny`) and
-   * the versioned webhook wire name. Two separate emits from one call site,
-   * mirroring the game-import processors.
+   * Announces the completed transfer through {@link HouseholdEventPublisher},
+   * after commit: the `MutationEvent`, which the audit persistence listener
+   * records as an audit entry, then the versioned webhook event type. The
+   * publisher logs a listener's throw rather than answering a 500 for the
+   * committed transfer, which the client would retry into a 400 "already an
+   * owner" (#248).
    *
-   * Called AFTER commit — a webhook or audit failure must never roll back the
-   * transfer, and a delivery describing a transaction that later aborted would
-   * be worse than a missing one.
-   *
-   * No `occurrenceId`: the envelope wants an id that is stable across re-emits
-   * of the SAME occurrence, and nothing available here qualifies. The audit row
-   * id does not exist yet (the listener writes it after this returns), and every
-   * id that does exist — the household, either role row — is stable across
-   * *different* transfers, so using one would make a second, legitimate
-   * transfer dedup against the first and silently drop its delivery. Absent an
-   * occurrenceId the dispatcher assigns a random delivery id (no dedup), which
-   * the contract explicitly allows.
+   * The webhook carries the owners' ids, never their identity, and no
+   * `occurrenceId`, for the reasons {@link householdWebhook} gives.
    */
   private emitOwnershipTransferred(
     before: HouseholdOwnershipSnapshot,
     after: HouseholdOwnershipSnapshot,
     initiatedAt: Date,
   ): void {
-    try {
-      this.emitTransferEvents(before, after, initiatedAt);
-    } catch (error) {
-      // The transfer is COMMITTED and both ability caches are already evicted.
-      // `EventEmitter2` is configured without `ignoreErrors`, so a synchronous
-      // listener that throws propagates out of `emit()` — and this call sits
-      // inside the mutation's try block, so it would reach
-      // `rethrowMutationFailure`, be classified as unexpected, and surface as a
-      // 500 for an operation that succeeded. The client would then retry into a
-      // 400 "already an owner".
-      //
-      // Logged rather than swallowed: a missing audit row is a real problem,
-      // just not one the caller can act on or retry away. Making audit writes
-      // durable rather than best-effort is #245's concern.
-      this.logger.error('Ownership transfer committed but emission failed', {
-        error,
+    this.publisher.publish(
+      new HouseholdOwnershipTransferredEvent(before, after, initiatedAt),
+      householdWebhook(WebhookEventType.HouseholdOwnershipTransferred, {
         householdId: after.householdId,
         previousOwnerMemberId: before.ownerMemberId,
+        previousOwnerUserId: before.ownerUserId,
         newOwnerMemberId: after.ownerMemberId,
-      });
-    }
+        newOwnerUserId: after.ownerUserId,
+      }),
+    );
   }
 
-  private emitTransferEvents(
-    before: HouseholdOwnershipSnapshot,
-    after: HouseholdOwnershipSnapshot,
+  /**
+   * Publishes a member's role change, after commit (#245): from the role read
+   * under the household lock to the role the write left. A change to the role
+   * the member already held changes nothing, so it publishes nothing (#728).
+   */
+  private emitMemberRoleChanged(
+    lockedRole: string | null,
+    updated: HouseholdMemberWithRelations,
     initiatedAt: Date,
   ): void {
-    this.events.emit(
-      HouseholdOwnershipTransferredEvent.eventName,
-      new HouseholdOwnershipTransferredEvent(before, after, initiatedAt),
-    );
+    const role = householdRoleName(updated);
 
-    this.events.emit(
-      WebhookEventType.HouseholdOwnershipTransferred,
-      webhookEnvelope({
-        subjectId: after.householdId,
-        householdId: after.householdId,
-        // Ids only. `data` is copied verbatim to a subscriber-controlled URL, so
-        // usernames, display names, avatars, and emails stay out of it — a read
-        // grant on the household is not consent to ship member identity to a
-        // third party.
-        data: {
-          householdId: after.householdId,
-          previousOwnerMemberId: before.ownerMemberId,
-          previousOwnerUserId: before.ownerUserId,
-          newOwnerMemberId: after.ownerMemberId,
-          newOwnerUserId: after.ownerUserId,
-        },
-      }),
+    if (role === lockedRole) {
+      return;
+    }
+
+    const membership: MembershipIds = {
+      householdId: updated.householdId,
+      memberId: updated.id,
+      userId: updated.userId,
+    };
+
+    this.publisher.publish(
+      new HouseholdMemberRoleChangedEvent({ ...membership, role: lockedRole }, { ...membership, role }, initiatedAt),
+      householdWebhook(WebhookEventType.HouseholdMemberRoleChanged, membership),
     );
   }
 

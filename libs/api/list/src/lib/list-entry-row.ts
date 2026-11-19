@@ -15,8 +15,9 @@ const ENTRY_GAME_SELECT = {
  * What a list entry carries to the client: its own columns and what it names,
  * so a client can show a list without fetching each game (#1241). An entry
  * names a game or a platform game, so exactly one of `game` and `platformGame`
- * is set, and a platform game brings its platform and its game. Each field is
- * named, so no column ships by default (#460).
+ * is set, and a platform game brings its overrides of image and content type
+ * (#1391), its platform and its game. Each field is named, so no column ships
+ * by default (#460).
  *
  * What an entry names is read with it, under no ceiling of its own, as a
  * collection row's platform game is: whoever may read the list sees what its
@@ -39,6 +40,7 @@ export const LIST_ENTRY_SELECT = {
       id: true,
       image: true,
       thumbnail: true,
+      contentType: true,
       platform: { select: { id: true, name: true, slug: true, platformType: true } },
       game: { select: ENTRY_GAME_SELECT },
     },

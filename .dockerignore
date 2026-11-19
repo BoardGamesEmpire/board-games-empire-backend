@@ -53,6 +53,8 @@ libpeerconnection.log
 .github
 docs
 **/*.md
+# The standard privacy policy is a build input: the api bundle ships it (#934).
+!libs/common/i18n-core/src/lib/privacy-policy/*.md
 Dockerfile
 .dockerignore
 compose.yaml

@@ -5,6 +5,7 @@ import {
   MemberInvitePolicy,
   MemberSharePolicy,
   Prisma,
+  Reach,
   ResourceType,
   SystemRole,
 } from '@bge/database';
@@ -19,19 +20,45 @@ import {
   createMockDatabaseService,
   createTestingModuleWithDb,
   paginationQuery,
+  rawQueryText,
   unwrapTransaction,
 } from '@bge/testing';
+import { WebhookEventType } from '@bge/webhooks';
 import {
   BadRequestException,
   ForbiddenException,
   InternalServerErrorException,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Http, PrismaError } from '@status/codes';
+import { HouseholdEvents } from './constants/household-events.constant';
+import { HouseholdEventPublisher } from './events/household-event.publisher';
+import {
+  HouseholdCreatedEvent,
+  HouseholdDeletedEvent,
+  HouseholdRestoredEvent,
+  HouseholdUpdatedEvent,
+} from './events/household.events';
 import { HouseholdService } from './household.service';
 import { MEMBER_SELECT } from './read-shapes';
 
 const COND = { id: 'sentinel-condition' };
+
+/** A household as an edit reads it under the lock: its own columns and its settings (#245). */
+const STORED = {
+  id: 'hh-1',
+  name: 'Home',
+  description: 'Games on Fridays',
+  image: null,
+  reach: Reach.Private,
+  languageTagId: 'tag-en',
+  settings: { memberInvitePolicy: MemberInvitePolicy.Off, memberSharePolicy: MemberSharePolicy.Direct },
+};
+
+/** The household row lock a role transition takes, which an edit takes too (#239, #245). */
+const isRoleTransitionLockSql = (value: unknown): boolean => /FOR NO KEY UPDATE/.test(rawQueryText(value));
 
 describe('HouseholdService', () => {
   let service: HouseholdService;
@@ -39,6 +66,7 @@ describe('HouseholdService', () => {
   let abilityService: jest.Mocked<Pick<AbilityService, 'getCurrentResourceConditions' | 'getActingUserId'>>;
   let permissions: jest.Mocked<Pick<PermissionsService, 'invalidateUser' | 'invalidateUsers'>>;
   let invites: jest.Mocked<Pick<InviteService, 'revokeOutstandingWithin' | 'emit'>>;
+  let events: jest.Mocked<Pick<EventEmitter2, 'emit'>>;
   let compose: jest.SpyInstance;
 
   beforeEach(async () => {
@@ -54,6 +82,7 @@ describe('HouseholdService', () => {
       revokeOutstandingWithin: jest.fn().mockResolvedValue({ count: 0, events: [] }),
       emit: jest.fn(),
     };
+    events = { emit: jest.fn().mockReturnValue(true) };
 
     const ctx = await createTestingModuleWithDb({
       providers: [
@@ -62,6 +91,10 @@ describe('HouseholdService', () => {
         // double here would make every where-clause assertion below a test of
         // the double rather than of the merge the reads actually depend on.
         ScopeComposer,
+        // The real publisher over a mocked bus, so each `events.emit`
+        // assertion below is what the audit and webhook listeners receive.
+        HouseholdEventPublisher,
+        { provide: EventEmitter2, useValue: events },
         { provide: AbilityService, useValue: abilityService },
         { provide: PermissionsService, useValue: permissions },
         { provide: InviteService, useValue: invites },
@@ -74,6 +107,42 @@ describe('HouseholdService', () => {
   });
 
   afterEach(() => jest.clearAllMocks());
+
+  /** The names published on the bus, in order. */
+  const emittedNames = () => events.emit.mock.calls.map(([name]) => name);
+
+  /** What was published under `name`. */
+  const emittedUnder = (name: string): unknown => events.emit.mock.calls.find(([emitted]) => emitted === name)?.[1];
+
+  /** Notes each name published on the bus in `order`. */
+  const recordEmits = (order: string[]) =>
+    events.emit.mockImplementation((name) => {
+      order.push(String(name));
+
+      return true;
+    });
+
+  /** Runs a callback transaction on `db`, noting in `order` when it commits. */
+  const commitInto = (order: string[]) =>
+    db.$transaction.mockImplementation((async (callback: (tx: MockDatabaseService) => Promise<unknown>) => {
+      const result = await callback(db);
+      order.push('commit');
+
+      return result;
+    }) as never);
+
+  /**
+   * An edit's transaction, run on `db` (#245): the scoped count admits the
+   * actor, the lock finds the household live, {@link STORED} is the state read
+   * under it, and the update leaves `edited`.
+   */
+  const arrangeEdit = (edited: object = STORED) => {
+    unwrapTransaction(db);
+    db.household.count.mockResolvedValue(1);
+    db.$queryRaw.mockResolvedValue([{ id: 'hh-1' }] as never);
+    db.household.findUniqueOrThrow.mockResolvedValue(STORED as never);
+    db.household.update.mockResolvedValue(edited as never);
+  };
 
   it('getHouseholdById → read', async () => {
     db.household.findUnique.mockResolvedValue({ id: 'hh-1', members: [] } as unknown as HouseholdWithMembers);
@@ -346,6 +415,8 @@ describe('HouseholdService', () => {
 
       await expect(service.create({ name: 'Home', clientRequestId: 'key-1' })).resolves.toBe(original);
       expect(permissions.invalidateUser).toHaveBeenCalledWith('user-1');
+      // The concurrent request created it and announces it (#245).
+      expect(events.emit).not.toHaveBeenCalled();
     });
 
     it('returns a soft-deleted original as-is (deletedAt visible for client reconciliation)', async () => {
@@ -385,9 +456,67 @@ describe('HouseholdService', () => {
     });
   });
 
+  /**
+   * #245. A create is the household's first audit entry. It has no webhook:
+   * no subscription can name a household before it exists.
+   */
+  describe('create, its domain event (#245)', () => {
+    const created = {
+      id: 'hh-1',
+      name: 'Home',
+      description: null,
+      image: null,
+      reach: Reach.Private,
+      languageTagId: null,
+      createdById: 'user-1',
+      clientRequestId: 'key-1',
+      deletedAt: null,
+      createdAt: new Date('2026-11-19T12:00:00Z'),
+      updatedAt: new Date('2026-11-19T12:00:00Z'),
+    } satisfies Household;
+
+    it('emits household.created on a fresh create (#245)', async () => {
+      db.household.create.mockResolvedValue(created);
+      const order: string[] = [];
+      permissions.invalidateUser.mockImplementation(async () => {
+        order.push('evict');
+      });
+      recordEmits(order);
+
+      await service.create({ name: 'Home', clientRequestId: 'key-1' });
+
+      expect(events.emit).toHaveBeenCalledTimes(1);
+      const event = emittedUnder(HouseholdEvents.Created) as HouseholdCreatedEvent;
+      expect(event).toBeInstanceOf(HouseholdCreatedEvent);
+      expect(event).toMatchObject({ subject: ResourceType.Household, subjectId: 'hh-1', action: 'create' });
+      // The household's own columns, and nothing of the request: not its key,
+      // not who created it, which the audit entry records as its actor.
+      expect(event.after).toEqual({
+        id: 'hh-1',
+        name: 'Home',
+        description: null,
+        image: null,
+        reach: Reach.Private,
+        languageTagId: null,
+      });
+      // After the owner's ability graph is evicted, so a listener acting on
+      // the domain event finds the new owner's grants.
+      expect(order).toEqual(['evict', HouseholdEvents.Created]);
+    });
+
+    it('emits nothing on a replayed create (#210)', async () => {
+      // The original request created it, and announced it then.
+      db.household.findUnique.mockResolvedValue(created);
+
+      await expect(service.create({ name: 'Home', clientRequestId: 'key-1' })).resolves.toBe(created);
+
+      expect(events.emit).not.toHaveBeenCalled();
+      expect(permissions.invalidateUser).toHaveBeenCalledWith('user-1');
+    });
+  });
+
   it('updateHousehold → update', async () => {
-    db.household.count.mockResolvedValue(1);
-    db.household.update.mockResolvedValue({ id: 'hh-1' } as Household);
+    arrangeEdit();
 
     await service.updateHousehold('hh-1', { name: 'New' } as never);
 
@@ -402,10 +531,7 @@ describe('HouseholdService', () => {
   });
 
   describe('updateHousehold, its settings (#166)', () => {
-    beforeEach(() => {
-      db.household.count.mockResolvedValue(1);
-      db.household.update.mockResolvedValue({ id: 'hh-1' } as Household);
-    });
+    beforeEach(() => arrangeEdit());
 
     const written = () => (db.household.update.mock.calls[0] as [{ data: Record<string, unknown> }])[0].data;
 
@@ -466,6 +592,215 @@ describe('HouseholdService', () => {
     });
   });
 
+  /**
+   * #245. An edit records the columns whose values it changed, before and
+   * after, read under the household's lock, and its webhook names them. A
+   * patch that changes nothing records nothing (#728).
+   */
+  describe('updateHousehold, its domain event (#245)', () => {
+    beforeEach(() => arrangeEdit());
+
+    afterEach(() => jest.restoreAllMocks());
+
+    /** The scoped count does not admit the actor; the refusal's probe finds the household. */
+    const refuseEdit = () => {
+      db.household.count.mockResolvedValueOnce(0).mockResolvedValueOnce(1);
+    };
+
+    it('emits only the changed columns, with the household.household.updated.v1 webhook', async () => {
+      db.household.update.mockResolvedValue({ ...STORED, name: 'Cabin' } as never);
+
+      // The description is re-sent as stored: the diff, not the patch, decides.
+      await service.updateHousehold('hh-1', { name: 'Cabin', description: STORED.description });
+
+      expect(emittedNames()).toEqual([HouseholdEvents.Updated, WebhookEventType.HouseholdUpdated]);
+
+      const event = emittedUnder(HouseholdEvents.Updated) as HouseholdUpdatedEvent;
+      expect(event).toBeInstanceOf(HouseholdUpdatedEvent);
+      expect(event).toMatchObject({ subject: ResourceType.Household, subjectId: 'hh-1', action: 'update' });
+      expect(event.before).toEqual({ id: 'hh-1', name: 'Home' });
+      expect(event.after).toEqual({ id: 'hh-1', name: 'Cabin' });
+
+      // The names of what changed, never the values: `data` goes to a
+      // subscriber's URL. No occurrenceId, so each edit is its own delivery.
+      expect(emittedUnder(WebhookEventType.HouseholdUpdated)).toEqual({
+        subjectId: 'hh-1',
+        householdId: 'hh-1',
+        data: { householdId: 'hh-1', changedFields: ['name'] },
+      });
+    });
+
+    it('records a changed setting under its own name, as it does a column (#166)', async () => {
+      db.household.update.mockResolvedValue({
+        ...STORED,
+        settings: { ...STORED.settings, memberInvitePolicy: MemberInvitePolicy.Direct },
+      } as never);
+
+      await service.updateHousehold('hh-1', { settings: { memberInvitePolicy: MemberInvitePolicy.Direct } });
+
+      const event = emittedUnder(HouseholdEvents.Updated) as HouseholdUpdatedEvent;
+      expect(event.before).toEqual({ id: 'hh-1', memberInvitePolicy: MemberInvitePolicy.Off });
+      expect(event.after).toEqual({ id: 'hh-1', memberInvitePolicy: MemberInvitePolicy.Direct });
+      expect(emittedUnder(WebhookEventType.HouseholdUpdated)).toMatchObject({
+        data: { householdId: 'hh-1', changedFields: ['memberInvitePolicy'] },
+      });
+    });
+
+    it('records both policies as changed when the household had no settings row and the patch names one (#245)', async () => {
+      db.household.findUniqueOrThrow.mockResolvedValue({ ...STORED, settings: null } as never);
+      db.household.update.mockResolvedValue({
+        ...STORED,
+        settings: { memberInvitePolicy: MemberInvitePolicy.Direct, memberSharePolicy: MemberSharePolicy.Direct },
+      } as never);
+
+      await service.updateHousehold('hh-1', { settings: { memberInvitePolicy: MemberInvitePolicy.Direct } });
+
+      // The upsert created the row with both, so both are new. No row meant
+      // no policy, which no invite or share grant matches, so the share
+      // policy's default is a change in what members may do, not a restatement
+      // of what they already could.
+      const event = emittedUnder(HouseholdEvents.Updated) as HouseholdUpdatedEvent;
+      expect(event.before).toEqual({ id: 'hh-1', memberInvitePolicy: null, memberSharePolicy: null });
+      expect(event.after).toEqual({
+        id: 'hh-1',
+        memberInvitePolicy: MemberInvitePolicy.Direct,
+        memberSharePolicy: MemberSharePolicy.Direct,
+      });
+      expect(emittedUnder(WebhookEventType.HouseholdUpdated)).toMatchObject({
+        data: { householdId: 'hh-1', changedFields: ['memberInvitePolicy', 'memberSharePolicy'] },
+      });
+    });
+
+    it('emits nothing when the patch re-sends stored values (#728)', async () => {
+      await service.updateHousehold('hh-1', {
+        name: STORED.name,
+        settings: { memberInvitePolicy: STORED.settings.memberInvitePolicy },
+      });
+
+      expect(db.household.update).toHaveBeenCalledTimes(1);
+      expect(events.emit).not.toHaveBeenCalled();
+    });
+
+    it('emits nothing on a 403', async () => {
+      refuseEdit();
+
+      await expect(service.updateHousehold('hh-1', { name: 'Cabin' })).rejects.toMatchObject({
+        status: Http.Forbidden,
+        response: expect.objectContaining({ key: 'common.forbidden.update' }),
+      });
+
+      expect(events.emit).not.toHaveBeenCalled();
+    });
+
+    // The refusal is decided by the scoped count, before the lock, so a caller
+    // who may not edit the household never holds its row. It is an outcome the
+    // route is specified to produce, not a failure to log.
+    it('refuses a caller the scoped count does not admit before taking the lock, and logs no error', async () => {
+      const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      refuseEdit();
+
+      await expect(service.updateHousehold('hh-1', { name: 'Cabin' })).rejects.toThrow(ForbiddenException);
+
+      expect(db.household.count).toHaveBeenNthCalledWith(1, { where: { id: 'hh-1', deletedAt: null, AND: [COND] } });
+      expect(db.$queryRaw).not.toHaveBeenCalled();
+      expect(db.household.update).not.toHaveBeenCalled();
+      expect(logged).not.toHaveBeenCalled();
+    });
+
+    // The refusal's existence probe runs on the transaction's own connection.
+    // A second one from the pool, taken while the transaction holds one, lets
+    // concurrent refused edits exhaust the pool and stall the API (#245).
+    it('probes the existence of a household it refuses to edit on the transaction, not a second connection', async () => {
+      const tx = createMockDatabaseService();
+      db.$transaction.mockImplementation((async (callback: (client: MockDatabaseService) => Promise<unknown>) =>
+        callback(tx)) as never);
+      tx.household.count.mockResolvedValueOnce(0).mockResolvedValueOnce(1);
+
+      await expect(service.updateHousehold('hh-1', { name: 'Cabin' })).rejects.toThrow(ForbiddenException);
+
+      expect(tx.household.count).toHaveBeenCalledTimes(2);
+      expect(tx.household.count).toHaveBeenNthCalledWith(1, { where: { id: 'hh-1', deletedAt: null, AND: [COND] } });
+      expect(tx.household.count).toHaveBeenNthCalledWith(2, { where: { id: 'hh-1', deletedAt: null } });
+      expect(db.household.count).not.toHaveBeenCalled();
+    });
+
+    // No existence probe runs in front of the transaction: the scoped count
+    // and the refusal's probe inside it already tell an unknown household from
+    // a forbidden one, and a probe would cost every edit a round trip (#245).
+    it('answers 404 for an unknown household from inside the transaction, taking no lock', async () => {
+      db.household.count.mockResolvedValue(0);
+
+      await expect(service.updateHousehold('hh-1', { name: 'Cabin' })).rejects.toMatchObject({
+        status: Http.NotFound,
+        response: expect.objectContaining({ key: 'errors.household.not_found' }),
+      });
+
+      expect(db.household.count.mock.calls).toEqual([
+        [{ where: { id: 'hh-1', deletedAt: null, AND: [COND] } }],
+        [{ where: { id: 'hh-1', deletedAt: null } }],
+      ]);
+      expect(db.$queryRaw).not.toHaveBeenCalled();
+      expect(db.household.update).not.toHaveBeenCalled();
+    });
+
+    // The lock is the liveness check (#386): a delete that commits after the
+    // scoped count leaves nothing to edit, which every route answers 404.
+    it('answers 404, logging no error and emitting nothing, when a delete commits before the lock', async () => {
+      const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      db.$queryRaw.mockResolvedValue([] as never);
+
+      await expect(service.updateHousehold('hh-1', { name: 'Cabin' })).rejects.toMatchObject({
+        status: Http.NotFound,
+        response: expect.objectContaining({ key: 'errors.household.not_found' }),
+      });
+
+      expect(db.household.update).not.toHaveBeenCalled();
+      expect(logged).not.toHaveBeenCalled();
+      expect(events.emit).not.toHaveBeenCalled();
+    });
+
+    // The before-state is read under the lock, so it is the state the write
+    // replaces even when another write to the household went first.
+    it('counts, locks, reads and writes inside one transaction, in that order, and publishes after commit', async () => {
+      const tx = createMockDatabaseService();
+      const order: string[] = [];
+      db.$transaction.mockImplementation((async (callback: (client: MockDatabaseService) => Promise<unknown>) => {
+        const result = await callback(tx);
+        order.push('commit');
+
+        return result;
+      }) as never);
+      tx.household.count.mockImplementation((async () => (order.push('count'), 1)) as never);
+      tx.$queryRaw.mockImplementation((async () => (order.push('lock'), [{ id: 'hh-1' }])) as never);
+      tx.household.findUniqueOrThrow.mockImplementation((async () => (order.push('read'), STORED)) as never);
+      tx.household.update.mockImplementation(
+        (async () => (order.push('update'), { ...STORED, name: 'Cabin' })) as never,
+      );
+      recordEmits(order);
+
+      await service.updateHousehold('hh-1', { name: 'Cabin' });
+
+      expect(order).toEqual([
+        'count',
+        'lock',
+        'read',
+        'update',
+        'commit',
+        HouseholdEvents.Updated,
+        WebhookEventType.HouseholdUpdated,
+      ]);
+      expect(tx.household.count).toHaveBeenCalledWith({ where: { id: 'hh-1', deletedAt: null, AND: [COND] } });
+      expect(tx.$queryRaw.mock.calls.map(([query]) => isRoleTransitionLockSql(query))).toEqual([true]);
+      expect(tx.household.findUniqueOrThrow).toHaveBeenCalledWith({
+        where: { id: 'hh-1' },
+        include: { settings: { select: { memberInvitePolicy: true, memberSharePolicy: true } } },
+      });
+      // Nothing reads outside the transaction.
+      expect(db.household.count).not.toHaveBeenCalled();
+      expect(db.household.update).not.toHaveBeenCalled();
+    });
+  });
+
   describe('a scoped write that matches nothing (#299)', () => {
     const missed = () =>
       new Prisma.PrismaClientKnownRequestError('no rows', {
@@ -475,17 +810,21 @@ describe('HouseholdService', () => {
 
     beforeEach(() => {
       unwrapTransaction(db);
+      // An edit gets past its lock; its scoped update is what misses.
+      db.$queryRaw.mockResolvedValue([{ id: 'hh-1' }] as never);
+      db.household.findUniqueOrThrow.mockResolvedValue(STORED as never);
       db.household.update.mockRejectedValue(missed());
     });
 
     it.each([
       ['updateHousehold', () => service.updateHousehold('hh-1', { name: 'New' } as never)],
       ['deleteHousehold', () => service.deleteHousehold('hh-1')],
-    ])('%s answers 404 when a delete landed between its probe and its write', async (_name, act) => {
-      // The probe is unlocked. The second of two concurrent deletes passes it,
-      // then its update re-checks `deletedAt: null` against the committed row
-      // and misses: the household is gone, not forbidden.
-      db.household.count.mockResolvedValueOnce(1).mockResolvedValueOnce(0);
+    ])('%s answers 404 when a delete landed before its scoped write', async (_name, act) => {
+      // A delete's probe is unlocked, and an edit has none. The second of two
+      // concurrent deletes passes the probe, then its scoped update re-checks
+      // `deletedAt: null` against the committed row and misses: the household
+      // is gone, not forbidden.
+      db.household.count.mockResolvedValueOnce(1).mockResolvedValue(0);
 
       await expect(act()).rejects.toMatchObject({
         status: Http.NotFound,
@@ -662,6 +1001,11 @@ describe('HouseholdService', () => {
         expect.objectContaining({ data: [grant('user-1'), grant('user-2')] }),
       );
       expect(result.restorableUntil).toBeNull();
+      // The grants were created, so the audit entry still lists them (#245).
+      expect((emittedUnder(HouseholdEvents.Deleted) as HouseholdDeletedEvent).before.restoreWindowUserIds).toEqual([
+        'user-1',
+        'user-2',
+      ]);
     });
 
     it('grants nothing when the deleter is not an owner, so staff moderation is not undoable by owners', async () => {
@@ -694,13 +1038,104 @@ describe('HouseholdService', () => {
 
       await expect(service.deleteHousehold('hh-1')).rejects.toBeInstanceOf(InternalServerErrorException);
       expect(permissions.invalidateUsers).not.toHaveBeenCalled();
+      expect(events.emit).not.toHaveBeenCalled();
+    });
+
+    /**
+     * #245. The delete's audit entry names the household and the owners it
+     * gave a restore window. Its webhook carries the household's id alone.
+     */
+    describe('its domain event (#245)', () => {
+      beforeEach(() => {
+        db.household.update.mockResolvedValue({ id: 'hh-1', name: 'Home' } as Household);
+      });
+
+      const deleted = () => emittedUnder(HouseholdEvents.Deleted) as HouseholdDeletedEvent;
+
+      it('records the owners given a restore window', async () => {
+        const order: string[] = [];
+        commitInto(order);
+        invites.emit.mockImplementation(() => {
+          order.push('invites');
+        });
+        recordEmits(order);
+
+        await service.deleteHousehold('hh-1');
+
+        expect(deleted()).toBeInstanceOf(HouseholdDeletedEvent);
+        expect(deleted()).toMatchObject({ subject: ResourceType.Household, subjectId: 'hh-1', action: 'delete' });
+        expect(deleted().before).toEqual({ id: 'hh-1', name: 'Home', restoreWindowUserIds: ['user-1', 'user-2'] });
+        // Ids only: no name, and no owners.
+        expect(emittedUnder(WebhookEventType.HouseholdDeleted)).toEqual({
+          subjectId: 'hh-1',
+          householdId: 'hh-1',
+          data: { householdId: 'hh-1' },
+        });
+        // After commit, and after the invites the delete revoked.
+        expect(order).toEqual(['commit', 'invites', HouseholdEvents.Deleted, WebhookEventType.HouseholdDeleted]);
+      });
+
+      it('records only the windows this delete opened, not a row an operator already set', async () => {
+        db.userPermission.createManyAndReturn.mockResolvedValue([{ userId: 'user-2' }] as never);
+
+        await service.deleteHousehold('hh-1');
+
+        expect(deleted().before.restoreWindowUserIds).toEqual(['user-2']);
+      });
+
+      it('records no restore window for a staff delete', async () => {
+        abilityService.getActingUserId.mockReturnValue('staff-1');
+
+        await service.deleteHousehold('hh-1');
+
+        expect(deleted().before).toEqual({ id: 'hh-1', name: 'Home', restoreWindowUserIds: [] });
+        expect(emittedNames()).toEqual([HouseholdEvents.Deleted, WebhookEventType.HouseholdDeleted]);
+      });
+
+      it('emits nothing on a 403', async () => {
+        db.household.update.mockRejectedValue(
+          new Prisma.PrismaClientKnownRequestError('no rows', {
+            code: PrismaError.DependentRecordNotFound,
+            clientVersion: 'test',
+          }),
+        );
+
+        await expect(service.deleteHousehold('hh-1')).rejects.toThrow(ForbiddenException);
+
+        expect(events.emit).not.toHaveBeenCalled();
+      });
     });
   });
 
   describe('restoreHousehold (#175)', () => {
+    const DELETED_AT = new Date('2026-11-01T09:00:00Z');
+
+    /** The household's restore window grants, as the restore revokes them. */
+    const windowGrants = {
+      resourceType: ResourceType.Household,
+      resourceId: 'hh-1',
+      permission: { slug: 'update:household:restore' },
+      OR: [{ inverted: null }, { inverted: false }],
+    };
+
+    /**
+     * The same grants, less the ones that lapsed or are of a retired
+     * permission: neither is a restore window, as `restoreWindows` and the
+     * ability loader count them.
+     */
+    const openWindowGrants = {
+      AND: [
+        windowGrants,
+        { permission: { retiredAt: null } },
+        { OR: [{ expiresAt: null }, { expiresAt: { gt: expect.any(Date) } }] },
+      ],
+    };
+
     beforeEach(() => {
       unwrapTransaction(db);
+      db.$queryRaw.mockResolvedValue([{ deleted_at: DELETED_AT }] as never);
       db.household.update.mockResolvedValue({ id: 'hh-1', deletedAt: null } as Household);
+      db.userPermission.findMany.mockResolvedValue([{ userId: 'user-1' }, { userId: 'user-2' }] as never);
       db.userPermission.deleteMany.mockResolvedValue({ count: 2 } as never);
       db.householdMember.findMany.mockResolvedValue([{ userId: 'user-1' }, { userId: 'user-2' }] as never);
     });
@@ -710,6 +1145,119 @@ describe('HouseholdService', () => {
         code: PrismaError.DependentRecordNotFound,
         clientVersion: 'test',
       });
+
+    // A lapsed grant, or one of a retired permission, is no restore window, so
+    // the audit entry does not list it as one, though the revocation still
+    // clears the row.
+    it('lists only the restore windows still open, though it revokes lapsed and retired grants too (#245)', async () => {
+      await service.restoreHousehold('hh-1');
+
+      expect(db.userPermission.findMany).toHaveBeenCalledWith({ where: openWindowGrants, select: { userId: true } });
+      expect(db.userPermission.deleteMany).toHaveBeenCalledWith({ where: windowGrants });
+    });
+
+    // #245. The audit entry records when the household was deleted and the
+    // restore windows the restore ends. The webhook carries the household's
+    // id alone.
+    it('records the restore windows it ends', async () => {
+      await service.restoreHousehold('hh-1');
+
+      expect(emittedNames()).toEqual([HouseholdEvents.Restored, WebhookEventType.HouseholdRestored]);
+
+      const event = emittedUnder(HouseholdEvents.Restored) as HouseholdRestoredEvent;
+      expect(event).toBeInstanceOf(HouseholdRestoredEvent);
+      expect(event).toMatchObject({ subject: ResourceType.Household, subjectId: 'hh-1', action: 'update' });
+      expect(event.before).toEqual({ id: 'hh-1', deletedAt: DELETED_AT, restoreWindowUserIds: ['user-1', 'user-2'] });
+      expect(event.after).toEqual({ id: 'hh-1', deletedAt: null, restoreWindowUserIds: [] });
+
+      expect(emittedUnder(WebhookEventType.HouseholdRestored)).toEqual({
+        subjectId: 'hh-1',
+        householdId: 'hh-1',
+        data: { householdId: 'hh-1' },
+      });
+    });
+
+    // Each is read inside the transaction, before the write that clears it.
+    // Published after commit and the eviction.
+    it('reads the tombstone and the windows before the writes that clear them, and publishes after commit', async () => {
+      const order: string[] = [];
+      commitInto(order);
+      db.$queryRaw.mockImplementation(
+        (async () => (order.push('lock tombstone'), [{ deleted_at: DELETED_AT }])) as never,
+      );
+      db.household.update.mockImplementation(
+        (async () => (order.push('restore'), { id: 'hh-1', deletedAt: null })) as never,
+      );
+      db.userPermission.findMany.mockImplementation(
+        (async () => (order.push('read windows'), [{ userId: 'user-1' }])) as never,
+      );
+      db.userPermission.deleteMany.mockImplementation((async () => (order.push('end windows'), { count: 1 })) as never);
+      permissions.invalidateUsers.mockImplementation(async () => {
+        order.push('evict');
+      });
+      recordEmits(order);
+
+      await service.restoreHousehold('hh-1');
+
+      expect(db.userPermission.findMany).toHaveBeenCalledWith({ where: openWindowGrants, select: { userId: true } });
+      expect(order).toEqual([
+        'lock tombstone',
+        'restore',
+        'read windows',
+        'end windows',
+        'commit',
+        'evict',
+        HouseholdEvents.Restored,
+        WebhookEventType.HouseholdRestored,
+      ]);
+    });
+
+    // #245. Read without the lock, the tombstone could come from an earlier
+    // delete than the one the update clears: a concurrent restore commits,
+    // the household is deleted again, and this restore's update matches the
+    // new tombstone. Locked, the update clears the tombstone the event records.
+    it("reads the tombstone under the household's row lock, matching only a deleted household", async () => {
+      await service.restoreHousehold('hh-1');
+
+      expect(db.$queryRaw).toHaveBeenCalledTimes(1);
+      const sql = rawQueryText(db.$queryRaw.mock.calls[0]?.[0]);
+      expect(sql).toMatch(/FOR NO KEY UPDATE/);
+      expect(sql).toMatch(/deleted_at IS NOT NULL/);
+      expect(db.household.findUnique).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['409 when the household is live and the actor can read it', 1, Http.Conflict, 'errors.household.not_deleted'],
+      ['404 when nothing live is readable', 0, Http.NotFound, 'errors.household.not_found'],
+    ])(
+      'answers %s when the lock finds no tombstone, attempting no write and logging no error',
+      async (_label, readable, status, key) => {
+        const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+        db.$queryRaw.mockResolvedValue([] as never);
+        db.household.count.mockResolvedValue(readable);
+
+        await expect(service.restoreHousehold('hh-1')).rejects.toMatchObject({
+          status,
+          response: expect.objectContaining({ key }),
+        });
+
+        expect(db.household.update).not.toHaveBeenCalled();
+        expect(db.userPermission.deleteMany).not.toHaveBeenCalled();
+        expect(permissions.invalidateUsers).not.toHaveBeenCalled();
+        expect(events.emit).not.toHaveBeenCalled();
+        expect(logged).not.toHaveBeenCalled();
+        logged.mockRestore();
+      },
+    );
+
+    it('emits nothing on a miss', async () => {
+      db.household.update.mockRejectedValue(missed());
+      db.household.count.mockResolvedValue(0);
+
+      await expect(service.restoreHousehold('hh-1')).rejects.toThrow(NotFoundException);
+
+      expect(events.emit).not.toHaveBeenCalled();
+    });
 
     it('clears the tombstone under the update scope, matching only a deleted household', async () => {
       const household = await service.restoreHousehold('hh-1');
@@ -725,14 +1273,7 @@ describe('HouseholdService', () => {
     it('revokes every recovery grant for the household, whoever restores it, and no denial', async () => {
       await service.restoreHousehold('hh-1');
 
-      expect(db.userPermission.deleteMany).toHaveBeenCalledWith({
-        where: {
-          resourceType: ResourceType.Household,
-          resourceId: 'hh-1',
-          permission: { slug: 'update:household:restore' },
-          OR: [{ inverted: null }, { inverted: false }],
-        },
-      });
+      expect(db.userPermission.deleteMany).toHaveBeenCalledWith({ where: windowGrants });
     });
 
     it('evicts every member, whose household grants all come back', async () => {
@@ -775,6 +1316,7 @@ describe('HouseholdService', () => {
         response: expect.objectContaining({ key: 'errors.household.not_deleted' }),
       });
       expect(permissions.invalidateUsers).not.toHaveBeenCalled();
+      expect(events.emit).not.toHaveBeenCalled();
     });
 
     it('rethrows a failure that is not a scoped miss', async () => {

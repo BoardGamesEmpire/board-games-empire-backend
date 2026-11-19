@@ -85,8 +85,8 @@ export interface ImportJobCompletedContext extends ImportJobEventContext {
 
   /**
    * True when the game is an add-on with a base game: linked to one, or
-   * adding the one it needs to the batch (#971). A remake or edition linked
-   * to its original is not.
+   * adding the one it needs to the batch (#971). A game of any other content
+   * type is not an expansion and gets no add-on link (#971, #1391).
    */
   isExpansion: boolean;
 

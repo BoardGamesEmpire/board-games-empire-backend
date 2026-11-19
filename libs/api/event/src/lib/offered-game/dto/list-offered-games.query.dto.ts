@@ -141,7 +141,9 @@ export class ListOfferedGamesQueryDto extends DefaultPaginationQueryDto implemen
   excludeMediums?: GameMedium[];
 
   @ApiPropertyOptional({
-    description: 'Comma-separated content types. Only games of these types are listed.',
+    description:
+      'Comma-separated content types. Only games of these types are listed, read from the offered copy’s platform ' +
+      'game when it has a content type of its own, else from the game.',
     enum: ContentType,
     enumName: 'ContentType',
     isArray: true,
@@ -155,7 +157,9 @@ export class ListOfferedGamesQueryDto extends DefaultPaginationQueryDto implemen
   contentTypes?: ContentType[];
 
   @ApiPropertyOptional({
-    description: 'Comma-separated content types. Games of these types are left out.',
+    description:
+      'Comma-separated content types. Games of these types are left out, read from the offered copy’s platform ' +
+      'game when it has a content type of its own, else from the game.',
     enum: ContentType,
     enumName: 'ContentType',
     isArray: true,

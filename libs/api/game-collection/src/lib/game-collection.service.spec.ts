@@ -1,10 +1,20 @@
 import type { GameCollection, GameRelease, PlatformGame } from '@bge/database';
-import { Action, GameMedium, GameRemovalReason, ListKind, Prisma, Reach, ResourceType } from '@bge/database';
+import {
+  Action,
+  ContentType,
+  GameMedium,
+  GameRemovalReason,
+  ListKind,
+  Prisma,
+  Reach,
+  ResourceType,
+} from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
 import type { MockDatabaseService } from '@bge/testing';
 import { batchTransactionCall, createTestingModuleWithDb, paginationQuery } from '@bge/testing';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { COLLECTION_INCLUDE } from './collection-row';
 import { GameCollectionService } from './game-collection.service';
 
 const dependentRecordNotFound = () =>
@@ -34,14 +44,30 @@ const entry = (overrides: Partial<GameCollection> = {}): GameCollection =>
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
-    // Of the embedded rows, the service reads only the game's id, which keys
-    // the base-game link read (#1070).
-    platformGame: { id: 'pg-1', game: { id: 'g-1' } },
+    // Of the embedded rows, the service reads the platform game's id, which
+    // keys the base-game link read, its platform, which picks the base games
+    // on it, and the content types, which decide each link's isStandalone
+    // (#1070, #1391).
+    platformGame: inView('pg-1', 'g-1'),
   }) as GameCollection;
 
-/** An entry on the game `gameId`, as the collection include returns it (#1070). */
+/**
+ * A platform game as the collection include returns it, of the game `gameId`,
+ * a standalone expansion, on `platformId` with no content type of its own
+ * unless given (#1391).
+ */
+function inView(id: string, gameId: string, platformId = 'plat-1', contentType: ContentType | null = null) {
+  return {
+    id,
+    contentType,
+    platform: { id: platformId },
+    game: { id: gameId, contentType: ContentType.StandaloneExpansion },
+  };
+}
+
+/** An entry on the game `gameId`, a standalone expansion, as the collection include returns it (#1070). */
 const entryOn = (gameId: string, overrides: Partial<GameCollection> = {}): GameCollection =>
-  ({ ...entry(overrides), platformGame: { id: `pg-${gameId}`, game: { id: gameId } } }) as GameCollection;
+  ({ ...entry(overrides), platformGame: inView(`pg-${gameId}`, gameId) }) as GameCollection;
 
 /** The refusal for a collection entry the actor can't see, whatever the reason (#634). */
 const ENTRY_NOT_FOUND = {
@@ -105,6 +131,21 @@ describe('GameCollectionService', () => {
       await service.listOwn(paginationQuery({ limit: 20 }));
 
       expect(compose).toHaveBeenCalledWith(ResourceType.GameCollection, Action.read, { userId: ME });
+    });
+
+    // A platform game's own content type is one of its overrides, so a row
+    // sends it beside its players, play time and images, a value or null
+    // (#1391).
+    it("sends the platform game's own content type beside its other overrides (#1391)", () => {
+      expect(COLLECTION_INCLUDE.platformGame.select).toMatchObject({
+        image: true,
+        thumbnail: true,
+        minPlayers: true,
+        maxPlayers: true,
+        minPlayTime: true,
+        maxPlayTime: true,
+        contentType: true,
+      });
     });
 
     // The tombstone, medium, favourite and date filters are caller input, not
@@ -198,8 +239,9 @@ describe('GameCollectionService', () => {
 
       // The catch-up drain resends a row when the entry changed or a value it
       // embeds did: the platform game, its platform, the game, the game's links
-      // as an expansion, those links' base games, and the release. Written out
-      // rather than built from the code under test, so a dropped arm fails here.
+      // as an expansion, those links' base games and their platform games
+      // (#1391), and the release. Written out rather than built from the code
+      // under test, so a dropped arm fails here.
       const changedSinceShape = {
         OR: [
           { updatedAt: { gte: since } },
@@ -220,6 +262,9 @@ describe('GameCollectionService', () => {
                                 OR: [
                                   { updatedAt: { gte: since } },
                                   { baseGame: { is: { updatedAt: { gte: since } } } },
+                                  // A base game gaining a platform game can add
+                                  // it to a row on that platform (#1391).
+                                  { baseGame: { is: { platformGames: { some: { updatedAt: { gte: since } } } } } },
                                 ],
                               },
                             },
@@ -621,11 +666,21 @@ describe('GameCollectionService', () => {
    * drop a deny-all and name every base game.
    */
   describe('base games on collection rows (#1070)', () => {
-    const LINK = { expansionGameId: 'g-1', baseGameId: 'b-1', isStandalone: true };
+    // The link carries no isStandalone: each row's `true` below comes from its
+    // game's content type, a standalone expansion. Its base game has a
+    // platform game on the rows' platform, so the rows name it (#1391).
+    const LINK = { expansionGameId: 'g-1', baseGameId: 'b-1', baseGame: { platformGames: [{ platformId: 'plat-1' }] } };
 
     // The real composer over the mocked ability: the live games under the
     // viewer's read ceiling.
     const LIVE_GAMES_THE_VIEWER_COULD_OPEN = { deletedAt: null, AND: [COND] };
+
+    /** The base game's platform games, read on the page's platforms only (#1391). */
+    const basePlatformGamesOn = (platformIds: string[]) => ({
+      baseGame: {
+        select: { platformGames: { where: { platformId: { in: platformIds } }, select: { platformId: true } } },
+      },
+    });
 
     const singleRowReads = {
       getById: () => service.getById('gc-1'),
@@ -653,9 +708,54 @@ describe('GameCollectionService', () => {
       expect(db.gameExpansion.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { expansionGameId: { in: ['g-1'] }, baseGame: { is: LIVE_GAMES_THE_VIEWER_COULD_OPEN } },
+          select: expect.objectContaining(basePlatformGamesOn(['plat-1'])),
         }),
       );
       expect(page.rows[0]?.platformGame.game.baseGames).toEqual([{ gameId: 'b-1', isStandalone: true }]);
+    });
+
+    // One game held on two platforms gives two rows. Each lists the base games
+    // with a platform game on its own platform, so the links are keyed by
+    // platform game, never by game (#1391).
+    it('gives each platform game of one game the base games on its own platform (#1391)', async () => {
+      db.gameCollection.findMany.mockResolvedValue([
+        { ...entry({ id: 'gc-1' }), platformGame: inView('pg-tabletop', 'g-1', 'plat-1') } as GameCollection,
+        { ...entry({ id: 'gc-2' }), platformGame: inView('pg-pc', 'g-1', 'plat-pc') } as GameCollection,
+      ]);
+
+      const page = await service.listOwn(paginationQuery({ limit: 20 }));
+
+      expect(db.gameExpansion.findMany).toHaveBeenCalledTimes(1);
+      expect(db.gameExpansion.findMany.mock.calls[0][0]).toMatchObject({
+        where: { expansionGameId: { in: ['g-1'] } },
+        select: basePlatformGamesOn(['plat-1', 'plat-pc']),
+      });
+      expect(page.rows.map((row) => [row.id, row.platformGame.game.baseGames])).toEqual([
+        ['gc-1', [{ gameId: 'b-1', isStandalone: true }]],
+        ['gc-2', []],
+      ]);
+    });
+
+    // A platform game's own content type overrides its game's on its row, so
+    // an add-on can be standalone on one platform and not another (#1391).
+    it("reads each row's isStandalone from its platform game's own content type, else its game's (#1391)", async () => {
+      db.gameExpansion.findMany.mockResolvedValue([
+        { ...LINK, baseGame: { platformGames: [{ platformId: 'plat-1' }, { platformId: 'plat-pc' }] } },
+      ] as never);
+      db.gameCollection.findMany.mockResolvedValue([
+        { ...entry({ id: 'gc-1' }), platformGame: inView('pg-tabletop', 'g-1', 'plat-1') } as GameCollection,
+        {
+          ...entry({ id: 'gc-2' }),
+          platformGame: inView('pg-pc', 'g-1', 'plat-pc', ContentType.DLC),
+        } as GameCollection,
+      ]);
+
+      const page = await service.listOwn(paginationQuery({ limit: 20 }));
+
+      expect(page.rows.map((row) => row.platformGame.game.baseGames)).toEqual([
+        [{ gameId: 'b-1', isStandalone: true }],
+        [{ gameId: 'b-1', isStandalone: false }],
+      ]);
     });
 
     it('reads a game held twice on one page once, and gives both rows its base games', async () => {

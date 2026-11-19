@@ -8,6 +8,7 @@ import {
   NominationResumedEvent,
 } from '../nomination/events/nomination.events';
 import { LIVE_DATE_STATUSES } from '../occurrence/live-dates.util';
+import { lockLiveEventDates } from '../utils/lock-live-event.util';
 
 /**
  * Whether an attendee is out of the event: removed by a host, or not
@@ -108,9 +109,10 @@ export interface LockedSupplier {
  * second waits, then sees the first. Without it, a nomination could open on
  * a game whose supplier left a moment before, and nothing would pause it.
  *
- * Take it before any other lock the write needs, as {@link syncSuppliedGames}
- * comes after the attendee row's: the attendee row first, then the event's
- * ({@link lockEventDates}), then nominations.
+ * Take it before any other lock the write needs: the supplier's rows, then
+ * the event's (`shareLiveEvent`), then nominations. A write to an attendee
+ * takes the event's row before the attendee's instead; the two orders can't
+ * wait on each other, since both take the event's row as a share.
  */
 export async function lockSupplier(tx: Prisma.TransactionClient, gameListId: string): Promise<LockedSupplier | null> {
   const rows = await tx.$queryRaw<LockedSupplier[]>(Prisma.sql`
@@ -127,35 +129,6 @@ export async function lockSupplier(tx: Prisma.TransactionClient, gameListId: str
   `);
 
   return rows[0] ?? null;
-}
-
-/**
- * Locks the event's row `FOR SHARE` until the caller's transaction ends, so
- * the event's dates stay as they are while the caller judges which lineups
- * are still ahead (#551). A write that can leave a lineup game with nobody
- * bringing it takes it before that read: a supplier leaving the event, or an
- * entry coming off their offered games.
- *
- * A write to the event's dates ({@link writeEventDates}), and a host's
- * removal of a lineup game (`LineupService.removeLineupGame`, through
- * `lockLiveEvent`), take the same row `FOR NO KEY UPDATE`, which conflicts
- * with this: whichever comes second waits, then sees the first. Without this
- * lock, a supplier could leave while a date that has started is moved to a
- * start still to come.
- * Their leaving would read the date as started and keep their game in its
- * lineup, and the move, reading before they left, would see them in the
- * event, so the lineup would end up ahead, holding a game nobody is
- * bringing.
- *
- * Adding a game to a lineup need not wait for either. Its supplier is in the
- * event when it is added ({@link lockSupplier}), and whichever of the two runs
- * when they leave judges it then. A direct add takes no lock on the event.
- * Settling a nomination takes this one before the nomination's, for another
- * reason: removing a date writes to the nominations that name it while
- * holding this row, so a nomination is locked only after it.
- */
-export async function lockEventDates(tx: Prisma.TransactionClient, eventId: string): Promise<void> {
-  await tx.$queryRaw(Prisma.sql`SELECT id FROM events WHERE id = ${eventId} FOR SHARE`);
 }
 
 /**
@@ -176,16 +149,21 @@ export async function lockEventDates(tx: Prisma.TransactionClient, eventId: stri
  * the write's row lock is what keeps a nomination or direct add from naming
  * this attendee's games until the transaction commits (`lockSupplier`).
  *
- * It locks the event's row first ({@link lockEventDates}), before any
- * nomination: removing a date writes to the nominations that name it while
- * holding that row, so locking a nomination first could deadlock with it.
+ * It locks the event's row `FOR SHARE` first, before any nomination:
+ * removing a date writes to the nominations that name it while holding that
+ * row, so locking a nomination first could deadlock with it. The same lock
+ * holds the event's dates while this judges which lineups are still ahead.
+ * Each caller has already taken it, checking the event is live
+ * (`shareLiveEvent`, #1065), so here it costs one round trip and changes
+ * nothing; it is taken again so that a caller that skips it still keeps both
+ * guarantees.
  */
 export async function syncSuppliedGames(
   tx: Prisma.TransactionClient,
   attendee: Pick<EventAttendee, 'id' | 'eventId' | 'removedAt' | 'status'>,
   now: Date,
 ): Promise<SuppliedGameChanges> {
-  await lockEventDates(tx, attendee.eventId);
+  await tx.$queryRaw(Prisma.sql`SELECT id FROM events WHERE id = ${attendee.eventId} FOR SHARE`);
 
   const changes: SuppliedGameChanges = { paused: [], resumed: [], removedGames: [] };
   const fromTheirList = {
@@ -240,11 +218,12 @@ export async function syncSuppliedGames(
  *
  * The event's row is locked `FOR NO KEY UPDATE` before the write, so this,
  * a host's removal (`LineupService.removeLineupGame`) and each write that can
- * leave a lineup game with nobody bringing it take turns
- * ({@link lockEventDates}). One that commits first is seen by the
- * read after the write. One that comes second waits for this to commit,
- * then finds the lineup ahead itself. Two date writes to one event take
- * turns the same way.
+ * leave a lineup game with nobody bringing it take turns (`shareLiveEvent`).
+ * One that commits first is seen by the read after the write. One that
+ * comes second waits for this to commit, then finds the lineup ahead itself.
+ * Two date writes to one event take turns the same way. Under the lock, an
+ * event that isn't live answers 404 and nothing is written: one deleted
+ * while this waited, or whose household is deleted (#1065).
  */
 export async function writeEventDates<T>(
   tx: Prisma.TransactionClient,
@@ -252,7 +231,7 @@ export async function writeEventDates<T>(
   now: Date,
   write: () => Promise<T>,
 ): Promise<{ removedGames: LineupGameSnapshot[]; written: T }> {
-  await tx.$queryRaw(Prisma.sql`SELECT id FROM events WHERE id = ${eventId} FOR NO KEY UPDATE`);
+  await lockLiveEventDates(tx, eventId);
 
   const written = await write();
 

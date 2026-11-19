@@ -104,6 +104,8 @@ describe('list routes (#1241)', () => {
     expect(byPlatformGame.platformGameId).toBe(platformGameId);
     expect(byPlatformGame.gameId).toBeNull();
     expect(byPlatformGame.platformGame?.game.id).toBe(gameId);
+    // Sent as null, not left out, when the platform game has no content type of its own (#1391).
+    expect(byPlatformGame.platformGame?.contentType).toBeNull();
     expect(byPlatformGame.position).toBe(byGame.position + 1);
 
     expect((await addEntry(user, list.id, { gameId }).expect(409)).body.code).toBe('LIST_ENTRY_EXISTS');

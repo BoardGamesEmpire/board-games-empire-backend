@@ -1,7 +1,7 @@
+import { changedKeys, pickSnapshot } from '@bge/actor-context';
 import type { Prisma } from '@bge/database';
 import { CodedHttpException, t } from '@bge/i18n';
 import { Http } from '@status/codes';
-import { changedKeys, pickSnapshot } from '../utils/pick-snapshot.util';
 import type { PolicyListsView } from './policy-view';
 
 /**

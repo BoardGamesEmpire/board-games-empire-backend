@@ -21,40 +21,6 @@
     "game_type": 5
   },
   {
-    "id": 230102,
-    "cover": {
-      "id": 277635,
-      "url": "//images.igdb.com/igdb/image/upload/t_thumb/co5y83.jpg"
-    },
-    "first_release_date": 1670976000,
-    "name": "The Witcher 3: Wild Hunt - Free Next-Gen Update",
-    "parent_game": 1942,
-    "platforms": [
-      {
-        "id": 169,
-        "abbreviation": "Series X|S",
-        "name": "Xbox Series X|S",
-        "platform_type": 1
-      },
-      {
-        "id": 6,
-        "abbreviation": "PC",
-        "name": "PC (Microsoft Windows)",
-        "platform_type": 4
-      },
-      {
-        "id": 167,
-        "abbreviation": "PS5",
-        "name": "PlayStation 5",
-        "platform_type": 1
-      }
-    ],
-    "summary": "The Witcher 3: Wild Hunt – Free Next-Gen Update was released on December 14, 2022, for PlayStation 5, Xbox Series X|S, and PC. This update introduced graphical enhancements such as ray tracing, improved textures, and faster loading times, along with quality-of-life features like a new camera angle, revised UI, and integrated mods. It also added new content inspired by the Netflix series, including armor sets and a themed quest.",
-    "total_rating": 87.69503546099291,
-    "url": "https://www.igdb.com/games/the-witcher-3-wild-hunt-free-next-gen-update",
-    "game_type": 14
-  },
-  {
     "id": 403150,
     "cover": {
       "id": 565688,
@@ -2603,67 +2569,6 @@
       }
     ],
     "game_type": 1
-  },
-  {
-    "id": 415005,
-    "cover": {
-      "id": 595561,
-      "url": "//images.igdb.com/igdb/image/upload/t_thumb/cocrjd.jpg"
-    },
-    "external_games": [
-      {
-        "id": 3222672,
-        "uid": "448390627",
-        "external_game_source": 14
-      }
-    ],
-    "first_release_date": 1790640000,
-    "name": "The Witcher 3: Wild Hunt Remastered",
-    "parent_game": 1942,
-    "platforms": [
-      {
-        "id": 169,
-        "abbreviation": "Series X|S",
-        "name": "Xbox Series X|S",
-        "platform_type": 1
-      },
-      {
-        "id": 508,
-        "abbreviation": "Switch 2",
-        "name": "Nintendo Switch 2",
-        "platform_type": 1
-      },
-      {
-        "id": 6,
-        "abbreviation": "PC",
-        "name": "PC (Microsoft Windows)",
-        "platform_type": 4
-      },
-      {
-        "id": 167,
-        "abbreviation": "PS5",
-        "name": "PlayStation 5",
-        "platform_type": 1
-      }
-    ],
-    "summary": "The Witcher 3: Wild Hunt — Remastered modernizes the acclaimed role-playing game with a range of upgrades and enhancements. Become monster slayer for hire Geralt of Rivia and journey across a dark fantasy open world in an epic quest to find your adopted daughter Ciri.\n\nThe Remastered update is free for players who own The Witcher 3 and includes both Hearts of Stone and Blood and Wine expansions.",
-    "total_rating": 97.92420462980115,
-    "url": "https://www.igdb.com/games/the-witcher-3-wild-hunt-remastered",
-    "language_supports": [
-      {
-        "id": 1746256,
-        "language": {
-          "id": 16,
-          "name": "Japanese",
-          "native_name": "日本語",
-          "locale": "ja-JP",
-          "created_at": 1664803639,
-          "updated_at": 1664803639,
-          "checksum": "6e46a214-1fc9-e097-bf2b-b5d3f1187a48"
-        }
-      }
-    ],
-    "game_type": 14
   },
   {
     "id": 170449,

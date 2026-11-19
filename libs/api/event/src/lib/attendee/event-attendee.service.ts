@@ -1,6 +1,9 @@
 import {
   Action,
+  ADD_ON_CONTENT_TYPES,
+  ContentType,
   DatabaseService,
+  effectiveContentType,
   EventAttendee,
   EventAttendeeGameList,
   EventParticipationStatus,
@@ -32,13 +35,8 @@ import { assertEventExists, requireEvent } from '../event-access.helpers';
 import { OFFERED_GAME_SELECT } from '../offered-game/offered-game.select';
 import { OfferedGameService } from '../offered-game/offered-game.service';
 import type { OfferedGame, OfferedGameEntry } from '../offered-game/offered-game.types';
-import {
-  ACTIVE_NOMINATION_STATUSES,
-  emitSuppliedGameChanges,
-  lineupStillAhead,
-  lockEventDates,
-  syncSuppliedGames,
-} from './attendance';
+import { shareLiveEvent } from '../utils/lock-live-event.util';
+import { ACTIVE_NOMINATION_STATUSES, emitSuppliedGameChanges, lineupStillAhead, syncSuppliedGames } from './attendance';
 import { AddAttendeeDto } from './dto/add-attendee.dto';
 import { AddGameToListDto } from './dto/add-game-to-list.dto';
 import type { OfferGameItemDto } from './dto/offer-games.dto';
@@ -225,6 +223,8 @@ export class EventAttendeeService {
       };
 
       const { attendee, changes } = await this.db.$transaction(async (tx) => {
+        await shareLiveEvent(tx, eventId);
+
         // Whom the caller may place on the event, as the event's create asks
         // of its invitees (#546).
         if (dto.userId) {
@@ -331,6 +331,8 @@ export class EventAttendeeService {
 
     try {
       const { removed, changes } = await this.db.$transaction(async (tx) => {
+        await shareLiveEvent(tx, eventId);
+
         // Read again under the row lock the update takes anyway. A removal
         // that lost a race to another removal answers 404, as one arriving
         // second would. The lock keeps an add from reviving the row (#551)
@@ -427,6 +429,8 @@ export class EventAttendeeService {
       // answer brings them back in (#551): the games they supply follow, in
       // the same transaction.
       const { previous, updated, changes } = await this.db.$transaction(async (tx) => {
+        await shareLiveEvent(tx, eventId);
+
         // The status this write replaces, read under the row lock the update
         // takes anyway. The read above runs before the lock, so two RSVPs
         // racing each other would both report the status neither left, and
@@ -565,9 +569,11 @@ export class EventAttendeeService {
    * - Each id is judged as the single add judges one. A bad id is refused
    *   with a stable reason and a translated message, and loses nothing else.
    * - An expansion must also expand its item's game: a `GameExpansion` link
-   *   from that game to its own, the direction base games are read in. The
-   *   expansions of a refused game are refused as `baseRefused`; those of a
-   *   game already offered go ahead.
+   *   from that game to its own, the direction base games are read in, else
+   *   `notAnExpansionOfBase`, as is an entry whose platform game is no
+   *   add-on on its platform. Its entry must also be on its game's platform,
+   *   else `differentPlatform` (#1391). The expansions of a refused game are
+   *   refused as `baseRefused`; those of a game already offered go ahead.
    * - An entry already offered is `alreadyOffered`, with its entry, and
    *   emits nothing, before any judgement: nothing is written for it, so
    *   nothing is refused. That holds for one removed from its collection
@@ -593,7 +599,14 @@ export class EventAttendeeService {
     const [collections, listed] = await Promise.all([
       this.db.gameCollection.findMany({
         where: { id: { in: named } },
-        select: { id: true, userId: true, deletedAt: true, platformGame: { select: { gameId: true } } },
+        select: {
+          id: true,
+          userId: true,
+          deletedAt: true,
+          platformGame: {
+            select: { gameId: true, platformId: true, contentType: true, game: { select: { contentType: true } } },
+          },
+        },
       }),
       this.db.eventAttendeeGameList.findMany({
         where: { attendeeId, collectionId: { in: named } },
@@ -619,10 +632,7 @@ export class EventAttendeeService {
         const refusal = offered(expansionId)
           ? null
           : gameRefusal === null
-            ? (judgeCollectionEntry(attendee, expansion) ??
-              (game && expansion && links.has(linkKey(game.platformGame.gameId, expansion.platformGame.gameId))
-                ? null
-                : OfferRefusal.NotAnExpansionOfBase))
+            ? (judgeCollectionEntry(attendee, expansion) ?? judgeExpansionOfBase(game, expansion, links))
             : OfferRefusal.BaseRefused;
         judged.push({ collectionId: expansionId, baseId: item.collectionId, refusal });
       }
@@ -695,12 +705,13 @@ export class EventAttendeeService {
    * deleted, because closed nominations, and the lineups of dates that have
    * started, still name it as their supplier.
    *
-   * The entry is locked `FOR UPDATE` before the check, so a nomination or
-   * direct add naming it either commits first and is counted, or waits
-   * (`lockSupplier`) and then finds it removed. The event's dates are locked
-   * too (`lockEventDates`), so a date write that puts a lineup ahead again
-   * either commits first and the game is counted, or waits and then takes
-   * the game off itself.
+   * The event's row is locked first (`shareLiveEvent`), which refuses a
+   * deleted event (#1065) and holds its dates, so a date write that puts a
+   * lineup ahead again either commits first and the game is counted, or
+   * waits and then takes the game off itself. The entry is locked
+   * `FOR UPDATE` before the check, so a nomination or direct add naming it
+   * either commits first and is counted, or waits (`lockSupplier`) and then
+   * finds it removed.
    */
   async removeGameFromList(eventId: string, attendeeId: string, gameListId: string): Promise<EventAttendeeGameList> {
     const initiatedAt = new Date();
@@ -716,6 +727,8 @@ export class EventAttendeeService {
 
     try {
       const removed = await this.db.$transaction(async (tx) => {
+        await shareLiveEvent(tx, eventId);
+
         const [locked] = await tx.$queryRaw<{ removedAt: Date | null }[]>(
           Prisma.sql`SELECT removed_at AS "removedAt" FROM attendee_game_lists WHERE id = ${gameListId} FOR UPDATE`,
         );
@@ -739,8 +752,6 @@ export class EventAttendeeService {
         if (permitted === 0) {
           throw new ForbiddenException(t('errors.attendee.forbidden_remove_game'));
         }
-
-        await lockEventDates(tx, eventId);
 
         const nominations = await tx.eventGameNomination.count({
           where: { suppliedFromId: gameListId, status: { in: ACTIVE_NOMINATION_STATUSES } },
@@ -810,8 +821,10 @@ export class EventAttendeeService {
   /**
    * Offers `collectionId` for the attendee: a new entry, or the entry
    * `removed` names, taken back earlier and revived with its id (#551). Emits
-   * the `GameAddedToListEvent`. A concurrent add surfaces as Prisma's own
-   * error: a unique-key clash on a create, or no row matched on a revive.
+   * the `GameAddedToListEvent` once it commits. A concurrent add surfaces as
+   * Prisma's own error: a unique-key clash on a create, or no row matched on
+   * a revive. An event deleted since the caller's read, or its household,
+   * answers 404 under the event's row lock (`shareLiveEvent`, #1065).
    */
   private async writeOffer(
     eventId: string,
@@ -820,21 +833,25 @@ export class EventAttendeeService {
     removed: Pick<EventAttendeeGameList, 'id' | 'attendeeId' | 'collectionId' | 'removedAt'> | null,
     initiatedAt: Date,
   ): Promise<OfferedGameEntry> {
-    const entry = removed
-      ? await this.db.eventAttendeeGameList.update({
-          // Matches nothing once a concurrent add has revived it, which
-          // answers as the duplicate it then is.
-          where: { id: removed.id, removedAt: { not: null } },
-          data: { removedAt: null },
-          select: OFFERED_GAME_SELECT,
-        })
-      : await this.db.eventAttendeeGameList.create({
-          data: {
-            attendee: { connect: { id: attendeeId } },
-            collection: { connect: { id: collectionId } },
-          },
-          select: OFFERED_GAME_SELECT,
-        });
+    const entry = await this.db.$transaction(async (tx) => {
+      await shareLiveEvent(tx, eventId);
+
+      return removed
+        ? tx.eventAttendeeGameList.update({
+            // Matches nothing once a concurrent add has revived it, which
+            // answers as the duplicate it then is.
+            where: { id: removed.id, removedAt: { not: null } },
+            data: { removedAt: null },
+            select: OFFERED_GAME_SELECT,
+          })
+        : tx.eventAttendeeGameList.create({
+            data: {
+              attendee: { connect: { id: attendeeId } },
+              collection: { connect: { id: collectionId } },
+            },
+            select: OFFERED_GAME_SELECT,
+          });
+    });
 
     this.eventEmitter.emit(
       GameAddedToListEvent.eventName,
@@ -863,7 +880,9 @@ export class EventAttendeeService {
    *   attendee's row can't be what's missing: it goes only with its event's,
    *   and no route deletes an event's row.
    *
-   * Any other failure is the database's, and fails the request.
+   * An event deleted since, or its household, fails the request with the
+   * event's 404, as a request sent after the delete would (#1065). Any other
+   * failure is the database's, and fails the request too.
    */
   private async offerOne(
     eventId: string,
@@ -1016,6 +1035,45 @@ function judgeCollectionEntry(
   }
 
   return collection.deletedAt ? OfferRefusal.RemovedFromCollection : null;
+}
+
+/**
+ * Whether an expansion entry goes with its item's game entry (#1188, #1391):
+ * a link from the game to the expansion's own game, and the expansion's
+ * platform game an add-on on its platform, else `notAnExpansionOfBase`; and
+ * both entries on one platform, else `differentPlatform`. On one platform a
+ * link holds there by definition, so those and equal platforms are the whole
+ * check. The add-on test reads the platform game's own content type where it
+ * has one, as the offered-games filters do, so an entry they count as a base
+ * game is never offered as an expansion. An entry that's missing was refused
+ * before this.
+ */
+function judgeExpansionOfBase(
+  game: { platformGame: { gameId: string; platformId: string } } | undefined,
+  expansion:
+    | {
+        platformGame: {
+          contentType: ContentType | null;
+          game: { contentType: ContentType };
+          gameId: string;
+          platformId: string;
+        };
+      }
+    | undefined,
+  links: ReadonlySet<string>,
+): OfferRefusal | null {
+  if (
+    !game ||
+    !expansion ||
+    !links.has(linkKey(game.platformGame.gameId, expansion.platformGame.gameId)) ||
+    !ADD_ON_CONTENT_TYPES.has(
+      effectiveContentType(expansion.platformGame.contentType, expansion.platformGame.game.contentType),
+    )
+  ) {
+    return OfferRefusal.NotAnExpansionOfBase;
+  }
+
+  return game.platformGame.platformId === expansion.platformGame.platformId ? null : OfferRefusal.DifferentPlatform;
 }
 
 /** The single add's answer to a refusal: the status it always gave. */

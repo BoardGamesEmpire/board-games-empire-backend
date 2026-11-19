@@ -119,6 +119,7 @@
     "game_from_other_collection": "Cannot add a game from another user's collection.",
     "game_removed_from_collection": "Cannot add a game that has been removed from the collection.",
     "not_an_expansion_of_base": "This game isn't an expansion of the game it was offered with.",
+    "different_platform": "This expansion is on a different platform from the game it was offered with.",
     "base_refused": "This expansion wasn't offered because the game it goes with couldn't be."
   },
   "nomination": {
@@ -344,6 +345,13 @@
     "mail_queue_unavailable": "The server couldn't queue the test email because its job queue isn't reachable. Try again in a few minutes",
     "smtp_password_required": "Enter the SMTP password again when you change the SMTP host, port or connection security. The saved password is only sent to the server it was saved for",
     "multiple": "Multiple system settings found! There can be only one. Please fix the database."
+  },
+  "privacy_policy": {
+    "language_tag_not_found": "This server doesn't know the language {languageTag}. Check the tag, or write the policy in its base language, such as fr for fr-CA.",
+    "not_found": "There's nothing to remove: no server admin has replaced the privacy policy in {languageTag}. Check the language tag.",
+    "empty": "There is nothing left to show once unsafe content is removed. Write the policy as Markdown text.",
+    "too_long": "Shorten the privacy policy to at most {max} characters and try again.",
+    "too_complex": "The privacy policy uses bold, italic or strikethrough too many times for its headings and lists to be kept. Use that formatting in fewer places and try again."
   },
   "well_known": {
     "security_txt_not_configured": "security.txt is not configured for this BGE instance. Set SECURITY_CONTACT to enable this endpoint."

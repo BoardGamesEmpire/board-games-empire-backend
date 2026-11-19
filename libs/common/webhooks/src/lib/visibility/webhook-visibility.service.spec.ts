@@ -169,6 +169,26 @@ describe('WebhookVisibilityService', () => {
       expect('OR' in where).toBe(false);
     });
 
+    it('reads the deleted Household row for the household deleted event (#245)', async () => {
+      db.household.count.mockResolvedValue(1);
+
+      await expect(
+        service.isVisibleTo(ResourceType.Household, 'hh-1', [ability], { subjectDeleted: true }),
+      ).resolves.toBe(true);
+
+      const where = db.household.count.mock.calls[0][0]?.where as Record<string, unknown>;
+      expect(where).toMatchObject({ id: 'hh-1', AND: [expect.anything()] });
+      expect('deletedAt' in where).toBe(false);
+    });
+
+    it('keeps the deletedAt guard on a household for every other event', async () => {
+      db.household.count.mockResolvedValue(1);
+
+      await service.isVisibleTo(ResourceType.Household, 'hh-1', [ability], { subjectDeleted: false });
+
+      expect(db.household.count).toHaveBeenCalledWith({ where: expect.objectContaining({ deletedAt: null }) });
+    });
+
     it('still checks the action it is given', async () => {
       const updateOnly = createPrismaAbility([
         { action: Action.update, subject: ResourceType.Event, conditions: { householdId: 'hh-1' } },

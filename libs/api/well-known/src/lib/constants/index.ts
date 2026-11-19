@@ -47,6 +47,15 @@ export const WELL_KNOWN_SCHEMA_VERSION = 1;
 export const SERVER_DISCOVERY_PATH = '/api/discovery/server';
 
 /**
+ * Where the server's privacy policy is read (#934), root-relative like every
+ * BGE endpoint the bge-identity document lists. It must match the route of
+ * `PrivacyPolicyController` under the api's `api` prefix; the well-known lib
+ * does not import that controller, so an e2e test follows the pointer to the
+ * route and fails if they drift apart.
+ */
+export const PRIVACY_POLICY_PATH = '/api/privacy-policy';
+
+/**
  * Schema version of signed-in server discovery (#78), versioned apart from the
  * bge-identity document. Clients parse known fields and ignore unknown ones;
  * this is bumped only on a breaking change to the document's shape.

@@ -4,7 +4,8 @@ import type { Prisma } from '@bge/database';
  * The columns a client gets for each platform game on `GET /games/:id` (#791).
  * Named one by one so a new column stays off the wire until someone adds it
  * here (#460). `enrichmentSource` and `frozenAt` stay out because a client has
- * no use for them.
+ * no use for them. The platform game's own content type is one of its
+ * overrides, sent as they are, a value or null (#1391).
  */
 export const PLATFORM_GAME_DETAIL_SELECT = {
   id: true,
@@ -15,6 +16,7 @@ export const PLATFORM_GAME_DETAIL_SELECT = {
   maxPlayers: true,
   minPlayTime: true,
   maxPlayTime: true,
+  contentType: true,
   supportsSolo: true,
   supportsLocal: true,
   supportsOnline: true,

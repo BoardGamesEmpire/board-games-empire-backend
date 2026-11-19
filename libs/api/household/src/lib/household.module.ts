@@ -8,6 +8,7 @@ import { AdminHouseholdController } from './admin/admin-household.controller';
 import { AdminHouseholdService } from './admin/admin-household.service';
 import { HouseholdBanController } from './ban/household-ban.controller';
 import { HouseholdBanService } from './ban/household-ban.service';
+import { HouseholdEventPublisher } from './events/household-event.publisher';
 import { HouseholdGamePoolService } from './game-pool/household-game-pool.service';
 import { HouseholdGameShareController } from './game-share/household-game-share.controller';
 import { HouseholdGameShareService } from './game-share/household-game-share.service';
@@ -57,6 +58,9 @@ import { HouseholdQuotaController } from './quota/household-quota.controller';
     HouseholdNotificationListener,
     HouseholdBanService,
     HouseholdGamePoolService,
+    // Every household domain event, and its webhook, goes out through it
+    // after commit (#245). The lib's own, so the module doesn't export it.
+    HouseholdEventPublisher,
   ],
   exports: [HouseholdService, HouseholdMemberService],
 })

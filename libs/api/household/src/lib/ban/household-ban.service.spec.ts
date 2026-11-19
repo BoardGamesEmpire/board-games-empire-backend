@@ -20,8 +20,18 @@ import {
   rawQueryText,
   unwrapTransaction,
 } from '@bge/testing';
+import { WEBHOOK_EVENT_TYPES } from '@bge/webhooks';
 import { ForbiddenException } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Http, PrismaError } from '@status/codes';
+import { HouseholdEvents } from '../constants/household-events.constant';
+import { HouseholdEventPublisher } from '../events/household-event.publisher';
+import {
+  HouseholdBanCreatedEvent,
+  HouseholdBanLiftedEvent,
+  HouseholdBanUpdatedEvent,
+  MembershipEndCause,
+} from '../events/household.events';
 import { HouseholdNotificationListener } from '../listeners/household-notification.listener';
 import type { RemovedMembership } from '../member/household-member.service';
 import { HouseholdMemberService } from '../member/household-member.service';
@@ -67,6 +77,26 @@ const BAN_VIEW = {
 const REVOKED = [{ eventName: 'invite.revoked', subjectId: 'inv-1' }] as unknown as InviteDomainEvent[];
 const ENDED_SHARES = [{ id: 'share-1', gameId: 'game-1', householdId: 'hh-1' }] as unknown as GameShare[];
 
+/** The membership a ban of `user-2` ends, as the member seam hands it back (#782, #245). */
+const REMOVED: RemovedMembership = {
+  removed: {
+    id: 'member-2',
+    userId: 'user-2',
+    householdId: 'hh-1',
+    showAllGames: true,
+    createdAt: NOW,
+    updatedAt: NOW,
+    user: { id: 'user-2', username: 'sam', profile: { avatarUrl: null, displayName: 'Sam Doe' } },
+    role: { role: { id: 'role-member', name: SystemRole.HouseholdMember } },
+  },
+  role: SystemRole.HouseholdMember,
+  revoked: REVOKED,
+  endedShares: ENDED_SHARES,
+};
+
+/** Every webhook event type, as the names a subscriber's URL can receive. */
+const WEBHOOK_NAMES: readonly string[] = WEBHOOK_EVENT_TYPES;
+
 const RELEASED: InviteSnapshot = {
   id: 'inv-9',
   type: InviteType.Household,
@@ -107,7 +137,10 @@ describe('HouseholdBanService', () => {
     >
   >;
   let notifier: jest.Mocked<Pick<HouseholdNotificationListener, 'onInvitesReleased'>>;
-  let members: jest.Mocked<Pick<HouseholdMemberService, 'removeUserWithin' | 'emitGameSharesEnded'>>;
+  let members: jest.Mocked<
+    Pick<HouseholdMemberService, 'removeUserWithin' | 'emitMemberRemoved' | 'emitGameSharesEnded'>
+  >;
+  let events: jest.Mocked<Pick<EventEmitter2, 'emit'>>;
   let compose: jest.SpyInstance;
 
   beforeEach(async () => {
@@ -124,7 +157,12 @@ describe('HouseholdBanService', () => {
       emit: jest.fn(),
     };
     notifier = { onInvitesReleased: jest.fn().mockResolvedValue(undefined) };
-    members = { removeUserWithin: jest.fn().mockResolvedValue(null), emitGameSharesEnded: jest.fn() };
+    members = {
+      removeUserWithin: jest.fn().mockResolvedValue(null),
+      emitMemberRemoved: jest.fn(),
+      emitGameSharesEnded: jest.fn(),
+    };
+    events = { emit: jest.fn().mockReturnValue(true) };
 
     const ctx = await createTestingModuleWithDb({
       providers: [
@@ -132,6 +170,10 @@ describe('HouseholdBanService', () => {
         // The real composer over the mocked ability service, so the list's
         // where clause asserted below is the merge the read runs.
         ScopeComposer,
+        // The real publisher over a mocked bus, so each `events.emit`
+        // assertion below is what the audit and webhook listeners receive.
+        HouseholdEventPublisher,
+        { provide: EventEmitter2, useValue: events },
         { provide: AbilityService, useValue: abilityService },
         { provide: PermissionsService, useValue: permissions },
         { provide: InviteService, useValue: invites },
@@ -153,6 +195,69 @@ describe('HouseholdBanService', () => {
   });
 
   afterEach(() => jest.clearAllMocks());
+
+  /** The names published on the bus, in order. */
+  const emittedNames = () => events.emit.mock.calls.map(([name]) => String(name));
+
+  /** What was published under `name`. */
+  const emittedUnder = (name: string): unknown => events.emit.mock.calls.find(([emitted]) => emitted === name)?.[1];
+
+  /** The names published on the bus that are webhook event types, which reach a subscriber's URL. */
+  const webhookNames = () => emittedNames().filter((name) => WEBHOOK_NAMES.includes(name));
+
+  /**
+   * Notes, in `order`, each step after commit that a double stands in for:
+   * the cache eviction, the invites announced, the membership's end, the
+   * ended game shares announced and the released invites told, and each name
+   * published on the bus.
+   */
+  const recordOrder = (order: string[]) => {
+    permissions.invalidateUser.mockImplementation(async () => {
+      order.push('evict');
+    });
+    invites.emit.mockImplementation(() => {
+      order.push('invites');
+    });
+    members.emitMemberRemoved.mockImplementation(() => {
+      order.push('member removed');
+    });
+    members.emitGameSharesEnded.mockImplementation(() => {
+      order.push('shares');
+    });
+    notifier.onInvitesReleased.mockImplementation(async () => {
+      order.push('notify');
+    });
+    events.emit.mockImplementation((name) => {
+      order.push(String(name));
+
+      return true;
+    });
+  };
+
+  /**
+   * Runs `request` on a fake clock at NOW that moves to LATER as its
+   * transaction starts, so a domain event stamped as the request arrived
+   * carries NOW (#245). The transaction runs on `db`, and `order` notes its commit:
+   * the db mocks keep their own call counter, so an order across them and
+   * the other doubles is recorded by hand.
+   */
+  const onMovingClock = async (request: () => Promise<unknown>, order: string[] = []) => {
+    jest.useFakeTimers({ now: NOW, doNotFake: ['nextTick', 'setImmediate'] });
+
+    try {
+      db.$transaction.mockImplementation((async (callback: (tx: MockDatabaseService) => Promise<unknown>) => {
+        jest.setSystemTime(LATER);
+        const result = await callback(db);
+        order.push('commit');
+
+        return result;
+      }) as never);
+
+      await request();
+    } finally {
+      jest.useRealTimers();
+    }
+  };
 
   describe('ban', () => {
     const DTO = { userId: 'user-2', reason: 'Kept the good meeples' };
@@ -264,7 +369,7 @@ describe('HouseholdBanService', () => {
       const steps: string[] = [];
       members.removeUserWithin.mockImplementation(async () => {
         steps.push('remove');
-        return { removed: {}, revoked: REVOKED, endedShares: ENDED_SHARES } as unknown as RemovedMembership;
+        return REMOVED;
       });
       invites.withholdOutstandingToAddressWithin.mockImplementation(async () => {
         steps.push('withhold');
@@ -341,6 +446,69 @@ describe('HouseholdBanService', () => {
       expect(invites.emit).not.toHaveBeenCalled();
       expect(members.emitGameSharesEnded).not.toHaveBeenCalled();
     });
+
+    it('a ban of a member emits member removed (cause banned), then the ban with its reason, and no webhook of its own (#245)', async () => {
+      const order: string[] = [];
+      members.removeUserWithin.mockResolvedValue(REMOVED);
+      recordOrder(order);
+
+      await onMovingClock(() => service.ban('hh-1', DTO), order);
+
+      expect(order).toEqual(['commit', 'evict', 'invites', 'member removed', 'shares', HouseholdEvents.BanCreated]);
+      // The membership's end records the ban as its cause; one instant, the
+      // request's, stamps it, the shares it ended and the ban.
+      expect(members.emitMemberRemoved).toHaveBeenCalledWith(REMOVED, MembershipEndCause.Banned, NOW);
+      expect(members.emitGameSharesEnded).toHaveBeenCalledWith(ENDED_SHARES, NOW);
+
+      const banned = emittedUnder(HouseholdEvents.BanCreated) as HouseholdBanCreatedEvent;
+      expect(banned).toBeInstanceOf(HouseholdBanCreatedEvent);
+      expect(banned).toMatchObject({ subject: ResourceType.Household, subjectId: 'hh-1', initiatedAt: NOW });
+      expect(banned.before).toEqual({ householdId: 'hh-1', userId: 'user-2', banId: null, reason: null });
+      expect(banned.after).toEqual({
+        householdId: 'hh-1',
+        userId: 'user-2',
+        banId: 'ban-1',
+        reason: 'Kept the good meeples',
+      });
+      // The ban has no webhook of its own: it would carry or imply the
+      // reason. The membership's end sends `household.member.removed.v1`,
+      // ids only and no cause, from `emitMemberRemoved` (pinned in its spec).
+      expect(emittedNames()).toEqual([HouseholdEvents.BanCreated]);
+      expect(webhookNames()).toEqual([]);
+    });
+
+    it('a ban of a non-member emits only the ban (#245)', async () => {
+      db.householdBan.create.mockResolvedValue(resolves({ ...BAN_ROW, reason: null }));
+
+      const order: string[] = [];
+      recordOrder(order);
+
+      await onMovingClock(() => service.ban('hh-1', { userId: 'user-2' }), order);
+
+      // Published after the transaction commits.
+      expect(order.filter((step) => step === 'commit' || step === HouseholdEvents.BanCreated)).toEqual([
+        'commit',
+        HouseholdEvents.BanCreated,
+      ]);
+      expect(members.emitMemberRemoved).not.toHaveBeenCalled();
+      expect(emittedNames()).toEqual([HouseholdEvents.BanCreated]);
+      expect((emittedUnder(HouseholdEvents.BanCreated) as HouseholdBanCreatedEvent).after).toEqual({
+        householdId: 'hh-1',
+        userId: 'user-2',
+        banId: 'ban-1',
+        reason: null,
+      });
+    });
+
+    it('a ban refused for a hidden member emits nothing (#245)', async () => {
+      // As the member seam refuses a member the caller's `manage` scope hides.
+      members.removeUserWithin.mockRejectedValue(new ForbiddenException());
+
+      await expect(service.ban('hh-1', DTO)).rejects.toBeInstanceOf(ForbiddenException);
+
+      expect(members.emitMemberRemoved).not.toHaveBeenCalled();
+      expect(events.emit).not.toHaveBeenCalled();
+    });
   });
 
   describe('updateReason and lift', () => {
@@ -379,11 +547,14 @@ describe('HouseholdBanService', () => {
         data: { reason: null },
         select: HOUSEHOLD_BAN_SELECT,
       });
-      // Asked before and after the household's share lock, each time.
+      // Asked before and after the household lock, each time.
       expect(abilityService.assertCurrentActorCan.mock.calls).toEqual(
         Array.from({ length: 4 }, () => [Action.update, ResourceType.HouseholdBan, NAMED_BAN_INSTANCE]),
       );
-      expect(db.$queryRaw.mock.calls.map(([query]) => isShareLockSql(query))).toEqual([true, true]);
+      // The lock a ban takes, not the share lock: two reason changes must not
+      // read the same reason (#245).
+      expect(db.$queryRaw.mock.calls.map(([query]) => isRoleTransitionLockSql(query))).toEqual([true, true]);
+      expect(db.$queryRaw.mock.calls.map(([query]) => isShareLockSql(query))).toEqual([false, false]);
     });
 
     it('updateReason and lift answer 404 when there is no ban (#782)', async () => {
@@ -514,6 +685,68 @@ describe('HouseholdBanService', () => {
       );
       expect(notifier.onInvitesReleased).toHaveBeenCalledWith([RELEASED]);
       expect(order).toEqual(['delete', 'release', 'commit', 'notify']);
+    });
+
+    it('a reason change emits old and new reason (#245)', async () => {
+      db.householdBan.update.mockResolvedValue(resolves({ ...BAN_ROW, reason: 'b', updatedAt: LATER }));
+
+      const order: string[] = [];
+      recordOrder(order);
+
+      await onMovingClock(() => service.updateReason('hh-1', 'user-2', { reason: 'b' }), order);
+
+      // Published after the transaction commits.
+      expect(order).toEqual(['commit', HouseholdEvents.BanUpdated]);
+      expect(emittedNames()).toEqual([HouseholdEvents.BanUpdated]);
+
+      const updated = emittedUnder(HouseholdEvents.BanUpdated) as HouseholdBanUpdatedEvent;
+      expect(updated).toBeInstanceOf(HouseholdBanUpdatedEvent);
+      // Stamped as the request arrived, before its transaction.
+      expect(updated).toMatchObject({ subject: ResourceType.Household, subjectId: 'hh-1', initiatedAt: NOW });
+      expect(updated.before).toEqual({
+        householdId: 'hh-1',
+        userId: 'user-2',
+        banId: 'ban-1',
+        reason: 'Kept the good meeples',
+      });
+      expect(updated.after).toEqual({ householdId: 'hh-1', userId: 'user-2', banId: 'ban-1', reason: 'b' });
+      // No webhook: it would send the reason to an outside address.
+      expect(webhookNames()).toEqual([]);
+    });
+
+    it('a reason change to the same reason emits nothing (#728, #245)', async () => {
+      db.householdBan.update.mockResolvedValue(resolves({ ...BAN_ROW, updatedAt: LATER }));
+
+      await service.updateReason('hh-1', 'user-2', { reason: BAN_ROW.reason });
+
+      expect(db.householdBan.update).toHaveBeenCalled();
+      expect(events.emit).not.toHaveBeenCalled();
+    });
+
+    it('a lift emits the lifted ban with its reason (#245)', async () => {
+      const order: string[] = [];
+      recordOrder(order);
+      db.householdBan.delete.mockResolvedValue(resolves({ id: 'ban-1' }));
+      invites.releaseWithheldToAddressWithin.mockResolvedValue([RELEASED]);
+
+      await onMovingClock(() => service.lift('hh-1', 'user-2'), order);
+
+      // The invites the lift released are not recorded (#245): the bus
+      // carries the lift alone, and their invitee is told after it.
+      expect(order).toEqual(['commit', HouseholdEvents.BanLifted, 'notify']);
+      expect(notifier.onInvitesReleased).toHaveBeenCalledWith([RELEASED]);
+
+      const lifted = emittedUnder(HouseholdEvents.BanLifted) as HouseholdBanLiftedEvent;
+      expect(lifted).toBeInstanceOf(HouseholdBanLiftedEvent);
+      expect(lifted).toMatchObject({ subject: ResourceType.Household, subjectId: 'hh-1', initiatedAt: NOW });
+      expect(lifted.before).toEqual({
+        householdId: 'hh-1',
+        userId: 'user-2',
+        banId: 'ban-1',
+        reason: 'Kept the good meeples',
+      });
+      expect(lifted.after).toEqual({ householdId: 'hh-1', userId: 'user-2', banId: null, reason: null });
+      expect(webhookNames()).toEqual([]);
     });
 
     it("lift keeps withheld what #278's gate would still withhold from the invite's sender (#782)", async () => {

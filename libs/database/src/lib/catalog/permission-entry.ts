@@ -110,6 +110,7 @@ export type SubjectWhereInput = ForEverySubject<{
 
   PluginGrant: Prisma.PluginGrantWhereInput;
   PluginLifecycleEvent: Prisma.PluginLifecycleEventWhereInput;
+  PrivacyPolicy: Prisma.PrivacyPolicyWhereInput;
   Quota: Prisma.QuotaWhereInput;
   Role: Prisma.RoleWhereInput;
   RolePermission: Prisma.RolePermissionWhereInput;
@@ -191,6 +192,7 @@ export type SubjectScalarField = ForEverySubject<{
 
   PluginGrant: Prisma.PluginGrantScalarFieldEnum;
   PluginLifecycleEvent: Prisma.PluginLifecycleEventScalarFieldEnum;
+  PrivacyPolicy: Prisma.PrivacyPolicyScalarFieldEnum;
   Quota: Prisma.QuotaScalarFieldEnum;
   Role: Prisma.RoleScalarFieldEnum;
   RolePermission: Prisma.RolePermissionScalarFieldEnum;

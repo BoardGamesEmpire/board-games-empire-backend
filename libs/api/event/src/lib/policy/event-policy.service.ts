@@ -1,3 +1,4 @@
+import { changedKeys } from '@bge/actor-context';
 import type { EventOccurrencePolicy, EventPolicy, Prisma } from '@bge/database';
 import { Action, DatabaseService, isPrismaDependentRecordNotFoundError, ResourceType } from '@bge/database';
 import { CodedHttpException, t } from '@bge/i18n';
@@ -9,7 +10,6 @@ import { Http } from '@status/codes';
 import assert from 'node:assert';
 import { eventWebhookIds } from '../event.service';
 import { lockLiveEvent } from '../utils/lock-live-event.util';
-import { changedKeys } from '../utils/pick-snapshot.util';
 import type { UpdateEventPolicyDto } from './dto/update-event-policy.dto';
 import type { UpdateOccurrencePolicyDto } from './dto/update-occurrence-policy.dto';
 import { assertValidVotingPolicy, foldPolicy } from './effective-policy';

@@ -1915,14 +1915,23 @@ describe('InviteService', () => {
     it('logs a throwing listener and still announces the rest', () => {
       // EventEmitterModule runs without `ignoreErrors`; a sync listener's throw
       // would otherwise turn a committed transition into a failed request.
+      const failure = new Error('listener exploded');
       emitter.emit.mockImplementationOnce(() => {
-        throw new Error('listener exploded');
+        throw failure;
       });
 
-      expect(() => service.emit([created(), revoked()])).not.toThrow();
+      const first = created();
+      expect(() => service.emit([first, revoked()])).not.toThrow();
 
       expect(emitter.emit).toHaveBeenCalledTimes(2);
-      expect(error).toHaveBeenCalledTimes(1);
+      // As (message, stack), so nestjs-pino keeps the error (#245): it drops
+      // an `Error` object passed as a bare argument.
+      expect(error.mock.calls).toEqual([
+        [
+          `A listener failed for ${InviteEvents.Created} (invite ${first.subjectId}) after the change committed: listener exploded`,
+          failure.stack,
+        ],
+      ]);
     });
 
     it('is a no-op on an empty list', () => {

@@ -10,8 +10,8 @@ import type { Prisma } from '@bge/database';
  *   owner's row. Their rating, comment, play count and quantity are theirs,
  *   not the event's. A column added to `GameCollection` later reaches no
  *   offered game unless it's named here.
- * - The platform game, with its own image and its overrides of players and
- *   play time, on its platform.
+ * - The platform game, with its own image and its overrides of players, play
+ *   time and content type (#1391), on its platform.
  * - The game itself.
  *
  * The game's base games, and what the entry supplies, are read on their own
@@ -36,6 +36,7 @@ export const OFFERED_GAME_SELECT = {
           maxPlayers: true,
           minPlayTime: true,
           maxPlayTime: true,
+          contentType: true,
 
           platform: {
             select: { id: true, name: true, slug: true, platformType: true },

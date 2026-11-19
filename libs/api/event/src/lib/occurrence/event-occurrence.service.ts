@@ -1,3 +1,4 @@
+import { changedKeys, pickSnapshot } from '@bge/actor-context';
 import {
   Action,
   AvailabilityResponse,
@@ -33,7 +34,7 @@ import { POLICY_VIEW_INCLUDE } from '../policy/policy-view';
 import type { DateWindow } from '../utils/date-end.util';
 import { hasDatePassed } from '../utils/date-end.util';
 import { EVENT_STATUS_DATE_SELECT } from '../utils/event-status.util';
-import { changedKeys, pickSnapshot } from '../utils/pick-snapshot.util';
+import { lockLiveEventDates, shareLiveEvent } from '../utils/lock-live-event.util';
 import { AVAILABILITY_VOTE_SLUG, countsAsVoter, voterGrantSelect } from '../vote/vote-grant';
 import { OccurrenceEvents } from './constants';
 import { OCCURRENCE_EDIT_FIELDS } from './constants/occurrence-edit-fields.constant';
@@ -249,11 +250,11 @@ export class EventOccurrenceService {
         // permission check. A PATCH that switches the event to Fixed holds
         // the same lock, so the mode is read again here, or a date could be
         // added to an event that just became Fixed with one date already (#796).
-        const locked = await tx.event.findUnique({
-          where: { id: eventId, ...liveEventWhere() },
+        // The lock has already refused an event that isn't live (#1065).
+        const locked = await tx.event.findUniqueOrThrow({
+          where: { id: eventId },
           select: { schedulingMode: true },
         });
-        assert(locked, new NotFoundException(t('errors.event.not_found', { id: eventId })));
 
         if (locked.schedulingMode === EventSchedulingMode.Fixed) {
           // A cancelled or declined date no longer holds the event's one
@@ -628,7 +629,11 @@ export class EventOccurrenceService {
 
     try {
       const { before, updated, canReadPolicy } = await this.db.$transaction(async (tx) => {
-        await tx.$queryRaw(Prisma.sql`SELECT id FROM events WHERE id = ${eventId} FOR NO KEY UPDATE`);
+        // The row lock a date write takes, so a transition takes its turn
+        // with them. A share first would not do: two transitions each holding
+        // one and waiting to raise it would wait on each other. One queued
+        // behind the event's delete answers 404 (#1065).
+        await lockLiveEventDates(tx, eventId);
 
         if (refuseOnCancelledEvent) {
           await assertEventNotCancelled(tx, eventId);
@@ -716,6 +721,8 @@ export class EventOccurrenceService {
     assertTakesVotes(occurrence, initiatedAt);
 
     const { vote, existingVote } = await this.db.$transaction(async (tx) => {
+      await shareLiveEvent(tx, eventId);
+
       // The checks above can be overtaken: a confirm, or an edit moving the
       // date into the past, commits between them and the write (#1005).
       // Under the share lock, which those writes' row locks conflict with,

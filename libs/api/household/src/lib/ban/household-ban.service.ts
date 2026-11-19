@@ -14,11 +14,14 @@ import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissi
 import { PaginatedRows, PaginationQueryDto } from '@bge/shared';
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { CreateHouseholdBanDto, UpdateHouseholdBanDto } from '../dto';
+import { HouseholdEventPublisher } from '../events/household-event.publisher';
 import {
-  assertHouseholdExists,
-  lockExistingHousehold,
-  lockHouseholdForRoleTransition,
-} from '../household-access.helpers';
+  HouseholdBanCreatedEvent,
+  HouseholdBanLiftedEvent,
+  HouseholdBanUpdatedEvent,
+  MembershipEndCause,
+} from '../events/household.events';
+import { assertHouseholdExists, lockHouseholdForRoleTransition } from '../household-access.helpers';
 import { readRoster } from '../invite/household-authority';
 import { HouseholdNotificationListener } from '../listeners/household-notification.listener';
 import { HouseholdMemberService } from '../member/household-member.service';
@@ -35,6 +38,12 @@ type BanAction = typeof Action.create | typeof Action.read | typeof Action.updat
  * the invite create and the admission read it (`household-ban.helpers.ts`).
  * Nobody is notified of a ban, the banned user included. A banned user who
  * reaches an admission anyway is refused, plainly and under a stable code.
+ *
+ * A ban, a change of its reason and a lift each publish a domain event after
+ * commit, with the reason, so the household's audit entries record it (#245).
+ * None has a webhook event type: a webhook would send the reason to an
+ * outside address. A ban that ends a membership publishes that end too, whose
+ * webhook carries ids only and no cause.
  */
 @Injectable()
 export class HouseholdBanService {
@@ -46,6 +55,7 @@ export class HouseholdBanService {
     private readonly invites: InviteService,
     private readonly members: HouseholdMemberService,
     private readonly notifier: HouseholdNotificationListener,
+    private readonly publisher: HouseholdEventPublisher,
   ) {}
 
   /**
@@ -74,9 +84,11 @@ export class HouseholdBanService {
    * 8. The ban is recorded. A user deleted since step 5 is 404, as one
    *    never found is.
    *
-   * After commit a removed member's ability cache is evicted, and then the
-   * revoked invites and the ended game shares are announced. A refusal at any
-   * step writes nothing.
+   * After commit a removed member's ability cache is evicted, and then come,
+   * in order: the revoked invites; a removed member's membership end, with
+   * the ban as its cause (#245); the ended game shares; and the ban itself,
+   * with its reason (#245). A refusal at any step writes nothing and
+   * publishes nothing.
    */
   async ban(householdId: string, dto: CreateHouseholdBanDto): Promise<HouseholdBanView> {
     const bannerId = this.abilityService.getActingUserId();
@@ -86,7 +98,7 @@ export class HouseholdBanService {
     }
 
     const initiatedAt = new Date();
-    const { ban, wasMember, revoked, endedShares } = await this.db.$transaction(async (tx) => {
+    const { ban, removed, revoked, endedShares } = await this.db.$transaction(async (tx) => {
       await this.assertBanAuthority(tx, householdId, Action.create);
       await lockHouseholdForRoleTransition(tx, householdId);
       await this.assertBanAuthority(tx, householdId, Action.create);
@@ -119,37 +131,65 @@ export class HouseholdBanService {
 
       // Only a member shares a game into the household, so a non-member has
       // no shares to end.
-      return { ban, wasMember: removed !== null, revoked, endedShares: removed?.endedShares ?? [] };
+      return { ban, removed, revoked, endedShares: removed?.endedShares ?? [] };
     });
 
     // The household just left a removed member's ability surface.
-    if (wasMember) {
+    if (removed) {
       await this.permissions.invalidateUser(ban.user.id);
     }
 
     this.invites.emit(revoked);
+
+    if (removed) {
+      this.members.emitMemberRemoved(removed, MembershipEndCause.Banned, initiatedAt);
+    }
+
     this.members.emitGameSharesEnded(endedShares, initiatedAt);
+    this.publisher.publish(
+      new HouseholdBanCreatedEvent(
+        { householdId, userId: ban.user.id, banId: ban.id, reason: ban.reason },
+        initiatedAt,
+      ),
+    );
 
     return toHouseholdBanView(ban);
   }
 
   /**
    * Sets, replaces or clears a ban's reason (`null` clears it), asked of the
-   * roster before and after the household's share lock, so a demotion that
-   * lands first is seen. 404 when the user isn't banned.
+   * roster before and after the household lock a ban takes, so a demotion
+   * that lands first is seen. 404 when the user isn't banned.
+   *
+   * After commit the old and the new reason are published (#245), only when
+   * they differ: a write that leaves the reason as it was publishes nothing
+   * (#728).
    */
   async updateReason(householdId: string, userId: string, dto: UpdateHouseholdBanDto): Promise<HouseholdBanView> {
-    const ban = await this.db.$transaction(async (tx) => {
+    const initiatedAt = new Date();
+    const { existing, ban } = await this.db.$transaction(async (tx) => {
       const existing = await this.findBanAsAuthority(tx, householdId, userId, Action.update);
 
-      return this.writeToBan(householdId, userId, () =>
+      const ban = await this.writeToBan(householdId, userId, () =>
         tx.householdBan.update({
           where: { id: existing.id },
           data: { reason: dto.reason },
           select: HOUSEHOLD_BAN_SELECT,
         }),
       );
+
+      return { existing, ban };
     });
+
+    if (existing.reason !== ban.reason) {
+      this.publisher.publish(
+        new HouseholdBanUpdatedEvent(
+          { householdId, userId, banId: existing.id, reason: existing.reason },
+          { householdId, userId, banId: ban.id, reason: ban.reason },
+          initiatedAt,
+        ),
+      );
+    }
 
     return toHouseholdBanView(ban);
   }
@@ -159,15 +199,21 @@ export class HouseholdBanService {
    * was. Every way back in opens again: the user may be invited by id, an
    * admission lets them in, and the open invites to their address that the
    * ban withheld are released, all but those #278's gate would still
-   * withhold from their inviter. After commit the user is told of each
-   * released invite their inbox now lists, as of one just sent.
+   * withhold from their inviter.
    *
-   * Under the household lock a ban takes, not the share lock: an invite
+   * After commit the lifted ban is published with its reason (#245), and
+   * then the user is told of each released invite their inbox now lists, as
+   * of one just sent. The released invites are not recorded (#245): the
+   * lift's own audit entry records why they changed, and a release is no
+   * invite transition, since a withheld invite stays open throughout.
+   *
+   * The lift takes the household lock a ban takes, not the share lock: an invite
    * create by address holds the share lock while it reads the ban, so with
    * only a share lock here, an invite that read the ban before this commit
    * could store itself withheld after the release had run, and stay so.
    */
   async lift(householdId: string, userId: string): Promise<HouseholdBanView> {
+    const initiatedAt = new Date();
     const { ban, released } = await this.db.$transaction(async (tx) => {
       const existing = await this.findBanAsAuthority(tx, householdId, userId, Action.delete);
 
@@ -176,6 +222,9 @@ export class HouseholdBanService {
       return { ban: existing, released: await this.releaseWithheldWithin(tx, householdId, userId) };
     });
 
+    this.publisher.publish(
+      new HouseholdBanLiftedEvent({ householdId, userId, banId: ban.id, reason: ban.reason }, initiatedAt),
+    );
     await this.notifier.onInvitesReleased(released);
 
     return toHouseholdBanView(ban);
@@ -242,9 +291,11 @@ export class HouseholdBanService {
   /**
    * The ban an update or a lift acts on: `action` asked of the roster before
    * and after the household's lock, each time about the ban as it was read
-   * just before. An update takes the share lock, and a lift the lock a ban
-   * takes ({@link lift} says why). 404 when the user isn't banned, told only
-   * to a caller the answer under the lock lets through.
+   * just before. Both take the lock a ban takes: a lift for the reason
+   * {@link lift} gives, and a reason change because two of them must not read
+   * the same reason, or the audit entry records a change that wasn't one, or
+   * misses one (#245). 404 when the user isn't banned, told only to a caller
+   * the answer under the lock lets through.
    *
    * The question names the ban by its id, as invite revoke names the invite
    * (#164): an API key scoped to one ban holds its grant only on that id, and
@@ -259,11 +310,7 @@ export class HouseholdBanService {
     const before = await this.findBan(tx, householdId, userId);
     await this.assertBanAuthority(tx, householdId, action, before?.id);
 
-    if (action === Action.delete) {
-      await lockHouseholdForRoleTransition(tx, householdId);
-    } else {
-      await lockExistingHousehold(tx, householdId);
-    }
+    await lockHouseholdForRoleTransition(tx, householdId);
 
     const ban = await this.findBan(tx, householdId, userId);
     await this.assertBanAuthority(tx, householdId, action, ban?.id);
@@ -285,7 +332,7 @@ export class HouseholdBanService {
   /**
    * Runs a write to a ban that was read a moment before. Two lifts sent at
    * once, as a double-click sends them, both find the ban under the
-   * household's share lock, and the write that lands second finds it gone. It
+   * household's lock, and the write that lands second finds it gone. It
    * answers 404, as a read that found it gone does, rather than a 500.
    */
   private async writeToBan<T>(householdId: string, userId: string, write: () => Promise<T>): Promise<T> {
