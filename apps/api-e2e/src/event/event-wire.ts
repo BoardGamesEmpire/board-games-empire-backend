@@ -246,7 +246,7 @@ export interface OfferedGameWire {
 
     readonly platformGame: Pick<
       Wire<PlatformGame>,
-      'id' | 'image' | 'thumbnail' | 'minPlayers' | 'maxPlayers' | 'minPlayTime' | 'maxPlayTime'
+      'id' | 'image' | 'thumbnail' | 'minPlayers' | 'maxPlayers' | 'minPlayTime' | 'maxPlayTime' | 'contentType'
     > & {
       readonly game: Pick<
         Wire<Game>,

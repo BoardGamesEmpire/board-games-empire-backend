@@ -1,4 +1,4 @@
-import type { List, ListEntry } from '@bge/database';
+import type { ContentType, List, ListEntry } from '@bge/database';
 import type { HttpResponseLike, RequestDescription, Wire } from '../support/wire';
 import { envelopeFailure, isRecord } from '../support/wire';
 
@@ -17,6 +17,9 @@ export type ListEntryWire = Wire<ListEntry> & {
   readonly game: { readonly id: string; readonly title: string } | null;
 
   readonly platformGame: {
+    /** The platform game's own content type, null when the game's applies (#1391). */
+    readonly contentType: ContentType | null;
+
     readonly game: { readonly id: string; readonly title: string };
     readonly id: string;
   } | null;

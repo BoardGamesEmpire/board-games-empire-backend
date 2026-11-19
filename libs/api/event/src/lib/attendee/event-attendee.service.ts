@@ -1,6 +1,9 @@
 import {
   Action,
+  ADD_ON_CONTENT_TYPES,
+  ContentType,
   DatabaseService,
+  effectiveContentType,
   EventAttendee,
   EventAttendeeGameList,
   EventParticipationStatus,
@@ -566,9 +569,11 @@ export class EventAttendeeService {
    * - Each id is judged as the single add judges one. A bad id is refused
    *   with a stable reason and a translated message, and loses nothing else.
    * - An expansion must also expand its item's game: a `GameExpansion` link
-   *   from that game to its own, the direction base games are read in. The
-   *   expansions of a refused game are refused as `baseRefused`; those of a
-   *   game already offered go ahead.
+   *   from that game to its own, the direction base games are read in, else
+   *   `notAnExpansionOfBase`, as is an entry whose platform game is no
+   *   add-on on its platform. Its entry must also be on its game's platform,
+   *   else `differentPlatform` (#1391). The expansions of a refused game are
+   *   refused as `baseRefused`; those of a game already offered go ahead.
    * - An entry already offered is `alreadyOffered`, with its entry, and
    *   emits nothing, before any judgement: nothing is written for it, so
    *   nothing is refused. That holds for one removed from its collection
@@ -594,7 +599,14 @@ export class EventAttendeeService {
     const [collections, listed] = await Promise.all([
       this.db.gameCollection.findMany({
         where: { id: { in: named } },
-        select: { id: true, userId: true, deletedAt: true, platformGame: { select: { gameId: true } } },
+        select: {
+          id: true,
+          userId: true,
+          deletedAt: true,
+          platformGame: {
+            select: { gameId: true, platformId: true, contentType: true, game: { select: { contentType: true } } },
+          },
+        },
       }),
       this.db.eventAttendeeGameList.findMany({
         where: { attendeeId, collectionId: { in: named } },
@@ -620,10 +632,7 @@ export class EventAttendeeService {
         const refusal = offered(expansionId)
           ? null
           : gameRefusal === null
-            ? (judgeCollectionEntry(attendee, expansion) ??
-              (game && expansion && links.has(linkKey(game.platformGame.gameId, expansion.platformGame.gameId))
-                ? null
-                : OfferRefusal.NotAnExpansionOfBase))
+            ? (judgeCollectionEntry(attendee, expansion) ?? judgeExpansionOfBase(game, expansion, links))
             : OfferRefusal.BaseRefused;
         judged.push({ collectionId: expansionId, baseId: item.collectionId, refusal });
       }
@@ -1026,6 +1035,45 @@ function judgeCollectionEntry(
   }
 
   return collection.deletedAt ? OfferRefusal.RemovedFromCollection : null;
+}
+
+/**
+ * Whether an expansion entry goes with its item's game entry (#1188, #1391):
+ * a link from the game to the expansion's own game, and the expansion's
+ * platform game an add-on on its platform, else `notAnExpansionOfBase`; and
+ * both entries on one platform, else `differentPlatform`. On one platform a
+ * link holds there by definition, so those and equal platforms are the whole
+ * check. The add-on test reads the platform game's own content type where it
+ * has one, as the offered-games filters do, so an entry they count as a base
+ * game is never offered as an expansion. An entry that's missing was refused
+ * before this.
+ */
+function judgeExpansionOfBase(
+  game: { platformGame: { gameId: string; platformId: string } } | undefined,
+  expansion:
+    | {
+        platformGame: {
+          contentType: ContentType | null;
+          game: { contentType: ContentType };
+          gameId: string;
+          platformId: string;
+        };
+      }
+    | undefined,
+  links: ReadonlySet<string>,
+): OfferRefusal | null {
+  if (
+    !game ||
+    !expansion ||
+    !links.has(linkKey(game.platformGame.gameId, expansion.platformGame.gameId)) ||
+    !ADD_ON_CONTENT_TYPES.has(
+      effectiveContentType(expansion.platformGame.contentType, expansion.platformGame.game.contentType),
+    )
+  ) {
+    return OfferRefusal.NotAnExpansionOfBase;
+  }
+
+  return game.platformGame.platformId === expansion.platformGame.platformId ? null : OfferRefusal.DifferentPlatform;
 }
 
 /** The single add's answer to a refusal: the status it always gave. */

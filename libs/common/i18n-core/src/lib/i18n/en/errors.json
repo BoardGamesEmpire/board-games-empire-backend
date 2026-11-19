@@ -119,6 +119,7 @@
     "game_from_other_collection": "Cannot add a game from another user's collection.",
     "game_removed_from_collection": "Cannot add a game that has been removed from the collection.",
     "not_an_expansion_of_base": "This game isn't an expansion of the game it was offered with.",
+    "different_platform": "This expansion is on a different platform from the game it was offered with.",
     "base_refused": "This expansion wasn't offered because the game it goes with couldn't be."
   },
   "nomination": {

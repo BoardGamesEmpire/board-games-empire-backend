@@ -19,6 +19,19 @@ import { toReleaseDate, toReleaseRegion } from './helpers';
 import { PersonUpsertService } from './person.service';
 import { PlatformUpsertService } from './platform.service';
 
+interface UpsertedGame {
+  /**
+   * The content type the game ends up with: the one just written, or a frozen
+   * game's own, which the import leaves alone. The add-on links follow it
+   * (#1391).
+   */
+  contentType: ContentType;
+
+  gameCreated: boolean;
+  gameId: string;
+  sourceCreated: boolean;
+}
+
 @Injectable()
 export class GameUpsertService {
   private readonly logger = new Logger(GameUpsertService.name);
@@ -49,7 +62,7 @@ export class GameUpsertService {
     fallbackBaseExternalId?: string,
   ): Promise<ImportJobResult> {
     const gameData = inMarkdown(fetched, contentFormat);
-    const { gameId, gameCreated, sourceCreated } = await this.upsertGameRecord(gameData, gatewayId);
+    const { contentType, gameId, gameCreated, sourceCreated } = await this.upsertGameRecord(gameData, gatewayId);
 
     const platformGames = await this.upsertRelations(gameId, gameData, gatewayId);
 
@@ -59,7 +72,7 @@ export class GameUpsertService {
       gameId,
       gatewayId,
       externalId: gameData.externalId,
-      contentType: toDbContentType(gameData.contentType),
+      contentType,
       baseExternalIds: gameData.baseGameExternalIds ?? [],
       fallbackBaseExternalId,
     });
@@ -67,10 +80,7 @@ export class GameUpsertService {
     return { gameId, gameCreated, sourceCreated, platformGames, baseGameIds, baseGameToAdd, isExpansion };
   }
 
-  private async upsertGameRecord(
-    gameData: GameData,
-    gatewayId: string,
-  ): Promise<{ gameCreated: boolean; gameId: string; sourceCreated: boolean }> {
+  private async upsertGameRecord(gameData: GameData, gatewayId: string): Promise<UpsertedGame> {
     const existingSource = await this.findGameSource(gatewayId, gameData.externalId);
     if (existingSource) {
       return this.applyExistingGameUpdate(existingSource, gameData, gatewayId);
@@ -103,6 +113,7 @@ export class GameUpsertService {
 
       this.logger.debug(`Created game id=${game.id} externalId=${gameData.externalId}`);
       return {
+        contentType: toDbContentType(gameData.contentType),
         gameId: game.id,
         gameCreated: true,
         sourceCreated: true,
@@ -132,7 +143,7 @@ export class GameUpsertService {
   private findGameSource(gatewayId: string, externalId: string) {
     return this.db.gameSource.findUnique({
       where: { gatewayId_externalId: { gatewayId, externalId } },
-      select: { baseExternalIds: true, game: { select: { id: true, frozenAt: true } } },
+      select: { baseExternalIds: true, game: { select: { id: true, contentType: true, frozenAt: true } } },
     });
   }
 
@@ -143,10 +154,10 @@ export class GameUpsertService {
    * them (#971). They rarely change, so an unchanged list is not written.
    */
   private async applyExistingGameUpdate(
-    source: { baseExternalIds: string[]; game: { frozenAt: Date | null; id: string } },
+    source: { baseExternalIds: string[]; game: { contentType: ContentType; frozenAt: Date | null; id: string } },
     gameData: GameData,
     gatewayId: string,
-  ): Promise<{ gameCreated: boolean; gameId: string; sourceCreated: boolean }> {
+  ): Promise<UpsertedGame> {
     const { game } = source;
     const baseExternalIds = gameData.baseGameExternalIds ?? [];
     if (!sameIds(source.baseExternalIds, baseExternalIds)) {
@@ -158,14 +169,16 @@ export class GameUpsertService {
 
     if (game.frozenAt) {
       this.logger.debug(`Skipped update for frozen game id=${game.id}`);
-    } else {
-      await this.db.game.update({
-        where: { id: game.id },
-        data: this.buildUpdateInput(gameData),
-      });
+      return { contentType: game.contentType, gameId: game.id, gameCreated: false, sourceCreated: false };
     }
 
+    await this.db.game.update({
+      where: { id: game.id },
+      data: this.buildUpdateInput(gameData),
+    });
+
     return {
+      contentType: toDbContentType(gameData.contentType),
       gameId: game.id,
       gameCreated: false,
       sourceCreated: false,

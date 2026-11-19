@@ -54,8 +54,9 @@ export class CollectionGameSummaryDto implements CollectionGame {
   @ApiProperty({
     type: [ExpansionLinkDto],
     description:
-      'For an expansion, the base games it attaches to that are live and that the viewer could open by id, in ' +
-      'title order, then game id, each with that link’s `isStandalone`. Empty for any other game.',
+      'For an add-on, the base games it attaches to that are live, that the viewer could open by id, and that ' +
+      'have a platform game on this row’s platform (#1391), in title order, then game id, each with the add-on’s ' +
+      '`isStandalone` on this platform. Empty for any other game.',
   })
   baseGames!: ExpansionLinkDto[];
 }
@@ -83,6 +84,16 @@ export class CollectionPlatformGameSummaryDto implements CollectionPlatformGame 
 
   @ApiPropertyOptional({ description: 'Platform-specific thumbnail override', nullable: true })
   thumbnail!: string | null;
+
+  @ApiProperty({
+    enum: ContentType,
+    enumName: 'ContentType',
+    nullable: true,
+    description:
+      'This platform game’s own content type, which overrides the game’s on this platform. Null when it has none, ' +
+      'and the game’s applies (#1391).',
+  })
+  contentType!: ContentType | null;
 
   @ApiProperty({
     type: Number,

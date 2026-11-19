@@ -111,7 +111,7 @@ export class GameListItemDto extends GameDto {
     type: [ExpansionLinkDto],
     description:
       'For an expansion, the base games it attaches to that this list also contains, in title order, then game ' +
-      'id, each with that link’s `isStandalone`. Empty for any other game.',
+      'id, each with the add-on’s `isStandalone`. Empty for any other game.',
   })
   baseGames!: ExpansionLinkDto[];
 }
@@ -168,6 +168,16 @@ export class PlatformGameDetailDto implements PlatformGameDetail {
   })
   maxPlayTime!: number | null;
 
+  @ApiProperty({
+    enum: ContentType,
+    enumName: 'ContentType',
+    nullable: true,
+    description:
+      'This platform game’s own content type, which overrides the game’s on this platform. Null when it has none, ' +
+      'and the game’s applies (#1391).',
+  })
+  contentType!: ContentType | null;
+
   @ApiProperty({ description: 'Whether one person can play it alone' })
   supportsSolo!: boolean;
 
@@ -219,6 +229,11 @@ export class LinkedGameDto implements LinkedGame {
   contentType!: ContentType;
 }
 
+/** `platformIds` on an add-on link of `GET /games/:id`, read the same from either end (#1391). */
+const LINK_PLATFORM_IDS_DESCRIPTION =
+  'IDs of the platforms this add-on link holds on: those where both games have a platform game the actor may ' +
+  'read, in platform name order. Empty when there are none, such as for an API key with no `read:platform_game`.';
+
 /** One of a game's expansions on `GET /games/:id` (#1069). */
 export class LinkedExpansionDto extends ExpansionLinkDto {
   @ApiProperty({ type: LinkedGameDto, description: 'The expansion' })
@@ -226,9 +241,7 @@ export class LinkedExpansionDto extends ExpansionLinkDto {
 
   @ApiProperty({
     type: [String],
-    description:
-      'IDs of the platforms the expansion has a platform game on, in platform name order. Empty when it has ' +
-      'none, or when the actor may not read its platform games, such as an API key with no `read:platform_game`.',
+    description: LINK_PLATFORM_IDS_DESCRIPTION,
   })
   platformIds!: string[];
 }
@@ -237,6 +250,12 @@ export class LinkedExpansionDto extends ExpansionLinkDto {
 export class LinkedBaseGameDto extends ExpansionLinkDto {
   @ApiProperty({ type: LinkedGameDto, description: 'The base game' })
   game!: LinkedGameDto;
+
+  @ApiProperty({
+    type: [String],
+    description: LINK_PLATFORM_IDS_DESCRIPTION,
+  })
+  platformIds!: string[];
 }
 
 export class GameDetailDto extends GameDto {
@@ -272,7 +291,7 @@ export class GameDetailDto extends GameDto {
   @ApiProperty({
     type: [LinkedExpansionDto],
     description:
-      'The game’s expansions the actor may read, in title order, then game id. Each link carries its own ' +
+      'The game’s expansions the actor may read, in title order, then game id. Each link carries the add-on’s ' +
       '`isStandalone`.',
   })
   expansions!: LinkedExpansionDto[];
@@ -281,7 +300,7 @@ export class GameDetailDto extends GameDto {
     type: [LinkedBaseGameDto],
     description:
       'For an expansion, the base games it attaches to that the actor may read, in title order, then game id. ' +
-      'Each link carries its own `isStandalone`. Empty for any other game.',
+      'Each link carries the add-on’s `isStandalone`. Empty for any other game.',
   })
   baseGames!: LinkedBaseGameDto[];
 }

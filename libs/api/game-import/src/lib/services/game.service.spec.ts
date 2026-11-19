@@ -665,6 +665,46 @@ describe('GameUpsertService', () => {
       });
     });
 
+    // A frozen game keeps its stored content type on re-import, and the add-on
+    // links read that type, so the link step gates on it too, never on the one
+    // its DataGateway sent (#1391).
+    it('links a frozen game with the content type it keeps, not the one its DataGateway sent (#1391)', async () => {
+      db.gameSource.findUnique.mockResolvedValue({
+        baseExternalIds: ['13'],
+        game: { id: 'game-frozen', frozenAt: new Date(), contentType: StoredContentType.BaseGame },
+      } as never);
+
+      await service.upsert(
+        expansionData({ contentType: ContentType.CONTENT_TYPE_DLC }),
+        GATEWAY_ID,
+        ContentFormat.PlainText,
+      );
+
+      expect(db.game.update).not.toHaveBeenCalled();
+      expect(baseGameLinks.link).toHaveBeenCalledWith(
+        expect.objectContaining({ gameId: 'game-frozen', contentType: StoredContentType.BaseGame }),
+      );
+    });
+
+    it('links a game that is not frozen with the content type its re-import writes (#1391)', async () => {
+      db.gameSource.findUnique.mockResolvedValue({
+        baseExternalIds: ['13'],
+        game: { id: 'game-existing', frozenAt: null, contentType: StoredContentType.BaseGame },
+      } as never);
+      db.game.update.mockResolvedValue({ id: 'game-existing' } as never);
+
+      await service.upsert(
+        expansionData({ contentType: ContentType.CONTENT_TYPE_DLC }),
+        GATEWAY_ID,
+        ContentFormat.PlainText,
+      );
+
+      expect(db.game.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ contentType: StoredContentType.DLC }) }),
+      );
+      expect(baseGameLinks.link).toHaveBeenCalledWith(expect.objectContaining({ contentType: StoredContentType.DLC }));
+    });
+
     it('passes the fallback base game to the link step', async () => {
       stubNewGameCreation('game-expansion');
 

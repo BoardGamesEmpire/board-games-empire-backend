@@ -152,6 +152,13 @@ describe('ListEntryService', () => {
       expect(operations).toHaveLength(3);
       expect(options).toEqual({ isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
     });
+
+    // A platform game's own content type is one of its overrides, so an entry
+    // naming a platform game sends it beside the image ones, a value or null
+    // (#1391).
+    it("sends a platform game's own content type beside its other overrides (#1391)", () => {
+      expect(LIST_ENTRY_SELECT.platformGame.select).toMatchObject({ image: true, thumbnail: true, contentType: true });
+    });
   });
 
   describe('add', () => {

@@ -24,9 +24,12 @@ export type CollectionRowGameWire = Wire<
   >
 > & { readonly baseGames: readonly ExpansionLinkWire[] };
 
-/** The platform game a collection row embeds, with its platform and game (#1070). */
+/**
+ * The platform game a collection row embeds, with its platform and game
+ * (#1070), and its own content type, null when it overrides none (#1391).
+ */
 export type CollectionRowPlatformGameWire = Wire<
-  Pick<PlatformGame, 'id' | 'image' | 'thumbnail' | PlayerAndPlayTimeField>
+  Pick<PlatformGame, 'id' | 'image' | 'thumbnail' | 'contentType' | PlayerAndPlayTimeField>
 > & {
   readonly game: CollectionRowGameWire;
   readonly platform: Pick<Platform, 'id' | 'name' | 'slug' | 'platformType'>;

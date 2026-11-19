@@ -44,6 +44,7 @@ export function makePlatformGame(
     maxPlayTime: null,
     image: null,
     thumbnail: null,
+    contentType: null,
     supportsSolo: false,
     supportsLocal: false,
     supportsOnline: false,

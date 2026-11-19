@@ -214,7 +214,8 @@ export class EventAttendeeController {
       'expansion right after its game: `added` (new, or taken back earlier and offered again with its id) or ' +
       '`alreadyOffered`, each with its `entry` in the offered-game shape, or `refused`, with a stable `reason` ' +
       `(${OFFER_REFUSALS.join(', ')}) beside a translated \`message\`. The expansions of a refused game are ` +
-      '`baseRefused`; those of a game already offered go ahead.',
+      '`baseRefused`; those of a game already offered go ahead. An expansion linked to its game but on another ' +
+      'platform is `differentPlatform`.',
   })
   @ApiParam({ name: 'eventId', type: String })
   @ApiParam({ name: 'attendeeId', type: String })
