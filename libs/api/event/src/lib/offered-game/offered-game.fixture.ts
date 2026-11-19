@@ -18,6 +18,7 @@ export function makeOfferedGameEntry(id: string, gameId = 'game-1', attendeeId =
         maxPlayers: null,
         minPlayTime: null,
         maxPlayTime: null,
+        contentType: null,
         platform: { id: 'plat-1', name: 'Tabletop', slug: 'tabletop', platformType: PlatformType.Tabletop },
         game: {
           id: gameId,

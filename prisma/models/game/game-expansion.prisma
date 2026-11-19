@@ -5,10 +5,12 @@
  * (an edition, remake, remaster, port or bundle) names its original on its
  * DataGateway link alone (#658).
  * The link has no kind of its own: the add-on's content type is its kind, so
- * `isStandalone` on the wire follows it, the same on every link of an add-on
- * (#1391). Add-ons are first-class Game records with their own GameSources,
- * mechanics, etc.; this table carries the link and the adjustments (e.g.
- * player count changes) the add-on brings.
+ * `isStandalone` on the wire follows it: the platform game's own where one
+ * platform is in view (a collection or offered-game row), else the game's. So
+ * every link on one row, or of one game where no platform is in view, carries
+ * the same value (#1391). Add-ons are first-class Game records with their own
+ * GameSources, mechanics, etc.; this table carries the link and the
+ * adjustments (e.g. player count changes) the add-on brings.
  */
 model GameExpansion {
   id String @id @default(cuid(2))

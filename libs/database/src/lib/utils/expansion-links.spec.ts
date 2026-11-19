@@ -1,11 +1,13 @@
 import type { Prisma } from '../client';
 import { ContentType } from '../client';
+import type { PlatformGameInView } from './expansion-links';
 import {
   ADD_ON_CONTENT_TYPES,
   effectiveContentType,
   isStandaloneAddOn,
   linkPlatformIds,
   readBaseGameLinks,
+  readBaseGameLinksOnPlatform,
 } from './expansion-links';
 
 /** A stand-in for the where the caller composes for the base games. */
@@ -85,6 +87,114 @@ describe('readBaseGameLinks', () => {
     const { db, findMany } = stubDb();
 
     const links = await readBaseGameLinks(db, [], BASE_WHERE);
+
+    expect(findMany).not.toHaveBeenCalled();
+    expect(links.size).toBe(0);
+  });
+});
+
+describe('readBaseGameLinksOnPlatform', () => {
+  const TABLETOP = 'plat-tabletop';
+  const PC = 'plat-pc';
+
+  const stubDb = (rows: unknown[] = []) => {
+    const findMany = jest.fn().mockResolvedValue(rows);
+
+    return {
+      db: { gameExpansion: { findMany } } as never as Parameters<typeof readBaseGameLinksOnPlatform>[0],
+      findMany,
+    };
+  };
+
+  /** A platform game a row shows: its own content type, if it has one, over its game's. */
+  const inView = (
+    id: string,
+    platformId: string,
+    game: PlatformGameInView['game'],
+    contentType: ContentType | null = null,
+  ): PlatformGameInView => ({ id, platformId, contentType, game });
+
+  /** A link row as the read returns it: the base game's platform games, among the page's platforms. */
+  const linkRow = (expansionGameId: string, baseGameId: string, basePlatformIds: readonly string[]) => ({
+    expansionGameId,
+    baseGameId,
+    baseGame: { platformGames: basePlatformIds.map((platformId) => ({ platformId })) },
+  });
+
+  // The caller's where stays in the read's own where, where the CASL extension
+  // sees a deny-all (#1069). The base game's platform games are read only to
+  // test presence, and only on the page's platforms: never sent, so under no
+  // ceiling (#1391).
+  it("reads each game once, with its base games' platform games on the page's platforms, in base game title then id order (#1391)", async () => {
+    const { db, findMany } = stubDb();
+
+    await readBaseGameLinksOnPlatform(
+      db,
+      [inView('pg-1', TABLETOP, DLC), inView('pg-2', PC, DLC), inView('pg-3', TABLETOP, EXPANSION)],
+      BASE_WHERE,
+    );
+
+    expect(findMany).toHaveBeenCalledTimes(1);
+    expect(findMany).toHaveBeenCalledWith({
+      where: { expansionGameId: { in: ['e2', 'e1'] }, baseGame: { is: BASE_WHERE } },
+      select: {
+        expansionGameId: true,
+        baseGameId: true,
+        baseGame: {
+          select: {
+            platformGames: { where: { platformId: { in: [TABLETOP, PC] } }, select: { platformId: true } },
+          },
+        },
+      },
+      orderBy: [{ baseGame: { title: 'asc' } }, { baseGameId: 'asc' }],
+    });
+  });
+
+  // A row shows one platform game, and a DLC on PC adds nothing to a base game
+  // a user can only have on the table (#1391).
+  it('gives a platform game no link to a base game with no platform game on its platform (#1391)', async () => {
+    const { db } = stubDb([linkRow('e2', 'b1', [TABLETOP])]);
+
+    const links = await readBaseGameLinksOnPlatform(db, [inView('pg-pc', PC, DLC)], BASE_WHERE);
+
+    expect(links.get('pg-pc') ?? []).toEqual([]);
+  });
+
+  // One DLC held on two platforms gives two rows, and the base game is only on
+  // the table: keyed by game, both rows would get the same answer (#1391).
+  it('keys the links by platform game, so of one DLC on Tabletop and on PC only the Tabletop one names a Tabletop-only base game (#1391)', async () => {
+    const { db } = stubDb([linkRow('e2', 'b1', [TABLETOP])]);
+
+    const links = await readBaseGameLinksOnPlatform(
+      db,
+      [inView('pg-tabletop', TABLETOP, DLC), inView('pg-pc', PC, DLC)],
+      BASE_WHERE,
+    );
+
+    expect(links.get('pg-tabletop')).toEqual([{ gameId: 'b1', isStandalone: false }]);
+    expect(links.get('pg-pc') ?? []).toEqual([]);
+  });
+
+  // With one platform in view, the add-on's content type is the platform
+  // game's own where it has one, else the game's (#1391).
+  it("reads isStandalone from the platform game's own content type, else the game's (#1391)", async () => {
+    const { db } = stubDb([linkRow('e2', 'b1', [TABLETOP, PC])]);
+
+    const links = await readBaseGameLinksOnPlatform(
+      db,
+      [inView('pg-tabletop', TABLETOP, DLC), inView('pg-pc', PC, DLC, ContentType.StandaloneExpansion)],
+      BASE_WHERE,
+    );
+
+    expect(links.get('pg-tabletop')).toEqual([{ gameId: 'b1', isStandalone: false }]);
+    expect(links.get('pg-pc')).toEqual([{ gameId: 'b1', isStandalone: true }]);
+  });
+
+  // An empty page has nothing to link, and `in: []` would still cost a round trip.
+  it('issues no query for no platform games (#1391)', async () => {
+    const { db, findMany } = stubDb();
+
+    const links = await readBaseGameLinksOnPlatform(db, [], BASE_WHERE);
 
     expect(findMany).not.toHaveBeenCalled();
     expect(links.size).toBe(0);

@@ -1,4 +1,4 @@
-import { Action, EventParticipationStatus, ListKind, Prisma, ResourceType } from '@bge/database';
+import { Action, ContentType, EventParticipationStatus, ListKind, Prisma, ResourceType } from '@bge/database';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
 import type { MockAbilityService, MockDatabaseService } from '@bge/testing';
 import {
@@ -17,10 +17,37 @@ import { ListOfferedGamesQueryDto } from './dto/list-offered-games.query.dto';
 import { makeOfferedGameEntry } from './offered-game.fixture';
 import { OFFERED_GAME_ORDER, OFFERED_GAME_SELECT } from './offered-game.select';
 import { OfferedGameService } from './offered-game.service';
+import type { OfferedGameEntry } from './offered-game.types';
 import { offeredGamesFilter } from './offered-games.filter';
 
 const COND = { id: 'sentinel-condition' };
 const NOW = new Date('2026-11-11T12:00:00Z');
+
+/** A link row as the base-game read returns it: the base game's platform games, among the page's platforms (#1391). */
+function baseGameLink(expansionGameId: string, baseGameId: string, basePlatformIds: readonly string[]) {
+  return {
+    expansionGameId,
+    baseGameId,
+    baseGame: { platformGames: basePlatformIds.map((platformId) => ({ platformId })) },
+  };
+}
+
+/** `entry` with its platform game moved to `platformId`, as another platform game of the same game (#1391). */
+function onPlatform(entry: OfferedGameEntry, platformId: string): OfferedGameEntry {
+  const { platformGame } = entry.collection;
+
+  return {
+    ...entry,
+    collection: {
+      ...entry.collection,
+      platformGame: {
+        ...platformGame,
+        id: `${platformGame.id}-${platformId}`,
+        platform: { ...platformGame.platform, id: platformId },
+      },
+    },
+  };
+}
 
 describe('OfferedGameService (#1185, #1187)', () => {
   let service: OfferedGameService;
@@ -63,7 +90,7 @@ describe('OfferedGameService (#1185, #1187)', () => {
     // name every base game (#559), so the links are a read of their own, as
     // collection rows read them (#1070).
     it('reads base games once per game, under the live-game read ceiling (#1187)', async () => {
-      db.gameExpansion.findMany.mockResolvedValue([{ expansionGameId: 'game-exp', baseGameId: 'game-base' }] as never);
+      db.gameExpansion.findMany.mockResolvedValue([baseGameLink('game-exp', 'game-base', ['plat-1'])] as never);
 
       const enriched = await service.enrich(
         [
@@ -90,6 +117,55 @@ describe('OfferedGameService (#1185, #1187)', () => {
         [{ gameId: 'game-base', isStandalone: false }],
       ]);
       expect(enriched.map((row) => row.id)).toEqual(['a', 'b', 'c']);
+    });
+
+    // An entry shows one platform game. One add-on offered on two platforms
+    // gives two entries, and each lists only the base games with a platform
+    // game on its own platform, so the links are keyed by platform game
+    // (#1391). The base game's platform games are read on the page's
+    // platforms only.
+    it('gives each offered platform game the base games on its own platform (#1391)', async () => {
+      db.gameExpansion.findMany.mockResolvedValue([baseGameLink('game-exp', 'game-base', ['plat-1'])] as never);
+
+      const enriched = await service.enrich(
+        [makeOfferedGameEntry('a', 'game-exp'), onPlatform(makeOfferedGameEntry('b', 'game-exp'), 'plat-pc')],
+        NOW,
+      );
+
+      expect(db.gameExpansion.findMany).toHaveBeenCalledTimes(1);
+      expect(db.gameExpansion.findMany.mock.calls[0][0]).toMatchObject({
+        where: { expansionGameId: { in: ['game-exp'] } },
+        select: {
+          baseGame: {
+            select: {
+              platformGames: { where: { platformId: { in: ['plat-1', 'plat-pc'] } }, select: { platformId: true } },
+            },
+          },
+        },
+      });
+      expect(enriched.map((row) => [row.id, row.collection.platformGame.game.baseGames])).toEqual([
+        ['a', [{ gameId: 'game-base', isStandalone: false }]],
+        ['b', []],
+      ]);
+    });
+
+    // With one platform in view, the add-on's content type is the platform
+    // game's own where it has one, else the game's (#1391).
+    it("reads isStandalone from the offered platform game's own content type, else the game's (#1391)", async () => {
+      db.gameExpansion.findMany.mockResolvedValue([baseGameLink('game-exp', 'game-base', ['plat-1'])] as never);
+      const standalone = makeOfferedGameEntry('b', 'game-exp');
+      standalone.collection.platformGame = {
+        ...standalone.collection.platformGame,
+        id: 'pg-standalone',
+        contentType: ContentType.StandaloneExpansion,
+      };
+
+      const enriched = await service.enrich([makeOfferedGameEntry('a', 'game-exp'), standalone], NOW);
+
+      expect(enriched.map((row) => row.collection.platformGame.game.baseGames)).toEqual([
+        [{ gameId: 'game-base', isStandalone: false }],
+        [{ gameId: 'game-base', isStandalone: true }],
+      ]);
     });
 
     // The same two facts the take-back's 409 checks, so a client can tell
