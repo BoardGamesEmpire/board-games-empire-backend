@@ -644,7 +644,7 @@ A game made up of other games and sold as one product, such as Catan: Big Box or
 _Avoid_: compilation, big box (for bundles in general), collection (a user's owned games)
 
 **Add-on link**:
-The link from an add-on to a base game it attaches to. An add-on can have several. Planned: a link holds only on the platforms where both games have a platform game.
+The link from an add-on to a base game it attaches to. An add-on can have several. A link holds only on the platforms where both games have a platform game. Only an add-on has one: a remake, remaster, port, expanded edition or bundle that names its original is not linked to it.
 _Avoid_: expansion link, parent link
 
 **Works-with link**:
@@ -693,7 +693,7 @@ _Avoid_: platform incarnation, PG
 The broad class of platform a game is played on, such as tabletop, console, PC or mobile.
 
 **Content type**:
-What a game is in relation to other games, such as a base game, expansion, DLC, accessory or bundle. Planned: a platform game can have its own, since Jagged Earth is an expansion on tabletop and DLC on PC.
+What a game is in relation to other games, such as a base game, expansion, DLC, accessory or bundle. A platform game can have its own, which overrides the game's on that platform, since Jagged Earth is an expansion on tabletop and DLC on PC.
 _Avoid_: game type, expansion type; not to be confused with content format
 
 **Override**:
