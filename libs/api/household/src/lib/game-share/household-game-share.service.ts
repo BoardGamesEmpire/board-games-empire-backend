@@ -12,7 +12,7 @@ import { AbilityService, ScopeComposer } from '@bge/permissions';
 import type { PaginatedRows } from '@bge/shared';
 import { PaginationQueryDto } from '@bge/shared';
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { EventEmitter2 } from '@nestjs/event-emitter';
+import { HouseholdEventPublisher } from '../events/household-event.publisher';
 import { HouseholdGameShareApprovedEvent } from '../events/household.events';
 import { assertHouseholdExists, lockExistingHousehold } from '../household-access.helpers';
 import type { RosterRow } from '../invite/household-authority';
@@ -59,7 +59,7 @@ export class HouseholdGameShareService {
     private readonly db: DatabaseService,
     private readonly abilityService: AbilityService,
     private readonly scopeComposer: ScopeComposer,
-    private readonly eventEmitter: EventEmitter2,
+    private readonly publisher: HouseholdEventPublisher,
   ) {}
 
   /**
@@ -173,8 +173,7 @@ export class HouseholdGameShareService {
       return { before: { ...share, approvedAt: null, approvedById: null }, after: share };
     });
 
-    this.eventEmitter.emit(
-      HouseholdGameShareApprovedEvent.eventName,
+    this.publisher.publish(
       new HouseholdGameShareApprovedEvent(gameShareSnapshot(before), gameShareSnapshot(after), now),
     );
 

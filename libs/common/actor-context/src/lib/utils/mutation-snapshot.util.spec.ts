@@ -1,7 +1,7 @@
-import { changedKeys } from './pick-snapshot.util';
+import { changedKeys } from './mutation-snapshot.util';
 
 describe('changedKeys', () => {
-  // #728: an audit row records the columns whose values changed, so a Date
+  // #728: an audit entry records the columns whose values changed, so a Date
   // compares by value, not by reference.
   it('treats two equal Date instances as unchanged', () => {
     const before = { startDate: new Date('2026-01-01T00:00:00Z') };

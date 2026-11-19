@@ -42,12 +42,12 @@ describe('WebhookEventRegistry', () => {
       }
     });
 
-    it('marks only the event delete as firing after its subject is soft-deleted (#538)', () => {
+    it('marks only the event and household deletes as firing after their subject is soft-deleted (#538, #245)', () => {
       // Visibility skips the deleted-row guard for a marked event, so a mark on
       // any other event would deliver it about a subject that is gone.
       const firesAfterDelete = registry.types().filter((type) => registry.require(type).subjectDeleted === true);
 
-      expect(firesAfterDelete).toEqual([WebhookEventType.EventDeleted]);
+      expect(firesAfterDelete).toEqual([WebhookEventType.EventDeleted, WebhookEventType.HouseholdDeleted]);
     });
 
     it('require throws for an unknown type (fail loudly)', () => {
@@ -112,6 +112,12 @@ describe('WebhookEventRegistry', () => {
         WebhookEventType.ImportJobFailed,
         WebhookEventType.ImportBatchCompleted,
         WebhookEventType.HouseholdOwnershipTransferred,
+        WebhookEventType.HouseholdUpdated,
+        WebhookEventType.HouseholdDeleted,
+        WebhookEventType.HouseholdRestored,
+        WebhookEventType.HouseholdMemberAdmitted,
+        WebhookEventType.HouseholdMemberRoleChanged,
+        WebhookEventType.HouseholdMemberRemoved,
       ].sort(),
     );
   });
@@ -124,5 +130,30 @@ describe('WebhookEventRegistry', () => {
       subject: ResourceType.EventPolicy,
       requiredAction: Action.read,
     });
+  });
+
+  it('describes the household lifecycle and membership types as read on the household, ids only (#245)', () => {
+    const wireNames = {
+      [WebhookEventType.HouseholdUpdated]: 'household.household.updated.v1',
+      [WebhookEventType.HouseholdDeleted]: 'household.household.deleted.v1',
+      [WebhookEventType.HouseholdRestored]: 'household.household.restored.v1',
+      [WebhookEventType.HouseholdMemberAdmitted]: 'household.member.admitted.v1',
+      [WebhookEventType.HouseholdMemberRoleChanged]: 'household.member.role-changed.v1',
+      [WebhookEventType.HouseholdMemberRemoved]: 'household.member.removed.v1',
+    };
+
+    for (const [type, wireName] of Object.entries(wireNames)) {
+      expect(type).toBe(wireName);
+      expect(registry.require(type as WebhookEventType)).toMatchObject({
+        subject: ResourceType.Household,
+        requiredAction: Action.read,
+      });
+    }
+
+    expect(registry.require(WebhookEventType.HouseholdDeleted).subjectDeleted).toBe(true);
+
+    for (const type of Object.keys(wireNames).filter((name) => name !== WebhookEventType.HouseholdDeleted)) {
+      expect(registry.require(type as WebhookEventType).subjectDeleted).toBeUndefined();
+    }
   });
 });

@@ -130,6 +130,31 @@ describe('webhook dispatch from the API (#538)', () => {
     });
   });
 
+  it('enqueues a delivery to a member when their household is deleted (#245)', async () => {
+    // The emit follows the soft delete, and the delete evicts every member's
+    // graph, so this is the household type that needs the deleted row checked:
+    // a live-row check refuses every subscriber. The watcher is no owner, so
+    // no restore window lends them a read.
+    const { owner, watcher, householdId } = await householdToTransfer();
+    const subscriptionId = await subscribe(watcher, {
+      resourceType: ResourceType.Household,
+      resourceId: householdId,
+      eventTypes: [WebhookEventType.HouseholdDeleted],
+    });
+
+    await request(baseUrl).delete(`/api/households/${householdId}`).set(owner.headers).expect(200);
+
+    const delivery = await onlyDelivery();
+
+    expect(delivery.data).toMatchObject({
+      subscriptionId,
+      eventType: WebhookEventType.HouseholdDeleted,
+      subjectId: householdId,
+    });
+    // Ids only: the restore windows stay in the audit entry.
+    expect(delivery.data.payload.data).toEqual({ householdId });
+  });
+
   it('enqueues a delivery for a subscriber whose only read arrived after their graph was cached (#732)', async () => {
     const owner = await actors.user();
     const watcher = await actors.user();
