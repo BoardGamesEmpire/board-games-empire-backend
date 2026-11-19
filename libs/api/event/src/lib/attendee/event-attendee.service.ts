@@ -566,7 +566,9 @@ export class EventAttendeeService {
    * - Each id is judged as the single add judges one. A bad id is refused
    *   with a stable reason and a translated message, and loses nothing else.
    * - An expansion must also expand its item's game: a `GameExpansion` link
-   *   from that game to its own, the direction base games are read in. The
+   *   from that game to its own, the direction base games are read in, else
+   *   `notAnExpansionOfBase`. Its entry must also be on its game's platform,
+   *   else `differentPlatform` (#1391). The
    *   expansions of a refused game are refused as `baseRefused`; those of a
    *   game already offered go ahead.
    * - An entry already offered is `alreadyOffered`, with its entry, and
@@ -594,7 +596,12 @@ export class EventAttendeeService {
     const [collections, listed] = await Promise.all([
       this.db.gameCollection.findMany({
         where: { id: { in: named } },
-        select: { id: true, userId: true, deletedAt: true, platformGame: { select: { gameId: true } } },
+        select: {
+          id: true,
+          userId: true,
+          deletedAt: true,
+          platformGame: { select: { gameId: true, platformId: true } },
+        },
       }),
       this.db.eventAttendeeGameList.findMany({
         where: { attendeeId, collectionId: { in: named } },
@@ -620,10 +627,7 @@ export class EventAttendeeService {
         const refusal = offered(expansionId)
           ? null
           : gameRefusal === null
-            ? (judgeCollectionEntry(attendee, expansion) ??
-              (game && expansion && links.has(linkKey(game.platformGame.gameId, expansion.platformGame.gameId))
-                ? null
-                : OfferRefusal.NotAnExpansionOfBase))
+            ? (judgeCollectionEntry(attendee, expansion) ?? judgeExpansionOfBase(game, expansion, links))
             : OfferRefusal.BaseRefused;
         judged.push({ collectionId: expansionId, baseId: item.collectionId, refusal });
       }
@@ -1026,6 +1030,26 @@ function judgeCollectionEntry(
   }
 
   return collection.deletedAt ? OfferRefusal.RemovedFromCollection : null;
+}
+
+/**
+ * Whether an expansion entry goes with its item's game entry (#1188, #1391):
+ * a link from the game to the expansion's own game, else
+ * `notAnExpansionOfBase`; and both entries on one platform, else
+ * `differentPlatform`. On one platform a link holds there by definition, so
+ * a link and equal platforms is the whole check. An entry that's missing was
+ * refused before this.
+ */
+function judgeExpansionOfBase(
+  game: { platformGame: { gameId: string; platformId: string } } | undefined,
+  expansion: { platformGame: { gameId: string; platformId: string } } | undefined,
+  links: ReadonlySet<string>,
+): OfferRefusal | null {
+  if (!game || !expansion || !links.has(linkKey(game.platformGame.gameId, expansion.platformGame.gameId))) {
+    return OfferRefusal.NotAnExpansionOfBase;
+  }
+
+  return game.platformGame.platformId === expansion.platformGame.platformId ? null : OfferRefusal.DifferentPlatform;
 }
 
 /** The single add's answer to a refusal: the status it always gave. */

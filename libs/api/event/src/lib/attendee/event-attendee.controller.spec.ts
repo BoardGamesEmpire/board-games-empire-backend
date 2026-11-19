@@ -253,6 +253,7 @@ describe('EventAttendeeController', () => {
         'notInAttendeesCollection',
         'removedFromCollection',
         'notAnExpansionOfBase',
+        'differentPlatform',
         'baseRefused',
       ]);
     });

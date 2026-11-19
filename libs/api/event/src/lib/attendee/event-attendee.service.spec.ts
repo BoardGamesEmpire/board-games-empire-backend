@@ -1464,11 +1464,16 @@ describe('EventAttendeeService', () => {
     const removedAt = new Date('2026-10-15T12:00:00Z');
 
     /** A collection entry as the batch reads it: its owner, tombstone and game. */
-    const owned = (id: string, gameId: string, overrides: { deletedAt?: Date | null; userId?: string } = {}) => ({
+    const owned = (
+      id: string,
+      gameId: string,
+      overrides: { deletedAt?: Date | null; userId?: string } = {},
+      platformId = 'plat-tabletop',
+    ) => ({
       id,
       userId: 'user-1',
       deletedAt: null,
-      platformGame: { gameId },
+      platformGame: { gameId, platformId },
       ...overrides,
     });
 
@@ -1807,6 +1812,56 @@ describe('EventAttendeeService', () => {
         ['col-reverse', OfferRefusal.NotAnExpansionOfBase],
       ]);
       expect(results[1]).toEqual(expect.objectContaining({ message: t('errors.attendee.not_an_expansion_of_base') }));
+    });
+
+    // A game's add-on link says which games go together; a platform game's
+    // entry is one platform's copy, so the two entries must share one (#1391).
+    it('refuses a linked expansion whose entry is on another platform from its game as differentPlatform (#1391)', async () => {
+      arrange({
+        collections: [owned('col-base', 'game-base'), owned('col-exp', 'game-exp', {}, 'plat-pc')],
+        links: [{ baseGameId: 'game-base', expansionGameId: 'game-exp' }],
+      });
+
+      const results = await service.offerGames('event-1', 'att-1', {
+        items: [{ collectionId: 'col-base', expansionCollectionIds: ['col-exp'] }],
+      });
+
+      expect(outcomes(results)).toEqual([
+        ['col-base', 'added'],
+        ['col-exp', OfferRefusal.DifferentPlatform],
+      ]);
+      expect(results[1]).toEqual(expect.objectContaining({ message: t('errors.attendee.different_platform') }));
+    });
+
+    it("accepts a linked expansion whose entry is on its game's platform (#1391)", async () => {
+      arrange({
+        collections: [owned('col-base', 'game-base', {}, 'plat-pc'), owned('col-exp', 'game-exp', {}, 'plat-pc')],
+        links: [{ baseGameId: 'game-base', expansionGameId: 'game-exp' }],
+      });
+
+      const results = await service.offerGames('event-1', 'att-1', {
+        items: [{ collectionId: 'col-base', expansionCollectionIds: ['col-exp'] }],
+      });
+
+      expect(outcomes(results)).toEqual([
+        ['col-base', 'added'],
+        ['col-exp', 'added'],
+      ]);
+    });
+
+    it('refuses an unlinked expansion on another platform as notAnExpansionOfBase, not differentPlatform (#1391)', async () => {
+      arrange({
+        collections: [owned('col-base', 'game-base'), owned('col-x', 'game-x', {}, 'plat-pc')],
+      });
+
+      const results = await service.offerGames('event-1', 'att-1', {
+        items: [{ collectionId: 'col-base', expansionCollectionIds: ['col-x'] }],
+      });
+
+      expect(outcomes(results)).toEqual([
+        ['col-base', 'added'],
+        ['col-x', OfferRefusal.NotAnExpansionOfBase],
+      ]);
     });
 
     it('refuses the expansions of a refused game as baseRefused, and lets those of an already-offered game through', async () => {
