@@ -995,11 +995,18 @@ export class HouseholdService {
         } satisfies Prisma.UserPermissionWhereInput;
 
         // Who holds the windows the restore ends, for the household restored
-        // domain event (#245). A lapsed grant is not a restore window, so the
-        // read leaves it out; the revocation below still clears the lapsed
-        // rows.
+        // domain event (#245). A lapsed grant, or one of a retired permission,
+        // is not a restore window, as {@link restoreWindows} and the ability
+        // loader count them, so the read leaves it out; the revocation below
+        // still clears those rows.
         const windows = await tx.userPermission.findMany({
-          where: { AND: [windowGrants, { OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }] },
+          where: {
+            AND: [
+              windowGrants,
+              { permission: { retiredAt: null } },
+              { OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
+            ],
+          },
           select: { userId: true },
         });
 

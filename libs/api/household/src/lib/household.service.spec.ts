@@ -1118,9 +1118,17 @@ describe('HouseholdService', () => {
       OR: [{ inverted: null }, { inverted: false }],
     };
 
-    /** The same grants, less the ones that lapsed: a lapsed grant is not a restore window. */
+    /**
+     * The same grants, less the ones that lapsed or are of a retired
+     * permission: neither is a restore window, as `restoreWindows` and the
+     * ability loader count them.
+     */
     const openWindowGrants = {
-      AND: [windowGrants, { OR: [{ expiresAt: null }, { expiresAt: { gt: expect.any(Date) } }] }],
+      AND: [
+        windowGrants,
+        { permission: { retiredAt: null } },
+        { OR: [{ expiresAt: null }, { expiresAt: { gt: expect.any(Date) } }] },
+      ],
     };
 
     beforeEach(() => {
@@ -1138,9 +1146,10 @@ describe('HouseholdService', () => {
         clientVersion: 'test',
       });
 
-    // A lapsed grant is no restore window, so the audit entry does not list it
-    // as one, though the revocation still clears the row.
-    it('lists only the restore windows still open, though it revokes lapsed grants too (#245)', async () => {
+    // A lapsed grant, or one of a retired permission, is no restore window, so
+    // the audit entry does not list it as one, though the revocation still
+    // clears the row.
+    it('lists only the restore windows still open, though it revokes lapsed and retired grants too (#245)', async () => {
       await service.restoreHousehold('hh-1');
 
       expect(db.userPermission.findMany).toHaveBeenCalledWith({ where: openWindowGrants, select: { userId: true } });
