@@ -517,6 +517,35 @@ describe('collection rows (#1070)', () => {
       );
       expect(tabletopRow.game.baseGames).toEqual([{ gameId: base.id, isStandalone: false }]);
     });
+
+    // The offered-games filters read a row's content type from its platform
+    // game where it has one, so a DLC game's platform game that is a base game
+    // counts as a base game there, and its row lists no base game of its own.
+    // A second DLC with no override, linked to the same base game, is the
+    // control (#1391).
+    it('a DLC whose platform game is a base game has no base game on its row (#1391)', async () => {
+      const owner = await actors.user();
+      const base = await arrangeGame(owner.user.id, Reach.Public, `e2e base ${token()}`);
+      const overridden = await arrangeRow(owner.user.id, {
+        reach: Reach.Private,
+        game: { contentType: ContentType.DLC },
+        platformGame: { contentType: ContentType.BaseGame },
+      });
+      const control = await arrangeRow(owner.user.id, {
+        reach: Reach.Private,
+        game: { contentType: ContentType.DLC },
+      });
+      await arrangeLink(base.id, overridden.gameId);
+      await arrangeLink(base.id, control.gameId);
+
+      for (const platformGame of await embeddedEverywhere(owner, overridden.entryId)) {
+        expect(platformGame.game.baseGames).toEqual([]);
+      }
+
+      for (const platformGame of await embeddedEverywhere(owner, control.entryId)) {
+        expect(platformGame.game.baseGames).toEqual([{ gameId: base.id, isStandalone: false }]);
+      }
+    });
   });
 
   /**

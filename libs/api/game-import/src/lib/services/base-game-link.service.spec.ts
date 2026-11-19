@@ -109,7 +109,9 @@ describe('BaseGameLinkService', () => {
     );
   });
 
-  it.each([ContentType.Expansion, ContentType.DLC, ContentType.Mod])(
+  const ADDS_BASE_GAME: readonly ContentType[] = [ContentType.Expansion, ContentType.DLC, ContentType.Mod];
+
+  it.each(ADDS_BASE_GAME)(
     'adds the first named base game when none is in the game catalog, for content type %s',
     async (contentType) => {
       const result = await service.link(input({ contentType, baseExternalIds: ['13', '143065'] }));
@@ -119,39 +121,58 @@ describe('BaseGameLinkService', () => {
     },
   );
 
-  it.each([
-    ContentType.StandaloneExpansion,
-    ContentType.ExpandedEdition,
-    ContentType.Remake,
-    ContentType.Remaster,
-    ContentType.Port,
-    ContentType.Bundle,
-    ContentType.Accessory,
-    ContentType.BaseGame,
-    ContentType.Unknown,
-  ])('only links, never adds, for content type %s', async (contentType) => {
-    const result = await service.link(input({ contentType, baseExternalIds: ['13'] }));
+  // Every content type but the three above, so a content type added later
+  // adds no base game until someone decides it should (#1391).
+  it.each(Object.values(ContentType).filter((contentType) => !ADDS_BASE_GAME.includes(contentType)))(
+    'only links, never adds, for content type %s',
+    async (contentType) => {
+      const result = await service.link(input({ contentType, baseExternalIds: ['13'] }));
 
-    expect(result.baseGameToAdd).toBeUndefined();
-  });
+      expect(result.baseGameToAdd).toBeUndefined();
+    },
+  );
 
   // An expansion to the import's events, notifications and game watches is
   // an add-on with a base game; a version of its original is not (#971).
-  it.each([
-    ContentType.Remake,
-    ContentType.Remaster,
-    ContentType.Port,
-    ContentType.ExpandedEdition,
-    ContentType.Bundle,
-    ContentType.BaseGame,
-    ContentType.Unknown,
-  ])('writes no add-on link for a %s that names its original (#1391)', async (contentType) => {
+  it.each(Object.values(ContentType).filter((contentType) => !ADD_ON_CONTENT_TYPES.has(contentType)))(
+    'writes no add-on link for a %s that names its original (#1391)',
+    async (contentType) => {
+      catalog = { '13': { gameId: 'game-catan' } };
+
+      const result = await service.link(input({ contentType, baseExternalIds: ['13'] }));
+
+      expect(result).toEqual({ baseGameIds: [], isExpansion: false });
+      expect(db.gameExpansion.upsert).not.toHaveBeenCalled();
+    },
+  );
+
+  // A DLC re-imported as a bundle keeps no add-on link its DataGateway's data
+  // made while it was a DLC. Only an add-on gets one (#1391).
+  it('removes the links to its named base games from a game re-imported as no add-on (#1391)', async () => {
+    catalog = { '13': { gameId: 'game-catan' }, '143065': { gameId: 'game-tribes' } };
+
+    await service.link(input({ contentType: ContentType.Bundle, baseExternalIds: ['13', '143065', '404'] }));
+
+    expect(db.gameExpansion.deleteMany).toHaveBeenCalledTimes(1);
+    expect(db.gameExpansion.deleteMany).toHaveBeenCalledWith({
+      where: { expansionGameId: 'game-expansion', baseGameId: { in: ['game-catan', 'game-tribes'] } },
+    });
+  });
+
+  // Nothing records which DataGateway made a link (#1178), so a link to a
+  // base game this DataGateway doesn't name may be another's and stays.
+  it('removes nothing from a game of no add-on content type whose named base games are not in the game catalog (#1391)', async () => {
+    await service.link(input({ contentType: ContentType.Remaster, baseExternalIds: ['13'] }));
+
+    expect(db.gameExpansion.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it('never removes a link from an add-on (#1391)', async () => {
     catalog = { '13': { gameId: 'game-catan' } };
 
-    const result = await service.link(input({ contentType, baseExternalIds: ['13'] }));
+    await service.link(input({ contentType: ContentType.DLC, baseExternalIds: ['13'] }));
 
-    expect(result).toEqual({ baseGameIds: [], isExpansion: false });
-    expect(db.gameExpansion.upsert).not.toHaveBeenCalled();
+    expect(db.gameExpansion.deleteMany).not.toHaveBeenCalled();
   });
 
   // A bundle names no base game, but it is one for the add-ons that name it (#1391).

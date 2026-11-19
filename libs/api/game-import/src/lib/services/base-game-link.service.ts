@@ -47,7 +47,8 @@ export interface LinkBaseGamesResult {
  * whose base game is missing adds it. A standalone expansion or accessory is
  * linked to a base game that is in the game catalog but never adds one. A
  * game that is not an add-on gets no add-on link at all, as `link()` says
- * (#971, #1391).
+ * (#971, #1391). Only an add-on adds a base game, so a content type here that
+ * is not in `ADD_ON_CONTENT_TYPES` adds nothing.
  */
 const NEEDS_BASE_GAME: ReadonlySet<ContentType> = new Set([ContentType.Expansion, ContentType.DLC, ContentType.Mod]);
 
@@ -80,11 +81,12 @@ export class BaseGameLinkService {
     const isAddOn = ADD_ON_CONTENT_TYPES.has(input.contentType);
     // Independent: one reads the base games' DataGateway links, the other the add-ons'.
     const [baseGameIds] = await Promise.all([
-      isAddOn ? this.linkToBaseGames(input, named.externalIds) : Promise.resolve<string[]>([]),
+      this.linkToBaseGames(input, named.externalIds, isAddOn),
       this.linkAddOns(input),
     ]);
 
-    const needsOne = named.fromDataGateway && baseGameIds.length === 0 && NEEDS_BASE_GAME.has(input.contentType);
+    const needsOne =
+      isAddOn && named.fromDataGateway && baseGameIds.length === 0 && NEEDS_BASE_GAME.has(input.contentType);
     const baseGameToAdd = needsOne ? named.externalIds[0] : undefined;
     // A game of an add-on content type with a base game is an expansion to
     // the import's events, notifications and game watches; a game of any
@@ -113,7 +115,15 @@ export class BaseGameLinkService {
     return { externalIds, fromDataGateway: false };
   }
 
-  private async linkToBaseGames(input: LinkBaseGamesInput, externalIds: string[]): Promise<string[]> {
+  /**
+   * The game's links to the base games named for it that are in the game
+   * catalog. An add-on is linked to each. A game of any other content type
+   * has those links removed instead, so a re-import that moves a game off the
+   * add-on content types leaves it no add-on link to them (#1391). Its links
+   * to base games not named here are left alone: nothing records which
+   * DataGateway made a link (#1178).
+   */
+  private async linkToBaseGames(input: LinkBaseGamesInput, externalIds: string[], isAddOn: boolean): Promise<string[]> {
     if (externalIds.length === 0) {
       return [];
     }
@@ -131,6 +141,16 @@ export class BaseGameLinkService {
           .filter((gameId): gameId is string => gameId !== undefined && gameId !== input.gameId),
       ),
     ];
+
+    if (!isAddOn) {
+      if (baseGameIds.length > 0) {
+        await this.db.gameExpansion.deleteMany({
+          where: { expansionGameId: input.gameId, baseGameId: { in: baseGameIds } },
+        });
+      }
+
+      return [];
+    }
 
     await Promise.all(baseGameIds.map((baseGameId) => this.linkPair(baseGameId, input.gameId)));
 

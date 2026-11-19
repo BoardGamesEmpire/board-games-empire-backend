@@ -87,8 +87,9 @@ interface BaseGameOnPlatforms {
  * (#1391), for a row that shows one platform: a collection row or an offered
  * game. A platform game lists only the base games that have a platform game
  * on its own platform, so one add-on held on two platforms can list different
- * base games on each row. A platform game with no such link is absent from the
- * map, and the caller defaults it to none.
+ * base games on each row. It lists none where its content type on that
+ * platform is not an add-on's. A platform game with no such link is absent
+ * from the map, and the caller defaults it to none.
  *
  * - The caller's `baseGameWhere` decides which base games are visible. It sits
  *   in this read's own `where`, as in {@link readBaseGameLinks}, where the CASL
@@ -137,9 +138,16 @@ export async function readBaseGameLinksOnPlatform(
   }
 
   for (const platformGame of platformGames) {
-    const isStandalone = isStandaloneAddOn(
-      effectiveContentType(platformGame.contentType, platformGame.game.contentType),
-    );
+    const contentType = effectiveContentType(platformGame.contentType, platformGame.game.contentType);
+    // A platform game that is no add-on on its platform has no base game
+    // there, whatever its game's links say. The offered-games filters read
+    // the same content type, so a row is never both a base game and an
+    // add-on of one (#1391).
+    if (!ADD_ON_CONTENT_TYPES.has(contentType)) {
+      continue;
+    }
+
+    const isStandalone = isStandaloneAddOn(contentType);
     const onPlatform = (baseGamesOf.get(platformGame.game.id) ?? [])
       .filter((baseGame) => baseGame.platformIds.has(platformGame.platform.id))
       .map(({ baseGameId }) => ({ gameId: baseGameId, isStandalone }));
@@ -184,10 +192,9 @@ export function isStandaloneAddOn(contentType: ContentType): boolean {
 
 /**
  * The platforms an add-on link holds on: the ids of `ordered` that are also in
- * `other`, in `ordered`'s order (#1391).
+ * `other`, in `ordered`'s order (#1391). `other` is a set, so a caller testing
+ * many links against one game's platforms builds it once.
  */
-export function linkPlatformIds(ordered: readonly string[], other: Iterable<string>): string[] {
-  const shared = new Set(other);
-
-  return ordered.filter((id) => shared.has(id));
+export function linkPlatformIds(ordered: readonly string[], other: ReadonlySet<string>): string[] {
+  return ordered.filter((id) => other.has(id));
 }

@@ -62,10 +62,13 @@ export type GameCollectionWithRelations = Prisma.GameCollectionGetPayload<{ incl
  *   the row. The arm can't name the row's platform, so a platform game on
  *   any platform resends it.
  * - A link deleted outright leaves nothing to test, so a client keeps the
- *   stale base game id until it reloads in full. Today a link goes only with
- *   one of its games, and games are hard-deleted (#476). A path that unlinks
- *   games on their own would meet the same gap. A base game's platform game
- *   deleted outright is the same: nothing is left to test (#1391).
+ *   stale base game id until it reloads in full. Today a link goes with one
+ *   of its games, and games are hard-deleted (#476). It also goes when a
+ *   re-import moves its add-on off the add-on content types, but that import
+ *   writes the add-on game's new content type, so the game's own arm resends
+ *   the row (#1391). A path that unlinks games on their own, leaving both
+ *   untouched, would meet the gap. A base game's platform game deleted
+ *   outright is the same: nothing is left to test (#1391).
  * - Whether the viewer could open a base game also turns on rows no arm
  *   reads: a friendship, a block, a share, a household membership. A change
  *   there resends nothing, so a client sees the base game appear or go only

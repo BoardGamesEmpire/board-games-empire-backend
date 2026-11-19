@@ -94,9 +94,9 @@ describe('OfferedGameService (#1185, #1187)', () => {
 
       const enriched = await service.enrich(
         [
-          makeOfferedGameEntry('a', 'game-exp'),
+          makeOfferedGameEntry('a', 'game-exp', 'att-1', ContentType.Expansion),
           makeOfferedGameEntry('b', 'game-base'),
-          makeOfferedGameEntry('c', 'game-exp'),
+          makeOfferedGameEntry('c', 'game-exp', 'att-1', ContentType.Expansion),
         ],
         NOW,
       );
@@ -128,7 +128,10 @@ describe('OfferedGameService (#1185, #1187)', () => {
       db.gameExpansion.findMany.mockResolvedValue([baseGameLink('game-exp', 'game-base', ['plat-1'])] as never);
 
       const enriched = await service.enrich(
-        [makeOfferedGameEntry('a', 'game-exp'), onPlatform(makeOfferedGameEntry('b', 'game-exp'), 'plat-pc')],
+        [
+          makeOfferedGameEntry('a', 'game-exp', 'att-1', ContentType.Expansion),
+          onPlatform(makeOfferedGameEntry('b', 'game-exp', 'att-1', ContentType.Expansion), 'plat-pc'),
+        ],
         NOW,
       );
 
@@ -153,14 +156,17 @@ describe('OfferedGameService (#1185, #1187)', () => {
     // game's own where it has one, else the game's (#1391).
     it("reads isStandalone from the offered platform game's own content type, else the game's (#1391)", async () => {
       db.gameExpansion.findMany.mockResolvedValue([baseGameLink('game-exp', 'game-base', ['plat-1'])] as never);
-      const standalone = makeOfferedGameEntry('b', 'game-exp');
+      const standalone = makeOfferedGameEntry('b', 'game-exp', 'att-1', ContentType.Expansion);
       standalone.collection.platformGame = {
         ...standalone.collection.platformGame,
         id: 'pg-standalone',
         contentType: ContentType.StandaloneExpansion,
       };
 
-      const enriched = await service.enrich([makeOfferedGameEntry('a', 'game-exp'), standalone], NOW);
+      const enriched = await service.enrich(
+        [makeOfferedGameEntry('a', 'game-exp', 'att-1', ContentType.Expansion), standalone],
+        NOW,
+      );
 
       expect(enriched.map((row) => row.collection.platformGame.game.baseGames)).toEqual([
         [{ gameId: 'game-base', isStandalone: false }],

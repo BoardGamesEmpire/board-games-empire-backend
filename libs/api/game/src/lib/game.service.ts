@@ -176,7 +176,7 @@ export class GameService {
     // A link holds on the platforms both its games are on (#1391). This
     // game's side is the platform games already read under the ceiling, so an
     // actor who may read none of them gets links that hold on none.
-    const ownPlatformIds = platformGames.map(({ platform }) => platform.id);
+    const ownPlatformIds = new Set(platformGames.map(({ platform }) => platform.id));
     const linkPlatformIdsWith = (gameId: string) => linkPlatformIds(platformIds.get(gameId) ?? [], ownPlatformIds);
     // On its base games' links this game is the add-on, so its own content
     // type decides them all (#1391).

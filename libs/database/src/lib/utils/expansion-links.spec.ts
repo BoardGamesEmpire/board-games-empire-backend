@@ -190,6 +190,25 @@ describe('readBaseGameLinksOnPlatform', () => {
     expect(links.get('pg-pc')).toEqual([{ gameId: 'b1', isStandalone: true }]);
   });
 
+  // The offered-games filters read a row's content type from its platform
+  // game where it has one; a row they count as a base game must not also
+  // name a base game of its own (#1391).
+  it.each([ContentType.BaseGame, ContentType.Bundle, ContentType.Remaster, ContentType.Unknown])(
+    'gives a platform game whose own content type is %s no base game, though its game is a DLC (#1391)',
+    async (contentType) => {
+      const { db } = stubDb([linkRow('e2', 'b1', [TABLETOP, PC])]);
+
+      const links = await readBaseGameLinksOnPlatform(
+        db,
+        [inView('pg-tabletop', TABLETOP, DLC), inView('pg-pc', PC, DLC, contentType)],
+        BASE_WHERE,
+      );
+
+      expect(links.get('pg-tabletop')).toEqual([{ gameId: 'b1', isStandalone: false }]);
+      expect(links.has('pg-pc')).toBe(false);
+    },
+  );
+
   // An empty page has nothing to link, and `in: []` would still cost a round trip.
   it('issues no query for no platform games (#1391)', async () => {
     const { db, findMany } = stubDb();
@@ -222,11 +241,11 @@ describe('linkPlatformIds', () => {
   // The platforms an add-on link holds on are those both games are on, read in
   // the add-on's order (#1391).
   it("keeps the ids also in the other game's, in the given order (#1391)", () => {
-    expect(linkPlatformIds(['p2', 'p1', 'p3'], ['p3', 'p2'])).toEqual(['p2', 'p3']);
+    expect(linkPlatformIds(['p2', 'p1', 'p3'], new Set(['p3', 'p2']))).toEqual(['p2', 'p3']);
   });
 
   it('is empty when the games share no platform (#1391)', () => {
-    expect(linkPlatformIds(['p1'], [])).toEqual([]);
+    expect(linkPlatformIds(['p1'], new Set())).toEqual([]);
   });
 });
 

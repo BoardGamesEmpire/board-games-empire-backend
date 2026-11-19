@@ -1,8 +1,17 @@
 import { ContentType, GameMedium, PlatformType } from '@bge/database';
 import type { OfferedGameEntry } from './offered-game.types';
 
-/** An offered entry as `OFFERED_GAME_SELECT` reads it, of game `gameId`, on `attendeeId`'s list. */
-export function makeOfferedGameEntry(id: string, gameId = 'game-1', attendeeId = 'att-1'): OfferedGameEntry {
+/**
+ * An offered entry as `OFFERED_GAME_SELECT` reads it, of game `gameId` of
+ * `contentType`, on `attendeeId`'s list. Only an add-on's row lists base
+ * games (#1391), so an entry meant to show its links passes an add-on type.
+ */
+export function makeOfferedGameEntry(
+  id: string,
+  gameId = 'game-1',
+  attendeeId = 'att-1',
+  contentType: ContentType = ContentType.BaseGame,
+): OfferedGameEntry {
   return {
     id,
     attendeeId,
@@ -26,7 +35,7 @@ export function makeOfferedGameEntry(id: string, gameId = 'game-1', attendeeId =
           subtitle: null,
           thumbnail: null,
           image: null,
-          contentType: ContentType.BaseGame,
+          contentType,
           publishYear: null,
           complexity: null,
           minPlayers: 2,

@@ -1,6 +1,9 @@
 import {
   Action,
+  ADD_ON_CONTENT_TYPES,
+  ContentType,
   DatabaseService,
+  effectiveContentType,
   EventAttendee,
   EventAttendeeGameList,
   EventParticipationStatus,
@@ -567,7 +570,8 @@ export class EventAttendeeService {
    *   with a stable reason and a translated message, and loses nothing else.
    * - An expansion must also expand its item's game: a `GameExpansion` link
    *   from that game to its own, the direction base games are read in, else
-   *   `notAnExpansionOfBase`. Its entry must also be on its game's platform,
+   *   `notAnExpansionOfBase`, as is an entry whose platform game is no
+   *   add-on on its platform. Its entry must also be on its game's platform,
    *   else `differentPlatform` (#1391). The expansions of a refused game are
    *   refused as `baseRefused`; those of a game already offered go ahead.
    * - An entry already offered is `alreadyOffered`, with its entry, and
@@ -599,7 +603,9 @@ export class EventAttendeeService {
           id: true,
           userId: true,
           deletedAt: true,
-          platformGame: { select: { gameId: true, platformId: true } },
+          platformGame: {
+            select: { gameId: true, platformId: true, contentType: true, game: { select: { contentType: true } } },
+          },
         },
       }),
       this.db.eventAttendeeGameList.findMany({
@@ -1033,18 +1039,37 @@ function judgeCollectionEntry(
 
 /**
  * Whether an expansion entry goes with its item's game entry (#1188, #1391):
- * a link from the game to the expansion's own game, else
- * `notAnExpansionOfBase`; and both entries on one platform, else
- * `differentPlatform`. On one platform a link holds there by definition, so
- * a link and equal platforms is the whole check. An entry that's missing was
- * refused before this.
+ * a link from the game to the expansion's own game, and the expansion's
+ * platform game an add-on on its platform, else `notAnExpansionOfBase`; and
+ * both entries on one platform, else `differentPlatform`. On one platform a
+ * link holds there by definition, so those and equal platforms are the whole
+ * check. The add-on test reads the platform game's own content type where it
+ * has one, as the offered-games filters do, so an entry they count as a base
+ * game is never offered as an expansion. An entry that's missing was refused
+ * before this.
  */
 function judgeExpansionOfBase(
   game: { platformGame: { gameId: string; platformId: string } } | undefined,
-  expansion: { platformGame: { gameId: string; platformId: string } } | undefined,
+  expansion:
+    | {
+        platformGame: {
+          contentType: ContentType | null;
+          game: { contentType: ContentType };
+          gameId: string;
+          platformId: string;
+        };
+      }
+    | undefined,
   links: ReadonlySet<string>,
 ): OfferRefusal | null {
-  if (!game || !expansion || !links.has(linkKey(game.platformGame.gameId, expansion.platformGame.gameId))) {
+  if (
+    !game ||
+    !expansion ||
+    !links.has(linkKey(game.platformGame.gameId, expansion.platformGame.gameId)) ||
+    !ADD_ON_CONTENT_TYPES.has(
+      effectiveContentType(expansion.platformGame.contentType, expansion.platformGame.game.contentType),
+    )
+  ) {
     return OfferRefusal.NotAnExpansionOfBase;
   }
 
