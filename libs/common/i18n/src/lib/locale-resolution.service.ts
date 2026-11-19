@@ -75,6 +75,17 @@ export class LocaleResolutionService {
     );
   }
 
+  /**
+   * The language tag a user stored as their preference, or null when they
+   * stored none or it can't be read. Unlike {@link resolve}, it isn't matched
+   * against the catalogs the server ships: a caller with languages of its
+   * own, such as the privacy policy (#934), matches it against those. Cached
+   * as {@link resolve}'s lookup is.
+   */
+  storedLanguage(userId: string): Promise<string | null> {
+    return this.preferredTag(userId);
+  }
+
   private async preferredTag(userId: string): Promise<string | null> {
     const cached = this.preferenceCache.get(userId);
     if (cached && cached.expiresAt > Date.now()) {

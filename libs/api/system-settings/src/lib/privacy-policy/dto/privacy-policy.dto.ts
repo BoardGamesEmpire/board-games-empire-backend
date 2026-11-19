@@ -10,7 +10,7 @@ import { PRIVACY_POLICY_SOURCES } from '../privacy-policy.constants';
 export class PrivacyPolicyDto {
   @ApiProperty({
     description:
-      'The language tag the policy is served in: the best match for `lang`, then `Accept-Language`, ' +
+      "The language tag the policy is served in: the best match for `lang`, then a signed-in reader's stored language, then `Accept-Language`, " +
       'among `availableLanguages`, or `en` when none matches. The `Content-Language` header repeats it.',
     example: 'en',
   })

@@ -20,6 +20,9 @@ export interface PrivacyPolicyLanguageRequest {
 
   /** The language tag the reader asked for by name, tried first. */
   lang?: string;
+
+  /** The language a signed-in reader stored as their preference, tried after `lang`. */
+  storedLanguage?: string | null;
 }
 
 /** The columns a write reads and returns: its events' snapshot. */
@@ -59,8 +62,8 @@ export class PrivacyPolicyService {
 
   /**
    * The policy in the best language the server has it in, from rows and files
-   * together: `lang` first, then `Accept-Language` in its order of preference,
-   * then English. A regional tag matches its base language, and anything that
+   * together: `lang` first, then the reader's stored language, then
+   * `Accept-Language` in its order of preference, then English. A regional tag matches its base language, and anything that
    * isn't a language tag matches nothing, so the read never fails on it.
    *
    * Anyone can read it, so a read fetches the Markdown of one row at most: the
@@ -72,7 +75,7 @@ export class PrivacyPolicyService {
     const available = this.availableLanguages(rowLanguages);
     // lookupTag cuts back a range that isn't a tag too, so `de-@@` would
     // match `de`: only tags are tried (#934).
-    const ranges = [request.lang, ...parseAcceptLanguage(request.acceptLanguage)]
+    const ranges = [request.lang, request.storedLanguage, ...parseAcceptLanguage(request.acceptLanguage)]
       .map((range) => canonicalizeTag(range))
       .filter((tag) => tag !== null);
     const language = lookupTag(ranges, available) ?? FALLBACK_LOCALE;

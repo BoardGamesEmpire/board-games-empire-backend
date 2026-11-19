@@ -12,9 +12,9 @@ export const PRIVACY_POLICY_LANG_MAX_LENGTH = 35;
 export class PrivacyPolicyQueryDto {
   @ApiPropertyOptional({
     description:
-      'The language tag to read the policy in, such as `de` or `pt-BR`. It is tried before `Accept-Language`, ' +
+      "The language tag to read the policy in, such as `de` or `pt-BR`. It is tried before a signed-in reader's stored language and `Accept-Language`, " +
       'and a regional tag matches its base language. A language the policy is not available in, or a value ' +
-      'that is not a language tag, falls back to `Accept-Language`, then English, instead of failing.',
+      'that is not a language tag, falls back to the stored language, then `Accept-Language`, then English, instead of failing.',
     maxLength: PRIVACY_POLICY_LANG_MAX_LENGTH,
     example: 'de',
   })

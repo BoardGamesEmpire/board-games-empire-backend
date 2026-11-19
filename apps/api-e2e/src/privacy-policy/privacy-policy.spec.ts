@@ -174,6 +174,40 @@ describe('privacy policy (#934)', () => {
     });
   });
 
+  // A signed-in reader's stored language is tried before Accept-Language, so a
+  // client needn't send it as `lang` (#934). German has no catalog, so this
+  // also shows the policy matches the stored tag itself, not the interface
+  // language the request resolved to.
+  it('serves a signed-in reader the policy in their stored language, with no lang', async () => {
+    const admin = await actors.admin();
+    await request(baseUrl).put(GERMAN_PATH).set(admin.headers).send({ markdown: GERMAN }).expect(200);
+
+    // A fresh user, whose preference is stored before their first request:
+    // the api caches a preference for a minute once it has read it.
+    const reader = await actors.user();
+    const german = await db.client.languageTag.findUniqueOrThrow({ where: { tag: 'de' }, select: { id: true } });
+    await db.client.userPreferences.upsert({
+      where: { userId: reader.user.id },
+      create: { userId: reader.user.id, languageTagId: german.id },
+      update: { languageTagId: german.id },
+    });
+
+    const signedIn = await request(baseUrl).get(PATH).set(reader.headers).set('Accept-Language', 'en').expect(200);
+
+    expect(signedIn.headers['content-language']).toBe('de');
+    expect(signedIn.body.privacyPolicy).toMatchObject({ language: 'de', markdown: GERMAN, source: 'operator' });
+
+    // The control: the same request without the session is served English.
+    await expect(readUnauthenticated({}, { 'Accept-Language': 'en' })).resolves.toMatchObject({
+      body: { privacyPolicy: { language: 'en', source: 'standard' } },
+    });
+
+    // `lang` still comes first.
+    await expect(
+      request(baseUrl).get(PATH).query({ lang: 'en' }).set(reader.headers).expect(200),
+    ).resolves.toMatchObject({ body: { privacyPolicy: { language: 'en' } } });
+  });
+
   // Each write is audited (#934). The entries are read from the audit log
   // itself, where the unit specs see only the events that feed it.
   it('audits each write as the Admin who made it: the first replace as a create, the removal as a delete', async () => {

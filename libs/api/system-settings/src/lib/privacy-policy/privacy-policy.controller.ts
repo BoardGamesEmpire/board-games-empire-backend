@@ -1,4 +1,6 @@
+import { actorUserId, AuditContextService } from '@bge/actor-context';
 import { Action, ResourceType } from '@bge/database';
+import { LocaleResolutionService } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import {
   Body,
@@ -50,7 +52,11 @@ const LANGUAGE_TAG_PARAM = {
 @ApiTags('privacy-policy')
 @Controller('privacy-policy')
 export class PrivacyPolicyController {
-  constructor(private readonly privacyPolicyService: PrivacyPolicyService) {}
+  constructor(
+    private readonly privacyPolicyService: PrivacyPolicyService,
+    private readonly auditContext: AuditContextService,
+    private readonly localeResolution: LocaleResolutionService,
+  ) {}
 
   /**
    * The privacy policy, to anyone, signed in or not (#934). `AllowAnonymous`
@@ -67,7 +73,7 @@ export class PrivacyPolicyController {
     summary: 'Read the privacy policy',
     description:
       'Needs no sign-in. Answers the policy in the best language the server has it in: `lang` first, then ' +
-      '`Accept-Language`, then English.',
+      "a signed-in reader's stored language, then `Accept-Language`, then English.",
   })
   @ApiHeader({
     name: 'Accept-Language',
@@ -93,7 +99,13 @@ export class PrivacyPolicyController {
     @Headers('accept-language') acceptLanguage: string | undefined,
     @Res({ passthrough: true }) res: Response,
   ): Promise<PrivacyPolicyResponseDto> {
-    const privacyPolicy = await this.privacyPolicyService.read({ acceptLanguage, lang: query.lang });
+    // A signed-in reader's stored language, so a client needn't send it as
+    // `lang`. Not the request's interface language: that is matched against
+    // the catalogs, and a policy can exist in a language they don't (#934).
+    const actor = this.auditContext.getActor();
+    const userId = actor ? actorUserId(actor) : null;
+    const storedLanguage = userId ? await this.localeResolution.storedLanguage(userId) : null;
+    const privacyPolicy = await this.privacyPolicyService.read({ acceptLanguage, lang: query.lang, storedLanguage });
     res.setHeader('Content-Language', privacyPolicy.language);
     // The language depends on Accept-Language; `vary` appends, keeping the Vary values CORS and compression set.
     res.vary('Accept-Language');

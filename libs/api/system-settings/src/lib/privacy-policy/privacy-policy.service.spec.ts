@@ -215,6 +215,19 @@ describe('PrivacyPolicyService (#934)', () => {
     expect(await languageFor({ acceptLanguage: null })).toBe('en');
   });
 
+  // A signed-in reader's stored language sits between lang and
+  // Accept-Language, so a client needn't send it (#934).
+  it("tries the reader's stored language after lang and before Accept-Language", async () => {
+    givenFiles(file('en'), file('de'), file('fr'));
+
+    const languageFor = async (input: PrivacyPolicyLanguageRequest) => (await service.read(input)).language;
+
+    expect(await languageFor({ lang: 'fr', storedLanguage: 'de', acceptLanguage: 'en' })).toBe('fr');
+    expect(await languageFor({ storedLanguage: 'de-AT', acceptLanguage: 'fr' })).toBe('de');
+    expect(await languageFor({ storedLanguage: 'es', acceptLanguage: 'fr' })).toBe('fr');
+    expect(await languageFor({ storedLanguage: null, acceptLanguage: 'fr' })).toBe('fr');
+  });
+
   it('matches a regional request to the base language', async () => {
     givenFiles(file('en'), file('de'));
 

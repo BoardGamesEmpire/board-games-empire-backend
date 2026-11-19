@@ -1,4 +1,6 @@
+import { AuditContextModule } from '@bge/actor-context';
 import { DatabaseModule } from '@bge/database';
+import { I18nConfigModule } from '@bge/i18n';
 import { Module } from '@nestjs/common';
 import { PrivacyPolicyFilesService } from './privacy-policy-files.service';
 import { PrivacyPolicyController } from './privacy-policy.controller';
@@ -9,7 +11,7 @@ import { PrivacyPolicyService } from './privacy-policy.service';
  * that serves the policy from them and the server admins' rows.
  */
 @Module({
-  imports: [DatabaseModule],
+  imports: [AuditContextModule, DatabaseModule, I18nConfigModule],
   controllers: [PrivacyPolicyController],
   providers: [PrivacyPolicyService, PrivacyPolicyFilesService],
 })
