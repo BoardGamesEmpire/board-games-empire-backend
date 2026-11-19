@@ -1,5 +1,5 @@
 import type { MetricReader } from '@opentelemetry/sdk-metrics';
-import type { SpanProcessor } from '@opentelemetry/sdk-trace-base';
+import type { SpanProcessor } from '@opentelemetry/sdk-trace';
 
 // jest.mock factories run before imports; the order of jest.mock declarations
 // vs. imports below is intentional. Per project convention, jest.mock is
@@ -40,13 +40,13 @@ jest.mock('@opentelemetry/exporter-metrics-otlp-grpc', () => ({
   OTLPMetricExporter: jest.fn().mockImplementation(() => ({ __metric_transport: 'grpc' })),
 }));
 
-jest.mock('@opentelemetry/sdk-trace-base', () => {
-  const actual = jest.requireActual<typeof import('@opentelemetry/sdk-trace-base')>('@opentelemetry/sdk-trace-base');
+jest.mock('@opentelemetry/sdk-trace', () => {
+  const actual = jest.requireActual<typeof import('@opentelemetry/sdk-trace')>('@opentelemetry/sdk-trace');
   return {
     ...actual,
-    BatchSpanProcessor: jest.fn().mockImplementation((exporter: unknown) => ({
+    BatchSpanProcessor: jest.fn().mockImplementation((options: { exporter: unknown }) => ({
       __kind: 'BatchSpanProcessor',
-      exporter,
+      exporter: options.exporter,
     })),
   };
 });
@@ -64,7 +64,7 @@ jest.mock('@opentelemetry/sdk-metrics', () => {
 
 import { PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics';
 import { NodeSDK } from '@opentelemetry/sdk-node';
-import { BatchSpanProcessor } from '@opentelemetry/sdk-trace-base';
+import { BatchSpanProcessor } from '@opentelemetry/sdk-trace';
 import { noopActorContextProvider } from '../processors/actor-context-provider';
 import { ActorSpanProcessor } from '../processors/actor-span.processor';
 import { initOtel } from './init-otel';
@@ -74,7 +74,7 @@ interface CapturedSdkConfig {
   spanProcessors: SpanProcessor[];
   resource: { attributes: Record<string, unknown> };
   instrumentations: unknown[];
-  metricReader?: MetricReader;
+  metricReaders?: MetricReader[];
 }
 
 const NodeSDKMock = NodeSDK as unknown as jest.Mock;
@@ -164,6 +164,60 @@ describe('initOtel', () => {
       const { spanProcessors } = lastSdkConfig();
       expect(spanProcessors).toHaveLength(2);
       expect(BatchSpanProcessorMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // sdk-trace 3's BatchSpanProcessor no longer reads OTEL_BSP_* itself, and
+  // NodeSDK reads them only for processors it builds, so initOtel passes
+  // them in (#957).
+  describe('batch span processor tuning', () => {
+    const bspOptions = (): Record<string, unknown> =>
+      BatchSpanProcessorMock.mock.calls[0][0] as Record<string, unknown>;
+
+    beforeEach(() => {
+      process.env['OTEL_EXPORTER_OTLP_ENDPOINT'] = 'http://localhost:4318';
+      delete process.env['OTEL_BSP_EXPORT_TIMEOUT'];
+      delete process.env['OTEL_BSP_MAX_EXPORT_BATCH_SIZE'];
+      delete process.env['OTEL_BSP_MAX_QUEUE_SIZE'];
+      delete process.env['OTEL_BSP_SCHEDULE_DELAY'];
+    });
+
+    it('passes the exporter and leaves every limit to the processor default when OTEL_BSP_* is unset', () => {
+      initOtel(baseConfig);
+
+      expect(bspOptions()).toEqual({
+        exporter: HttpExporterMock.mock.results[0].value,
+        exportTimeoutMillis: undefined,
+        maxExportBatchSize: undefined,
+        maxQueueSize: undefined,
+        scheduledDelayMillis: undefined,
+      });
+    });
+
+    it('passes each OTEL_BSP_* variable to the processor', () => {
+      process.env['OTEL_BSP_EXPORT_TIMEOUT'] = '10000';
+      process.env['OTEL_BSP_MAX_EXPORT_BATCH_SIZE'] = '256';
+      process.env['OTEL_BSP_MAX_QUEUE_SIZE'] = '4096';
+      process.env['OTEL_BSP_SCHEDULE_DELAY'] = '1000';
+
+      initOtel(baseConfig);
+
+      expect(bspOptions()).toEqual(
+        expect.objectContaining({
+          exportTimeoutMillis: 10000,
+          maxExportBatchSize: 256,
+          maxQueueSize: 4096,
+          scheduledDelayMillis: 1000,
+        }),
+      );
+    });
+
+    it.each(['0', '-5', 'soon', '   '])('falls back to the default for OTEL_BSP_MAX_QUEUE_SIZE=%p', (value) => {
+      process.env['OTEL_BSP_MAX_QUEUE_SIZE'] = value;
+
+      initOtel(baseConfig);
+
+      expect(bspOptions()['maxQueueSize']).toBeUndefined();
     });
   });
 
@@ -267,7 +321,7 @@ describe('initOtel', () => {
       initOtel(baseConfig);
 
       expect(PeriodicReaderMock).not.toHaveBeenCalled();
-      expect(lastSdkConfig().metricReader).toBeUndefined();
+      expect(lastSdkConfig().metricReaders).toBeUndefined();
     });
 
     it('does NOT register a metric reader when only OTEL_METRICS_EXPORTER=otlp is set (endpoint missing)', () => {
@@ -277,7 +331,7 @@ describe('initOtel', () => {
       initOtel(baseConfig);
 
       expect(PeriodicReaderMock).not.toHaveBeenCalled();
-      expect(lastSdkConfig().metricReader).toBeUndefined();
+      expect(lastSdkConfig().metricReaders).toBeUndefined();
     });
 
     it('does NOT register a metric reader when only the endpoint is set (exporter=none)', () => {
@@ -287,9 +341,11 @@ describe('initOtel', () => {
       initOtel(baseConfig);
 
       expect(PeriodicReaderMock).not.toHaveBeenCalled();
-      expect(lastSdkConfig().metricReader).toBeUndefined();
+      expect(lastSdkConfig().metricReaders).toBeUndefined();
     });
 
+    // Passed as `metricReaders`: sdk-node 0.301 ignores the singular
+    // `metricReader`, which would leave the reader unregistered (#957).
     it('registers a PeriodicExportingMetricReader when both opt-in conditions are met', () => {
       process.env['OTEL_EXPORTER_OTLP_ENDPOINT'] = 'http://localhost:4318';
       process.env['OTEL_METRICS_EXPORTER'] = 'otlp';
@@ -297,7 +353,7 @@ describe('initOtel', () => {
       initOtel(baseConfig);
 
       expect(PeriodicReaderMock).toHaveBeenCalledTimes(1);
-      expect(lastSdkConfig().metricReader).toBeDefined();
+      expect(lastSdkConfig().metricReaders).toEqual([PeriodicReaderMock.mock.results[0].value]);
     });
 
     it('defaults to the HTTP metric exporter when protocol is unset', () => {
@@ -328,7 +384,7 @@ describe('initOtel', () => {
       initOtel(baseConfig);
 
       expect(PeriodicReaderMock).not.toHaveBeenCalled();
-      expect(lastSdkConfig().metricReader).toBeUndefined();
+      expect(lastSdkConfig().metricReaders).toBeUndefined();
     });
   });
 });

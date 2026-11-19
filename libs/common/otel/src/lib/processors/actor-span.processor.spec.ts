@@ -1,6 +1,6 @@
 import type { Actor } from '@bge/actor-context';
 import type { Context } from '@opentelemetry/api';
-import type { ReadableSpan, Span } from '@opentelemetry/sdk-trace-base';
+import type { ReadableSpan, Span } from '@opentelemetry/sdk-trace';
 import { BGE_OTEL_ATTRIBUTES } from '../constants/otel-attributes.constants';
 import type { ActorContextProvider, ActorSpanContext } from './actor-context-provider';
 import { ActorSpanProcessor } from './actor-span.processor';

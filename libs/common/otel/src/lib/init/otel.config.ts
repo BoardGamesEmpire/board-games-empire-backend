@@ -79,6 +79,15 @@ export const OTEL_METRICS_EXPORTER_ENV = 'OTEL_METRICS_EXPORTER';
 export const OTEL_LOGS_EXPORTER_ENV = 'OTEL_LOGS_EXPORTER';
 
 /**
+ * The spec's batch span processor variables, which `initOtel` passes to the
+ * processor it builds for the trace exporter (#957).
+ */
+export const OTEL_BSP_EXPORT_TIMEOUT_ENV = 'OTEL_BSP_EXPORT_TIMEOUT';
+export const OTEL_BSP_MAX_EXPORT_BATCH_SIZE_ENV = 'OTEL_BSP_MAX_EXPORT_BATCH_SIZE';
+export const OTEL_BSP_MAX_QUEUE_SIZE_ENV = 'OTEL_BSP_MAX_QUEUE_SIZE';
+export const OTEL_BSP_SCHEDULE_DELAY_ENV = 'OTEL_BSP_SCHEDULE_DELAY';
+
+/**
  * OTLP protocol token requesting gRPC transport.
  */
 export const OTEL_OTLP_PROTOCOL_GRPC = 'grpc';
