@@ -12,7 +12,7 @@ export function changedKeys<T extends object>(before: T, after: T, keys: readonl
 
 /**
  * Changed-subset snapshot for update-shaped MutationEvents: the changed keys
- * (from `changedKeys`) plus `id`. Shared by every service in this lib that
+ * (from `changedKeys`) plus `id`. Shared by every service, in any lib, that
  * emits update events.
  */
 export function pickSnapshot<T extends { id: string }>(row: T, keys: readonly (keyof T)[]): Partial<T> & Pick<T, 'id'> {

@@ -75,6 +75,10 @@ export {
   SOURCE_CLS_KEY,
 } from './lib/services/audit-context.service';
 
+// Snapshot diff helpers for update-shaped MutationEvents (#728): the changed
+// columns only, and no event when nothing changed.
+export { changedKeys, pickSnapshot } from './lib/utils/mutation-snapshot.util';
+
 // Module (registers reader + internal populator + system scope; ClsModule.forRoot
 // is the caller's responsibility).
 export { AuditContextModule } from './lib/audit-context.module';
