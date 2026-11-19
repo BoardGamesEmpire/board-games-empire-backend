@@ -34,6 +34,7 @@ import {
   HOUSEHOLD_MEMBER_UNIQUE_FIELDS,
 } from '../constants/household.constants';
 import type { AssignableHouseholdRole } from '../dto';
+import { HouseholdEventPublisher } from '../events/household-event.publisher';
 import { HouseholdGameShareEndedEvent } from '../events/household.events';
 import { MEMBER_SELECT } from '../read-shapes';
 import type { AdmissibleMembershipOrigin, HouseholdMemberWithRelations } from './household-member.service';
@@ -222,6 +223,9 @@ describe('HouseholdMemberService', () => {
         ScopeComposer,
         { provide: AbilityService, useValue: abilityService },
         { provide: PermissionsService, useValue: permissions },
+        // The real publisher over the mocked emitter, so the `events.emit`
+        // assertions below see what the service publishes (#245).
+        HouseholdEventPublisher,
         { provide: EventEmitter2, useValue: events },
         { provide: QuotaService, useValue: quotas },
         { provide: InviteService, useValue: invites },
@@ -950,11 +954,47 @@ describe('HouseholdMemberService', () => {
     it('still answers the removal when announcing an ended game share throws, since it has committed (#810)', async () => {
       db.householdMember.findFirst.mockResolvedValue(resolves(makeMember()));
       db.gameShare.findMany.mockResolvedValue([gameShareRow('share-1')] as never);
+      const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
       events.emit.mockImplementation(() => {
         throw new Error('listener failed');
       });
 
       await expect(service.removeMember('hh-1', 'member-1')).resolves.toMatchObject({ id: 'member-1' });
+
+      // Logged by the publisher's guard (#245), not lost: without the guard the
+      // throw would reach the mutation's catch and answer a 500.
+      expect(logged).toHaveBeenCalledWith(
+        expect.stringContaining(`${HouseholdEvents.GameShareEnded} (GameShare share-1)`),
+        expect.stringContaining('Error: '),
+      );
+      logged.mockRestore();
+    });
+
+    it('still announces the other ended game shares when one share’s listener throws (#245)', async () => {
+      db.householdMember.findFirst.mockResolvedValue(resolves(makeMember()));
+      db.gameShare.findMany.mockResolvedValue([gameShareRow('share-1'), gameShareRow('share-2')] as never);
+      const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      events.emit.mockImplementation((name, event) => {
+        if (
+          name === HouseholdEvents.GameShareEnded &&
+          (event as HouseholdGameShareEndedEvent).subjectId === 'share-1'
+        ) {
+          throw new Error('listener failed');
+        }
+
+        return true;
+      });
+
+      await service.removeMember('hh-1', 'member-1');
+
+      // Each share is published on its own, so the first share's failure
+      // leaves the second announced.
+      const announced = events.emit.mock.calls
+        .filter(([name]) => name === HouseholdEvents.GameShareEnded)
+        .map(([, event]) => (event as HouseholdGameShareEndedEvent).subjectId);
+      expect(announced).toEqual(['share-1', 'share-2']);
+      expect(logged).toHaveBeenCalledTimes(1);
+      logged.mockRestore();
     });
 
     it('locks the owner rows and allows removing an owner when another owner remains', async () => {
@@ -1657,7 +1697,14 @@ describe('HouseholdMemberService', () => {
         const result = await service.transferOwnership('hh-1', 'member-2');
 
         expect(result.owner.id).toBe('member-2');
-        expect(logged).toHaveBeenCalled();
+        // Each emit is guarded on its own by the publisher (#245), so the
+        // webhook is still attempted after the audit listener's throw, and
+        // each failure is logged under the name of what was lost.
+        expect(events.emit).toHaveBeenCalledTimes(2);
+        expect(logged.mock.calls.map(([message]) => message)).toEqual([
+          expect.stringContaining(`for ${HouseholdEvents.OwnershipTransferred} (Household hh-1)`),
+          expect.stringContaining(`for ${WebhookEventType.HouseholdOwnershipTransferred} (Household hh-1)`),
+        ]);
         logged.mockRestore();
       });
 

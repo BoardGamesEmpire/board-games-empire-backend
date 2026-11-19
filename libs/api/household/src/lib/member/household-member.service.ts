@@ -31,7 +31,6 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { EventEmitter2 } from '@nestjs/event-emitter';
 import { isBannedWithin } from '../ban/household-ban.helpers';
 import {
   HOUSEHOLD_MEMBER_UNIQUE_COLUMNS,
@@ -40,6 +39,7 @@ import {
 } from '../constants/household.constants';
 import type { AssignableHouseholdRole } from '../dto';
 import { isAssignableHouseholdRole, UpdateMemberRoleDto } from '../dto';
+import { HouseholdEventPublisher } from '../events/household-event.publisher';
 import type { HouseholdOwnershipSnapshot } from '../events/household.events';
 import { HouseholdGameShareEndedEvent, HouseholdOwnershipTransferredEvent } from '../events/household.events';
 import {
@@ -194,7 +194,7 @@ export class HouseholdMemberService {
     private readonly db: DatabaseService,
     private readonly abilityService: AbilityService,
     private readonly permissions: PermissionsService,
-    private readonly events: EventEmitter2,
+    private readonly publisher: HouseholdEventPublisher,
     private readonly quotas: QuotaService,
     private readonly scopeComposer: ScopeComposer,
     private readonly invites: InviteService,
@@ -1231,21 +1231,19 @@ export class HouseholdMemberService {
   }
 
   /**
-   * Announces the game shares a departure ended, one event each: a member
-   * leaving, being removed or being banned (#782). The departure is committed
-   * by then, so a listener's throw is logged rather than answered as a 500,
-   * for the reason `emitOwnershipTransferred` gives.
+   * Announces the game shares a departure ended, one event each, after the
+   * departure commits: a member leaving, being removed from the household or
+   * being banned (#782). Each share is published on its own through
+   * {@link HouseholdEventPublisher}, so a listener that throws for one share
+   * is logged, for the reason the publisher gives, and the others are still
+   * announced.
    */
   emitGameSharesEnded(shares: readonly GameShare[], initiatedAt: Date): void {
     for (const share of shares) {
-      try {
-        this.events.emit(
-          HouseholdGameShareEndedEvent.eventName,
-          new HouseholdGameShareEndedEvent(gameShareSnapshot(share), initiatedAt),
-        );
-      } catch (error) {
-        this.logger.error('Departure committed but a game share emission failed', { error, shareId: share.id });
-      }
+      this.publisher.publish(
+        HouseholdGameShareEndedEvent.eventName,
+        new HouseholdGameShareEndedEvent(gameShareSnapshot(share), initiatedAt),
+      );
     }
   }
 
@@ -1323,20 +1321,18 @@ export class HouseholdMemberService {
   }
 
   /**
-   * Fans the completed transfer out to the two emit-driven subsystems: the
-   * `MutationEvent` (audit row, via `AuditPersistenceListener`'s `onAny`) and
-   * the versioned webhook wire name. Two separate emits from one call site,
-   * mirroring the game-import processors.
-   *
-   * Called AFTER commit — a webhook or audit failure must never roll back the
-   * transfer, and a delivery describing a transaction that later aborted would
-   * be worse than a missing one.
+   * Announces the completed transfer through {@link HouseholdEventPublisher},
+   * after commit: the `MutationEvent`, which the audit persistence listener
+   * records as an audit entry, then the versioned webhook event type. The
+   * publisher logs a listener's throw rather than answering a 500 for the
+   * committed transfer, which the client would retry into a 400 "already an
+   * owner" (#248).
    *
    * No `occurrenceId`: the envelope wants an id that is stable across re-emits
-   * of the SAME occurrence, and nothing available here qualifies. The audit row
-   * id does not exist yet (the listener writes it after this returns), and every
-   * id that does exist — the household, either role row — is stable across
-   * *different* transfers, so using one would make a second, legitimate
+   * of the SAME occurrence, and nothing available here qualifies. The audit
+   * entry's id does not exist yet (the listener writes it after this returns),
+   * and every id that does exist — the household, either role row — is stable
+   * across *different* transfers, so using one would make a second, legitimate
    * transfer dedup against the first and silently drop its delivery. Absent an
    * occurrenceId the dispatcher assigns a random delivery id (no dedup), which
    * the contract explicitly allows.
@@ -1346,56 +1342,27 @@ export class HouseholdMemberService {
     after: HouseholdOwnershipSnapshot,
     initiatedAt: Date,
   ): void {
-    try {
-      this.emitTransferEvents(before, after, initiatedAt);
-    } catch (error) {
-      // The transfer is COMMITTED and both ability caches are already evicted.
-      // `EventEmitter2` is configured without `ignoreErrors`, so a synchronous
-      // listener that throws propagates out of `emit()` — and this call sits
-      // inside the mutation's try block, so it would reach
-      // `rethrowMutationFailure`, be classified as unexpected, and surface as a
-      // 500 for an operation that succeeded. The client would then retry into a
-      // 400 "already an owner".
-      //
-      // Logged rather than swallowed: a missing audit row is a real problem,
-      // just not one the caller can act on or retry away. Making audit writes
-      // durable rather than best-effort is #245's concern.
-      this.logger.error('Ownership transfer committed but emission failed', {
-        error,
-        householdId: after.householdId,
-        previousOwnerMemberId: before.ownerMemberId,
-        newOwnerMemberId: after.ownerMemberId,
-      });
-    }
-  }
-
-  private emitTransferEvents(
-    before: HouseholdOwnershipSnapshot,
-    after: HouseholdOwnershipSnapshot,
-    initiatedAt: Date,
-  ): void {
-    this.events.emit(
+    this.publisher.publish(
       HouseholdOwnershipTransferredEvent.eventName,
       new HouseholdOwnershipTransferredEvent(before, after, initiatedAt),
-    );
-
-    this.events.emit(
-      WebhookEventType.HouseholdOwnershipTransferred,
-      webhookEnvelope({
-        subjectId: after.householdId,
-        householdId: after.householdId,
-        // Ids only. `data` is copied verbatim to a subscriber-controlled URL, so
-        // usernames, display names, avatars, and emails stay out of it — a read
-        // grant on the household is not consent to ship member identity to a
-        // third party.
-        data: {
+      {
+        type: WebhookEventType.HouseholdOwnershipTransferred,
+        envelope: webhookEnvelope({
+          subjectId: after.householdId,
           householdId: after.householdId,
-          previousOwnerMemberId: before.ownerMemberId,
-          previousOwnerUserId: before.ownerUserId,
-          newOwnerMemberId: after.ownerMemberId,
-          newOwnerUserId: after.ownerUserId,
-        },
-      }),
+          // Ids only. `data` is copied verbatim to a subscriber-controlled URL, so
+          // usernames, display names, avatars, and emails stay out of it — a read
+          // grant on the household is not consent to ship member identity to a
+          // third party.
+          data: {
+            householdId: after.householdId,
+            previousOwnerMemberId: before.ownerMemberId,
+            previousOwnerUserId: before.ownerUserId,
+            newOwnerMemberId: after.ownerMemberId,
+            newOwnerUserId: after.ownerUserId,
+          },
+        }),
+      },
     );
   }
 
