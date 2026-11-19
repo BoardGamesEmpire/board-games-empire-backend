@@ -1,3 +1,4 @@
+import { changedKeys, pickSnapshot } from '@bge/actor-context';
 import type { Household } from '@bge/database';
 import {
   Action,
@@ -22,10 +23,12 @@ import {
   ScopeComposer,
 } from '@bge/permissions';
 import { PaginatedRows, PaginationQueryDto, pickDefined, sampleWithoutReplacement } from '@bge/shared';
+import { webhookEnvelope, WebhookEventType } from '@bge/webhooks';
 import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  HttpException,
   Injectable,
   InternalServerErrorException,
   Logger,
@@ -34,7 +37,17 @@ import {
 import assert from 'node:assert';
 import { HOUSEHOLD_RESTORE_PERMISSION_SLUG, HOUSEHOLD_RESTORE_WINDOW_MS } from './constants/household.constants';
 import { CreateHouseholdDto, UpdateHouseholdDto } from './dto';
-import { assertHouseholdExists, householdExists } from './household-access.helpers';
+import type { HouseholdWebhook } from './events/household-event.publisher';
+import { HouseholdEventPublisher } from './events/household-event.publisher';
+import type { HouseholdStateSnapshot } from './events/household.events';
+import {
+  HouseholdCreatedEvent,
+  HouseholdDeletedEvent,
+  HouseholdRestoredEvent,
+  householdStateSnapshot,
+  HouseholdUpdatedEvent,
+} from './events/household.events';
+import { assertHouseholdExists, householdExists, lockHouseholdForRoleTransition } from './household-access.helpers';
 import { HOUSEHOLD_SETTINGS_SELECT, MEMBER_SELECT } from './read-shapes';
 
 /**
@@ -97,6 +110,50 @@ export interface HouseholdDeletion {
   readonly restorableUntil: Date | null;
 }
 
+/**
+ * What a delete's recovery grants opened (#175): when the acting owner's
+ * restore window ends, or `null` when the delete opened none for them, and the
+ * users it gave a restore window, by user id, which its domain event records
+ * (#245).
+ */
+interface RecoveryGrants {
+  readonly restorableUntil: Date | null;
+  readonly windowUserIds: string[];
+}
+
+/**
+ * The columns of {@link HouseholdStateSnapshot} an edit can change, which is
+ * every one but `id`: the update diffs these (#245). A record rather than a
+ * list, so a column added to the snapshot and not here fails to compile
+ * instead of going unrecorded.
+ */
+const HOUSEHOLD_EDITABLE_COLUMNS: { readonly [Column in Exclude<keyof HouseholdStateSnapshot, 'id'>]: Column } = {
+  name: 'name',
+  description: 'description',
+  image: 'image',
+  reach: 'reach',
+  languageTagId: 'languageTagId',
+  memberInvitePolicy: 'memberInvitePolicy',
+  memberSharePolicy: 'memberSharePolicy',
+};
+
+/**
+ * A household change's webhook (#245), sent under the household's id. `data`
+ * is copied verbatim to a subscriber's URL, so it holds ids only, and for an
+ * edit the names of the columns that changed, never their values. No
+ * `occurrenceId`: nothing here names one change stably, so each publish is its
+ * own delivery, as the ownership transfer's is.
+ */
+function householdWebhook<TData extends { readonly householdId: string }>(
+  type: WebhookEventType,
+  data: TData,
+): HouseholdWebhook {
+  return {
+    type,
+    envelope: webhookEnvelope({ subjectId: data.householdId, householdId: data.householdId, data }),
+  };
+}
+
 @Injectable()
 export class HouseholdService {
   private readonly logger = new Logger(HouseholdService.name);
@@ -107,6 +164,7 @@ export class HouseholdService {
     private readonly permissions: PermissionsService,
     private readonly scopeComposer: ScopeComposer,
     private readonly invites: InviteService,
+    private readonly publisher: HouseholdEventPublisher,
   ) {}
 
   /**
@@ -281,13 +339,18 @@ export class HouseholdService {
    * even one soft-deleted since, rather than creating a second. The lookup
    * runs before the language tag resolves, so a tag the server has stopped
    * supporting can't refuse the retry of a create that succeeded.
+   *
+   * A fresh create is published after it commits (#245): the household's
+   * created event, which its audit entry records. No webhook, since no
+   * subscription can name a household before it exists.
    */
   async create(createHouseholdDto: CreateHouseholdDto) {
+    const initiatedAt = new Date();
     const userId = this.abilityService.getActingUserId();
     const { language, clientRequestId: rawClientRequestId, ...rest } = createHouseholdDto;
     const clientRequestId = normalizeClientRequestId(rawClientRequestId);
 
-    const { row: household } = await createOrReplay({
+    const { row: household, replayed } = await createOrReplay({
       clientRequestId,
       // No `deletedAt: null` filter: the keyed create semantically succeeded,
       // and that row, even if since soft-deleted, is its canonical outcome for
@@ -366,9 +429,20 @@ export class HouseholdService {
     // A replay evicts too. Replays are usually pure no-ops, but the one
     // pathological original — committed, then crashed before its own eviction
     // ran — leaves the owner's ability graph stale; the retry is the natural
-    // place to heal it, and eviction is idempotent and cheap. A household
-    // create emits nothing, so there is nothing for a replay to suppress.
+    // place to heal it, and eviction is idempotent and cheap.
     await this.permissions.invalidateUser(userId);
+
+    // A replay emits nothing, since it created nothing: the request that
+    // created the household published it (#210). A fresh create is published
+    // after the eviction, so a listener acting on it finds the owner's grants.
+    if (!replayed) {
+      const { id, name, description, image, reach, languageTagId } = household;
+
+      this.publisher.publish(
+        HouseholdCreatedEvent.eventName,
+        new HouseholdCreatedEvent({ id, name, description, image, reach, languageTagId }, initiatedAt),
+      );
+    }
 
     return household;
   }
@@ -382,8 +456,16 @@ export class HouseholdService {
    * rest, so the create half runs only for a row a write outside the api left
    * out. A nested update would answer that row's absence as the scoped write's
    * 403 to an owner, naming nothing that is wrong.
+   *
+   * The edit is recorded (#245). Its state before the write is read under the
+   * household row lock role transitions take, so it is the state the write
+   * replaces. After commit, the columns and settings whose values changed are
+   * published, before and after, with the `household.household.updated.v1`
+   * webhook naming them. A patch that re-sends stored values changes nothing,
+   * so it publishes nothing (#728).
    */
   async updateHousehold(id: string, updateHouseholdDto: UpdateHouseholdDto) {
+    const initiatedAt = new Date();
     const { language, settings: rawSettings, ...rawFields } = updateHouseholdDto;
     // The household's own fields and its settings judged alike: a key sent as
     // `undefined` names nothing, in either half.
@@ -396,35 +478,68 @@ export class HouseholdService {
 
     const languageTagId = await this.resolveLanguageTagId(language);
 
+    const editable = {
+      id,
+      deletedAt: null,
+      // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
+      AND: this.abilityService.getCurrentResourceConditions(ResourceType.Household, Action.update),
+    } satisfies Prisma.HouseholdWhereInput;
+
     try {
-      // Existence first (→ 404); the scoped update below enforces permission
-      // (P2025 → 403, unless a delete landed in between: see
-      // `scopedWriteRefusal`). Keeps the two outcomes distinguishable.
+      // Existence first (→ 404), which costs no transaction for an unknown id.
       await assertHouseholdExists(this.db, id);
 
-      return await this.db.household.update({
-        where: {
-          id,
-          deletedAt: null,
-          // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
-          AND: this.abilityService.getCurrentResourceConditions(ResourceType.Household, Action.update),
-        },
-        data: {
-          ...fields,
-          languageTag: languageTagId
-            ? {
-                connect: {
-                  id: languageTagId,
-                },
-              }
-            : undefined,
-          ...(Object.keys(settings).length === 0
-            ? {}
-            : { settings: { upsert: { create: settings, update: settings } } }),
-        },
-        include: { settings: { select: HOUSEHOLD_SETTINGS_SELECT } },
+      const { before, household } = await this.db.$transaction(async (tx) => {
+        // Permission next, as the scoped write's own where: 403, unless a
+        // delete landed since the probe (see `scopedWriteRefusal`). Asked
+        // before the lock, so a caller who may not edit the household never
+        // holds its row.
+        if ((await tx.household.count({ where: editable })) === 0) {
+          throw await this.scopedWriteRefusal(id, t('common.forbidden.update'), tx);
+        }
+
+        // Also the liveness check: a delete that committed since the count
+        // leaves nothing to edit, and this answers 404.
+        await lockHouseholdForRoleTransition(tx, id);
+
+        const stored = await tx.household.findUniqueOrThrow({
+          where: { id },
+          include: { settings: { select: HOUSEHOLD_SETTINGS_SELECT } },
+        });
+
+        const household = await tx.household.update({
+          where: editable,
+          data: {
+            ...fields,
+            languageTag: languageTagId
+              ? {
+                  connect: {
+                    id: languageTagId,
+                  },
+                }
+              : undefined,
+            ...(Object.keys(settings).length === 0
+              ? {}
+              : { settings: { upsert: { create: settings, update: settings } } }),
+          },
+          include: { settings: { select: HOUSEHOLD_SETTINGS_SELECT } },
+        });
+
+        return { before: householdStateSnapshot(stored), household };
       });
+
+      this.publishHouseholdUpdated(before, householdStateSnapshot(household), initiatedAt);
+
+      return household;
     } catch (error) {
+      // A refusal decided inside the transaction, or the lock's 404: outcomes
+      // the route is specified to produce, rethrown as they are and not logged
+      // as failures. Only client errors: an `HttpException` with a 5xx status
+      // is a server-side failure and still gets the error log below.
+      if (error instanceof HttpException && error.getStatus() < 500) {
+        throw error;
+      }
+
       if (isPrismaDependentRecordNotFoundError(error)) {
         throw await this.scopedWriteRefusal(id, t('common.forbidden.update'));
       }
@@ -432,6 +547,29 @@ export class HouseholdService {
       this.logger.error(`Error updating household with id ${id}`, error);
       throw error;
     }
+  }
+
+  /**
+   * Publishes a committed edit (#245): the columns whose values changed,
+   * before and after, and the webhook naming them. Nothing when none did
+   * (#728).
+   */
+  private publishHouseholdUpdated(
+    before: HouseholdStateSnapshot,
+    after: HouseholdStateSnapshot,
+    initiatedAt: Date,
+  ): void {
+    const changed = changedKeys(before, after, Object.values(HOUSEHOLD_EDITABLE_COLUMNS));
+
+    if (changed.length === 0) {
+      return;
+    }
+
+    this.publisher.publish(
+      HouseholdUpdatedEvent.eventName,
+      new HouseholdUpdatedEvent(pickSnapshot(before, changed), pickSnapshot(after, changed), initiatedAt),
+      householdWebhook(WebhookEventType.HouseholdUpdated, { householdId: after.id, changedFields: changed }),
+    );
   }
 
   /**
@@ -676,8 +814,17 @@ export class HouseholdService {
    * The other order has no shortcut. When an owner deleted first and staff
    * want the household to stay down, staff restore it and delete it again:
    * the restore revokes the owners' windows, and a staff delete issues none.
+   *
+   * ## What it publishes (#245)
+   *
+   * After commit, and after the revoked invites: the household's deleted
+   * event, whose audit entry names the household and the owners given a
+   * restore window (none for a staff delete), and the
+   * `household.household.deleted.v1` webhook, which carries the household's
+   * id alone.
    */
   async deleteHousehold(id: string): Promise<HouseholdDeletion> {
+    const initiatedAt = new Date();
     // `null` for an actor with no user behind it, which then owns nothing.
     const actorUserId = resolveActingUserIdOrNull(this.abilityService);
 
@@ -688,7 +835,7 @@ export class HouseholdService {
       // concurrent delete landed in between (`scopedWriteRefusal`).
       await assertHouseholdExists(this.db, id);
 
-      const { household, memberUserIds, restorableUntil, revocation } = await this.db.$transaction(async (tx) => {
+      const { household, memberUserIds, recovery, revocation } = await this.db.$transaction(async (tx) => {
         const household = await tx.household.update({
           where: {
             id,
@@ -717,12 +864,12 @@ export class HouseholdService {
           .filter((member) => member.role?.role.name === SystemRole.HouseholdOwner)
           .map((member) => member.userId);
 
-        const restorableUntil =
+        const recovery: RecoveryGrants =
           actorUserId !== null && ownerUserIds.includes(actorUserId)
             ? await this.grantRecovery(tx, id, ownerUserIds, actorUserId)
-            : null;
+            : { restorableUntil: null, windowUserIds: [] };
 
-        return { household, memberUserIds: members.map((member) => member.userId), restorableUntil, revocation };
+        return { household, memberUserIds: members.map((member) => member.userId), recovery, revocation };
       });
 
       // Evict every member's graph so stale Household* abilities don't linger for
@@ -735,7 +882,17 @@ export class HouseholdService {
       // failing listener rather than throwing it into this request.
       this.invites.emit(revocation.events);
 
-      return { household, restorableUntil };
+      // The owners given a restore window go in the audit entry only.
+      this.publisher.publish(
+        HouseholdDeletedEvent.eventName,
+        new HouseholdDeletedEvent(
+          { id, name: household.name, restoreWindowUserIds: recovery.windowUserIds },
+          initiatedAt,
+        ),
+        householdWebhook(WebhookEventType.HouseholdDeleted, { householdId: id }),
+      );
+
+      return { household, restorableUntil: recovery.restorableUntil };
     } catch (error) {
       // A scoped-update miss: the actor may not delete this household
       // (owner-only), or a concurrent delete got there first.
@@ -749,20 +906,26 @@ export class HouseholdService {
   }
 
   /**
-   * What a scoped write on a household that matched nothing (P2025) should
-   * answer. The existence probe in front of it takes no lock, so a soft-delete
-   * can commit in between, and a second of two concurrent deletes then misses
-   * on `deletedAt: null` rather than on permission. The household is gone, so
-   * the answer is the 404 every route gives a deleted household (#299), not a
-   * denial. Otherwise it is there and the actor may not do this: 403.
+   * What a scoped write on a household that matched nothing (P2025), or an
+   * edit's scoped count that found nothing, should answer. The existence probe
+   * in front of it takes no lock, so a soft-delete can commit in between, and
+   * a second of two concurrent deletes then misses on `deletedAt: null` rather
+   * than on permission. The household is gone, so the answer is the 404 every
+   * route gives a deleted household (#299), not a denial. Otherwise it is
+   * there and the actor may not do this: 403.
    *
    * Not logged: both are outcomes the endpoint is specified to produce.
+   *
+   * `client` is the connection the probe runs on. Inside a transaction it is
+   * that transaction's, so a refusal never takes a second connection from the
+   * pool while the transaction holds one (#245).
    */
   private async scopedWriteRefusal(
     id: string,
     forbidden: ReturnType<typeof t>,
+    client: DatabaseService | Prisma.TransactionClient = this.db,
   ): Promise<ForbiddenException | NotFoundException> {
-    return (await householdExists(this.db, id))
+    return (await householdExists(client, id))
       ? new ForbiddenException(forbidden)
       : new NotFoundException(t('errors.household.not_found', { id }));
   }
@@ -770,8 +933,13 @@ export class HouseholdService {
   /**
    * Undoes {@link deleteHousehold} (#175): clears `deletedAt`, so every read
    * sees the household again and its members' household-scoped grants come
-   * back. Revoked invites stay revoked, and nothing is emitted, like the delete
-   * (#245).
+   * back. Revoked invites stay revoked.
+   *
+   * After commit the restore is published (#245): the household's restored
+   * event, whose audit entry records when the household was deleted and the
+   * restore windows the restore ends, and the
+   * `household.household.restored.v1` webhook, which carries the household's
+   * id alone. A miss publishes nothing.
    *
    * The write is scoped by the actor's `update` rules on Household, and the
    * only ones that can match a deleted row are the two restore slugs, both
@@ -798,8 +966,15 @@ export class HouseholdService {
    * household is live and the actor may read it, otherwise 404.
    */
   async restoreHousehold(id: string): Promise<Household> {
+    const initiatedAt = new Date();
+
     try {
-      const { household, memberUserIds } = await this.db.$transaction(async (tx) => {
+      const { household, memberUserIds, deletedAt, windowUserIds } = await this.db.$transaction(async (tx) => {
+        // When the household was deleted, for the restored event. Read before
+        // the update clears it. A caller the update refuses rolls this back
+        // with the rest, and learns nothing from it.
+        const tombstone = await tx.household.findUnique({ where: { id }, select: { deletedAt: true } });
+
         const household = await tx.household.update({
           where: {
             id,
@@ -814,24 +989,47 @@ export class HouseholdService {
         // restore, as it outlived the delete (`grantRecovery`). `inverted` is
         // nullable, so "not a denial" is spelled out: `NOT: { inverted: true }`
         // would drop the null rows.
-        await tx.userPermission.deleteMany({
-          where: {
-            resourceType: ResourceType.Household,
-            resourceId: id,
-            permission: { slug: HOUSEHOLD_RESTORE_PERMISSION_SLUG },
-            OR: [{ inverted: null }, { inverted: false }],
-          },
+        const windowGrants = {
+          resourceType: ResourceType.Household,
+          resourceId: id,
+          permission: { slug: HOUSEHOLD_RESTORE_PERMISSION_SLUG },
+          OR: [{ inverted: null }, { inverted: false }],
+        } satisfies Prisma.UserPermissionWhereInput;
+
+        // Who holds the windows the restore ends, for the restored event. A
+        // lapsed grant is not a restore window, so the read leaves it out; the
+        // revocation below still clears the lapsed rows.
+        const windows = await tx.userPermission.findMany({
+          where: { AND: [windowGrants, { OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }] },
+          select: { userId: true },
         });
+
+        await tx.userPermission.deleteMany({ where: windowGrants });
 
         const members = await tx.householdMember.findMany({
           where: { householdId: id },
           select: { userId: true },
         });
 
-        return { household, memberUserIds: members.map((member) => member.userId) };
+        return {
+          household,
+          memberUserIds: members.map((member) => member.userId),
+          deletedAt: tombstone?.deletedAt ?? null,
+          windowUserIds: windows.map((grant) => grant.userId),
+        };
       });
 
       await this.permissions.invalidateUsers(memberUserIds);
+
+      this.publisher.publish(
+        HouseholdRestoredEvent.eventName,
+        new HouseholdRestoredEvent(
+          { id, deletedAt, restoreWindowUserIds: windowUserIds },
+          { id, deletedAt: null, restoreWindowUserIds: [] },
+          initiatedAt,
+        ),
+        householdWebhook(WebhookEventType.HouseholdRestored, { householdId: id }),
+      );
 
       return household;
     } catch (error) {
@@ -872,14 +1070,15 @@ export class HouseholdService {
   /**
    * Issues each owner the recovery grant, all expiring together, and returns
    * when the acting owner's undo ends, or `null` when this delete opened none
-   * for them.
+   * for them, with the owners it gave a restore window: those whose grant it
+   * created (#245).
    *
    * Create-only. Every restore revokes the household's recovery grants, so a
    * row already on an owner's key was put there by an operator, and it stays
    * exactly as set: a denial is not turned into a grant, and a grant is not
-   * re-dated or re-attributed. That owner gets no new window, and when the
-   * owner is the actor the result is `null`: the response never promises an
-   * undo this delete did not open.
+   * re-dated or re-attributed. That owner gets no new window, so they are not
+   * among the owners returned, and when the owner is the actor their undo is
+   * `null`: the response never promises an undo this delete did not open.
    *
    * An operator's denial of the slug pinned to no household also means `null`
    * while it is in force, because the loader applies denials after grants and
@@ -894,7 +1093,7 @@ export class HouseholdService {
     householdId: string,
     ownerUserIds: readonly string[],
     grantedById: string,
-  ): Promise<Date | null> {
+  ): Promise<RecoveryGrants> {
     const permission = await tx.permission.findFirst({
       where: { slug: HOUSEHOLD_RESTORE_PERMISSION_SLUG, retiredAt: null },
       select: { id: true },
@@ -917,9 +1116,10 @@ export class HouseholdService {
       skipDuplicates: true,
       select: { userId: true },
     });
+    const windowUserIds = created.map((grant) => grant.userId);
 
-    if (!created.some((grant) => grant.userId === grantedById)) {
-      return null;
+    if (!windowUserIds.includes(grantedById)) {
+      return { restorableUntil: null, windowUserIds };
     }
 
     const deniedEverywhere = await tx.userPermission.count({
@@ -932,6 +1132,6 @@ export class HouseholdService {
       },
     });
 
-    return deniedEverywhere > 0 ? null : expiresAt;
+    return { restorableUntil: deniedEverywhere > 0 ? null : expiresAt, windowUserIds };
   }
 }

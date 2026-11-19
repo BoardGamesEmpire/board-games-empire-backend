@@ -14,7 +14,10 @@ import { InternalServerErrorException, NotFoundException } from '@nestjs/common'
  * that follows a permission-scoped miss stays with each service, because the
  * "what does an empty result mean" question is resource-specific.
  */
-export async function householdExists(db: DatabaseService, householdId: string): Promise<boolean> {
+export async function householdExists(
+  db: DatabaseService | Prisma.TransactionClient,
+  householdId: string,
+): Promise<boolean> {
   const count = await db.household.count({ where: { id: householdId, deletedAt: null } });
   return count > 0;
 }
@@ -109,6 +112,9 @@ export async function lockExistingHousehold(tx: Prisma.TransactionClient, househ
  * the predicate, is never locked, and this 404s at once rather than waiting.
  * That is still correct: the household was deleted when the transition asked,
  * and the same request succeeds once the restore commits.
+ *
+ * The household edit takes this lock too, so the before-state its domain event
+ * records is the state the write replaces (#245).
  *
  * All four transitions refuse, leaving included. Restore is an undo and brings
  * back exactly what was deleted, so a deleted household's roster stays frozen
