@@ -39,6 +39,8 @@ const MARKDOWN_REFUSALS: Readonly<Record<PolicyMarkdownProblem, () => CodedHttpE
       PrivacyPolicyErrorCode.TooLong,
       t('errors.privacy_policy.too_long', { max: PRIVACY_POLICY_MAX_LENGTH }),
     ),
+  'too-complex': () =>
+    new CodedHttpException(Http.BadRequest, PrivacyPolicyErrorCode.TooComplex, t('errors.privacy_policy.too_complex')),
 };
 
 /**
@@ -68,8 +70,12 @@ export class PrivacyPolicyService {
   async read(request: PrivacyPolicyLanguageRequest): Promise<PrivacyPolicyDto> {
     const rowLanguages = await this.rowLanguages(this.db);
     const available = this.availableLanguages(rowLanguages);
-    const preferred = parseAcceptLanguage(request.acceptLanguage);
-    const language = lookupTag(request.lang ? [request.lang, ...preferred] : preferred, available) ?? FALLBACK_LOCALE;
+    // lookupTag cuts back a range that isn't a tag too, so `de-@@` would
+    // match `de`: only tags are tried (#934).
+    const ranges = [request.lang, ...parseAcceptLanguage(request.acceptLanguage)]
+      .map((range) => canonicalizeTag(range))
+      .filter((tag) => tag !== null);
+    const language = lookupTag(ranges, available) ?? FALLBACK_LOCALE;
 
     const row = rowLanguages.includes(language) ? await this.rowText(language) : null;
     const text = row ?? this.files.get(language);
@@ -98,7 +104,9 @@ export class PrivacyPolicyService {
    * 400 `PRIVACY_POLICY_TOO_LONG` before it is sanitized. This is the only
    * check of the length: the request's validation would count a character
    * outside the Basic Multilingual Plane once, not twice, and refuse the same
-   * rule in a second shape. With nothing but whitespace left once sanitized, it is refused
+   * rule in a second shape. With more runs of emphasis markers than the
+   * sanitizer parses, it is refused with 400 `PRIVACY_POLICY_TOO_COMPLEX`.
+   * With nothing but whitespace left once sanitized, it is refused
    * with 400 `PRIVACY_POLICY_EMPTY`. The language tag is canonicalized, so
    * `EN-us` names `en-US`, and must be one the server knows, or the answer is
    * 404 `PRIVACY_POLICY_LANGUAGE_TAG_NOT_FOUND`. It need not be a language the

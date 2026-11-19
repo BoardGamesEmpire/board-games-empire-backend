@@ -12,7 +12,9 @@ export class PutPrivacyPolicyDto {
       'Markdown is refused with 400 PRIVACY_POLICY_TOO_LONG. It is ' +
       'sanitized as every Markdown the server stores is: raw HTML is removed, and a link that is not http, ' +
       'https or mailto is reduced to its text. Its headings and lists are kept, so a screen reader can move ' +
-      'through it. Markdown with nothing left once sanitized is refused. Sending the text already saved ' +
+      'through it. Markdown that uses bold, italic or strikethrough too many times for them to be kept is ' +
+      'refused with 400 PRIVACY_POLICY_TOO_COMPLEX. Markdown with nothing left once sanitized is refused. ' +
+      'Sending the text already saved ' +
       'changes nothing.',
     maxLength: PRIVACY_POLICY_MAX_LENGTH,
     example: '# Privacy policy\n\nThis server keeps your account details so that you can sign in.\n',

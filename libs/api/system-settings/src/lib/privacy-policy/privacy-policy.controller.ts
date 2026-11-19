@@ -127,8 +127,9 @@ export class PrivacyPolicyController {
     status: Http.BadRequest,
     description:
       `No \`markdown\`, or an unknown field; \`markdown\` longer than ${PRIVACY_POLICY_MAX_LENGTH} UTF-16 ` +
-      `code units (code ${PrivacyPolicyErrorCode.TooLong}); or Markdown with nothing left once sanitized ` +
-      `(code ${PrivacyPolicyErrorCode.Empty})`,
+      `code units (code ${PrivacyPolicyErrorCode.TooLong}); Markdown with too many runs of bold, italic or ` +
+      `strikethrough markers to keep its structure (code ${PrivacyPolicyErrorCode.TooComplex}); or Markdown ` +
+      `with nothing left once sanitized (code ${PrivacyPolicyErrorCode.Empty})`,
   })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })

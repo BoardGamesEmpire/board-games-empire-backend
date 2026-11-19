@@ -212,7 +212,7 @@ The api reads the files once, at boot, so a change to them applies when it resta
   ---
   ```
 
-- The Markdown is at most 20,000 characters, as a text saved through the API is. Both are sanitized as every Markdown the server stores is: HTML tags are removed, though the text between them is kept, except a script, which goes whole. A link that isn't `http`, `https` or `mailto` is reduced to its text. Headings and lists are kept, so a screen reader can move through the policy.
+- The Markdown is at most 20,000 characters, as a text saved through the API is, and can't use bold, italic or strikethrough more than about 1,000 times, or its headings and lists couldn't be kept. Both are sanitized as every Markdown the server stores is: HTML tags are removed, though the text between them is kept, except a script, which goes whole. A link that isn't `http`, `https` or `mailto` is reduced to its text. Headings and lists are kept, so a screen reader can move through the policy.
 - A file that is byte for byte a standard privacy policy the server shipped, apart from a byte order mark or CRLF line endings, is served as the standard one. Any other file is served as the operator's privacy policy.
 
 **A file the api can't use:** a missing or malformed `en.md` stops the api at boot, and the log names the file and what is wrong with it. English is the language read when nothing else matches, so the server can't start without it. Any other file the api can't use, such as one whose name isn't a language tag or whose front matter is malformed, is skipped with a warning in the log. Readers of its language get another language until you fix the file and restart the api.

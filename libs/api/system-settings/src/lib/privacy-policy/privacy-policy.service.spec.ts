@@ -247,6 +247,17 @@ describe('PrivacyPolicyService (#934)', () => {
     await expect(service.read({ lang: '@@' })).resolves.toMatchObject({ language: 'en', markdown: '# en file\n' });
   });
 
+  // A tag the policy has, followed by subtags that aren't a tag's, is not a
+  // language tag, so it falls through to Accept-Language rather than being
+  // cut back to the language it starts with.
+  it('passes over a lang or Accept-Language range that is not a tag, rather than cutting it back to its language', async () => {
+    givenFiles(file('en'), file('de'), file('fr'));
+
+    expect((await service.read({ lang: 'de-@@', acceptLanguage: 'fr' })).language).toBe('fr');
+    expect((await service.read({ acceptLanguage: 'de-@@, fr;q=0.5' })).language).toBe('fr');
+    expect((await service.read({ lang: 'de-AT', acceptLanguage: 'fr' })).language).toBe('de');
+  });
+
   it('answers only the five public fields', async () => {
     givenFiles(file('en'));
     givenRows(row('en'));
@@ -333,6 +344,21 @@ describe('PrivacyPolicyService (#934)', () => {
       );
 
       expect(db.privacyPolicy.upsert).not.toHaveBeenCalled();
+    });
+
+    // Within the limit, Markdown with more runs of emphasis markers than the
+    // sanitizer parses would be stored as plain text with its headings and
+    // lists flattened, so it is refused instead.
+    it('refuses Markdown with too many runs of emphasis markers to keep its structure', async () => {
+      const markdown = `# Datenschutz\n\n${'*a* '.repeat(1001)}`;
+
+      await expect(service.put('de', markdown)).rejects.toMatchObject(
+        refusal(HttpStatus.BAD_REQUEST, PrivacyPolicyErrorCode.TooComplex, 'errors.privacy_policy.too_complex'),
+      );
+
+      expect(db.$transaction).not.toHaveBeenCalled();
+      expect(db.privacyPolicy.upsert).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
     });
 
     it('accepts Markdown at the limit', async () => {
@@ -448,6 +474,26 @@ describe('PrivacyPolicyService (#934)', () => {
         source: 'operator',
         updatedAt: storedAt.toISOString(),
       });
+
+      expect(db.privacyPolicy.upsert).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    // A policy file's CRLF line endings are read as LF, and so are a server
+    // admin's: the same text sent from Windows changes nothing a reader sees.
+    it('stores CRLF line endings as LF, so resending the stored text with CRLF changes nothing', async () => {
+      await service.put('de', '# Datenschutz\r\n\r\nText.\r\n');
+
+      expect(db.privacyPolicy.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({ update: { markdown: '# Datenschutz\n\nText.\n' } }),
+      );
+
+      db.privacyPolicy.upsert.mockClear();
+      emitter.emit.mockClear();
+      db.privacyPolicy.findUnique.mockResolvedValue(snapshot('tag-de', '# Datenschutz\n\nText.\n') as never);
+      givenRows(row('de'));
+
+      await service.put('de', '# Datenschutz\r\n\r\nText.\r\n');
 
       expect(db.privacyPolicy.upsert).not.toHaveBeenCalled();
       expect(emitter.emit).not.toHaveBeenCalled();

@@ -39,6 +39,7 @@ const PROBLEMS: Readonly<Record<PolicyFileProblem['problem'], string>> = {
   'no-valid-date':
     'it must start with three lines and nothing else: "---", then "updated: YYYY-MM-DD" with a real date, then "---"',
   'not-a-language-tag': `its name must be a language tag and ${POLICY_FILE_EXTENSION}, such as ${FALLBACK_FILE} or pt-BR${POLICY_FILE_EXTENSION}`,
+  'too-complex': 'its text uses bold, italic or strikethrough too many times to keep its headings and lists',
   'too-long': `its text is longer than ${PRIVACY_POLICY_MAX_LENGTH} characters`,
 };
 

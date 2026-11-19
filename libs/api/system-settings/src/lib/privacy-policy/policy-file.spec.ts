@@ -85,6 +85,17 @@ describe('parsePolicyFile (#934)', () => {
     });
   });
 
+  // Under the limit, Markdown with too many runs of emphasis markers would
+  // still be kept as plain text, its heading flattened, so it is refused too.
+  it('refuses a body with too many runs of emphasis markers to keep its structure', () => {
+    expect(parsePolicyFile('en.md', policyFile(`# Privacy\n\n${'*a* '.repeat(1001)}`))).toEqual({
+      problem: 'too-complex',
+    });
+    expect(parsePolicyFile('en.md', policyFile(`# Privacy\n\n${'*a* '.repeat(999)}`))).toMatchObject({
+      language: 'en',
+    });
+  });
+
   // The limit must stay within the sanitizer's own bound, past which it keeps
   // Markdown as plain text and escapes the heading below as `\# Privacy`, so a
   // limit raised past that bound fails here.

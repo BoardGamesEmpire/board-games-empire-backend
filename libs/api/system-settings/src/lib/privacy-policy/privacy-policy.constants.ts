@@ -26,6 +26,7 @@ export const PrivacyPolicyErrorCode = {
   NotFound: 'PRIVACY_POLICY_NOT_FOUND',
   Empty: 'PRIVACY_POLICY_EMPTY',
   TooLong: 'PRIVACY_POLICY_TOO_LONG',
+  TooComplex: 'PRIVACY_POLICY_TOO_COMPLEX',
 } as const;
 
 export type PrivacyPolicyErrorCode = (typeof PrivacyPolicyErrorCode)[keyof typeof PrivacyPolicyErrorCode];
