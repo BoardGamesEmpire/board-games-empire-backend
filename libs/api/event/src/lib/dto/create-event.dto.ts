@@ -1,8 +1,9 @@
 import { EventSchedulingMode, EventType, Reach } from '@bge/database';
 import { i18nValidationMessage } from '@bge/i18n';
 import { ClientRequestIdProperty, ReachProperty } from '@bge/shared';
+import { applyDecorators } from '@nestjs/common';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
@@ -11,6 +12,7 @@ import {
   IsOptional,
   IsString,
   IsUrl,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { CreateEventOccurrenceDto } from '../occurrence/dto/create-event-occurrence.dto';
@@ -52,9 +54,29 @@ export function EventReachProperty(defaultReach?: EventReach): PropertyDecorator
   });
 }
 
+/**
+ * An event's title: trimmed, and refused when that leaves it empty, so no
+ * event is stored without a title (#1404).
+ *
+ * Shared with `UpdateEventDto`, which passes `optional`. That DTO can't
+ * inherit `title` through `PartialType`, whose `IsOptional` lets `null`
+ * through to the non-nullable column as a 500 (#1404).
+ */
+export function EventTitleProperty({ optional = false }: { optional?: boolean } = {}): PropertyDecorator {
+  const description = 'Trimmed. Refused when empty.';
+
+  return applyDecorators(
+    ...(optional
+      ? [ApiPropertyOptional({ description }), ValidateIf((_, value) => value !== undefined)]
+      : [ApiProperty({ description })]),
+    Transform(({ value }) => (typeof value === 'string' ? value.trim() : value)),
+    IsString({ message: i18nValidationMessage('validation.isString') }),
+    IsNotEmpty({ message: i18nValidationMessage('validation.isNotEmpty') }),
+  );
+}
+
 export class CreateEventDto {
-  @ApiProperty()
-  @IsString({ message: i18nValidationMessage('validation.isString') })
+  @EventTitleProperty()
   title!: string;
 
   @ApiPropertyOptional({

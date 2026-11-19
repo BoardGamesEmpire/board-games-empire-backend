@@ -29,6 +29,17 @@ describe('CreateEventDto', () => {
     },
   );
 
+  it.each([[''], ['   '], [null]])('rejects the title %p (#1404)', async (title) => {
+    await expect(propertiesWithErrors({ title })).resolves.toEqual(['title']);
+  });
+
+  it('trims the title (#1404)', async () => {
+    const dto = plainToInstance(CreateEventDto, { title: '  Game night ' });
+
+    await expect(validate(dto, { whitelist: true, forbidNonWhitelisted: true })).resolves.toEqual([]);
+    expect(dto.title).toBe('Game night');
+  });
+
   // The create check reads an empty string as a household id, which no
   // household role matches, so it would answer 403 to a request that only
   // meant "no household".
