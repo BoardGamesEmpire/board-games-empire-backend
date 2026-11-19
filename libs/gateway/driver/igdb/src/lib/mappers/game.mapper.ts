@@ -43,8 +43,9 @@ function toIsoDate(unixSeconds: number): string {
  * Maps IGDB `category` to the proto ContentType.
  *
  * Types with no direct BGE equivalent take the nearest one: an episode or a
- * pack/add-on is DLC, a season is a bundle, and a fork is a base game. Only
- * update=14 is left out, and falls through to CONTENT_TYPE_UNSPECIFIED.
+ * pack/add-on is DLC, a season is DLC of the game it names as `parent_game`
+ * (#1396), and a fork is a base game. Only update=14 is left out, and falls
+ * through to CONTENT_TYPE_UNSPECIFIED; the fetches never ask for updates (#1396).
  */
 const IGDB_CONTENT_TYPE_MAP: Readonly<Partial<Record<IgdbGameType, proto.ContentType>>> = {
   [GameType.MainGame]: proto.ContentType.CONTENT_TYPE_BASE_GAME,
@@ -56,7 +57,7 @@ const IGDB_CONTENT_TYPE_MAP: Readonly<Partial<Record<IgdbGameType, proto.Content
   [GameType.Remaster]: proto.ContentType.CONTENT_TYPE_REMASTER,
 
   [GameType.Episode]: proto.ContentType.CONTENT_TYPE_DLC,
-  [GameType.Season]: proto.ContentType.CONTENT_TYPE_BUNDLE,
+  [GameType.Season]: proto.ContentType.CONTENT_TYPE_DLC,
   [GameType.ExpandedEdition]: proto.ContentType.CONTENT_TYPE_EXPANDED_EDITION,
   [GameType.Port]: proto.ContentType.CONTENT_TYPE_PORT,
   [GameType.Fork]: proto.ContentType.CONTENT_TYPE_BASE_GAME,
@@ -70,8 +71,9 @@ function toContentType(category: IgdbGameType | undefined): proto.ContentType {
 
 /**
  * Every content type the map names, which the DataGateway declares as its
- * coverage. A game of a type it leaves out, an update or one IGDB adds later,
- * can still come back, with its content type unspecified.
+ * coverage. A game of a type the map leaves out, such as one IGDB adds later,
+ * can still come back, with its content type unspecified. Updates never come
+ * back: every request leaves them out (#1396).
  */
 export const IGDB_CONTENT_TYPES: readonly proto.ContentType[] = [
   ...new Set(Object.values(IGDB_CONTENT_TYPE_MAP).filter((type): type is proto.ContentType => type !== undefined)),

@@ -12,7 +12,6 @@ const GAMES_ENDPOINT = '/games';
  */
 export const GAME_SEARCH_FIELDS = [
   'cover.url',
-  'expansions',
   // A game's ids at other services; its Steam app becomes a cross-reference (#926).
   'external_games.external_game_source',
   'external_games.uid',
@@ -26,7 +25,6 @@ export const GAME_SEARCH_FIELDS = [
   'platforms.abbreviation',
   'platforms.name',
   'platforms.platform_type',
-  'standalone_expansions',
   'summary',
   'total_rating',
   'url',
@@ -67,6 +65,9 @@ export const GAME_FETCH_FIELDS = [
   'total_rating_count',
 ] as const;
 
+/** Updates are never requested: IGDB's patches aren't games to import (#1396). */
+const NOT_AN_UPDATE = `game_type != ${GameType.Update}`;
+
 /**
  * Escapes a user-supplied search term for the apicalypse `search "<q>"` clause.
  *
@@ -95,7 +96,7 @@ export function searchGamesRequest(
   locale?: string,
   narrowing: IgdbSearchNarrowing = {},
 ): IgdbRequest<IgdbGame[]> {
-  const clauses = [`version_parent = null & game_type != ${GameType.Update}`];
+  const clauses = [`version_parent = null & ${NOT_AN_UPDATE}`];
 
   if (narrowing.gameTypes) {
     clauses.push(`game_type = (${narrowing.gameTypes.join(',')})`);
@@ -198,7 +199,7 @@ export function fetchGameRequest(externalId: string, locale?: string): IgdbReque
 
   return (client: IGDBClient, signal: AbortSignal) => {
     const builder = client.fields(GAME_FETCH_FIELDS);
-    return includeLanguageFilter(builder, locale, `id = '${id}'`)
+    return includeLanguageFilter(builder, locale, `id = '${id}' & ${NOT_AN_UPDATE}`)
       .limit(1)
       .request<IgdbGame>(GAMES_ENDPOINT, signal)
       .then((response) => response.data);
@@ -208,10 +209,12 @@ export function fetchGameRequest(externalId: string, locale?: string): IgdbReque
 /**
  * Fetch all expansions and DLC for a base game.
  *
- * The combined `parent_game | version_parent` filter captures:
- *   - DLC (category 1): parent_game set
- *   - Expansions (category 2): parent_game set
- *   - Standalone expansions (category 4): version_parent set
+ * The combined `parent_game | version_parent` filter captures DLC, expansions
+ * and standalone expansions. Standalone expansions use `parent_game` too (514
+ * of 515 in #660's sample of IGDB's standalone expansions, 2026-11-18), and the
+ * `version_parent` half catches the rest and the games IGDB records as versions
+ * of the base game (its own term for `version_parent`) (#658). Updates are left
+ * out (#1396).
  *
  * A malformed base id throws here, when the request is built, before any call.
  */
@@ -221,7 +224,11 @@ export function fetchExpansionsRequest(baseExternalId: string, locale?: string):
   return (client: IGDBClient, signal: AbortSignal) => {
     const builder = client.fields(GAME_SEARCH_FIELDS);
 
-    return includeLanguageFilter(builder, locale, `(parent_game = '${id}' | version_parent = '${id}')`)
+    return includeLanguageFilter(
+      builder,
+      locale,
+      `(parent_game = '${id}' | version_parent = '${id}') & ${NOT_AN_UPDATE}`,
+    )
       .limit(50)
       .request<IgdbGame>(GAMES_ENDPOINT, signal)
       .then((response) => response.data);

@@ -236,7 +236,6 @@ export interface IgdbGame {
   age_ratings?: IgdbAgeRating[];
   collections?: IgdbNamedEntity[];
   cover?: IgdbCover;
-  expansions?: number[];
   external_games?: IgdbExternalGame[];
 
   /**
@@ -260,7 +259,6 @@ export interface IgdbGame {
 
   platforms?: IgdbPlatform[];
   release_dates?: IgdbReleaseDate[];
-  standalone_expansions?: number[];
   summary?: string;
   themes?: IgdbNamedEntity[];
   total_rating?: number;
