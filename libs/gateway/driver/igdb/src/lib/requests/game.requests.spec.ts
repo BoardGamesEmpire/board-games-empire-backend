@@ -178,6 +178,17 @@ describe('GameRequests', () => {
       expect(client.where).toHaveBeenCalledWith(expect.stringContaining('1942'));
     });
 
+    it('leaves updates out of a fetch by id (#1396)', async () => {
+      const client = buildMockClient();
+      await fetchGameRequest('1942')(client, signal);
+      expect(client.where).toHaveBeenCalledWith(`id = '1942' & game_type != 14`);
+    });
+
+    it('leaves the fields nothing reads out of the fetch fields (#1396)', () => {
+      expect(GAME_FETCH_FIELDS).not.toContain('expansions');
+      expect(GAME_FETCH_FIELDS).not.toContain('standalone_expansions');
+    });
+
     it('sets limit to 1', async () => {
       const client = buildMockClient();
       await fetchGameRequest('1942')(client, signal);
@@ -228,14 +239,14 @@ describe('GameRequests', () => {
       const client = buildMockClient();
       await fetchGameRequest('1942', 'fr-CA')(client, signal);
       // Dropping the id filter here would fetch an arbitrary game, not game 1942.
-      expect(client.where).toHaveBeenCalledWith(`id = '1942'`);
+      expect(client.where).toHaveBeenCalledWith(`id = '1942' & game_type != 14`);
     });
 
     it('combines the id filter with a mapped locale language filter', async () => {
       const client = buildMockClient();
       await fetchGameRequest('1942', 'en-US')(client, signal);
       expect(client.where).toHaveBeenCalledWith(
-        `id = '1942' & (language_supports.language = (7) | language_supports.language = null)`,
+        `id = '1942' & game_type != 14 & (language_supports.language = (7) | language_supports.language = null)`,
       );
     });
 
@@ -264,6 +275,17 @@ describe('GameRequests', () => {
       expect(client.where).toHaveBeenCalledWith(expect.stringContaining(`version_parent = '1942'`));
     });
 
+    it('leaves updates out of the expansions (#1396)', async () => {
+      const client = buildMockClient();
+      await fetchExpansionsRequest('1942')(client, signal);
+      expect(client.where).toHaveBeenCalledWith(`(parent_game = '1942' | version_parent = '1942') & game_type != 14`);
+    });
+
+    it('leaves the fields nothing reads out of the search fields (#1396)', () => {
+      expect(GAME_SEARCH_FIELDS).not.toContain('expansions');
+      expect(GAME_SEARCH_FIELDS).not.toContain('standalone_expansions');
+    });
+
     it('uses an OR combinator between the two filters', async () => {
       const client = buildMockClient();
       await fetchExpansionsRequest('1942')(client, signal);
@@ -289,7 +311,7 @@ describe('GameRequests', () => {
       const client = buildMockClient();
       await fetchExpansionsRequest('1942', 'en-AU')(client, signal);
       // Dropping this filter would return up to 50 unrelated games.
-      expect(client.where).toHaveBeenCalledWith(`(parent_game = '1942' | version_parent = '1942')`);
+      expect(client.where).toHaveBeenCalledWith(`(parent_game = '1942' | version_parent = '1942') & game_type != 14`);
     });
 
     it('refuses a malformed external ID when the request is built, before any client call', () => {
