@@ -1447,6 +1447,23 @@ describe('EventService', () => {
     expect(emitted.invitedUserIds).toEqual(['user-2']);
   });
 
+  it("createEvent dates the host's own attendance at the event's creation (#1027)", async () => {
+    db.$transaction.mockImplementation(async (cb: (tx: MockDatabaseService) => unknown) => cb(db));
+    db.event.create.mockResolvedValue(withDates(makeEvent({ id: 'event-1', createdById: 'user-1' })));
+    abilityService.getActingUserId.mockReturnValue('user-1');
+
+    await service.createEvent({ title: 'X', inviteUserIds: ['user-2'] } as CreateEventDto);
+
+    // The host has answered: they are Attending. An invited attendee has not.
+    // Typed as one row or a list; createEvent writes a list.
+    const [host, invited] = db.event.create.mock.calls[0][0].data.attendees?.create as object[];
+    expect(host).toEqual(
+      expect.objectContaining({ status: EventParticipationStatus.Attending, rsvpDate: expect.any(Date) }),
+    );
+    expect(invited).toEqual(expect.objectContaining({ status: EventParticipationStatus.Invited }));
+    expect(invited).not.toHaveProperty('rsvpDate');
+  });
+
   describe('what createEvent writes', () => {
     const startDate = new Date('2026-11-01T18:00:00.000Z');
     const endDate = new Date('2026-11-01T22:00:00.000Z');

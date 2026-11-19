@@ -72,8 +72,13 @@ export class AttendeeRemovedEvent extends MutationEvent<EventAttendee> {
   }
 }
 
-/** Changed subset (`status`) plus the row fields RSVP listeners key off. */
-type AttendeeStatusSnapshot = Readonly<Pick<EventAttendee, 'id' | 'eventId' | 'userId' | 'status'>>;
+/**
+ * The attendee's row ids plus the changed subset: `status` always, which RSVP
+ * listeners key off; `notes` only when they changed (#903).
+ */
+type AttendeeStatusSnapshot = Readonly<
+  Pick<EventAttendee, 'id' | 'eventId' | 'userId' | 'status'> & Partial<Pick<EventAttendee, 'notes'>>
+>;
 
 export class AttendeeStatusUpdatedEvent extends MutationEvent<EventAttendee> {
   static readonly eventName = AttendeeEvents.AttendeeStatusUpdated;

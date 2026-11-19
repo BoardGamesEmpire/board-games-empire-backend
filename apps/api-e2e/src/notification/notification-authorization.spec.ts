@@ -112,6 +112,24 @@ describe('notification authorization', () => {
     await expect(unreadIds(reader)).resolves.toEqual([kept]);
   });
 
+  it('mark-read leaves readAt alone on a notification already read (#903)', async () => {
+    const reader = await actors.user();
+    const [alreadyRead, unread] = await Promise.all([notify(reader), notify(reader)]);
+    const readEarlier = new Date('2026-01-01T00:00:00.000Z');
+    await db.client.notification.update({ where: { id: alreadyRead }, data: { read: true, readAt: readEarlier } });
+
+    await request(baseUrl)
+      .post(MARK_READ_PATH)
+      .set(reader.headers)
+      .send({ userId: reader.user.id, notificationIds: [alreadyRead, unread] })
+      .expect(201);
+
+    const readAt = async (id: string) =>
+      (await db.client.notification.findUniqueOrThrow({ where: { id }, select: { readAt: true } })).readAt;
+    await expect(readAt(alreadyRead)).resolves.toEqual(readEarlier);
+    await expect(readAt(unread)).resolves.toEqual(expect.any(Date));
+  });
+
   it("lets a plain user mark all their own notifications read, and leaves another user's unread", async () => {
     const [reader, other] = await Promise.all([actors.user(), actors.user()]);
     await notify(reader);

@@ -36,6 +36,7 @@ import { OFFERED_GAME_SELECT } from '../offered-game/offered-game.select';
 import { OfferedGameService } from '../offered-game/offered-game.service';
 import type { OfferedGame, OfferedGameEntry } from '../offered-game/offered-game.types';
 import { shareLiveEvent } from '../utils/lock-live-event.util';
+import { rsvpDateFor } from '../utils/rsvp-date.util';
 import { ACTIVE_NOMINATION_STATUSES, emitSuppliedGameChanges, lineupStillAhead, syncSuppliedGames } from './attendance';
 import { AddAttendeeDto } from './dto/add-attendee.dto';
 import { AddGameToListDto } from './dto/add-game-to-list.dto';
@@ -210,10 +211,15 @@ export class EventAttendeeService {
     let added: AttendeeRow;
 
     try {
+      const status = dto.status ?? EventParticipationStatus.Invited;
       const fields = {
         guestName: dto.guestName,
         guestEmail: dto.guestEmail,
-        status: dto.status ?? EventParticipationStatus.Invited,
+        status,
+        // Added with an answer, whoever added them, the row holds that
+        // answer from now; added as invited, it holds none yet. A revived
+        // row takes the date of the status it is revived with (#1027).
+        rsvpDate: rsvpDateFor(status, initiatedAt),
         notes: dto.notes,
         role: {
           create: {
@@ -252,7 +258,6 @@ export class EventAttendeeService {
           data: {
             ...fields,
             removedAt: null,
-            rsvpDate: null,
             invitedBy: inviter ? { connect: { id: inviter.id } } : { disconnect: true },
           },
           include: ATTENDEE_USER_AND_ROLE_INCLUDE,
@@ -418,17 +423,16 @@ export class EventAttendeeService {
       throw new NotFoundException(t('errors.attendee.not_found', { attendeeId, eventId }));
     }
 
-    const rsvpDate =
-      dto.status === EventParticipationStatus.Attending || dto.status === EventParticipationStatus.NotAttending
-        ? new Date()
-        : undefined;
+    // Notes left out, or sent as null, leave the stored notes as they are:
+    // they are unchanged, never cleared (#903).
+    const notes = dto.notes ?? undefined;
     let answered: AttendeeRow;
 
     try {
       // Not attending takes the attendee out of the event, and any other
       // answer brings them back in (#551): the games they supply follow, in
       // the same transaction.
-      const { previous, updated, changes } = await this.db.$transaction(async (tx) => {
+      const { previous, updated, changes, statusChanged, notesChanged } = await this.db.$transaction(async (tx) => {
         await shareLiveEvent(tx, eventId);
 
         // The status this write replaces, read under the row lock the update
@@ -438,14 +442,27 @@ export class EventAttendeeService {
         // unchanged and tell nobody (#802). An RSVP that lost a race to the
         // attendee's removal answers 404, as one arriving second would, so a
         // failed update after this read is the grant refusing it (#1064).
-        const [previous] = await tx.$queryRaw<{ removedAt: Date | null; status: EventParticipationStatus }[]>(
-          Prisma.sql`SELECT status, removed_at AS "removedAt" FROM event_attendees WHERE id = ${attendeeId} FOR NO KEY UPDATE`,
+        // The status and notes read here are also what the send is compared
+        // with, so the second of two identical racing RSVPs is the no-op it
+        // is (#903).
+        const [previous] = await tx.$queryRaw<
+          { notes: string | null; removedAt: Date | null; status: EventParticipationStatus }[]
+        >(
+          Prisma.sql`SELECT status, notes, removed_at AS "removedAt" FROM event_attendees WHERE id = ${attendeeId} FOR NO KEY UPDATE`,
         );
         assert(
           previous && !previous.removedAt,
           new NotFoundException(t('errors.attendee.not_found', { attendeeId, eventId })),
         );
 
+        const statusChanged = previous.status !== dto.status;
+        const notesChanged = notes !== undefined && notes !== previous.notes;
+
+        // The update runs even when nothing changed, so its ceiling still
+        // refuses a send the caller may not make, with 403. It writes only
+        // the columns that changed: with none, Prisma reads the row through
+        // the same where instead of writing it, so `updatedAt` stays put
+        // (#903).
         const updated = await tx.eventAttendee.update({
           where: {
             id: attendeeId,
@@ -454,25 +471,52 @@ export class EventAttendeeService {
             AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventAttendee, Action.update),
           },
           data: {
-            status: dto.status,
-            notes: dto.notes ?? undefined,
-            rsvpDate,
+            status: statusChanged ? dto.status : undefined,
+            notes: notesChanged ? notes : undefined,
+            // The date of the current answer moves only when the answer
+            // does: a resend or a notes edit leaves it alone, and a move to
+            // Invited clears it (#1027).
+            rsvpDate: statusChanged ? rsvpDateFor(dto.status, initiatedAt) : undefined,
           },
           include: ATTENDEE_USER_AND_ROLE_INCLUDE,
         });
 
-        return { previous, updated, changes: await syncSuppliedGames(tx, updated, initiatedAt) };
+        return {
+          previous,
+          updated,
+          statusChanged,
+          notesChanged,
+          changes: await syncSuppliedGames(tx, updated, initiatedAt),
+        };
       });
 
-      this.eventEmitter.emit(
-        AttendeeStatusUpdatedEvent.eventName,
-        new AttendeeStatusUpdatedEvent(
-          { id: attendeeId, eventId, userId: existing.userId, status: previous.status },
-          { id: updated.id, eventId: updated.eventId, userId: updated.userId, status: updated.status },
-          actingUserId,
-          initiatedAt,
-        ),
-      );
+      // A send that changes neither the answer nor the notes is no change,
+      // and emits nothing. A notes-only edit is one: its snapshot carries
+      // the notes, so the audit entry shows what changed (#903).
+      if (statusChanged || notesChanged) {
+        this.eventEmitter.emit(
+          AttendeeStatusUpdatedEvent.eventName,
+          new AttendeeStatusUpdatedEvent(
+            {
+              id: attendeeId,
+              eventId,
+              userId: existing.userId,
+              status: previous.status,
+              ...(notesChanged && { notes: previous.notes }),
+            },
+            {
+              id: updated.id,
+              eventId: updated.eventId,
+              userId: updated.userId,
+              status: updated.status,
+              ...(notesChanged && { notes: updated.notes }),
+            },
+            actingUserId,
+            initiatedAt,
+          ),
+        );
+      }
+
       emitSuppliedGameChanges(this.eventEmitter, eventId, changes, actingUserId, initiatedAt);
       answered = updated;
     } catch (error) {

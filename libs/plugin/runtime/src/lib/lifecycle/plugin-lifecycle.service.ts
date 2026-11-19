@@ -5,6 +5,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PluginConfigValidationError } from '../config/config-schema.errors';
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
+import { isSameConfigDocument } from '../config/same-config-document';
 import {
   PluginConfigUpdatedEvent,
   PluginDisabledEvent,
@@ -148,7 +149,7 @@ export class PluginLifecycleService {
     // the document this write replaced, not the one the pre-transaction read
     // saw: a PATCH queued behind another reports the change from that one's
     // document.
-    const { before, updated } = await this.db.$transaction(async (tx) => {
+    const { before, updated, changed } = await this.db.$transaction(async (tx) => {
       const rows = await tx.$queryRaw<
         (ClaimedPluginRow & { config: Prisma.JsonValue })[]
       >`SELECT uninstalled_at, version, installed_at, config, manifest_json = ${bindManifest(plugin.manifestJson)}::jsonb AS manifest_matches
@@ -169,25 +170,37 @@ export class PluginLifecycleService {
         throw new PluginLifecyclePluginChangedError(plugin.slug, moved, plugin.version, row.version);
       }
 
+      // The document the claim found, sent again, changes nothing: no write,
+      // no event, and the row as it stands (#903).
+      if (isSameConfigDocument(row.config, input.config)) {
+        return {
+          before: row.config,
+          updated: await tx.plugin.findUniqueOrThrow({ where: { id: plugin.id } }),
+          changed: false,
+        };
+      }
+
       const written = await tx.plugin.update({
         where: { id: plugin.id },
         // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Prisma's InputJsonValue can't take Record<string, unknown>; the document is JSON the plugin's config schema has checked (#1321)
         data: { config: input.config as Prisma.InputJsonValue },
       });
 
-      return { before: row.config, updated: written };
+      return { before: row.config, updated: written, changed: true };
     });
 
     // The reload needs no direct publish: the lifecycle listener is the
     // single publish site for the config channel and reacts to this event.
-    this.emitter.emit(
-      PluginConfigUpdatedEvent.eventName,
-      new PluginConfigUpdatedEvent(
-        { id: plugin.id, slug: plugin.slug, config: before },
-        { id: updated.id, slug: updated.slug, config: updated.config },
-        initiatedAt,
-      ),
-    );
+    if (changed) {
+      this.emitter.emit(
+        PluginConfigUpdatedEvent.eventName,
+        new PluginConfigUpdatedEvent(
+          { id: plugin.id, slug: plugin.slug, config: before },
+          { id: updated.id, slug: updated.slug, config: updated.config },
+          initiatedAt,
+        ),
+      );
+    }
 
     return updated;
   }
