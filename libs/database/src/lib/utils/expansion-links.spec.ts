@@ -209,6 +209,30 @@ describe('readBaseGameLinksOnPlatform', () => {
     },
   );
 
+  // A batch offer reads its already-offered entries before its writes and the
+  // new ones after, so a re-import between them can give one platform game
+  // two content types. The links are keyed by platform game, so a base game
+  // snapshot would otherwise carry the add-on snapshot's links. With none,
+  // either snapshot is a row that can be: an add-on whose links hold on no
+  // platform, or a base game (#1391).
+  it.each([
+    ['the add-on first', [DLC, { ...DLC, contentType: ContentType.BaseGame }]],
+    ['the base game first', [{ ...DLC, contentType: ContentType.BaseGame }, DLC]],
+  ])(
+    'gives a platform game seen both as an add-on and as no add-on no base game, %s (#1391)',
+    async (_order, [first, second]) => {
+      const { db } = stubDb([linkRow('e2', 'b1', [TABLETOP])]);
+
+      const links = await readBaseGameLinksOnPlatform(
+        db,
+        [inView('pg-1', TABLETOP, first), inView('pg-1', TABLETOP, second)],
+        BASE_WHERE,
+      );
+
+      expect(links.has('pg-1')).toBe(false);
+    },
+  );
+
   // An empty page has nothing to link, and `in: []` would still cost a round trip.
   it('issues no query for no platform games (#1391)', async () => {
     const { db, findMany } = stubDb();

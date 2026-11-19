@@ -137,16 +137,24 @@ export async function readBaseGameLinksOnPlatform(
     baseGamesOf.set(expansionGameId, forAddOn);
   }
 
+  // A platform game that is no add-on on its platform has no base game there,
+  // whatever its game's links say. The offered-games filters read the same
+  // content type, so a row is never both a base game and an add-on of one
+  // (#1391). A batch offer can see one platform game twice, either side of a
+  // re-import that changed its content type, and the links are keyed by
+  // platform game: one sighting as no add-on gives it none, in either order.
+  const notAddOn = new Set(
+    platformGames
+      .filter(({ contentType, game }) => !ADD_ON_CONTENT_TYPES.has(effectiveContentType(contentType, game.contentType)))
+      .map(({ id }) => id),
+  );
+
   for (const platformGame of platformGames) {
-    const contentType = effectiveContentType(platformGame.contentType, platformGame.game.contentType);
-    // A platform game that is no add-on on its platform has no base game
-    // there, whatever its game's links say. The offered-games filters read
-    // the same content type, so a row is never both a base game and an
-    // add-on of one (#1391).
-    if (!ADD_ON_CONTENT_TYPES.has(contentType)) {
+    if (notAddOn.has(platformGame.id)) {
       continue;
     }
 
+    const contentType = effectiveContentType(platformGame.contentType, platformGame.game.contentType);
     const isStandalone = isStandaloneAddOn(contentType);
     const onPlatform = (baseGamesOf.get(platformGame.game.id) ?? [])
       .filter((baseGame) => baseGame.platformIds.has(platformGame.platform.id))
