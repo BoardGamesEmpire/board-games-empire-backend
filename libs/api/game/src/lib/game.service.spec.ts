@@ -420,7 +420,7 @@ describe('GameService', () => {
 
   describe('getGame, with its platform games (#791)', () => {
     it('reads them through the composer, in platform name order, and returns them on the game', async () => {
-      const row = { id: 'platform-game-1' } as never;
+      const row = { id: 'platform-game-1', platform: { id: 'platform-1' } } as never;
       db.game.findUniqueOrThrow.mockResolvedValue({ id: 'game-1' } as Game);
       db.platformGame.findMany.mockResolvedValue([row]);
 
@@ -500,15 +500,21 @@ describe('GameService', () => {
       db.gameExpansion.findMany.mockImplementation(((args: { where: Record<string, unknown> }) =>
         Promise.resolve('baseGameId' in args.where ? expansions : baseGames)) as never);
 
-    // The detail's platform games and the expansions' platform ids are told
-    // apart by their select.
-    const stubPlatformIds = (rows: unknown[]) =>
+    // The game's own platform games and the linked games' platform ids are
+    // told apart by their select. The game's own rows carry only the platform
+    // id its links are held to (#1391).
+    const stubPlatformReads = (ownPlatformIds: readonly string[], linkedRows: unknown[]) =>
       db.platformGame.findMany.mockImplementation(((args: { select: unknown }) =>
-        Promise.resolve(args.select === PLATFORM_GAME_DETAIL_SELECT ? [] : rows)) as never);
+        Promise.resolve(
+          args.select === PLATFORM_GAME_DETAIL_SELECT ? ownPlatformIds.map((id) => ({ platform: { id } })) : linkedRows,
+        )) as never);
+
+    const platformIdsOf = (links: readonly { gameId: string; platformIds: string[] }[]) =>
+      links.map(({ gameId, platformIds }) => ({ gameId, platformIds }));
 
     beforeEach(() => {
       db.game.findUniqueOrThrow.mockResolvedValue({ id: 'g1' } as Game);
-      stubPlatformIds([]);
+      stubPlatformReads([], []);
     });
 
     it('reads the game’s live expansions through the read ceiling, in title then id order (#1069)', async () => {
@@ -532,38 +538,155 @@ describe('GameService', () => {
       });
     });
 
-    // An API key with no `read:platform_game` gets empty lists, as it gets no
-    // platform games (#791).
-    it('reads the expansions’ platform ids through the platform game ceiling, in platform name order (#1069)', async () => {
+    // One read covers the linked games at both ends of the game's links
+    // (#1391). An API key with no `read:platform_game` gets empty lists, as it
+    // gets no platform games (#791). The game's own platforms are listed in
+    // e1's order, so e1's result shows the read's order kept, not re-sorted.
+    it('reads the linked games’ platform ids in one read through the platform game ceiling, keeping its platform name order (#1069, #1391)', async () => {
       stubLinks(
         [
           { expansionGame: linkedGame('e1', 'A', ContentType.Expansion) },
           { expansionGame: linkedGame('e2', 'B', ContentType.Expansion) },
         ],
-        [],
+        [{ baseGame: linkedGame('b1', 'Base', ContentType.BaseGame) }],
       );
-      stubPlatformIds([
-        { gameId: 'e1', platformId: 'p2' },
-        { gameId: 'e1', platformId: 'p1' },
-      ]);
+      stubPlatformReads(
+        ['p2', 'p1'],
+        [
+          { gameId: 'e1', platformId: 'p2' },
+          { gameId: 'e1', platformId: 'p1' },
+          { gameId: 'b1', platformId: 'p1' },
+        ],
+      );
 
       const game = await service.getGame('g1');
 
       expect(compose).toHaveBeenCalledWith(ResourceType.PlatformGame, Action.read, {
-        gameId: { in: ['e1', 'e2'] },
+        gameId: { in: ['e1', 'e2', 'b1'] },
       });
+      expect(db.platformGame.findMany).toHaveBeenCalledTimes(2);
       expect(db.platformGame.findMany).toHaveBeenCalledWith({
-        where: { gameId: { in: ['e1', 'e2'] }, AND: [COND] },
+        where: { gameId: { in: ['e1', 'e2', 'b1'] }, AND: [COND] },
         select: { gameId: true, platformId: true },
         orderBy: { platform: { name: 'asc' } },
       });
-      expect(game.expansions.map(({ gameId, platformIds }) => ({ gameId, platformIds }))).toEqual([
+      expect(platformIdsOf(game.expansions)).toEqual([
         { gameId: 'e1', platformIds: ['p2', 'p1'] },
         { gameId: 'e2', platformIds: [] },
       ]);
+      expect(platformIdsOf(game.baseGames)).toEqual([{ gameId: 'b1', platformIds: ['p1'] }]);
     });
 
-    it('skips the platform id read when the game has no visible expansion (#1069)', async () => {
+    // An add-on link holds on the platforms both its games are on (#1391): a
+    // base game on Tabletop and PC with an expansion on PC and Mac holds on
+    // PC alone, and the link reads the same from either end. Each read is in
+    // platform name order: Mac, PC, Tabletop.
+    it('gives a link the platforms both its games are on, the same from either end (#1391)', async () => {
+      stubLinks([{ expansionGame: linkedGame('e1', 'Expansion', ContentType.Expansion) }], []);
+      stubPlatformReads(
+        ['pc', 'tabletop'],
+        [
+          { gameId: 'e1', platformId: 'mac' },
+          { gameId: 'e1', platformId: 'pc' },
+        ],
+      );
+
+      const base = await service.getGame('g1');
+
+      expect(platformIdsOf(base.expansions)).toEqual([{ gameId: 'e1', platformIds: ['pc'] }]);
+
+      db.game.findUniqueOrThrow.mockResolvedValue({ id: 'e1', contentType: ContentType.Expansion } as Game);
+      stubLinks([], [{ baseGame: linkedGame('g1', 'Base', ContentType.BaseGame) }]);
+      stubPlatformReads(
+        ['mac', 'pc'],
+        [
+          { gameId: 'g1', platformId: 'pc' },
+          { gameId: 'g1', platformId: 'tabletop' },
+        ],
+      );
+
+      const expansion = await service.getGame('e1');
+
+      expect(platformIdsOf(expansion.baseGames)).toEqual([{ gameId: 'g1', platformIds: ['pc'] }]);
+    });
+
+    // A DLC only on PC under a base game only on Tabletop holds on no
+    // platform, and its link is still listed (#1391).
+    it('lists a link that holds on no platform, with empty platformIds, at either end (#1391)', async () => {
+      stubLinks(
+        [{ expansionGame: linkedGame('e1', 'DLC', ContentType.DLC) }],
+        [{ baseGame: linkedGame('b1', 'Base', ContentType.BaseGame) }],
+      );
+      stubPlatformReads(
+        ['tabletop'],
+        [
+          { gameId: 'e1', platformId: 'pc' },
+          { gameId: 'b1', platformId: 'pc' },
+        ],
+      );
+
+      const game = await service.getGame('g1');
+
+      expect(platformIdsOf(game.expansions)).toEqual([{ gameId: 'e1', platformIds: [] }]);
+      expect(platformIdsOf(game.baseGames)).toEqual([{ gameId: 'b1', platformIds: [] }]);
+    });
+
+    // A manual game has no platform game, so it shares no platform with a
+    // linked game that has one, whichever side is the empty one (#1391).
+    it('gives empty platformIds when the game has no platform game but its linked games do (#1391)', async () => {
+      stubLinks(
+        [{ expansionGame: linkedGame('e1', 'A', ContentType.Expansion) }],
+        [{ baseGame: linkedGame('b1', 'Base', ContentType.BaseGame) }],
+      );
+      stubPlatformReads(
+        [],
+        [
+          { gameId: 'e1', platformId: 'pc' },
+          { gameId: 'b1', platformId: 'pc' },
+        ],
+      );
+
+      const game = await service.getGame('g1');
+
+      expect(game.expansions[0].platformIds).toEqual([]);
+      expect(game.baseGames[0].platformIds).toEqual([]);
+    });
+
+    it('gives empty platformIds when the game is on a platform but its linked games have no platform game (#1391)', async () => {
+      stubLinks(
+        [{ expansionGame: linkedGame('e1', 'A', ContentType.Expansion) }],
+        [{ baseGame: linkedGame('b1', 'Base', ContentType.BaseGame) }],
+      );
+      stubPlatformReads(['pc'], []);
+
+      const game = await service.getGame('g1');
+
+      expect(game.expansions[0].platformIds).toEqual([]);
+      expect(game.baseGames[0].platformIds).toEqual([]);
+    });
+
+    // An API key with no `read:platform_game` reads no platform game, the
+    // game's own or a linked game's (#791). Every link then holds on no
+    // platform the key can see, and nothing reads around the ceiling to fill
+    // them in (#1391).
+    it('gives every link empty platformIds when the platform game reads come back empty, reading none outside the ceiling (#1391)', async () => {
+      stubLinks(
+        [{ expansionGame: linkedGame('e1', 'A', ContentType.Expansion) }],
+        [{ baseGame: linkedGame('b1', 'Base', ContentType.BaseGame) }],
+      );
+      stubPlatformReads([], []);
+
+      const game = await service.getGame('g1');
+
+      expect(platformIdsOf(game.expansions)).toEqual([{ gameId: 'e1', platformIds: [] }]);
+      expect(platformIdsOf(game.baseGames)).toEqual([{ gameId: 'b1', platformIds: [] }]);
+      const underCeiling = expect.objectContaining({ where: expect.objectContaining({ AND: [COND] }) });
+      expect(db.platformGame.findMany).toHaveBeenCalledTimes(2);
+      expect(db.platformGame.findMany).toHaveBeenNthCalledWith(1, underCeiling);
+      expect(db.platformGame.findMany).toHaveBeenNthCalledWith(2, underCeiling);
+    });
+
+    it('skips the platform id read when the game has no visible link (#1069, #1391)', async () => {
       await service.getGame('g1');
 
       expect(db.platformGame.findMany).toHaveBeenCalledTimes(1);
@@ -572,12 +695,18 @@ describe('GameService', () => {
       );
     });
 
-    it('returns expansions and baseGames as links carrying the linked game (#1069)', async () => {
+    it('returns expansions and baseGames as links carrying the linked game and the platforms they hold on (#1069, #1391)', async () => {
       stubLinks(
         [{ expansionGame: linkedGame('e1', 'A', ContentType.Expansion) }],
         [{ baseGame: linkedGame('b1', 'Base', ContentType.BaseGame) }],
       );
-      stubPlatformIds([{ gameId: 'e1', platformId: 'p1' }]);
+      stubPlatformReads(
+        ['p1'],
+        [
+          { gameId: 'e1', platformId: 'p1' },
+          { gameId: 'b1', platformId: 'p1' },
+        ],
+      );
 
       const game = await service.getGame('g1');
 
@@ -585,7 +714,12 @@ describe('GameService', () => {
         { gameId: 'e1', isStandalone: false, game: linkedGame('e1', 'A', ContentType.Expansion), platformIds: ['p1'] },
       ]);
       expect(game.baseGames).toEqual([
-        { gameId: 'b1', isStandalone: false, game: linkedGame('b1', 'Base', ContentType.BaseGame) },
+        {
+          gameId: 'b1',
+          isStandalone: false,
+          game: linkedGame('b1', 'Base', ContentType.BaseGame),
+          platformIds: ['p1'],
+        },
       ]);
     });
 

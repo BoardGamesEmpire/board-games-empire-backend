@@ -6,6 +6,7 @@ import request from 'supertest';
 import type { Caller } from '../support/api-key';
 import { mintApiKey } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
+import { tabletopPlatform } from '../support/seeded-platforms';
 import type { TestDatabase } from '../support/test-db';
 import { createTestDatabase } from '../support/test-db';
 import type { ExpansionLinkWire } from './game-wire';
@@ -51,6 +52,16 @@ describe('expansion links on the game routes (#1069)', () => {
   const arrangeLink = (baseGameId: string, expansionGameId: string) =>
     db.client.gameExpansion.create({ data: { baseGameId, expansionGameId }, select: { id: true } });
 
+  // Platforms are shared by every spec, so each name carries the caller's token.
+  const arrangePlatform = (name: string, platformType: PlatformType) =>
+    db.client.platform.create({
+      data: { name, slug: name.toLowerCase().replace(/\s+/g, '-'), platformType },
+      select: { id: true },
+    });
+
+  const arrangePlatformGame = (gameId: string, platformId: string) =>
+    db.client.platformGame.create({ data: { gameId, platformId }, select: { id: true } });
+
   const listRow = async (caller: Caller, gameId: string, who: string) =>
     listRowBaseGames(
       await request(baseUrl).get(`${GAMES_PATH}?${LIST_QUERY}`).set(caller.headers).expect(200),
@@ -65,6 +76,9 @@ describe('expansion links on the game routes (#1069)', () => {
     );
 
   const gameIds = (links: readonly { gameId: string }[]) => links.map((link) => link.gameId);
+
+  const platformIdsOf = (links: readonly { gameId: string; platformIds: readonly string[] }[]) =>
+    links.map(({ gameId, platformIds }) => ({ gameId, platformIds }));
 
   it('names a base game on a list row and in the detail to its creator, and to no stranger (#1069)', async () => {
     const creator = await actors.user();
@@ -151,16 +165,18 @@ describe('expansion links on the game routes (#1069)', () => {
     expect(gameIds(await listRow(creator, expansion.id, 'the creator'))).toEqual([privateBase.id]);
   });
 
-  it('sends a key without read:platform_game the expansions with no platform ids, and a key with it the ids (#1069)', async () => {
+  // A key with no `read:platform_game` reads no platform game at either end
+  // of a link, so each link holds on no platform it can see. Nothing reads
+  // around the ceiling to fill them in (#1391).
+  it('sends a key without read:platform_game links with no platform ids at either end, and a key with it the ids (#1069, #1391)', async () => {
     const keyOwner = await actors.user();
     const base = await arrangeGame(keyOwner.user.id, Reach.Public);
     const expansion = await arrangeGame(keyOwner.user.id, Reach.Public);
     await arrangeLink(base.id, expansion.id);
-    const platform = await db.client.platform.create({
-      data: { name: `Alpha ${token()}`, slug: `alpha-${token()}`, platformType: PlatformType.Other },
-      select: { id: true },
-    });
-    await db.client.platformGame.create({ data: { gameId: expansion.id, platformId: platform.id } });
+    // Both games are on the platform, so the link holds on it.
+    const platform = await arrangePlatform(`Alpha ${token()}`, PlatformType.Other);
+    await arrangePlatformGame(base.id, platform.id);
+    await arrangePlatformGame(expansion.id, platform.id);
 
     const gameOnly = await mintApiKey(baseUrl, db.client, keyOwner, {
       slugs: ['read:game'],
@@ -171,16 +187,73 @@ describe('expansion links on the game routes (#1069)', () => {
       { slugs: ['read:platform_game'], resourceType: ResourceType.PlatformGame },
     ]);
 
-    const withoutIds = (await detail(gameOnly, base.id, 'a key holding read:game alone')).expansions;
-    expect(withoutIds.map(({ gameId, platformIds }) => ({ gameId, platformIds }))).toEqual([
+    const gameOnlyCaller = 'a key holding read:game alone';
+    expect(platformIdsOf((await detail(gameOnly, base.id, gameOnlyCaller)).expansions)).toEqual([
       { gameId: expansion.id, platformIds: [] },
     ]);
+    expect(platformIdsOf((await detail(gameOnly, expansion.id, gameOnlyCaller)).baseGames)).toEqual([
+      { gameId: base.id, platformIds: [] },
+    ]);
 
-    // The control: the same key owner's key holding both gets the id, so the
-    // empty list above comes from the missing key scope.
-    const withIds = (await detail(both, base.id, 'a key holding both')).expansions;
-    expect(withIds.map(({ gameId, platformIds }) => ({ gameId, platformIds }))).toEqual([
+    // The control: the same key owner's key holding both gets the id at
+    // either end, so the empty lists above come from the missing key scope.
+    expect(platformIdsOf((await detail(both, base.id, 'a key holding both')).expansions)).toEqual([
       { gameId: expansion.id, platformIds: [platform.id] },
+    ]);
+    expect(platformIdsOf((await detail(both, expansion.id, 'a key holding both')).baseGames)).toEqual([
+      { gameId: base.id, platformIds: [platform.id] },
+    ]);
+  });
+
+  // An add-on link holds on the platforms both its games are on: a base game
+  // on Tabletop and PC with an expansion on PC and Mac holds on PC alone, and
+  // the link says so from either end.
+  it('makes an add-on link’s platformIds the platforms both games are on, from either end (#1391)', async () => {
+    const creator = await actors.user();
+    const t = token();
+    const tabletop = await tabletopPlatform(db.client);
+    const pc = await arrangePlatform(`PC ${t}`, PlatformType.PC);
+    const mac = await arrangePlatform(`Mac ${t}`, PlatformType.PC);
+    const base = await arrangeGame(creator.user.id, Reach.Public, `Base ${t}`);
+    const expansion = await arrangeGame(creator.user.id, Reach.Public, `Expansion ${t}`, ContentType.Expansion);
+    await arrangePlatformGame(base.id, tabletop.id);
+    await arrangePlatformGame(base.id, pc.id);
+    await arrangePlatformGame(expansion.id, pc.id);
+    await arrangePlatformGame(expansion.id, mac.id);
+    await arrangeLink(base.id, expansion.id);
+
+    expect(platformIdsOf((await detail(creator, base.id, 'the creator')).expansions)).toEqual([
+      { gameId: expansion.id, platformIds: [pc.id] },
+    ]);
+    expect(platformIdsOf((await detail(creator, expansion.id, 'the creator')).baseGames)).toEqual([
+      { gameId: base.id, platformIds: [pc.id] },
+    ]);
+  });
+
+  // A link that holds on no platform is still a link: the DLC is listed under
+  // its base game, from either end, with no platform to play it on. The
+  // expansion on Tabletop beside it is the control: the same base game and
+  // the same reads, on a platform both games are on.
+  it('lists a DLC only on PC under a Tabletop-only base game with empty platformIds (#1391)', async () => {
+    const creator = await actors.user();
+    const t = token();
+    const tabletop = await tabletopPlatform(db.client);
+    const pc = await arrangePlatform(`PC ${t}`, PlatformType.PC);
+    const base = await arrangeGame(creator.user.id, Reach.Public, `Base ${t}`);
+    const dlc = await arrangeGame(creator.user.id, Reach.Public, `A DLC ${t}`, ContentType.DLC);
+    const expansion = await arrangeGame(creator.user.id, Reach.Public, `B expansion ${t}`, ContentType.Expansion);
+    await arrangePlatformGame(base.id, tabletop.id);
+    await arrangePlatformGame(dlc.id, pc.id);
+    await arrangePlatformGame(expansion.id, tabletop.id);
+    await arrangeLink(base.id, dlc.id);
+    await arrangeLink(base.id, expansion.id);
+
+    expect(platformIdsOf((await detail(creator, base.id, 'the creator')).expansions)).toEqual([
+      { gameId: dlc.id, platformIds: [] },
+      { gameId: expansion.id, platformIds: [tabletop.id] },
+    ]);
+    expect(platformIdsOf((await detail(creator, dlc.id, 'the creator')).baseGames)).toEqual([
+      { gameId: base.id, platformIds: [] },
     ]);
   });
 

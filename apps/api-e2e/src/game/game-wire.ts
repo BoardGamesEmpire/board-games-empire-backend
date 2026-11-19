@@ -25,15 +25,22 @@ export interface ExpansionLinkWire {
 /** The game at the far end of a link on `GET /api/games/:id` (#1069). */
 export type LinkedGameWire = Pick<GameWire, 'id' | 'title' | 'thumbnail' | 'contentType'>;
 
-/** One of `GET /api/games/:id`'s `game.expansions` (#1069). */
+/**
+ * One of `GET /api/games/:id`'s `game.expansions` (#1069), with the platforms
+ * the add-on link holds on (#1391).
+ */
 export interface LinkedExpansionWire extends ExpansionLinkWire {
   readonly game: LinkedGameWire;
   readonly platformIds: readonly string[];
 }
 
-/** One of `GET /api/games/:id`'s `game.baseGames` (#1069). */
+/**
+ * One of `GET /api/games/:id`'s `game.baseGames` (#1069), with the platforms
+ * the add-on link holds on (#1391).
+ */
 export interface LinkedBaseGameWire extends ExpansionLinkWire {
   readonly game: LinkedGameWire;
+  readonly platformIds: readonly string[];
 }
 
 export interface ListGamesEnvelope {

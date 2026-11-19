@@ -219,6 +219,11 @@ export class LinkedGameDto implements LinkedGame {
   contentType!: ContentType;
 }
 
+/** `platformIds` on an add-on link of `GET /games/:id`, read the same from either end (#1391). */
+const LINK_PLATFORM_IDS_DESCRIPTION =
+  'IDs of the platforms this add-on link holds on: those where both games have a platform game the actor may ' +
+  'read, in platform name order. Empty when there are none, such as for an API key with no `read:platform_game`.';
+
 /** One of a game's expansions on `GET /games/:id` (#1069). */
 export class LinkedExpansionDto extends ExpansionLinkDto {
   @ApiProperty({ type: LinkedGameDto, description: 'The expansion' })
@@ -226,9 +231,7 @@ export class LinkedExpansionDto extends ExpansionLinkDto {
 
   @ApiProperty({
     type: [String],
-    description:
-      'IDs of the platforms the expansion has a platform game on, in platform name order. Empty when it has ' +
-      'none, or when the actor may not read its platform games, such as an API key with no `read:platform_game`.',
+    description: LINK_PLATFORM_IDS_DESCRIPTION,
   })
   platformIds!: string[];
 }
@@ -237,6 +240,12 @@ export class LinkedExpansionDto extends ExpansionLinkDto {
 export class LinkedBaseGameDto extends ExpansionLinkDto {
   @ApiProperty({ type: LinkedGameDto, description: 'The base game' })
   game!: LinkedGameDto;
+
+  @ApiProperty({
+    type: [String],
+    description: LINK_PLATFORM_IDS_DESCRIPTION,
+  })
+  platformIds!: string[];
 }
 
 export class GameDetailDto extends GameDto {

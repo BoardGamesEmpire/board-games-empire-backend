@@ -6,6 +6,7 @@ import {
   gameSummaryReader,
   isPrismaDependentRecordNotFoundError,
   isStandaloneAddOn,
+  linkPlatformIds,
   Prisma,
   Reach,
   readBaseGameLinks,
@@ -132,7 +133,9 @@ export class GameService {
 
   /**
    * A game the actor may read, with its platform games (#791), its expansions
-   * and, for an expansion, its base games (#1069).
+   * and, for an expansion, its base games (#1069). Each add-on link carries
+   * the platforms it holds on, and is listed even when it holds on none
+   * (#1391).
    *
    * Each relation is a read of its own, not a filter in the game's `include`:
    * a deny-all condition is dropped there, so a key with no
@@ -166,7 +169,15 @@ export class GameService {
       }),
     ]);
 
-    const platformIds = await this.readPlatformIds(expansionRows.map(({ expansionGame }) => expansionGame.id));
+    const platformIds = await this.readPlatformIds([
+      ...expansionRows.map(({ expansionGame }) => expansionGame.id),
+      ...baseGameRows.map(({ baseGame }) => baseGame.id),
+    ]);
+    // A link holds on the platforms both its games are on (#1391). This
+    // game's side is the platform games already read under the ceiling, so an
+    // actor who may read none of them gets links that hold on none.
+    const ownPlatformIds = platformGames.map(({ platform }) => platform.id);
+    const holdsOn = (gameId: string) => linkPlatformIds(platformIds.get(gameId) ?? [], ownPlatformIds);
     // On its base games' links this game is the add-on, so its own content
     // type decides them all (#1391).
     const isStandalone = isStandaloneAddOn(game.contentType);
@@ -178,12 +189,13 @@ export class GameService {
         gameId: expansionGame.id,
         isStandalone: isStandaloneAddOn(expansionGame.contentType),
         game: expansionGame,
-        platformIds: platformIds.get(expansionGame.id) ?? [],
+        platformIds: holdsOn(expansionGame.id),
       })),
       baseGames: baseGameRows.map(({ baseGame }) => ({
         gameId: baseGame.id,
         isStandalone,
         game: baseGame,
+        platformIds: holdsOn(baseGame.id),
       })),
     };
   }
@@ -206,7 +218,9 @@ export class GameService {
 
   /**
    * The platforms each of `gameIds` has a platform game on, in platform name
-   * order, through the platform game ceiling (#1069). Empty for an API key
+   * order, through the platform game ceiling (#1069). One read covers the
+   * linked games at the far end of each of a game's add-on links, expansions
+   * and base games alike (#1391). Empty for an API key
    * with no `read:platform_game`, as its platform games are (#791).
    */
   private async readPlatformIds(gameIds: readonly string[]): Promise<ReadonlyMap<string, string[]>> {
