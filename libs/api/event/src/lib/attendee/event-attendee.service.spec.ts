@@ -4,6 +4,7 @@ import {
   EventParticipationStatus,
   FriendshipStatus,
   HUMAN_USER_WHERE,
+  liveEventWhere,
   NominationStatus,
   Prisma,
   Reach,
@@ -103,6 +104,8 @@ describe('EventAttendeeService', () => {
     // preference, and no friendship.
     db.user.findUnique.mockImplementation(((args: { where: { id: string } }) =>
       Promise.resolve({ id: args.where.id })) as never);
+    // The event is live, before each write's lock and under it (#1065).
+    db.event.count.mockResolvedValue(1);
   });
 
   /** The status write's row: an attendee of event-1 who has not been removed. */
@@ -246,12 +249,13 @@ describe('EventAttendeeService', () => {
       it('reads the row again under its lock, before the gated write (#1064)', async () => {
         await service.removeAttendee('event-1', 'att-1');
 
-        const [[attendeeLock]] = db.$queryRaw.mock.calls;
+        // After the event's row, which comes first (#1065).
+        const [, [attendeeLock]] = db.$queryRaw.mock.calls;
         expect(rawQueryText(attendeeLock)).toMatch(
           /^SELECT removed_at AS "removedAt" FROM event_attendees WHERE id = \? AND event_id = \? FOR NO KEY UPDATE$/,
         );
         expect((attendeeLock as unknown as Prisma.Sql).values).toEqual(['att-1', 'event-1']);
-        expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        expect(db.$queryRaw.mock.invocationCallOrder[1]).toBeLessThan(
           db.eventAttendee.update.mock.invocationCallOrder[0],
         );
       });
@@ -474,8 +478,10 @@ describe('EventAttendeeService', () => {
 
     // A date write in flight finishes before the lineups are judged, and
     // the event's row is locked before any nomination: removing a date writes
-    // to the nominations that name it while holding that row.
-    it("updateStatus locks the event's dates after the RSVP write, before pausing a nomination", async () => {
+    // to the nominations that name it while holding that row. It comes first,
+    // before the attendee's own row, so a deleted event is refused before
+    // anything is locked for the write (#1065).
+    it("updateStatus locks the event's row first, before the RSVP write and any nomination it pauses", async () => {
       db.event.count.mockResolvedValue(1);
       db.eventAttendee.findUnique.mockResolvedValue({
         id: 'att-1',
@@ -486,14 +492,22 @@ describe('EventAttendeeService', () => {
 
       await service.updateStatus('event-1', 'att-1', { status: EventParticipationStatus.NotAttending });
 
-      // The first raw query is the attendee row's lock (#802).
-      const [, [datesLock]] = db.$queryRaw.mock.calls;
+      // The attendee row's lock (#802) comes after it, once. The supplier
+      // sync takes the event's row again, so it holds even for a caller that
+      // skipped it, before any nomination (#551).
+      const [[datesLock], [attendeeLock], [syncLock]] = db.$queryRaw.mock.calls;
+      expect(db.$queryRaw).toHaveBeenCalledTimes(3);
       expect(rawQueryText(datesLock)).toMatch(/^SELECT id FROM events WHERE id = \? FOR SHARE$/);
       expect((datesLock as unknown as Prisma.Sql).values).toEqual(['event-1']);
-      expect(db.$queryRaw.mock.invocationCallOrder[1]).toBeGreaterThan(
+      expect(rawQueryText(attendeeLock)).toMatch(/FROM event_attendees/);
+      expect(rawQueryText(syncLock)).toMatch(/^SELECT id FROM events WHERE id = \? FOR SHARE$/);
+      expect(db.$queryRaw.mock.invocationCallOrder[2]).toBeLessThan(
+        db.eventGameNomination.updateManyAndReturn.mock.invocationCallOrder[0],
+      );
+      expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
         db.eventAttendee.update.mock.invocationCallOrder[0],
       );
-      expect(db.$queryRaw.mock.invocationCallOrder[1]).toBeLessThan(
+      expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
         db.eventGameNomination.updateManyAndReturn.mock.invocationCallOrder[0],
       );
     });
@@ -577,12 +591,13 @@ describe('EventAttendeeService', () => {
 
       await service.updateStatus('event-1', 'att-1', { status: EventParticipationStatus.Attending });
 
-      const [[attendeeLock]] = db.$queryRaw.mock.calls;
+      // After the event's row, which comes first (#1065).
+      const [, [attendeeLock]] = db.$queryRaw.mock.calls;
       expect(rawQueryText(attendeeLock)).toMatch(
         /^SELECT status, removed_at AS "removedAt" FROM event_attendees WHERE id = \? FOR NO KEY UPDATE$/,
       );
       expect((attendeeLock as unknown as Prisma.Sql).values).toEqual(['att-1']);
-      expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      expect(db.$queryRaw.mock.invocationCallOrder[1]).toBeLessThan(
         db.eventAttendee.update.mock.invocationCallOrder[0],
       );
 
@@ -1078,11 +1093,13 @@ describe('EventAttendeeService', () => {
         expect(db.eventAttendeeGameList.delete).not.toHaveBeenCalled();
       });
 
-      it("counts what the entry supplies after locking it, and the event's dates", async () => {
+      it("counts what the entry supplies after locking the event's row, then the entry", async () => {
         await service.removeGameFromList('event-1', 'att-1', 'gl-1');
 
+        // The event's row comes first (#1065), then the entry's.
         expect(db.$queryRaw).toHaveBeenCalledTimes(2);
-        const [, [datesLock]] = db.$queryRaw.mock.calls;
+        const [[datesLock], [entryLock]] = db.$queryRaw.mock.calls;
+        expect(rawQueryText(entryLock)).toMatch(/FROM attendee_game_lists WHERE id = \? FOR UPDATE$/);
         expect(rawQueryText(datesLock)).toMatch(/^SELECT id FROM events WHERE id = \? FOR SHARE$/);
         expect((datesLock as unknown as Prisma.Sql).values).toEqual(['event-1']);
         expect(db.eventGameNomination.count).toHaveBeenCalledWith({
@@ -1305,6 +1322,136 @@ describe('EventAttendeeService', () => {
       expect(emitter.emit).toHaveBeenCalledWith(GameAddedToListEvent.eventName, expect.anything());
     });
   });
+
+  // Each answers the 404 the event's read gives, and writes nothing. The
+  // check runs under the event's row lock, so a delete that commits after the
+  // first read can't slip between the check and the write (#1065).
+  describe('a write on an event deleted since its first read, or whose household was (#1065)', () => {
+    const isEventShare = (query: unknown) =>
+      /^SELECT id FROM events WHERE id = \? FOR SHARE$/.test(rawQueryText(query));
+
+    /**
+     * The event reads live until the write has taken its row lock `locks`
+     * times, then reads deleted: a delete that committed in between. Every
+     * raw query answers as the test arranged it before this call.
+     */
+    const deletedAtLock = (locks = 1) => {
+      const raw = db.$queryRaw.getMockImplementation();
+      let taken = 0;
+      db.$queryRaw.mockImplementation(((query: unknown) => {
+        if (isEventShare(query)) {
+          taken += 1;
+        }
+
+        return raw ? raw(query as Prisma.Sql) : Promise.resolve([]);
+      }) as never);
+      db.event.count.mockImplementation((async () => (taken >= locks ? 0 : 1)) as never);
+    };
+
+    /** The event's share lock came before every other raw query, and before the liveness read under it. */
+    const expectLockedFirst = () => {
+      expect(isEventShare(db.$queryRaw.mock.calls[0][0])).toBe(true);
+      expect(db.event.count).toHaveBeenLastCalledWith({ where: { id: 'event-1', ...liveEventWhere() } });
+      expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        db.event.count.mock.invocationCallOrder.at(-1) ?? 0,
+      );
+    };
+
+    beforeEach(() => {
+      db.event.findUnique.mockResolvedValue({ id: 'event-1', householdId: null } as Event);
+      db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1', userId: 'user-1' } as EventAttendee);
+    });
+
+    it("addAttendee refuses it under the event's row lock (#1065)", async () => {
+      deletedAtLock();
+
+      await expect(service.addAttendee('event-1', { guestName: 'Sam' })).rejects.toBeInstanceOf(NotFoundException);
+
+      expectLockedFirst();
+      expect(db.eventAttendee.create).not.toHaveBeenCalled();
+      expect(db.eventAttendee.update).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+      expect(permissions.invalidateUser).not.toHaveBeenCalled();
+    });
+
+    it("removeAttendee refuses it under the event's row lock (#1065)", async () => {
+      lockedAttendee({ removedAt: null });
+      deletedAtLock();
+
+      await expect(service.removeAttendee('event-1', 'att-1')).rejects.toBeInstanceOf(NotFoundException);
+
+      expectLockedFirst();
+      expect(db.eventAttendee.update).not.toHaveBeenCalled();
+      expect(db.eventAttendeeRole.deleteMany).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it("updateStatus refuses it under the event's row lock (#1065)", async () => {
+      lockedStatus(EventParticipationStatus.Attending);
+      deletedAtLock();
+
+      await expect(
+        service.updateStatus('event-1', 'att-1', { status: EventParticipationStatus.NotAttending }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+
+      expectLockedFirst();
+      expect(db.eventAttendee.update).not.toHaveBeenCalled();
+      expect(db.eventGameNomination.updateManyAndReturn).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it("addGameToList refuses it under the event's row lock (#1065)", async () => {
+      db.gameCollection.findUnique.mockResolvedValue({ userId: 'user-1', deletedAt: null } as GameCollection);
+      db.eventAttendeeGameList.findFirst.mockResolvedValue(null);
+      deletedAtLock();
+
+      await expect(service.addGameToList('event-1', 'att-1', { collectionId: 'col-1' })).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+
+      expectLockedFirst();
+      expect(db.eventAttendeeGameList.create).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it("removeGameFromList refuses it under the event's row lock (#1065)", async () => {
+      db.eventAttendeeGameList.findUnique.mockResolvedValue(
+        makeEventAttendeeGameList('att-1', 'col-1', { id: 'gl-1' }),
+      );
+      db.$queryRaw.mockResolvedValue([{ removedAt: null }] as never);
+      db.eventAttendeeGameList.count.mockResolvedValue(1);
+      deletedAtLock();
+
+      await expect(service.removeGameFromList('event-1', 'att-1', 'gl-1')).rejects.toBeInstanceOf(NotFoundException);
+
+      expectLockedFirst();
+      expect(db.eventAttendeeGameList.update).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    // Each offer is its own transaction, so a delete can land between two of
+    // them. The rest of the batch then answers the event's 404, as a request
+    // sent after the delete would, not a refusal per item; the offers written
+    // before it stay, as they do when any other failure stops the batch.
+    it('offerGames fails the whole batch when the event is deleted mid-batch (#1065)', async () => {
+      db.gameCollection.findMany.mockResolvedValue([
+        { id: 'col-1', userId: 'user-1', deletedAt: null, platformGame: { gameId: 'g-1' } },
+        { id: 'col-2', userId: 'user-1', deletedAt: null, platformGame: { gameId: 'g-2' } },
+      ] as never);
+      db.eventAttendeeGameList.findMany.mockResolvedValue([]);
+      db.eventAttendeeGameList.create.mockResolvedValue(makeOfferedGameEntry('gl-1') as never);
+      deletedAtLock(2);
+
+      await expect(
+        service.offerGames('event-1', 'att-1', { items: [{ collectionId: 'col-1' }, { collectionId: 'col-2' }] }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+
+      expect(db.eventAttendeeGameList.create).toHaveBeenCalledTimes(1);
+      expect(emitter.emit).toHaveBeenCalledTimes(1);
+      expect(emitter.emit).toHaveBeenCalledWith(GameAddedToListEvent.eventName, expect.anything());
+    });
+  });
+
   // #1188: each id is judged as the single add judges one, a bad id loses
   // nothing else, and the answer says what happened to each.
   describe('offerGames (#1188)', () => {
