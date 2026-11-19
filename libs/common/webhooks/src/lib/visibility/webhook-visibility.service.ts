@@ -108,11 +108,14 @@ export class WebhookVisibilityService {
       (id, abilities, options) =>
         this.exists(this.db.job.count({ where: this.scope(ResourceType.Job, id, abilities, false, options) })),
     ],
-    // Required by `household.ownership.transferred.v1` (#158). Without an entry
-    // here `isVisibleTo` throws for the subject, `fanOut` catches it per
+    // Required by every household webhook type: the ownership transfer (#158)
+    // and the lifecycle and membership types (#245). Without an entry here
+    // `isVisibleTo` throws for the subject, `fanOut` catches it per
     // subscription, and the event is registered-but-undeliverable — an ERROR log
     // per subscriber and no delivery. Household is soft-deleted, so a
-    // tombstoned household is never visible.
+    // tombstoned household is invisible, except to an event that fires after its
+    // delete (`household.household.deleted.v1`), whose descriptor sets
+    // `subjectDeleted`.
     [
       ResourceType.Household,
       (id, abilities, options) =>
