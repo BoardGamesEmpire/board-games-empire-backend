@@ -23,7 +23,7 @@ import {
   ScopeComposer,
 } from '@bge/permissions';
 import { PaginatedRows, PaginationQueryDto, pickDefined, sampleWithoutReplacement } from '@bge/shared';
-import { webhookEnvelope, WebhookEventType } from '@bge/webhooks';
+import { WebhookEventType } from '@bge/webhooks';
 import {
   BadRequestException,
   ConflictException,
@@ -37,8 +37,7 @@ import {
 import assert from 'node:assert';
 import { HOUSEHOLD_RESTORE_PERMISSION_SLUG, HOUSEHOLD_RESTORE_WINDOW_MS } from './constants/household.constants';
 import { CreateHouseholdDto, UpdateHouseholdDto } from './dto';
-import type { HouseholdWebhook } from './events/household-event.publisher';
-import { HouseholdEventPublisher } from './events/household-event.publisher';
+import { HouseholdEventPublisher, householdWebhook } from './events/household-event.publisher';
 import type { HouseholdStateSnapshot } from './events/household.events';
 import {
   HouseholdCreatedEvent,
@@ -136,23 +135,6 @@ const HOUSEHOLD_EDITABLE_COLUMNS: { readonly [Column in Exclude<keyof HouseholdS
   memberInvitePolicy: 'memberInvitePolicy',
   memberSharePolicy: 'memberSharePolicy',
 };
-
-/**
- * A household change's webhook (#245), sent under the household's id. `data`
- * is copied verbatim to a subscriber's URL, so it holds ids only, and for an
- * edit the names of the columns that changed, never their values. No
- * `occurrenceId`: nothing here names one change stably, so each publish is its
- * own delivery, as the ownership transfer's is.
- */
-function householdWebhook<TData extends { readonly householdId: string }>(
-  type: WebhookEventType,
-  data: TData,
-): HouseholdWebhook {
-  return {
-    type,
-    envelope: webhookEnvelope({ subjectId: data.householdId, householdId: data.householdId, data }),
-  };
-}
 
 @Injectable()
 export class HouseholdService {
@@ -340,8 +322,8 @@ export class HouseholdService {
    * runs before the language tag resolves, so a tag the server has stopped
    * supporting can't refuse the retry of a create that succeeded.
    *
-   * A fresh create is published after it commits (#245): the household's
-   * created event, which its audit entry records. No webhook, since no
+   * A fresh create is published after it commits (#245): the household
+   * created domain event, which its audit entry records. No webhook, since no
    * subscription can name a household before it exists.
    */
   async create(createHouseholdDto: CreateHouseholdDto) {
@@ -817,9 +799,9 @@ export class HouseholdService {
    *
    * ## What it publishes (#245)
    *
-   * After commit, and after the revoked invites: the household's deleted
-   * event, whose audit entry names the household and the owners given a
-   * restore window (none for a staff delete), and the
+   * After commit, and after the revoked invites: the household deleted
+   * domain event, whose audit entry names the household and the owners given
+   * a restore window (none for a staff delete), and the
    * `household.household.deleted.v1` webhook, which carries the household's
    * id alone.
    */
@@ -882,7 +864,7 @@ export class HouseholdService {
       // failing listener rather than throwing it into this request.
       this.invites.emit(revocation.events);
 
-      // The owners given a restore window go in the audit entry only.
+      // The owners given a restore window go in the audit entry only (#245).
       this.publisher.publish(
         HouseholdDeletedEvent.eventName,
         new HouseholdDeletedEvent(
@@ -935,9 +917,9 @@ export class HouseholdService {
    * sees the household again and its members' household-scoped grants come
    * back. Revoked invites stay revoked.
    *
-   * After commit the restore is published (#245): the household's restored
-   * event, whose audit entry records when the household was deleted and the
-   * restore windows the restore ends, and the
+   * After commit the restore is published (#245): the household restored
+   * domain event, whose audit entry records when the household was deleted
+   * and the restore windows the restore ends, and the
    * `household.household.restored.v1` webhook, which carries the household's
    * id alone. A miss publishes nothing.
    *
@@ -970,9 +952,9 @@ export class HouseholdService {
 
     try {
       const { household, memberUserIds, deletedAt, windowUserIds } = await this.db.$transaction(async (tx) => {
-        // When the household was deleted, for the restored event. Read before
-        // the update clears it. A caller the update refuses rolls this back
-        // with the rest, and learns nothing from it.
+        // When the household was deleted, for the household restored domain
+        // event (#245). Read before the update clears it. A caller the update
+        // refuses rolls this back with the rest, and learns nothing from it.
         const tombstone = await tx.household.findUnique({ where: { id }, select: { deletedAt: true } });
 
         const household = await tx.household.update({
@@ -996,9 +978,10 @@ export class HouseholdService {
           OR: [{ inverted: null }, { inverted: false }],
         } satisfies Prisma.UserPermissionWhereInput;
 
-        // Who holds the windows the restore ends, for the restored event. A
-        // lapsed grant is not a restore window, so the read leaves it out; the
-        // revocation below still clears the lapsed rows.
+        // Who holds the windows the restore ends, for the household restored
+        // domain event (#245). A lapsed grant is not a restore window, so the
+        // read leaves it out; the revocation below still clears the lapsed
+        // rows.
         const windows = await tx.userPermission.findMany({
           where: { AND: [windowGrants, { OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }] },
           select: { userId: true },

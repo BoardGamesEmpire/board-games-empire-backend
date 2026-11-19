@@ -500,7 +500,7 @@ describe('HouseholdService', () => {
         languageTagId: null,
       });
       // After the owner's ability graph is evicted, so a listener acting on
-      // the event finds the new owner's grants.
+      // the domain event finds the new owner's grants.
       expect(order).toEqual(['evict', HouseholdEvents.Created]);
     });
 

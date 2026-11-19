@@ -20,7 +20,7 @@ import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissi
 import type { QuotaSoftOverageEvent } from '@bge/quota';
 import { QuotaExceededException, QuotaService } from '@bge/quota';
 import { PaginatedRows, PaginationQueryDto } from '@bge/shared';
-import { webhookEnvelope, WebhookEventType } from '@bge/webhooks';
+import { WebhookEventType } from '@bge/webhooks';
 import {
   BadRequestException,
   ConflictException,
@@ -39,12 +39,11 @@ import {
 } from '../constants/household.constants';
 import type { AssignableHouseholdRole } from '../dto';
 import { isAssignableHouseholdRole, UpdateMemberRoleDto } from '../dto';
-import type { HouseholdWebhook } from '../events/household-event.publisher';
-import { HouseholdEventPublisher } from '../events/household-event.publisher';
+import { HouseholdEventPublisher, householdWebhook } from '../events/household-event.publisher';
 import type { HouseholdOwnershipSnapshot } from '../events/household.events';
 import {
   HouseholdGameShareEndedEvent,
-  HouseholdMemberAddedEvent,
+  HouseholdMemberAdmittedEvent,
   HouseholdMemberRemovedEvent,
   HouseholdMemberRoleChangedEvent,
   HouseholdOwnershipTransferredEvent,
@@ -197,32 +196,28 @@ export interface RemovedMembership {
 
   /**
    * The member's household role by name as the household lock found it, or
-   * null for a member with no role: the role the member-removed event records
-   * (#245). `removed.role` is the read before the lock.
+   * null for a member with no role: the role the member-removed domain event
+   * records (#245). `removed.role` is the read before the lock.
    */
   readonly role: string | null;
 }
 
-/** The ids that name one membership. */
+/**
+ * The ids that name one membership: all a membership change's webhook carries
+ * ({@link householdWebhook}), so its role, origin and cause stay in the audit
+ * entry (#245).
+ */
 interface MembershipIds {
   readonly householdId: string;
   readonly memberId: string;
   readonly userId: string;
 }
 
-/**
- * A membership change's webhook (#245), sent under the household's id. `data`
- * is copied verbatim to a subscriber's URL, so it holds the membership's ids
- * and nothing more: no role, no origin and no cause. No `occurrenceId`, for
- * the reason `emitOwnershipTransferred` gives.
- */
-function membershipWebhook(type: WebhookEventType, membership: MembershipIds): HouseholdWebhook {
-  const { householdId, memberId, userId } = membership;
-
-  return {
-    type,
-    envelope: webhookEnvelope({ subjectId: householdId, householdId, data: { householdId, memberId, userId } }),
-  };
+/** A member's household role by name, or null for a member with no role (#245). */
+function householdRoleName(member: {
+  readonly role: { readonly role: { readonly name: string } } | null;
+}): string | null {
+  return member.role?.role.name ?? null;
 }
 
 @Injectable()
@@ -465,7 +460,7 @@ export class HouseholdMemberService {
         return {
           // The role the change replaces is the one read under the lock, for
           // the reasons above: the read before it can be stale (#245).
-          lockedRole: locked.role?.role.name ?? null,
+          lockedRole: householdRoleName(locked),
           updated: await tx.householdMember.findUniqueOrThrow({ where: { id: member.id }, select: MEMBER_SELECT }),
         };
       });
@@ -708,7 +703,7 @@ export class HouseholdMemberService {
    *   window would be invisible.
    * - `QuotaService.emitSoftOverages(result.softOverages)` — see
    *   {@link AddMemberResult}.
-   * - {@link emitMemberAdded} (#245), and only when
+   * - {@link emitMemberAdmitted} (#245), and only when
    *   {@link AddMemberResult.admitted} is true: a membership returned rather
    *   than written admitted nobody.
    *
@@ -1220,8 +1215,8 @@ export class HouseholdMemberService {
     // the answer standing through the deletes, since every role transition,
     // and every member leaving or being removed, in this household takes it too.
     //
-    // It reads the member's role too, the one the member-removed event
-    // records (#245): a promotion that committed while this waited for the
+    // It reads the member's role too, the one the member-removed domain event
+    // records (#245): a role change that committed while this waited for the
     // lock is in it, where `member.role`, read before the lock, would record
     // a role the member no longer held.
     const reachable = await tx.householdMember.findFirst({
@@ -1261,7 +1256,7 @@ export class HouseholdMemberService {
       member.userId,
     );
 
-    return { removed: member, role: reachable.role?.role.name ?? null, revoked: events, endedShares };
+    return { removed: member, role: householdRoleName(reachable), revoked: events, endedShares };
   }
 
   /**
@@ -1302,13 +1297,17 @@ export class HouseholdMemberService {
    * invite accept, and the join approval of #231. Its webhook carries the
    * membership's ids only, so the role and the origin stay in the audit entry.
    */
-  emitMemberAdded(member: HouseholdMemberWithRelations, origin: AdmissibleMembershipOrigin, initiatedAt: Date): void {
-    const membership = { householdId: member.householdId, userId: member.userId, memberId: member.id };
+  emitMemberAdmitted(
+    member: HouseholdMemberWithRelations,
+    origin: AdmissibleMembershipOrigin,
+    initiatedAt: Date,
+  ): void {
+    const membership: MembershipIds = { householdId: member.householdId, memberId: member.id, userId: member.userId };
 
     this.publisher.publish(
-      HouseholdMemberAddedEvent.eventName,
-      new HouseholdMemberAddedEvent({ ...membership, role: member.role?.role.name ?? null, origin }, initiatedAt),
-      membershipWebhook(WebhookEventType.HouseholdMemberAdded, membership),
+      HouseholdMemberAdmittedEvent.eventName,
+      new HouseholdMemberAdmittedEvent({ ...membership, role: householdRoleName(member), origin }, initiatedAt),
+      householdWebhook(WebhookEventType.HouseholdMemberAdmitted, membership),
     );
   }
 
@@ -1320,17 +1319,17 @@ export class HouseholdMemberService {
    * membership's ids and no cause, so a membership a ban ended reads to a
    * subscriber as any other.
    */
-  emitMemberRemoved(removed: RemovedMembership, cause: MembershipEndCause, initiatedAt: Date): void {
-    const membership = {
-      householdId: removed.removed.householdId,
-      userId: removed.removed.userId,
-      memberId: removed.removed.id,
+  emitMemberRemoved(membership: RemovedMembership, cause: MembershipEndCause, initiatedAt: Date): void {
+    const ids: MembershipIds = {
+      householdId: membership.removed.householdId,
+      memberId: membership.removed.id,
+      userId: membership.removed.userId,
     };
 
     this.publisher.publish(
       HouseholdMemberRemovedEvent.eventName,
-      new HouseholdMemberRemovedEvent({ ...membership, role: removed.role }, cause, initiatedAt),
-      membershipWebhook(WebhookEventType.HouseholdMemberRemoved, membership),
+      new HouseholdMemberRemovedEvent({ ...ids, role: membership.role }, cause, initiatedAt),
+      householdWebhook(WebhookEventType.HouseholdMemberRemoved, ids),
     );
   }
 
@@ -1432,14 +1431,8 @@ export class HouseholdMemberService {
    * committed transfer, which the client would retry into a 400 "already an
    * owner" (#248).
    *
-   * No `occurrenceId`: the envelope wants an id that is stable across re-emits
-   * of the SAME occurrence, and nothing available here qualifies. The audit
-   * entry's id does not exist yet (the listener writes it after this returns),
-   * and every id that does exist — the household, either role row — is stable
-   * across *different* transfers, so using one would make a second, legitimate
-   * transfer dedup against the first and silently drop its delivery. Absent an
-   * occurrenceId the dispatcher assigns a random delivery id (no dedup), which
-   * the contract explicitly allows.
+   * The webhook carries the owners' ids, never their identity, and no
+   * `occurrenceId`, for the reasons {@link householdWebhook} gives.
    */
   private emitOwnershipTransferred(
     before: HouseholdOwnershipSnapshot,
@@ -1449,24 +1442,13 @@ export class HouseholdMemberService {
     this.publisher.publish(
       HouseholdOwnershipTransferredEvent.eventName,
       new HouseholdOwnershipTransferredEvent(before, after, initiatedAt),
-      {
-        type: WebhookEventType.HouseholdOwnershipTransferred,
-        envelope: webhookEnvelope({
-          subjectId: after.householdId,
-          householdId: after.householdId,
-          // Ids only. `data` is copied verbatim to a subscriber-controlled URL, so
-          // usernames, display names, avatars, and emails stay out of it — a read
-          // grant on the household is not consent to ship member identity to a
-          // third party.
-          data: {
-            householdId: after.householdId,
-            previousOwnerMemberId: before.ownerMemberId,
-            previousOwnerUserId: before.ownerUserId,
-            newOwnerMemberId: after.ownerMemberId,
-            newOwnerUserId: after.ownerUserId,
-          },
-        }),
-      },
+      householdWebhook(WebhookEventType.HouseholdOwnershipTransferred, {
+        householdId: after.householdId,
+        previousOwnerMemberId: before.ownerMemberId,
+        previousOwnerUserId: before.ownerUserId,
+        newOwnerMemberId: after.ownerMemberId,
+        newOwnerUserId: after.ownerUserId,
+      }),
     );
   }
 
@@ -1480,18 +1462,22 @@ export class HouseholdMemberService {
     updated: HouseholdMemberWithRelations,
     initiatedAt: Date,
   ): void {
-    const role = updated.role?.role.name ?? null;
+    const role = householdRoleName(updated);
 
     if (role === lockedRole) {
       return;
     }
 
-    const membership = { householdId: updated.householdId, userId: updated.userId, memberId: updated.id };
+    const membership: MembershipIds = {
+      householdId: updated.householdId,
+      memberId: updated.id,
+      userId: updated.userId,
+    };
 
     this.publisher.publish(
       HouseholdMemberRoleChangedEvent.eventName,
       new HouseholdMemberRoleChangedEvent({ ...membership, role: lockedRole }, { ...membership, role }, initiatedAt),
-      membershipWebhook(WebhookEventType.HouseholdMemberRoleChanged, membership),
+      householdWebhook(WebhookEventType.HouseholdMemberRoleChanged, membership),
     );
   }
 

@@ -2,7 +2,7 @@ import { webhookEnvelope, WebhookEventType } from '@bge/webhooks';
 import { Logger } from '@nestjs/common';
 import type { EventEmitter2 } from '@nestjs/event-emitter';
 import { HouseholdEvents } from '../constants/household-events.constant';
-import { HouseholdEventPublisher } from './household-event.publisher';
+import { HouseholdEventPublisher, householdWebhook } from './household-event.publisher';
 import { HouseholdUpdatedEvent } from './household.events';
 
 const INITIATED_AT = new Date('2026-11-19T12:00:00Z');
@@ -99,5 +99,22 @@ describe('HouseholdEventPublisher (#245)', () => {
     publisher.publish(HouseholdEvents.Updated, domainEvent);
 
     expect(events.emit.mock.calls).toEqual([[HouseholdEvents.Updated, domainEvent]]);
+  });
+});
+
+describe('householdWebhook (#245)', () => {
+  it('sends the data it is given under the household id, with no occurrenceId', () => {
+    const data = { householdId: 'hh-1', memberId: 'member-1', userId: 'user-1' };
+
+    const { type, envelope } = householdWebhook(WebhookEventType.HouseholdMemberRemoved, data);
+
+    expect(type).toBe(WebhookEventType.HouseholdMemberRemoved);
+    expect(envelope).toEqual({ subjectId: 'hh-1', householdId: 'hh-1', data });
+    // `data` goes to the subscriber's URL as the caller built it: the same
+    // object, so the builder adds, drops and reorders no key.
+    expect(envelope.data).toBe(data);
+    // No id is stable across re-emits of one change and unique across
+    // changes before the audit entry exists, so the delivery is not deduped.
+    expect(envelope.occurrenceId).toBeUndefined();
   });
 });

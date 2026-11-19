@@ -15,15 +15,16 @@ import type { HOUSEHOLD_SETTINGS_SELECT } from '../read-shapes';
 /**
  * Domain mutation events for the Household aggregate (#57, #158, #245).
  *
- * Payloads carry ROW STATE only; the acting actor, source, and correlationId
- * live in CLS and are read at handle time by `AuditPersistenceListener` — never
- * on the payload. All events here are audited by default, and each is emitted
- * after commit through `HouseholdEventPublisher`.
+ * Payloads carry the changed state as projections, never the actor: the
+ * acting actor, source, and correlationId live in CLS and are read at handle
+ * time by `AuditPersistenceListener`. All events here are audited by default,
+ * and each is emitted after commit through `HouseholdEventPublisher`.
  *
- * A household change's event names the household as its subject (#245), as
- * the ownership transfer's does (#248): a household's audit entries are one
- * trail, and a webhook's audience check resolves `subjectId` against the
- * household. The snapshots are projections of what changed about it, not rows.
+ * A household change's domain event names the household as its subject
+ * (#245), as the ownership transfer's does (#248): a household's audit
+ * entries are one trail, and a webhook's audience check resolves `subjectId`
+ * against the household. The snapshots are projections of what changed about
+ * it, not rows.
  */
 
 /**
@@ -115,7 +116,7 @@ export class HouseholdGameShareEndedEvent extends MutationEvent<GameShareSnapsho
   }
 }
 
-/** Why a membership ended, as the member-removed event records it (#245). */
+/** Why a membership ended, as the member-removed domain event records it (#245). */
 export enum MembershipEndCause {
   /** A household owner or admin removed the member from the household. */
   Removed = 'removed',
@@ -128,7 +129,7 @@ export enum MembershipEndCause {
 /**
  * The household's columns and settings an edit can change, flattened so one
  * diff covers both (#245). An edit records only the columns whose values
- * changed, so its event carries a subset of these, plus `id`.
+ * changed, so its domain event carries a subset of these, plus `id`.
  */
 export interface HouseholdStateSnapshot {
   readonly description: string | null;
@@ -188,7 +189,7 @@ export interface HouseholdRestoreSnapshot {
  * (#245). The side with no membership has a null `memberId` and `role`.
  */
 export interface HouseholdMembershipSnapshot {
-  /** Why the membership ended, on the after side of a member-removed event only. */
+  /** Why the membership ended, on the after side of a member-removed domain event only. */
   readonly cause?: MembershipEndCause;
 
   readonly householdId: string;
@@ -196,7 +197,7 @@ export interface HouseholdMembershipSnapshot {
   /** The `HouseholdMember` row's id, or null on the side with no membership. */
   readonly memberId: string | null;
 
-  /** How the member came to belong, on the after side of a member-added event. */
+  /** How the member came to belong, on the after side of a member-admitted domain event. */
   readonly origin?: HouseholdMembershipOrigin;
 
   /** The member's household role by name, or null on the side with no membership. */
@@ -326,8 +327,8 @@ export class HouseholdRestoredEvent extends MutationEvent<HouseholdRestoreSnapsh
  * (#245). The household changed, not a row of its own, so `action` derives to
  * `update`: `before` is the same user with no membership.
  */
-export class HouseholdMemberAddedEvent extends MutationEvent<HouseholdMembershipSnapshot> {
-  static readonly eventName = HouseholdEvents.MemberAdded;
+export class HouseholdMemberAdmittedEvent extends MutationEvent<HouseholdMembershipSnapshot> {
+  static readonly eventName = HouseholdEvents.MemberAdmitted;
   declare readonly before: HouseholdMembershipSnapshot;
   declare readonly after: HouseholdMembershipSnapshot;
   readonly subject = ResourceType.Household;
@@ -359,8 +360,9 @@ export class HouseholdMemberRoleChangedEvent extends MutationEvent<HouseholdMemb
 
 /**
  * Emitted once, after commit, when a membership ends (#245): the member left,
- * was removed from the household or was banned. One event for every cause,
- * and `after` says which: the same user with no membership, and the cause.
+ * was removed from the household or was banned. One domain event for every
+ * cause, and `after` says which: the same user with no membership, and the
+ * cause.
  * `action` derives to `update`, since the household is what changed.
  */
 export class HouseholdMemberRemovedEvent extends MutationEvent<HouseholdMembershipSnapshot> {

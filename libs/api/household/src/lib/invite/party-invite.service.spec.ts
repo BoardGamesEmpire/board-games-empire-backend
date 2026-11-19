@@ -102,7 +102,7 @@ describe('PartyInviteService', () => {
       | 'emit'
     >
   >;
-  let members: jest.Mocked<Pick<HouseholdMemberService, 'addMemberWithin' | 'emitMemberAdded'>>;
+  let members: jest.Mocked<Pick<HouseholdMemberService, 'addMemberWithin' | 'emitMemberAdmitted'>>;
   let abilities: jest.Mocked<Pick<AbilityService, 'userAbilityWithin'>>;
   let senderCan: jest.Mock<boolean, Parameters<UserAbilityCheck>>;
   let permissions: jest.Mocked<Pick<PermissionsService, 'invalidateUser'>>;
@@ -148,7 +148,7 @@ describe('PartyInviteService', () => {
     };
     members = {
       addMemberWithin: jest.fn().mockImplementation(() => Promise.resolve(admission)),
-      emitMemberAdded: jest.fn(),
+      emitMemberAdmitted: jest.fn(),
     };
     senderCan = jest.fn().mockReturnValue(true);
     abilities = { userAbilityWithin: jest.fn().mockResolvedValue(senderCan) };
@@ -324,7 +324,7 @@ describe('PartyInviteService', () => {
       expect(quotas.emitSoftOverages).not.toHaveBeenCalled();
     });
 
-    describe('the member-added event (#245)', () => {
+    describe('the member-admitted domain event (#245)', () => {
       it('publishes the admitted member with origin InviteAccepted after the accepted invite', async () => {
         // The mocked client and these mocks keep separate call counters, so
         // the order is recorded by hand.
@@ -341,8 +341,8 @@ describe('PartyInviteService', () => {
         invites.emit.mockImplementation(() => {
           order.push('invites');
         });
-        members.emitMemberAdded.mockImplementation(() => {
-          order.push('member added');
+        members.emitMemberAdmitted.mockImplementation(() => {
+          order.push('member admitted');
         });
         quotas.emitSoftOverages.mockImplementation(() => {
           order.push('soft caps');
@@ -350,16 +350,16 @@ describe('PartyInviteService', () => {
 
         await service.accept({ inviteId: 'invite-1' });
 
-        expect(members.emitMemberAdded).toHaveBeenCalledTimes(1);
+        expect(members.emitMemberAdmitted).toHaveBeenCalledTimes(1);
         // The row the admission wrote (its role is not the offered one), not
         // a rebuilt one.
-        expect(members.emitMemberAdded.mock.calls[0][0]).toBe(NEW_MEMBER);
-        expect(members.emitMemberAdded.mock.calls[0][1]).toBe(HouseholdMembershipOrigin.InviteAccepted);
-        expect(members.emitMemberAdded.mock.calls[0][2]).toBeInstanceOf(Date);
-        expect(order).toEqual(['commit', 'evict', 'invites', 'member added', 'soft caps']);
+        expect(members.emitMemberAdmitted.mock.calls[0][0]).toBe(NEW_MEMBER);
+        expect(members.emitMemberAdmitted.mock.calls[0][1]).toBe(HouseholdMembershipOrigin.InviteAccepted);
+        expect(members.emitMemberAdmitted.mock.calls[0][2]).toBeInstanceOf(Date);
+        expect(order).toEqual(['commit', 'evict', 'invites', 'member admitted', 'soft caps']);
       });
 
-      it('emits no member-added event when the invite is revoked at accept', async () => {
+      it('emits no member-admitted domain event when the invite is revoked at accept', async () => {
         // Its sender could no longer send it (#747): the revoke commits and
         // is announced, and nobody was admitted.
         senderCan.mockReturnValue(false);
@@ -367,7 +367,7 @@ describe('PartyInviteService', () => {
         await expect(service.accept({ inviteId: 'invite-1' })).rejects.toMatchObject({ status: 409 });
 
         expect(invites.emit).toHaveBeenCalledWith([revocation.event]);
-        expect(members.emitMemberAdded).not.toHaveBeenCalled();
+        expect(members.emitMemberAdmitted).not.toHaveBeenCalled();
       });
 
       it.each([
@@ -392,16 +392,19 @@ describe('PartyInviteService', () => {
             );
           },
         ],
-      ])('emits no member-added event when the invitee is already a member, found %s', async (_label, arrange) => {
-        arrange();
+      ])(
+        'emits no member-admitted domain event when the invitee is already a member, found %s',
+        async (_label, arrange) => {
+          arrange();
 
-        await expect(service.accept({ inviteId: 'invite-1' })).rejects.toMatchObject({
-          status: 409,
-          response: expect.objectContaining({ key: 'errors.household.already_a_member' }),
-        });
+          await expect(service.accept({ inviteId: 'invite-1' })).rejects.toMatchObject({
+            status: 409,
+            response: expect.objectContaining({ key: 'errors.household.already_a_member' }),
+          });
 
-        expect(members.emitMemberAdded).not.toHaveBeenCalled();
-      });
+          expect(members.emitMemberAdmitted).not.toHaveBeenCalled();
+        },
+      );
     });
 
     it('admits with the seam’s default when the invite offers no role', async () => {

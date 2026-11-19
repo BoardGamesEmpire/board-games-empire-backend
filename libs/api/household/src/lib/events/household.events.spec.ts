@@ -9,7 +9,7 @@ import {
   HouseholdBanUpdatedEvent,
   HouseholdCreatedEvent,
   HouseholdDeletedEvent,
-  HouseholdMemberAddedEvent,
+  HouseholdMemberAdmittedEvent,
   HouseholdMemberRemovedEvent,
   HouseholdMemberRoleChangedEvent,
   HouseholdRestoredEvent,
@@ -37,13 +37,13 @@ const ban = (overrides: Partial<HouseholdBanSnapshot> = {}): HouseholdBanSnapsho
   ...overrides,
 });
 
-/** Each household change's event class and the domain event name it is emitted under (#245). */
+/** Each household change's domain event class and the name it is emitted under (#245). */
 const NAMED_CLASSES = [
   [HouseholdCreatedEvent, HouseholdEvents.Created],
   [HouseholdUpdatedEvent, HouseholdEvents.Updated],
   [HouseholdDeletedEvent, HouseholdEvents.Deleted],
   [HouseholdRestoredEvent, HouseholdEvents.Restored],
-  [HouseholdMemberAddedEvent, HouseholdEvents.MemberAdded],
+  [HouseholdMemberAdmittedEvent, HouseholdEvents.MemberAdmitted],
   [HouseholdMemberRoleChangedEvent, HouseholdEvents.MemberRoleChanged],
   [HouseholdMemberRemovedEvent, HouseholdEvents.MemberRemoved],
   [HouseholdBanCreatedEvent, HouseholdEvents.BanCreated],
@@ -52,7 +52,7 @@ const NAMED_CLASSES = [
 ] as const;
 
 describe('household domain events (#245)', () => {
-  describe('every household change event', () => {
+  describe("every household change's domain event", () => {
     const reflector = new Reflector();
 
     it.each(NAMED_CLASSES.map(([cls, name]) => [cls.name, name, cls] as const))(
@@ -129,11 +129,11 @@ describe('household domain events (#245)', () => {
 
   // A membership, a role change and a ban each change the household, which is
   // the subject; so each is an update of it, never a create or a delete.
-  describe('HouseholdMemberAddedEvent', () => {
+  describe('HouseholdMemberAdmittedEvent', () => {
     it('is an update of the household, building a before with no membership for the same user', () => {
       const after = membership({ origin: HouseholdMembershipOrigin.InviteAccepted });
 
-      const event = new HouseholdMemberAddedEvent(after, INITIATED_AT);
+      const event = new HouseholdMemberAdmittedEvent(after, INITIATED_AT);
 
       expect(event).toMatchObject({ subject: ResourceType.Household, subjectId: 'hh-1', action: 'update' });
       expect(event.before).toEqual({ householdId: 'hh-1', userId: 'user-1', memberId: null, role: null });

@@ -76,7 +76,7 @@ export {
 } from './lib/services/audit-context.service';
 
 // Snapshot diff helpers for update-shaped MutationEvents (#728): the changed
-// columns only, and no event when nothing changed.
+// columns only, and no domain event when nothing changed.
 export { changedKeys, pickSnapshot } from './lib/utils/mutation-snapshot.util';
 
 // Module (registers reader + internal populator + system scope; ClsModule.forRoot

@@ -47,10 +47,10 @@ export const WebhookEventType = {
   HouseholdDeleted: 'household.household.deleted.v1',
   /** A soft-deleted household was restored (#245). */
   HouseholdRestored: 'household.household.restored.v1',
-  /** A user joined a household (#245). */
-  HouseholdMemberAdded: 'household.member.added.v1',
+  /** A user was admitted to a household (#245). */
+  HouseholdMemberAdmitted: 'household.member.admitted.v1',
   /** A member's role in a household changed (#245). */
-  HouseholdMemberRoleChanged: 'household.member-role.changed.v1',
+  HouseholdMemberRoleChanged: 'household.member.role-changed.v1',
   /** A membership ended, for any cause (#245). */
   HouseholdMemberRemoved: 'household.member.removed.v1',
 } as const;
@@ -133,14 +133,14 @@ export const WEBHOOK_EVENT_DESCRIPTORS: Record<WebhookEventType, WebhookEventMet
   // for the reason given above (#247), and their payloads hold ids only (#245).
   [WebhookEventType.HouseholdUpdated]: { subject: ResourceType.Household, requiredAction: Action.read },
   // Emitted after the soft delete commits, so a live-row check would refuse
-  // every subscriber.
+  // every subscriber (#245).
   [WebhookEventType.HouseholdDeleted]: {
     subject: ResourceType.Household,
     requiredAction: Action.read,
     subjectDeleted: true,
   },
   [WebhookEventType.HouseholdRestored]: { subject: ResourceType.Household, requiredAction: Action.read },
-  [WebhookEventType.HouseholdMemberAdded]: { subject: ResourceType.Household, requiredAction: Action.read },
+  [WebhookEventType.HouseholdMemberAdmitted]: { subject: ResourceType.Household, requiredAction: Action.read },
   [WebhookEventType.HouseholdMemberRoleChanged]: { subject: ResourceType.Household, requiredAction: Action.read },
   [WebhookEventType.HouseholdMemberRemoved]: { subject: ResourceType.Household, requiredAction: Action.read },
 };

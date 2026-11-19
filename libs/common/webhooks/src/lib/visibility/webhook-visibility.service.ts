@@ -113,9 +113,9 @@ export class WebhookVisibilityService {
     // `isVisibleTo` throws for the subject, `fanOut` catches it per
     // subscription, and the event is registered-but-undeliverable — an ERROR log
     // per subscriber and no delivery. Household is soft-deleted, so a
-    // tombstoned household is invisible, except to an event that fires after its
-    // delete (`household.household.deleted.v1`), whose descriptor sets
-    // `subjectDeleted`.
+    // tombstoned household is invisible, except to a webhook event type that
+    // fires after its delete (`household.household.deleted.v1`), whose
+    // descriptor sets `subjectDeleted`.
     [
       ResourceType.Household,
       (id, abilities, options) =>

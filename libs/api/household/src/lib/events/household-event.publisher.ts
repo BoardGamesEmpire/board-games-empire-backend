@@ -1,15 +1,44 @@
 import type { MutationEvent } from '@bge/actor-context';
 import type { WebhookEmittableEvent, WebhookEventType } from '@bge/webhooks';
+import { webhookEnvelope } from '@bge/webhooks';
 import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { HouseholdEvents } from '../constants/household-events.constant';
 
 /** A household change's webhook: its versioned wire name, and the envelope sent under it. */
 export interface HouseholdWebhook {
-  /** Ids only: `data` is copied verbatim to a subscriber-controlled URL (#248). */
+  /** Built by {@link householdWebhook}, which says what `data` may hold. */
   readonly envelope: WebhookEmittableEvent<unknown>;
 
   readonly type: WebhookEventType;
+}
+
+/**
+ * Builds a household change's webhook, sent under the household's id: the
+ * envelope's `subjectId` and `householdId` are both `data.householdId`.
+ *
+ * `data` is copied verbatim to a subscriber-controlled URL, so it holds ids
+ * only (#248, #245): no names, no roles, no reason and no cause, and for an
+ * edit the names of the columns that changed, never their values. A read grant
+ * on the household is not consent to ship member identity to a third party.
+ *
+ * No `occurrenceId`. The envelope wants one that is stable across re-emits of
+ * the same change and unique across different changes, and none exists before
+ * the audit entry does: the listener writes the entry after the publish, and
+ * every id that exists already (the household, a member, a role row) is shared
+ * by different changes, so using one would dedup a second, legitimate change
+ * against the first and silently drop its delivery. Without one the dispatcher
+ * gives each delivery a random id (no dedup), which the envelope's contract
+ * allows.
+ */
+export function householdWebhook<TData extends { readonly householdId: string }>(
+  type: WebhookEventType,
+  data: TData,
+): HouseholdWebhook {
+  return {
+    type,
+    envelope: webhookEnvelope({ subjectId: data.householdId, householdId: data.householdId, data }),
+  };
 }
 
 /**

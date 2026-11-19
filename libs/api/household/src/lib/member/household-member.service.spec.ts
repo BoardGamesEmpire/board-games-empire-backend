@@ -37,7 +37,7 @@ import type { AssignableHouseholdRole } from '../dto';
 import { HouseholdEventPublisher } from '../events/household-event.publisher';
 import {
   HouseholdGameShareEndedEvent,
-  HouseholdMemberAddedEvent,
+  HouseholdMemberAdmittedEvent,
   HouseholdMemberRemovedEvent,
   HouseholdMemberRoleChangedEvent,
   MembershipEndCause,
@@ -849,7 +849,7 @@ describe('HouseholdMemberService', () => {
       expect(permissions.invalidateUser).not.toHaveBeenCalled();
     });
 
-    describe('the role-change event (#245)', () => {
+    describe('the role-change domain event (#245)', () => {
       const asAdmin = () => makeMember({ role: { role: { id: 'role-admin', name: SystemRole.HouseholdAdmin } } });
       const changed = () => emittedUnder(HouseholdEvents.MemberRoleChanged) as HouseholdMemberRoleChangedEvent;
 
@@ -894,7 +894,7 @@ describe('HouseholdMemberService', () => {
         ]);
       });
 
-      it('emits no role-change event when the role is unchanged', async () => {
+      it('emits no role-change domain event when the role is unchanged', async () => {
         // The member holds the role the change gives, as the roster read
         // under the lock says: the write changes nothing, so nothing is
         // recorded and no webhook goes out (#728).
@@ -980,7 +980,7 @@ describe('HouseholdMemberService', () => {
 
       // The scope is asked again under the lock and before the first delete:
       // a grant reading the member's role matches nothing once it's gone (#168).
-      // It reads the role the member-removed event records (#245).
+      // It reads the role the member-removed domain event records (#245).
       expect(db.householdMember.findFirst).toHaveBeenLastCalledWith({
         where: expect.objectContaining({ id: 'member-1', householdId: 'hh-1', AND: [COND] }),
         select: LOCKED_RECHECK_SELECT,
@@ -1565,7 +1565,7 @@ describe('HouseholdMemberService', () => {
       expect(invites.revokeOutstandingOfUserWithin).toHaveBeenCalledWith(db, { householdId: 'hh-1' }, 'user-2');
       expect(db.gameShare.deleteMany).toHaveBeenCalledWith({ where: { id: 'share-1' } });
       // The role is the one read under the household lock, for the caller's
-      // member-removed event (#245).
+      // member-removed domain event (#245).
       expect(db.householdMember.findFirst).toHaveBeenLastCalledWith({
         where: { householdId: 'hh-1', userId: 'user-2', AND: [COND], id: 'member-2' },
         select: LOCKED_RECHECK_SELECT,
@@ -1615,7 +1615,7 @@ describe('HouseholdMemberService', () => {
     });
   });
 
-  describe('emitMemberAdded (#245)', () => {
+  describe('emitMemberAdmitted (#245)', () => {
     it('records the origin it is given and the role on the admitted row, and sends neither in the webhook', () => {
       const initiatedAt = new Date('2026-11-19T00:00:00.000Z');
       const member = makeMember({
@@ -1624,15 +1624,15 @@ describe('HouseholdMemberService', () => {
         role: { role: { id: 'role-admin', name: SystemRole.HouseholdAdmin } },
       });
 
-      service.emitMemberAdded(member, HouseholdMembershipOrigin.InviteAccepted, initiatedAt);
+      service.emitMemberAdmitted(member, HouseholdMembershipOrigin.InviteAccepted, initiatedAt);
 
-      expect(emittedNames()).toEqual([HouseholdEvents.MemberAdded, WebhookEventType.HouseholdMemberAdded]);
-      const added = emittedUnder(HouseholdEvents.MemberAdded) as HouseholdMemberAddedEvent;
-      expect(added).toBeInstanceOf(HouseholdMemberAddedEvent);
-      expect(added).toMatchObject({ subject: ResourceType.Household, subjectId: 'hh-1', action: 'update' });
-      expect(added.initiatedAt).toBe(initiatedAt);
-      expect(added.before).toEqual({ householdId: 'hh-1', userId: 'user-new', memberId: null, role: null });
-      expect(added.after).toEqual({
+      expect(emittedNames()).toEqual([HouseholdEvents.MemberAdmitted, WebhookEventType.HouseholdMemberAdmitted]);
+      const admitted = emittedUnder(HouseholdEvents.MemberAdmitted) as HouseholdMemberAdmittedEvent;
+      expect(admitted).toBeInstanceOf(HouseholdMemberAdmittedEvent);
+      expect(admitted).toMatchObject({ subject: ResourceType.Household, subjectId: 'hh-1', action: 'update' });
+      expect(admitted.initiatedAt).toBe(initiatedAt);
+      expect(admitted.before).toEqual({ householdId: 'hh-1', userId: 'user-new', memberId: null, role: null });
+      expect(admitted.after).toEqual({
         householdId: 'hh-1',
         userId: 'user-new',
         memberId: 'member-new',
@@ -1640,7 +1640,7 @@ describe('HouseholdMemberService', () => {
         origin: HouseholdMembershipOrigin.InviteAccepted,
       });
       // Ids only: no role and no origin leave for a subscriber's URL.
-      expect(emittedUnder(WebhookEventType.HouseholdMemberAdded)).toEqual({
+      expect(emittedUnder(WebhookEventType.HouseholdMemberAdmitted)).toEqual({
         subjectId: 'hh-1',
         householdId: 'hh-1',
         data: { householdId: 'hh-1', memberId: 'member-new', userId: 'user-new' },
@@ -1648,13 +1648,13 @@ describe('HouseholdMemberService', () => {
     });
 
     it('records no role for a row that carries none', () => {
-      service.emitMemberAdded(
+      service.emitMemberAdmitted(
         makeMember({ role: null }),
         HouseholdMembershipOrigin.InviteAccepted,
         new Date('2026-11-19T00:00:00.000Z'),
       );
 
-      expect((emittedUnder(HouseholdEvents.MemberAdded) as HouseholdMemberAddedEvent).after.role).toBeNull();
+      expect((emittedUnder(HouseholdEvents.MemberAdmitted) as HouseholdMemberAdmittedEvent).after.role).toBeNull();
     });
   });
 

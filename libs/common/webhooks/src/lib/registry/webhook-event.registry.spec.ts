@@ -115,7 +115,7 @@ describe('WebhookEventRegistry', () => {
         WebhookEventType.HouseholdUpdated,
         WebhookEventType.HouseholdDeleted,
         WebhookEventType.HouseholdRestored,
-        WebhookEventType.HouseholdMemberAdded,
+        WebhookEventType.HouseholdMemberAdmitted,
         WebhookEventType.HouseholdMemberRoleChanged,
         WebhookEventType.HouseholdMemberRemoved,
       ].sort(),
@@ -137,8 +137,8 @@ describe('WebhookEventRegistry', () => {
       [WebhookEventType.HouseholdUpdated]: 'household.household.updated.v1',
       [WebhookEventType.HouseholdDeleted]: 'household.household.deleted.v1',
       [WebhookEventType.HouseholdRestored]: 'household.household.restored.v1',
-      [WebhookEventType.HouseholdMemberAdded]: 'household.member.added.v1',
-      [WebhookEventType.HouseholdMemberRoleChanged]: 'household.member-role.changed.v1',
+      [WebhookEventType.HouseholdMemberAdmitted]: 'household.member.admitted.v1',
+      [WebhookEventType.HouseholdMemberRoleChanged]: 'household.member.role-changed.v1',
       [WebhookEventType.HouseholdMemberRemoved]: 'household.member.removed.v1',
     };
 

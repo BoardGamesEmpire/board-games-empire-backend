@@ -25,7 +25,7 @@ export enum HouseholdEvents {
   /** A soft-deleted household restored (#245). */
   Restored = 'household.restored',
   /** A user admitted to the household (#245). */
-  MemberAdded = 'household.member.added',
+  MemberAdmitted = 'household.member.admitted',
   /** A member's household role changed (#245). */
   MemberRoleChanged = 'household.member.role_changed',
   /** A membership ended: the member left, was removed from the household or was banned (#245). */

@@ -270,7 +270,7 @@ export class PartyInviteService {
 
     await this.permissions.invalidateUser(inviteeId);
     this.invites.emit([event]);
-    this.members.emitMemberAdded(member, HouseholdMembershipOrigin.InviteAccepted, initiatedAt);
+    this.members.emitMemberAdmitted(member, HouseholdMembershipOrigin.InviteAccepted, initiatedAt);
     this.quotas.emitSoftOverages(softOverages);
 
     return { invite, member };
