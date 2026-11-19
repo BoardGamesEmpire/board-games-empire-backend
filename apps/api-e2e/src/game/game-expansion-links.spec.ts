@@ -85,7 +85,7 @@ describe('expansion links on the game routes (#1069)', () => {
     const stranger = await actors.user();
     const privateBase = await arrangeGame(creator.user.id, Reach.Private, `A private base ${token()}`);
     const publicBase = await arrangeGame(creator.user.id, Reach.Public, `B public base ${token()}`);
-    const expansion = await arrangeGame(creator.user.id, Reach.Public);
+    const expansion = await arrangeGame(creator.user.id, Reach.Public, undefined, ContentType.Expansion);
     await arrangeLink(privateBase.id, expansion.id);
     await arrangeLink(publicBase.id, expansion.id);
 
@@ -110,8 +110,18 @@ describe('expansion links on the game routes (#1069)', () => {
     const creator = await actors.user();
     const stranger = await actors.user();
     const base = await arrangeGame(creator.user.id, Reach.Public);
-    const privateExpansion = await arrangeGame(creator.user.id, Reach.Private, `A private expansion ${token()}`);
-    const publicExpansion = await arrangeGame(creator.user.id, Reach.Public, `B public expansion ${token()}`);
+    const privateExpansion = await arrangeGame(
+      creator.user.id,
+      Reach.Private,
+      `A private expansion ${token()}`,
+      ContentType.Expansion,
+    );
+    const publicExpansion = await arrangeGame(
+      creator.user.id,
+      Reach.Public,
+      `B public expansion ${token()}`,
+      ContentType.Expansion,
+    );
     await arrangeLink(base.id, privateExpansion.id);
     await arrangeLink(base.id, publicExpansion.id);
 
@@ -124,7 +134,7 @@ describe('expansion links on the game routes (#1069)', () => {
           id: privateExpansion.id,
           title: privateExpansion.title,
           thumbnail: null,
-          contentType: ContentType.BaseGame,
+          contentType: ContentType.Expansion,
         },
         platformIds: [],
       },
@@ -135,7 +145,7 @@ describe('expansion links on the game routes (#1069)', () => {
           id: publicExpansion.id,
           title: publicExpansion.title,
           thumbnail: null,
-          contentType: ContentType.BaseGame,
+          contentType: ContentType.Expansion,
         },
         platformIds: [],
       },
@@ -152,7 +162,7 @@ describe('expansion links on the game routes (#1069)', () => {
     const creator = await actors.user();
     const admin = await actors.admin();
     const privateBase = await arrangeGame(creator.user.id, Reach.Private);
-    const expansion = await arrangeGame(creator.user.id, Reach.Public);
+    const expansion = await arrangeGame(creator.user.id, Reach.Public, undefined, ContentType.Expansion);
     await arrangeLink(privateBase.id, expansion.id);
 
     expect(gameIds((await detail(admin, expansion.id, 'an admin')).baseGames)).toEqual([privateBase.id]);
@@ -171,7 +181,7 @@ describe('expansion links on the game routes (#1069)', () => {
   it('sends a key without read:platform_game links with no platform ids at either end, and a key with it the ids (#1069, #1391)', async () => {
     const keyOwner = await actors.user();
     const base = await arrangeGame(keyOwner.user.id, Reach.Public);
-    const expansion = await arrangeGame(keyOwner.user.id, Reach.Public);
+    const expansion = await arrangeGame(keyOwner.user.id, Reach.Public, undefined, ContentType.Expansion);
     await arrangeLink(base.id, expansion.id);
     // Both games are on the platform, so the link holds on it.
     const platform = await arrangePlatform(`Alpha ${token()}`, PlatformType.Other);
@@ -308,9 +318,9 @@ describe('expansion links on the game routes (#1069)', () => {
     const creator = await actors.user();
     const t = token();
     const base = await arrangeGame(creator.user.id, Reach.Public, `B base ${t}`);
-    const zeta = await arrangeGame(creator.user.id, Reach.Public, `Zeta ${t}`);
-    const tiedA = await arrangeGame(creator.user.id, Reach.Public, `Alpha ${t}`);
-    const tiedB = await arrangeGame(creator.user.id, Reach.Public, `Alpha ${t}`);
+    const zeta = await arrangeGame(creator.user.id, Reach.Public, `Zeta ${t}`, ContentType.Expansion);
+    const tiedA = await arrangeGame(creator.user.id, Reach.Public, `Alpha ${t}`, ContentType.Expansion);
+    const tiedB = await arrangeGame(creator.user.id, Reach.Public, `Alpha ${t}`, ContentType.Expansion);
     for (const expansion of [zeta, tiedA, tiedB]) {
       await arrangeLink(base.id, expansion.id);
     }
@@ -334,7 +344,7 @@ describe('expansion links on the game routes (#1069)', () => {
     const creator = await actors.user();
     const admin = await actors.admin();
     const base = await arrangeGame(creator.user.id, Reach.Public);
-    const expansion = await arrangeGame(creator.user.id, Reach.Public);
+    const expansion = await arrangeGame(creator.user.id, Reach.Public, undefined, ContentType.Expansion);
     await arrangeLink(base.id, expansion.id);
 
     expect(gameIds((await detail(admin, base.id, 'an admin')).expansions)).toEqual([expansion.id]);
@@ -348,6 +358,28 @@ describe('expansion links on the game routes (#1069)', () => {
     await db.client.game.update({ where: { id: expansion.id }, data: { deletedAt: null } });
     await softDelete(base.id);
     expect((await detail(admin, expansion.id, 'an admin')).baseGames).toEqual([]);
+  });
+
+  // Only an add-on gets a link (#1391). A re-import that makes a game no
+  // add-on keeps its link to a base game its DataGateway no longer names, as
+  // no link records where it came from (#1178). Neither route lists it, at
+  // either end. The control turns the same game into a DLC, and the same
+  // stored link is listed on both.
+  it('lists a stored link of a game that is no add-on at neither end, on neither route (#1391)', async () => {
+    const creator = await actors.user();
+    const base = await arrangeGame(creator.user.id, Reach.Public);
+    const remaster = await arrangeGame(creator.user.id, Reach.Public, undefined, ContentType.Remaster);
+    await arrangeLink(base.id, remaster.id);
+
+    expect((await detail(creator, base.id, 'the creator')).expansions).toEqual([]);
+    expect((await detail(creator, remaster.id, 'the creator')).baseGames).toEqual([]);
+    expect(await listRow(creator, remaster.id, 'the creator')).toEqual([]);
+
+    await db.client.game.update({ where: { id: remaster.id }, data: { contentType: ContentType.DLC } });
+
+    expect(gameIds((await detail(creator, base.id, 'the creator')).expansions)).toEqual([remaster.id]);
+    expect(gameIds((await detail(creator, remaster.id, 'the creator')).baseGames)).toEqual([base.id]);
+    expect(gameIds(await listRow(creator, remaster.id, 'the creator'))).toEqual([base.id]);
   });
 
   // The parsers fail on an absent list, so this holds only if each list is

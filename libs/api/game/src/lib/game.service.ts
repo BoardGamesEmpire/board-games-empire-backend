@@ -2,6 +2,7 @@ import { sanitizeMarkdown } from '@bge/content-format';
 import type { GameSummary } from '@bge/database';
 import {
   Action,
+  ADD_ON_CONTENT_TYPES,
   DatabaseService,
   gameSummaryReader,
   isPrismaDependentRecordNotFoundError,
@@ -135,7 +136,8 @@ export class GameService {
    * A game the actor may read, with its platform games (#791), its expansions
    * and, for an expansion, its base games (#1069). Each add-on link carries
    * the platforms it holds on, and is listed even when it holds on none
-   * (#1391).
+   * (#1391). A link whose add-on end has a content type that is not an
+   * add-on's is left out (#1391).
    *
    * Each relation is a read of its own, not a filter in the game's `include`:
    * a deny-all condition is dropped there, so a key with no
@@ -149,7 +151,7 @@ export class GameService {
     const game = await this.readGame(id);
     const linkedGameWhere = this.linkedGameWhere();
 
-    const [platformGames, expansionRows, baseGameRows] = await Promise.all([
+    const [platformGames, linkedExpansionRows, baseGameRows] = await Promise.all([
       this.db.platformGame.findMany({
         where: this.scopeComposer.compose(ResourceType.PlatformGame, Action.read, { gameId: id }),
         select: PLATFORM_GAME_DETAIL_SELECT,
@@ -162,12 +164,22 @@ export class GameService {
         orderBy: [{ expansionGame: { title: 'asc' } }, { expansionGameId: 'asc' }],
       }),
 
-      this.db.gameExpansion.findMany({
-        where: { expansionGameId: id, baseGame: { is: linkedGameWhere } },
-        select: { baseGame: { select: LINKED_GAME_SELECT } },
-        orderBy: [{ baseGame: { title: 'asc' } }, { baseGameId: 'asc' }],
-      }),
+      // Only an add-on has base games (#1391).
+      ADD_ON_CONTENT_TYPES.has(game.contentType)
+        ? this.db.gameExpansion.findMany({
+            where: { expansionGameId: id, baseGame: { is: linkedGameWhere } },
+            select: { baseGame: { select: LINKED_GAME_SELECT } },
+            orderBy: [{ baseGame: { title: 'asc' } }, { baseGameId: 'asc' }],
+          })
+        : [],
     ]);
+
+    // A link of a game that is no add-on can still be stored (#1178), and is
+    // left out as on a row (#1391). The test is on the rows read, not in the
+    // read's `where`, where it would sit beside the ceiling in an `AND`.
+    const expansionRows = linkedExpansionRows.filter(({ expansionGame }) =>
+      ADD_ON_CONTENT_TYPES.has(expansionGame.contentType),
+    );
 
     const platformIds = await this.readPlatformIds([
       ...expansionRows.map(({ expansionGame }) => expansionGame.id),

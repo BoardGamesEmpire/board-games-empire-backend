@@ -46,6 +46,8 @@ const BASE_GAME_LINK_SELECT = {
  *   base: the link is what the importer recorded.
  * - Each link's `isStandalone` follows the add-on's content type, which the
  *   caller passes with its id (#1391). A game given twice is read once.
+ * - A game whose content type is not an add-on's lists no base game, though a
+ *   link of it can still be stored (#1178), as on a row (#1391).
  * - Each expansion's links come in base game title order, then base game id,
  *   the order `GET /games/:id` gives them, so an expansion's base games read
  *   the same on a list row as on its detail.
@@ -56,11 +58,17 @@ export async function readBaseGameLinks(
   baseGameWhere: Prisma.GameWhereInput,
 ): Promise<ReadonlyMap<string, ExpansionLink[]>> {
   const links = new Map<string, ExpansionLink[]>();
-  if (expansions.length === 0) {
+  // Only an add-on lists a base game (#1391). A link of a game that is no
+  // add-on can still be stored (#1178), and is left out as on a row.
+  const isStandaloneOf = new Map(
+    expansions
+      .filter(({ contentType }) => ADD_ON_CONTENT_TYPES.has(contentType))
+      .map(({ id, contentType }) => [id, isStandaloneAddOn(contentType)]),
+  );
+  if (isStandaloneOf.size === 0) {
     return links;
   }
 
-  const isStandaloneOf = new Map(expansions.map(({ id, contentType }) => [id, isStandaloneAddOn(contentType)]));
   const rows = await db.gameExpansion.findMany({
     where: { expansionGameId: { in: [...isStandaloneOf.keys()] }, baseGame: { is: baseGameWhere } },
     select: BASE_GAME_LINK_SELECT,

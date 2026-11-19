@@ -1,5 +1,13 @@
 import type { Game } from '@bge/database';
-import { Action, ContentType, GAME_SUMMARY_SELECT, Prisma, Reach, ResourceType } from '@bge/database';
+import {
+  Action,
+  ADD_ON_CONTENT_TYPES,
+  ContentType,
+  GAME_SUMMARY_SELECT,
+  Prisma,
+  Reach,
+  ResourceType,
+} from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
 import { RandomSampleQueryDto } from '@bge/shared';
@@ -172,14 +180,15 @@ describe('GameService', () => {
       // of your list", so a client can tell a base game it hasn't paged to yet
       // from one it will never see. The read runs after the page's
       // transaction: the links describe rows already chosen, and a link
-      // removed between the two reads only removes a name.
+      // removed between the two reads only removes a name. Only the page's
+      // add-ons are read: a base game lists none (#1391).
       it("reads the page's base-game links through the same where as the page, so a base game is named only when it is listed (#1069)", async () => {
         await read();
 
         const [findManyArgs] = db.game.findMany.mock.calls[0] as [{ where: unknown }];
         expect(db.gameExpansion.findMany).toHaveBeenCalledWith(
           expect.objectContaining({
-            where: { expansionGameId: { in: ['g1', 'g2'] }, baseGame: { is: findManyArgs.where } },
+            where: { expansionGameId: { in: ['g1'] }, baseGame: { is: findManyArgs.where } },
           }),
         );
         expect(batchTransactionCall(db).operations).toHaveLength(2);
@@ -526,8 +535,12 @@ describe('GameService', () => {
     const platformIdsOf = (links: readonly { gameId: string; platformIds: string[] }[]) =>
       links.map(({ gameId, platformIds }) => ({ gameId, platformIds }));
 
+    /** Every content type that gets no add-on link (#1391). */
+    const NOT_ADD_ON = Object.values(ContentType).filter((contentType) => !ADD_ON_CONTENT_TYPES.has(contentType));
+
+    // An expansion of an expansion has links at both ends.
     beforeEach(() => {
-      db.game.findUniqueOrThrow.mockResolvedValue({ id: 'g1' } as Game);
+      db.game.findUniqueOrThrow.mockResolvedValue({ id: 'g1', contentType: ContentType.Expansion } as Game);
       stubPlatformReads([], []);
     });
 
@@ -699,6 +712,45 @@ describe('GameService', () => {
       expect(db.platformGame.findMany).toHaveBeenNthCalledWith(1, underCeiling);
       expect(db.platformGame.findMany).toHaveBeenNthCalledWith(2, underCeiling);
     });
+
+    // Only an add-on gets a link (#1391). A re-import that makes a game no
+    // add-on removes its links to the base games its DataGateway names, but
+    // one it no longer names stays stored, as no link records where it came
+    // from (#1178). The detail lists it at neither end, as a collection row
+    // does not.
+    it.each(NOT_ADD_ON)(
+      'lists no base game for a game whose content type is %s, reading none (#1391)',
+      async (contentType) => {
+        db.game.findUniqueOrThrow.mockResolvedValue({ id: 'g1', contentType } as Game);
+        stubLinks([], [{ baseGame: linkedGame('b1', 'Base', ContentType.BaseGame) }]);
+
+        const game = await service.getGame('g1');
+
+        expect(game.baseGames).toEqual([]);
+        expect(db.gameExpansion.findMany).toHaveBeenCalledTimes(1);
+        expect(db.gameExpansion.findMany).toHaveBeenCalledWith(
+          expect.objectContaining({ where: expect.objectContaining({ baseGameId: 'g1' }) }),
+        );
+      },
+    );
+
+    it.each(NOT_ADD_ON)(
+      'lists no linked game whose content type is %s among the expansions, nor reads its platforms (#1391)',
+      async (contentType) => {
+        stubLinks(
+          [
+            { expansionGame: linkedGame('e1', 'A', ContentType.Expansion) },
+            { expansionGame: linkedGame('r1', 'B', contentType) },
+          ],
+          [],
+        );
+
+        const game = await service.getGame('g1');
+
+        expect(game.expansions.map(({ gameId }) => gameId)).toEqual(['e1']);
+        expect(compose).toHaveBeenCalledWith(ResourceType.PlatformGame, Action.read, { gameId: { in: ['e1'] } });
+      },
+    );
 
     it('skips the platform id read when the game has no visible link (#1069, #1391)', async () => {
       await service.getGame('g1');

@@ -18,6 +18,9 @@ const EXPANSION = { id: 'e1', contentType: ContentType.Expansion };
 const DLC = { id: 'e2', contentType: ContentType.DLC };
 const STANDALONE = { id: 's1', contentType: ContentType.StandaloneExpansion };
 
+/** Every content type that gets no add-on link (#1391). */
+const NOT_ADD_ON = Object.values(ContentType).filter((contentType) => !ADD_ON_CONTENT_TYPES.has(contentType));
+
 describe('readBaseGameLinks', () => {
   const stubDb = (rows: unknown[] = []) => {
     const findMany = jest.fn().mockResolvedValue(rows);
@@ -80,6 +83,33 @@ describe('readBaseGameLinks', () => {
       { gameId: 'b2', isStandalone: true },
     ]);
     expect(links.get('e2')).toEqual([{ gameId: 'b1', isStandalone: false }]);
+  });
+
+  // Only an add-on gets a link (#1391). A re-import that makes a game no
+  // add-on removes its links to the base games its DataGateway names, but one
+  // it no longer names stays stored, as no link records where it came from
+  // (#1178). A row lists none, as a collection row does.
+  it.each(NOT_ADD_ON)(
+    'leaves a game whose content type is %s out of the read, so it lists no base game (#1391)',
+    async (contentType) => {
+      const { db, findMany } = stubDb([{ expansionGameId: 'e1', baseGameId: 'b1' }]);
+
+      const links = await readBaseGameLinks(db, [EXPANSION, { id: 'r1', contentType }], BASE_WHERE);
+
+      expect(findMany.mock.calls[0][0].where.expansionGameId).toEqual({ in: ['e1'] });
+      expect(links.has('r1')).toBe(false);
+    },
+  );
+
+  // Most of a `GET /games` page is base games, and a page of them alone has
+  // no link to read.
+  it('issues no query when no game given is an add-on (#1391)', async () => {
+    const { db, findMany } = stubDb();
+
+    const links = await readBaseGameLinks(db, [{ id: 'b1', contentType: ContentType.BaseGame }], BASE_WHERE);
+
+    expect(findMany).not.toHaveBeenCalled();
+    expect(links.size).toBe(0);
   });
 
   // An empty page has nothing to link, and `in: []` would still cost a round trip.
