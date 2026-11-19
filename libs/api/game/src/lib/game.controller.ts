@@ -46,7 +46,7 @@ export class GameController {
       'it, and under `?sort=newest` an added game lands on page 1. Paginated: `?page=` (1-based) and `?limit=`, ' +
       'with a `pagination` envelope carrying `total`, `totalPages` and `hasMore`; `total` counts the same set. ' +
       'See #230. Each row’s `baseGames` names, for an expansion, the base games it attaches to that this list ' +
-      'also contains, each with that link’s `isStandalone`; empty for any other game. The server does not group ' +
+      'also contains, each with the add-on’s `isStandalone`; empty for any other game. The server does not group ' +
       'expansions with their base games; see #1069.',
   })
   @ApiResponse({ status: Http.Ok, type: PaginatedGamesResponse })
@@ -103,7 +103,8 @@ export class GameController {
       'such as an API key with no `read:platform_game`. See #791. `expansions` lists the game’s expansions the ' +
       'actor may read, each with `platformIds`, the platforms it has a platform game on (empty for an API key ' +
       'without `read:platform_game`); `baseGames` lists, for an expansion, the base games it attaches to that the ' +
-      'actor may read. Both are in title order, and each link carries its own `isStandalone`. See #1069.',
+      'actor may read. Both are in title order, and each link carries the add-on’s `isStandalone`. See #1069 ' +
+      'and #1391.',
   })
   @ApiParam({ name: 'id', type: String })
   @ApiResponse({ status: Http.Ok, type: GameResponseDto })

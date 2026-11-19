@@ -17,13 +17,15 @@ model PlatformGame {
 
   // ─── Platform-specific overrides ─────────────────────────
   // Nullable — when null, consumers fall back to parent Game values.
-  minPlayers  Int?    @map("min_players")
-  maxPlayers  Int?    @map("max_players")
+  minPlayers  Int?         @map("min_players")
+  maxPlayers  Int?         @map("max_players")
   // both play times are minutes (#869); the client formats them for display
-  minPlayTime Int?    @map("min_play_time")
-  maxPlayTime Int?    @map("max_play_time")
+  minPlayTime Int?         @map("min_play_time")
+  maxPlayTime Int?         @map("max_play_time")
   image       String?
   thumbnail   String?
+  // this platform's content type, overriding the game's (#1391); null falls back to the game's
+  contentType ContentType? @map("content_type")
 
   supportsSolo   Boolean @default(false) @map("supports_solo")
   supportsLocal  Boolean @default(false) @map("supports_local")

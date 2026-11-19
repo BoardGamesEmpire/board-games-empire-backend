@@ -1,4 +1,4 @@
-import { ContentType, DatabaseService, ExpansionType, isPrismaUniqueConstraintError } from '@bge/database';
+import { ADD_ON_CONTENT_TYPES, ContentType, DatabaseService, isPrismaUniqueConstraintError } from '@bge/database';
 import { Injectable, Logger } from '@nestjs/common';
 
 export interface LinkBaseGamesInput {
@@ -51,18 +51,6 @@ export interface LinkBaseGamesResult {
 const NEEDS_BASE_GAME: ReadonlySet<ContentType> = new Set([ContentType.Expansion, ContentType.DLC, ContentType.Mod]);
 
 /**
- * The content types that add to a base game rather than being a version of
- * it, so a game of one with a base game is an expansion to the import's
- * events, notifications and game watches. A remake, remaster, port, edition
- * or bundle linked to its original is not (#971, #658).
- */
-const ADD_ON: ReadonlySet<ContentType> = new Set([
-  ...NEEDS_BASE_GAME,
-  ContentType.StandaloneExpansion,
-  ContentType.Accessory,
-]);
-
-/**
  * Links an imported game to its base games, and the add-ons already in the
  * game catalog to it (#971).
  */
@@ -90,9 +78,13 @@ export class BaseGameLinkService {
 
     const needsOne = named.fromDataGateway && baseGameIds.length === 0 && NEEDS_BASE_GAME.has(input.contentType);
     const baseGameToAdd = needsOne ? named.externalIds[0] : undefined;
-    // An add-on whose base game is being added counts already: the base
-    // game's own import makes the link, after this game's events fired.
-    const isExpansion = ADD_ON.has(input.contentType) && (baseGameIds.length > 0 || baseGameToAdd !== undefined);
+    // A game of an add-on content type with a base game is an expansion to
+    // the import's events, notifications and game watches; a remake,
+    // remaster, port, edition or bundle linked to its original is not (#971,
+    // #658). An add-on whose base game is being added counts already: the
+    // base game's own import makes the link, after this game's events fired.
+    const isExpansion =
+      ADD_ON_CONTENT_TYPES.has(input.contentType) && (baseGameIds.length > 0 || baseGameToAdd !== undefined);
 
     return baseGameToAdd ? { baseGameIds, baseGameToAdd, isExpansion } : { baseGameIds, isExpansion };
   }
@@ -133,7 +125,7 @@ export class BaseGameLinkService {
       ),
     ];
 
-    await Promise.all(baseGameIds.map((baseGameId) => this.linkPair(baseGameId, input.gameId, input.contentType)));
+    await Promise.all(baseGameIds.map((baseGameId) => this.linkPair(baseGameId, input.gameId)));
 
     return baseGameIds;
   }
@@ -142,28 +134,24 @@ export class BaseGameLinkService {
   private async linkAddOns(input: LinkBaseGamesInput): Promise<void> {
     const addOns = await this.db.gameSource.findMany({
       where: { gatewayId: input.gatewayId, baseExternalIds: { has: input.externalId }, gameId: { not: input.gameId } },
-      select: { gameId: true, game: { select: { contentType: true } } },
+      select: { gameId: true },
     });
 
-    await Promise.all(addOns.map((addOn) => this.linkPair(input.gameId, addOn.gameId, addOn.game.contentType)));
+    await Promise.all(addOns.map((addOn) => this.linkPair(input.gameId, addOn.gameId)));
   }
 
   /**
-   * Writes one base game link, its type taken from the add-on's content type.
-   * Another import may write the same link first (see `link`), and losing
-   * that race leaves the link made.
+   * Writes one add-on link. It has no kind of its own: the add-on's content
+   * type is its kind, so the write names the pair alone (#1391). Another
+   * import may write the same link first (see `link`), and losing that race
+   * leaves the link made.
    */
-  private async linkPair(baseGameId: string, expansionGameId: string, contentType: ContentType): Promise<void> {
-    const kind = {
-      expansionType: toExpansionType(contentType),
-      isStandalone: contentType === ContentType.StandaloneExpansion,
-    };
-
+  private async linkPair(baseGameId: string, expansionGameId: string): Promise<void> {
     try {
       await this.db.gameExpansion.upsert({
         where: { baseGameId_expansionGameId: { baseGameId, expansionGameId } },
-        create: { baseGameId, expansionGameId, ...kind },
-        update: kind,
+        create: { baseGameId, expansionGameId },
+        update: {},
       });
     } catch (error) {
       if (!isPrismaUniqueConstraintError(error)) {
@@ -171,42 +159,6 @@ export class BaseGameLinkService {
       }
 
       this.logger.debug(`Base game link ${baseGameId} ← ${expansionGameId} was made by another import`);
-    }
-  }
-}
-
-/**
- * Derives the GameExpansion.expansionType from the expansion game's ContentType.
- * ContentType describes what the game IS; ExpansionType describes the relationship.
- */
-function toExpansionType(contentType: ContentType): ExpansionType {
-  switch (contentType) {
-    case ContentType.StandaloneExpansion: {
-      return ExpansionType.StandaloneExpansion;
-    }
-
-    case ContentType.DLC: {
-      return ExpansionType.DLC;
-    }
-
-    case ContentType.Accessory: {
-      return ExpansionType.Accessory;
-    }
-
-    case ContentType.ExpandedEdition: {
-      return ExpansionType.ExpandedEdition;
-    }
-
-    case ContentType.Port: {
-      return ExpansionType.Port;
-    }
-
-    case ContentType.Mod: {
-      return ExpansionType.Mod;
-    }
-
-    default: {
-      return ExpansionType.Expansion;
     }
   }
 }

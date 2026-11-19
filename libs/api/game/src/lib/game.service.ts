@@ -5,6 +5,7 @@ import {
   DatabaseService,
   gameSummaryReader,
   isPrismaDependentRecordNotFoundError,
+  isStandaloneAddOn,
   Prisma,
   Reach,
   readBaseGameLinks,
@@ -94,11 +95,7 @@ export class GameService {
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
 
-    const links = await readBaseGameLinks(
-      this.db,
-      rows.map((row) => row.id),
-      where,
-    );
+    const links = await readBaseGameLinks(this.db, rows, where);
 
     return { rows: rows.map((row) => ({ ...row, baseGames: links.get(row.id) ?? [] })), total };
   }
@@ -158,29 +155,32 @@ export class GameService {
 
       this.db.gameExpansion.findMany({
         where: { baseGameId: id, expansionGame: { is: linkedGameWhere } },
-        select: { isStandalone: true, expansionGame: { select: LINKED_GAME_SELECT } },
+        select: { expansionGame: { select: LINKED_GAME_SELECT } },
         orderBy: [{ expansionGame: { title: 'asc' } }, { expansionGameId: 'asc' }],
       }),
 
       this.db.gameExpansion.findMany({
         where: { expansionGameId: id, baseGame: { is: linkedGameWhere } },
-        select: { isStandalone: true, baseGame: { select: LINKED_GAME_SELECT } },
+        select: { baseGame: { select: LINKED_GAME_SELECT } },
         orderBy: [{ baseGame: { title: 'asc' } }, { baseGameId: 'asc' }],
       }),
     ]);
 
     const platformIds = await this.readPlatformIds(expansionRows.map(({ expansionGame }) => expansionGame.id));
+    // On its base games' links this game is the add-on, so its own content
+    // type decides them all (#1391).
+    const isStandalone = isStandaloneAddOn(game.contentType);
 
     return {
       ...game,
       platformGames,
-      expansions: expansionRows.map(({ isStandalone, expansionGame }) => ({
+      expansions: expansionRows.map(({ expansionGame }) => ({
         gameId: expansionGame.id,
-        isStandalone,
+        isStandalone: isStandaloneAddOn(expansionGame.contentType),
         game: expansionGame,
         platformIds: platformIds.get(expansionGame.id) ?? [],
       })),
-      baseGames: baseGameRows.map(({ isStandalone, baseGame }) => ({
+      baseGames: baseGameRows.map(({ baseGame }) => ({
         gameId: baseGame.id,
         isStandalone,
         game: baseGame,

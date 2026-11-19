@@ -970,9 +970,7 @@ describe('EventAttendeeService', () => {
       db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1', userId: 'user-1' } as EventAttendee);
       db.gameCollection.findUnique.mockResolvedValue({ userId: 'user-1', deletedAt: null } as GameCollection);
       db.eventAttendeeGameList.create.mockResolvedValue(makeOfferedGameEntry('gl-1', 'game-exp') as never);
-      db.gameExpansion.findMany.mockResolvedValue([
-        { expansionGameId: 'game-exp', baseGameId: 'game-base', isStandalone: false },
-      ] as never);
+      db.gameExpansion.findMany.mockResolvedValue([{ expansionGameId: 'game-exp', baseGameId: 'game-base' }] as never);
 
       const entry = await service.addGameToList('event-1', 'att-1', { collectionId: 'col-1' });
 

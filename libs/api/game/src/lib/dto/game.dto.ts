@@ -111,7 +111,7 @@ export class GameListItemDto extends GameDto {
     type: [ExpansionLinkDto],
     description:
       'For an expansion, the base games it attaches to that this list also contains, in title order, then game ' +
-      'id, each with that link’s `isStandalone`. Empty for any other game.',
+      'id, each with the add-on’s `isStandalone`. Empty for any other game.',
   })
   baseGames!: ExpansionLinkDto[];
 }
@@ -272,7 +272,7 @@ export class GameDetailDto extends GameDto {
   @ApiProperty({
     type: [LinkedExpansionDto],
     description:
-      'The game’s expansions the actor may read, in title order, then game id. Each link carries its own ' +
+      'The game’s expansions the actor may read, in title order, then game id. Each link carries the add-on’s ' +
       '`isStandalone`.',
   })
   expansions!: LinkedExpansionDto[];
@@ -281,7 +281,7 @@ export class GameDetailDto extends GameDto {
     type: [LinkedBaseGameDto],
     description:
       'For an expansion, the base games it attaches to that the actor may read, in title order, then game id. ' +
-      'Each link carries its own `isStandalone`. Empty for any other game.',
+      'Each link carries the add-on’s `isStandalone`. Empty for any other game.',
   })
   baseGames!: LinkedBaseGameDto[];
 }

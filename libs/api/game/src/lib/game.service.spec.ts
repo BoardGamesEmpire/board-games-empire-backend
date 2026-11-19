@@ -1,5 +1,5 @@
 import type { Game } from '@bge/database';
-import { Action, GAME_SUMMARY_SELECT, Prisma, Reach, ResourceType } from '@bge/database';
+import { Action, ContentType, GAME_SUMMARY_SELECT, Prisma, Reach, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
 import { RandomSampleQueryDto } from '@bge/shared';
@@ -158,7 +158,10 @@ describe('GameService', () => {
     });
 
     describe("each row's base games (#1069)", () => {
-      const page = [{ id: 'g1' }, { id: 'g2' }] as Game[];
+      const page = [
+        { id: 'g1', contentType: ContentType.StandaloneExpansion },
+        { id: 'g2', contentType: ContentType.BaseGame },
+      ] as Game[];
 
       beforeEach(() => {
         db.game.findMany.mockResolvedValue(page);
@@ -182,16 +185,16 @@ describe('GameService', () => {
         expect(batchTransactionCall(db).operations).toHaveLength(2);
       });
 
-      it('gives every row baseGames, empty when it has no visible link (#1069)', async () => {
-        db.gameExpansion.findMany.mockResolvedValue([
-          { expansionGameId: 'g1', baseGameId: 'b1', isStandalone: false },
-        ] as never);
+      // The link carries no isStandalone of its own: the row's content type
+      // decides it, the same on every link of the add-on (#1391).
+      it("gives every row baseGames, empty when it has no visible link, each with the row's isStandalone (#1069, #1391)", async () => {
+        db.gameExpansion.findMany.mockResolvedValue([{ expansionGameId: 'g1', baseGameId: 'b1' }] as never);
 
         const result = await read();
 
         expect(result.rows).toEqual([
-          { id: 'g1', baseGames: [{ gameId: 'b1', isStandalone: false }] },
-          { id: 'g2', baseGames: [] },
+          { ...page[0], baseGames: [{ gameId: 'b1', isStandalone: true }] },
+          { ...page[1], baseGames: [] },
         ]);
       });
 
@@ -485,7 +488,7 @@ describe('GameService', () => {
     // test is what keeps a soft-deleted game off their links (#1069).
     const linkedGameWhere = { deletedAt: null, AND: [COND] };
 
-    const linkedGame = (id: string, title: string, contentType: string) => ({
+    const linkedGame = (id: string, title: string, contentType: ContentType) => ({
       id,
       title,
       thumbnail: null,
@@ -514,7 +517,7 @@ describe('GameService', () => {
       expect(compose).toHaveBeenCalledWith(ResourceType.Game, Action.read, { deletedAt: null });
       expect(db.gameExpansion.findMany).toHaveBeenCalledWith({
         where: { baseGameId: 'g1', expansionGame: { is: linkedGameWhere } },
-        select: { isStandalone: true, expansionGame: { select: LINKED_GAME_SELECT } },
+        select: { expansionGame: { select: LINKED_GAME_SELECT } },
         orderBy: [{ expansionGame: { title: 'asc' } }, { expansionGameId: 'asc' }],
       });
     });
@@ -524,7 +527,7 @@ describe('GameService', () => {
 
       expect(db.gameExpansion.findMany).toHaveBeenCalledWith({
         where: { expansionGameId: 'g1', baseGame: { is: linkedGameWhere } },
-        select: { isStandalone: true, baseGame: { select: LINKED_GAME_SELECT } },
+        select: { baseGame: { select: LINKED_GAME_SELECT } },
         orderBy: [{ baseGame: { title: 'asc' } }, { baseGameId: 'asc' }],
       });
     });
@@ -534,8 +537,8 @@ describe('GameService', () => {
     it('reads the expansions’ platform ids through the platform game ceiling, in platform name order (#1069)', async () => {
       stubLinks(
         [
-          { isStandalone: false, expansionGame: linkedGame('e1', 'A', 'Expansion') },
-          { isStandalone: true, expansionGame: linkedGame('e2', 'B', 'Expansion') },
+          { expansionGame: linkedGame('e1', 'A', ContentType.Expansion) },
+          { expansionGame: linkedGame('e2', 'B', ContentType.Expansion) },
         ],
         [],
       );
@@ -571,18 +574,46 @@ describe('GameService', () => {
 
     it('returns expansions and baseGames as links carrying the linked game (#1069)', async () => {
       stubLinks(
-        [{ isStandalone: true, expansionGame: linkedGame('e1', 'A', 'Expansion') }],
-        [{ isStandalone: false, baseGame: linkedGame('b1', 'Base', 'BaseGame') }],
+        [{ expansionGame: linkedGame('e1', 'A', ContentType.Expansion) }],
+        [{ baseGame: linkedGame('b1', 'Base', ContentType.BaseGame) }],
       );
       stubPlatformIds([{ gameId: 'e1', platformId: 'p1' }]);
 
       const game = await service.getGame('g1');
 
       expect(game.expansions).toEqual([
-        { gameId: 'e1', isStandalone: true, game: linkedGame('e1', 'A', 'Expansion'), platformIds: ['p1'] },
+        { gameId: 'e1', isStandalone: false, game: linkedGame('e1', 'A', ContentType.Expansion), platformIds: ['p1'] },
       ]);
       expect(game.baseGames).toEqual([
-        { gameId: 'b1', isStandalone: false, game: linkedGame('b1', 'Base', 'BaseGame') },
+        { gameId: 'b1', isStandalone: false, game: linkedGame('b1', 'Base', ContentType.BaseGame) },
+      ]);
+    });
+
+    // `isStandalone` is the add-on's, from its content type (#1391). On
+    // `expansions` the add-on is the linked game; on `baseGames` it is the
+    // game being read, so a base game's own content type never decides it.
+    it("gives each link its add-on's isStandalone: the expansion's on expansions, the game's own on baseGames (#1391)", async () => {
+      db.game.findUniqueOrThrow.mockResolvedValue({ id: 'g1', contentType: ContentType.StandaloneExpansion } as Game);
+      stubLinks(
+        [
+          { expansionGame: linkedGame('e1', 'A', ContentType.StandaloneExpansion) },
+          { expansionGame: linkedGame('e2', 'B', ContentType.DLC) },
+        ],
+        [
+          { baseGame: linkedGame('b1', 'Base', ContentType.BaseGame) },
+          { baseGame: linkedGame('b2', 'Other base', ContentType.BaseGame) },
+        ],
+      );
+
+      const game = await service.getGame('g1');
+
+      expect(game.expansions.map(({ gameId, isStandalone }) => ({ gameId, isStandalone }))).toEqual([
+        { gameId: 'e1', isStandalone: true },
+        { gameId: 'e2', isStandalone: false },
+      ]);
+      expect(game.baseGames.map(({ gameId, isStandalone }) => ({ gameId, isStandalone }))).toEqual([
+        { gameId: 'b1', isStandalone: true },
+        { gameId: 'b2', isStandalone: true },
       ]);
     });
   });

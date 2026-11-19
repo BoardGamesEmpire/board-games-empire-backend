@@ -8,6 +8,7 @@ import { mintApiKey } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import type { TestDatabase } from '../support/test-db';
 import { createTestDatabase } from '../support/test-db';
+import type { ExpansionLinkWire } from './game-wire';
 import { gameExpansionLinks, listRowBaseGames } from './game-wire';
 
 /**
@@ -44,11 +45,11 @@ describe('expansion links on the game routes (#1069)', () => {
 
   const token = () => randomUUID().slice(0, 8);
 
-  const arrangeGame = (createdById: string, reach: Reach, title = `e2e game ${token()}`) =>
-    db.client.game.create({ data: { title, reach, createdById }, select: { id: true, title: true } });
+  const arrangeGame = (createdById: string, reach: Reach, title = `e2e game ${token()}`, contentType?: ContentType) =>
+    db.client.game.create({ data: { title, reach, createdById, contentType }, select: { id: true, title: true } });
 
-  const arrangeLink = (baseGameId: string, expansionGameId: string, isStandalone = false) =>
-    db.client.gameExpansion.create({ data: { baseGameId, expansionGameId, isStandalone }, select: { id: true } });
+  const arrangeLink = (baseGameId: string, expansionGameId: string) =>
+    db.client.gameExpansion.create({ data: { baseGameId, expansionGameId }, select: { id: true } });
 
   const listRow = async (caller: Caller, gameId: string, who: string) =>
     listRowBaseGames(
@@ -183,34 +184,48 @@ describe('expansion links on the game routes (#1069)', () => {
     ]);
   });
 
-  // The schema keeps `isStandalone` on the link, so an expansion can be
-  // standalone for one base game and not another. Neither route may merge them.
-  it('keeps each link’s isStandalone when an expansion attaches to two base games (#1069)', async () => {
+  // `isStandalone` is the add-on's, from its content type, so it reads the
+  // same on every link of the add-on and from either end. The DLC beside it
+  // is the control: the same two base games, `false` on every link.
+  it('makes an add-on that is a standalone expansion standalone on every link (#1391)', async () => {
     const creator = await actors.user();
-    const standaloneFor = await arrangeGame(creator.user.id, Reach.Public, `A base ${token()}`);
-    const notStandaloneFor = await arrangeGame(creator.user.id, Reach.Public, `B base ${token()}`);
-    const expansion = await arrangeGame(creator.user.id, Reach.Public);
-    await arrangeLink(standaloneFor.id, expansion.id, true);
-    await arrangeLink(notStandaloneFor.id, expansion.id, false);
+    const t = token();
+    const firstBase = await arrangeGame(creator.user.id, Reach.Public, `A base ${t}`);
+    const secondBase = await arrangeGame(creator.user.id, Reach.Public, `B base ${t}`);
+    const standalone = await arrangeGame(
+      creator.user.id,
+      Reach.Public,
+      `A standalone ${t}`,
+      ContentType.StandaloneExpansion,
+    );
+    const dlc = await arrangeGame(creator.user.id, Reach.Public, `B DLC ${t}`, ContentType.DLC);
+    for (const addOn of [standalone, dlc]) {
+      await arrangeLink(firstBase.id, addOn.id);
+      await arrangeLink(secondBase.id, addOn.id);
+    }
 
-    const expected = [
-      { gameId: standaloneFor.id, isStandalone: true },
-      { gameId: notStandaloneFor.id, isStandalone: false },
-    ];
+    const pick = (links: readonly ExpansionLinkWire[]) =>
+      links.map(({ gameId, isStandalone }) => ({ gameId, isStandalone }));
 
-    expect(await listRow(creator, expansion.id, 'the creator')).toEqual(expected);
+    for (const [addOn, isStandalone] of [
+      [standalone, true],
+      [dlc, false],
+    ] as const) {
+      const expected = [
+        { gameId: firstBase.id, isStandalone },
+        { gameId: secondBase.id, isStandalone },
+      ];
 
-    const { baseGames } = await detail(creator, expansion.id, 'the creator');
-    expect(baseGames.map(({ gameId, isStandalone }) => ({ gameId, isStandalone }))).toEqual(expected);
+      expect(await listRow(creator, addOn.id, 'the creator')).toEqual(expected);
+      expect(pick((await detail(creator, addOn.id, 'the creator')).baseGames)).toEqual(expected);
+    }
 
-    const fromStandalone = (await detail(creator, standaloneFor.id, 'the creator')).expansions;
-    expect(fromStandalone.map(({ gameId, isStandalone }) => ({ gameId, isStandalone }))).toEqual([
-      { gameId: expansion.id, isStandalone: true },
-    ]);
-    const fromOther = (await detail(creator, notStandaloneFor.id, 'the creator')).expansions;
-    expect(fromOther.map(({ gameId, isStandalone }) => ({ gameId, isStandalone }))).toEqual([
-      { gameId: expansion.id, isStandalone: false },
-    ]);
+    for (const base of [firstBase, secondBase]) {
+      expect(pick((await detail(creator, base.id, 'the creator')).expansions)).toEqual([
+        { gameId: standalone.id, isStandalone: true },
+        { gameId: dlc.id, isStandalone: false },
+      ]);
+    }
   });
 
   // Created in the opposite order to the one expected, so a read in creation

@@ -19,20 +19,3 @@ enum ContentType {
 
   @@map("content_types")
 }
-
-/**
- * Describes the nature of the relationship between a base game and an
- * expansion in the GameExpansion join table.
- */
-enum ExpansionType {
-  Accessory
-  DLC
-  ExpandedEdition
-  Expansion
-  MiniExpansion
-  Mod
-  Port
-  StandaloneExpansion
-
-  @@map("expansion_types")
-}

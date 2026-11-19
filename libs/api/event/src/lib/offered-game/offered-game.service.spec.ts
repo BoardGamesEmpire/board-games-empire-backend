@@ -63,9 +63,7 @@ describe('OfferedGameService (#1185, #1187)', () => {
     // name every base game (#559), so the links are a read of their own, as
     // collection rows read them (#1070).
     it('reads base games once per game, under the live-game read ceiling (#1187)', async () => {
-      db.gameExpansion.findMany.mockResolvedValue([
-        { expansionGameId: 'game-exp', baseGameId: 'game-base', isStandalone: false },
-      ] as never);
+      db.gameExpansion.findMany.mockResolvedValue([{ expansionGameId: 'game-exp', baseGameId: 'game-base' }] as never);
 
       const enriched = await service.enrich(
         [

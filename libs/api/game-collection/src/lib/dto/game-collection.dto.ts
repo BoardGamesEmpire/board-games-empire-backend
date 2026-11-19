@@ -55,7 +55,7 @@ export class CollectionGameSummaryDto implements CollectionGame {
     type: [ExpansionLinkDto],
     description:
       'For an expansion, the base games it attaches to that are live and that the viewer could open by id, in ' +
-      'title order, then game id, each with that link’s `isStandalone`. Empty for any other game.',
+      'title order, then game id, each with the add-on’s `isStandalone`. Empty for any other game.',
   })
   baseGames!: ExpansionLinkDto[];
 }

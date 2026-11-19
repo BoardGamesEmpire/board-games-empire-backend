@@ -11,6 +11,11 @@ import {
 /** A stand-in for the where the caller composes for the base games. */
 const BASE_WHERE: Prisma.GameWhereInput = { id: 'sentinel-base-game-where' };
 
+/** Add-ons as a caller passes them: each game's id and content type. */
+const EXPANSION = { id: 'e1', contentType: ContentType.Expansion };
+const DLC = { id: 'e2', contentType: ContentType.DLC };
+const STANDALONE = { id: 's1', contentType: ContentType.StandaloneExpansion };
+
 describe('readBaseGameLinks', () => {
   const stubDb = (rows: unknown[] = []) => {
     const findMany = jest.fn().mockResolvedValue(rows);
@@ -26,31 +31,53 @@ describe('readBaseGameLinks', () => {
   it("reads the links of the given expansions whose base game passes the caller's where, in base game title then id order (#1069)", async () => {
     const { db, findMany } = stubDb();
 
-    await readBaseGameLinks(db, ['e1', 'e2'], BASE_WHERE);
+    await readBaseGameLinks(db, [EXPANSION, DLC], BASE_WHERE);
 
     expect(findMany).toHaveBeenCalledTimes(1);
     expect(findMany).toHaveBeenCalledWith({
       where: { expansionGameId: { in: ['e1', 'e2'] }, baseGame: { is: BASE_WHERE } },
-      select: { expansionGameId: true, baseGameId: true, isStandalone: true },
+      select: { expansionGameId: true, baseGameId: true },
       orderBy: [{ baseGame: { title: 'asc' } }, { baseGameId: 'asc' }],
     });
   });
 
-  // An expansion can attach to several base games and be standalone for one
-  // and not another, so each link keeps its own value (#1069).
-  it('groups them by expansion, each link naming its base game and keeping its own isStandalone (#1069)', async () => {
+  // A page can hold one game twice, and `in` needs it once.
+  it('names a game given twice once in the read (#1391)', async () => {
+    const { db, findMany } = stubDb();
+
+    await readBaseGameLinks(db, [EXPANSION, DLC, EXPANSION], BASE_WHERE);
+
+    expect(findMany.mock.calls[0][0].where.expansionGameId).toEqual({ in: ['e1', 'e2'] });
+  });
+
+  it('groups them by expansion, each link naming its base game (#1069)', async () => {
     const { db } = stubDb([
-      { expansionGameId: 'e1', baseGameId: 'b1', isStandalone: false },
-      { expansionGameId: 'e1', baseGameId: 'b2', isStandalone: true },
+      { expansionGameId: 'e1', baseGameId: 'b1' },
+      { expansionGameId: 'e1', baseGameId: 'b2' },
     ]);
 
-    const links = await readBaseGameLinks(db, ['e1', 'e2'], BASE_WHERE);
+    const links = await readBaseGameLinks(db, [EXPANSION, DLC], BASE_WHERE);
 
-    expect(links.get('e1')).toEqual([
-      { gameId: 'b1', isStandalone: false },
+    expect(links.get('e1')?.map(({ gameId }) => gameId)).toEqual(['b1', 'b2']);
+    expect(links.has('e2')).toBe(false);
+  });
+
+  // `isStandalone` is a property of the add-on, not of one link: it follows
+  // the add-on's content type, so no two links of an add-on differ (#1391).
+  it("gives every link of an add-on its content type's isStandalone (#1391)", async () => {
+    const { db } = stubDb([
+      { expansionGameId: 's1', baseGameId: 'b1' },
+      { expansionGameId: 's1', baseGameId: 'b2' },
+      { expansionGameId: 'e2', baseGameId: 'b1' },
+    ]);
+
+    const links = await readBaseGameLinks(db, [STANDALONE, DLC], BASE_WHERE);
+
+    expect(links.get('s1')).toEqual([
+      { gameId: 'b1', isStandalone: true },
       { gameId: 'b2', isStandalone: true },
     ]);
-    expect(links.has('e2')).toBe(false);
+    expect(links.get('e2')).toEqual([{ gameId: 'b1', isStandalone: false }]);
   });
 
   // An empty page has nothing to link, and `in: []` would still cost a round trip.

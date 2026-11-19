@@ -1,4 +1,4 @@
-import { ContentType, ExpansionType, Prisma } from '@bge/database';
+import { ContentType, Prisma } from '@bge/database';
 import type { MockDatabaseService } from '@bge/testing';
 import { createTestingModuleWithDb } from '@bge/testing';
 import type { LinkBaseGamesInput } from './base-game-link.service';
@@ -46,7 +46,7 @@ describe('BaseGameLinkService', () => {
       if (named) {
         return addOns
           .filter((addOn) => addOn.baseExternalIds.includes(named) && addOn.gameId !== excluded)
-          .map((addOn) => ({ gameId: addOn.gameId, game: { contentType: addOn.contentType } }));
+          .map((addOn) => ({ gameId: addOn.gameId }));
       }
 
       return [];
@@ -85,12 +85,13 @@ describe('BaseGameLinkService', () => {
       ['game-catan', 'game-expansion'],
       ['game-tribes', 'game-expansion'],
     ]);
-    expect(db.gameExpansion.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        create: expect.objectContaining({ expansionType: ExpansionType.DLC, isStandalone: false }),
-        update: { expansionType: ExpansionType.DLC, isStandalone: false },
-      }),
-    );
+    // The link has no kind of its own: the add-on's content type is its kind,
+    // so the write names the pair and nothing else (#1391).
+    expect(db.gameExpansion.upsert).toHaveBeenCalledWith({
+      where: { baseGameId_expansionGameId: { baseGameId: 'game-catan', expansionGameId: 'game-expansion' } },
+      create: { baseGameId: 'game-catan', expansionGameId: 'game-expansion' },
+      update: {},
+    });
   });
 
   it('looks the named base games up on the same DataGateway only', async () => {
@@ -179,22 +180,20 @@ describe('BaseGameLinkService', () => {
 
     await service.link(input({ gameId: 'game-catan', externalId: '13', contentType: ContentType.BaseGame }));
 
-    expect(db.gameSource.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { gatewayId: GATEWAY_ID, baseExternalIds: { has: '13' }, gameId: { not: 'game-catan' } },
-      }),
-    );
+    expect(db.gameSource.findMany).toHaveBeenCalledWith({
+      where: { gatewayId: GATEWAY_ID, baseExternalIds: { has: '13' }, gameId: { not: 'game-catan' } },
+      select: { gameId: true },
+    });
     expect(linkedPairs()).toEqual([
       ['game-catan', 'game-seafarers'],
       ['game-catan', 'game-catan-mod'],
     ]);
-    // Each link takes its type from the add-on's stored content type.
-    expect(db.gameExpansion.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { baseGameId_expansionGameId: { baseGameId: 'game-catan', expansionGameId: 'game-catan-mod' } },
-        create: expect.objectContaining({ expansionType: ExpansionType.Mod }),
-      }),
-    );
+    // The add-on's content type stays on the add-on; the link names the pair alone (#1391).
+    expect(db.gameExpansion.upsert).toHaveBeenCalledWith({
+      where: { baseGameId_expansionGameId: { baseGameId: 'game-catan', expansionGameId: 'game-catan-mod' } },
+      create: { baseGameId: 'game-catan', expansionGameId: 'game-catan-mod' },
+      update: {},
+    });
   });
 
   it('falls back to the requested game when the DataGateway names no base game', async () => {

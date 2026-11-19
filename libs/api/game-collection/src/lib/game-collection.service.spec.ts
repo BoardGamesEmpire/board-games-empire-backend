@@ -1,5 +1,14 @@
 import type { GameCollection, GameRelease, PlatformGame } from '@bge/database';
-import { Action, GameMedium, GameRemovalReason, ListKind, Prisma, Reach, ResourceType } from '@bge/database';
+import {
+  Action,
+  ContentType,
+  GameMedium,
+  GameRemovalReason,
+  ListKind,
+  Prisma,
+  Reach,
+  ResourceType,
+} from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
 import type { MockDatabaseService } from '@bge/testing';
@@ -35,13 +44,17 @@ const entry = (overrides: Partial<GameCollection> = {}): GameCollection =>
     updatedAt: new Date(),
     ...overrides,
     // Of the embedded rows, the service reads only the game's id, which keys
-    // the base-game link read (#1070).
-    platformGame: { id: 'pg-1', game: { id: 'g-1' } },
+    // the base-game link read (#1070), and its content type, which decides
+    // each link's isStandalone (#1391).
+    platformGame: { id: 'pg-1', game: { id: 'g-1', contentType: ContentType.StandaloneExpansion } },
   }) as GameCollection;
 
-/** An entry on the game `gameId`, as the collection include returns it (#1070). */
+/** An entry on the game `gameId`, a standalone expansion, as the collection include returns it (#1070). */
 const entryOn = (gameId: string, overrides: Partial<GameCollection> = {}): GameCollection =>
-  ({ ...entry(overrides), platformGame: { id: `pg-${gameId}`, game: { id: gameId } } }) as GameCollection;
+  ({
+    ...entry(overrides),
+    platformGame: { id: `pg-${gameId}`, game: { id: gameId, contentType: ContentType.StandaloneExpansion } },
+  }) as GameCollection;
 
 /** The refusal for a collection entry the actor can't see, whatever the reason (#634). */
 const ENTRY_NOT_FOUND = {
@@ -621,7 +634,9 @@ describe('GameCollectionService', () => {
    * drop a deny-all and name every base game.
    */
   describe('base games on collection rows (#1070)', () => {
-    const LINK = { expansionGameId: 'g-1', baseGameId: 'b-1', isStandalone: true };
+    // The link carries no isStandalone: each row's `true` below comes from its
+    // game's content type, a standalone expansion (#1391).
+    const LINK = { expansionGameId: 'g-1', baseGameId: 'b-1' };
 
     // The real composer over the mocked ability: the live games under the
     // viewer's read ceiling.

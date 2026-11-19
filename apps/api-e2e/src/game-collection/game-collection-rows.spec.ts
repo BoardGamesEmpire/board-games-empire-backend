@@ -114,8 +114,8 @@ describe('collection rows (#1070)', () => {
   const arrangeGame = (createdById: string, reach: Reach, title: string, deletedAt: Date | null = null) =>
     db.client.game.create({ data: { title, reach, createdById, deletedAt }, select: { id: true } });
 
-  const arrangeLink = (baseGameId: string, expansionGameId: string, isStandalone: boolean) =>
-    db.client.gameExpansion.create({ data: { baseGameId, expansionGameId, isStandalone }, select: { id: true } });
+  const arrangeLink = (baseGameId: string, expansionGameId: string) =>
+    db.client.gameExpansion.create({ data: { baseGameId, expansionGameId }, select: { id: true } });
 
   it("sends the game's and platform game's list facts on every collection row (#1070)", async () => {
     // Actors first, rows before anyone's first authenticated request (#256
@@ -289,12 +289,14 @@ describe('collection rows (#1070)', () => {
       const anonymousUser = await actors.anonymous();
       const privateBase = await arrangeGame(owner.user.id, Reach.Private, `A private base ${token()}`);
       const publicBase = await arrangeGame(owner.user.id, Reach.Public, `B public base ${token()}`);
+      // A standalone expansion, so every link reads `isStandalone: true`, the
+      // add-on's own value (#1391).
       const expansion = await arrangeRow(owner.user.id, {
         reach: Reach.Public,
-        game: { reach: Reach.Public, createdById: owner.user.id, contentType: ContentType.Expansion },
+        game: { reach: Reach.Public, createdById: owner.user.id, contentType: ContentType.StandaloneExpansion },
       });
-      await arrangeLink(privateBase.id, expansion.gameId, false);
-      await arrangeLink(publicBase.id, expansion.gameId, true);
+      await arrangeLink(privateBase.id, expansion.gameId);
+      await arrangeLink(publicBase.id, expansion.gameId);
 
       // The control: the owner's row names both, in base game title order.
       const owners = embeddedOnPage(
@@ -303,7 +305,7 @@ describe('collection rows (#1070)', () => {
         `GET ${COLLECTIONS_PATH} as the owner`,
       );
       expect(owners.game.baseGames).toEqual([
-        { gameId: privateBase.id, isStandalone: false },
+        { gameId: privateBase.id, isStandalone: true },
         { gameId: publicBase.id, isStandalone: true },
       ]);
 
@@ -336,7 +338,7 @@ describe('collection rows (#1070)', () => {
         reach: Reach.Private,
         game: { contentType: ContentType.Expansion },
       });
-      await arrangeLink(base.id, expansion.gameId, false);
+      await arrangeLink(base.id, expansion.gameId);
       const collectionRead = { slugs: ['read:game_collection'], resourceType: ResourceType.GameCollection };
       const collectionOnly = await mintApiKey(baseUrl, db.client, owner, collectionRead);
       const withGameRead = await mintApiKey(baseUrl, db.client, owner, [
@@ -369,8 +371,8 @@ describe('collection rows (#1070)', () => {
         reach: Reach.Private,
         game: { contentType: ContentType.Expansion },
       });
-      await arrangeLink(liveBase.id, expansion.gameId, false);
-      await arrangeLink(deletedBase.id, expansion.gameId, false);
+      await arrangeLink(liveBase.id, expansion.gameId);
+      await arrangeLink(deletedBase.id, expansion.gameId);
 
       const admins = embeddedOnPage(
         await listOwn(admin).expect(200),
@@ -388,9 +390,10 @@ describe('collection rows (#1070)', () => {
     it('names the base game on the rows POST, PATCH and DELETE return (#1070)', async () => {
       const owner = await actors.user();
       const base = await arrangeGame(owner.user.id, Reach.Public, `e2e base ${token()}`);
-      // No entry yet: the POST makes it.
-      const expansion = await arrangePlatformGame({ game: { contentType: ContentType.Expansion } });
-      await arrangeLink(base.id, expansion.gameId, true);
+      // No entry yet: the POST makes it. A standalone expansion, so the link
+      // reads `isStandalone: true`, the add-on's own value (#1391).
+      const expansion = await arrangePlatformGame({ game: { contentType: ContentType.StandaloneExpansion } });
+      await arrangeLink(base.id, expansion.gameId);
       const expected = [{ gameId: base.id, isStandalone: true }];
 
       const created = await request(baseUrl)
@@ -449,14 +452,18 @@ describe('collection rows (#1070)', () => {
       const owner = await actors.user();
       const linked = await arrangeRow(owner.user.id, { reach: Reach.Private });
       const linkedBase = await arrangeGame(owner.user.id, Reach.Public, `e2e base ${token()}`);
-      await arrangeLink(linkedBase.id, linked.gameId, false);
-      const unlinked = await arrangeRow(owner.user.id, { reach: Reach.Private });
+      await arrangeLink(linkedBase.id, linked.gameId);
+      // A standalone expansion, so its new link reads `isStandalone: true` (#1391).
+      const unlinked = await arrangeRow(owner.user.id, {
+        reach: Reach.Private,
+        game: { contentType: ContentType.StandaloneExpansion },
+      });
       const untouched = await arrangeRow(owner.user.id, { reach: Reach.Private });
 
       const since = await startOfChanges();
       await db.client.game.update({ where: { id: linkedBase.id }, data: { title: `e2e renamed base ${token()}` } });
       const newBase = await arrangeGame(owner.user.id, Reach.Public, `e2e new base ${token()}`);
-      await arrangeLink(newBase.id, unlinked.gameId, true);
+      await arrangeLink(newBase.id, unlinked.gameId);
 
       const drained = await drainedRows(owner, since);
 
@@ -501,7 +508,7 @@ describe('collection rows (#1070)', () => {
       const owner = await actors.user();
       const row = await arrangeRow(owner.user.id, { reach: Reach.Private });
       const base = await arrangeGame(owner.user.id, Reach.Public, `e2e base ${token()}`);
-      await arrangeLink(base.id, row.gameId, false);
+      await arrangeLink(base.id, row.gameId);
 
       const since = await startOfChanges();
       await db.client.game.delete({ where: { id: base.id } });
