@@ -2,10 +2,8 @@ import type { OnApplicationBootstrap, OnApplicationShutdown } from '@nestjs/comm
 import { Injectable, Logger } from '@nestjs/common';
 import { DiscoveryService } from '@nestjs/core';
 import { Queue } from 'bullmq';
+import { resolveMetricExportTiming } from '../init/metric-export-env';
 import { metricsExportEnabled } from '../init/metrics-enabled';
-
-const DEFAULT_INTERVAL_MS = 60_000;
-const METRIC_EXPORT_INTERVAL_ENV = 'OTEL_METRIC_EXPORT_INTERVAL';
 
 /**
  * Polls every BullMQ {@link Queue} registered in the NestJS DI container
@@ -54,7 +52,8 @@ export class BullMQQueueDepthRecorder implements OnApplicationBootstrap, OnAppli
       return;
     }
 
-    const intervalMs = readIntervalMs();
+    // Same parsing as the SDK reader's interval, so polling matches export (#1436).
+    const intervalMs = resolveMetricExportTiming().exportIntervalMillis;
     this.intervalHandle = setInterval(() => {
       void this.recordAll();
     }, intervalMs);
@@ -89,14 +88,4 @@ export class BullMQQueueDepthRecorder implements OnApplicationBootstrap, OnAppli
       .map((wrapper): unknown => wrapper.instance)
       .filter((instance): instance is Queue => instance instanceof Queue);
   }
-}
-
-function readIntervalMs(): number {
-  const raw = process.env[METRIC_EXPORT_INTERVAL_ENV];
-  if (raw === undefined || raw === '') {
-    return DEFAULT_INTERVAL_MS;
-  }
-
-  const parsed = Number.parseInt(raw, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_INTERVAL_MS;
 }

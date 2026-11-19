@@ -12,6 +12,7 @@ import type { SpanExporter, SpanProcessor } from '@opentelemetry/sdk-trace';
 import { BatchSpanProcessor } from '@opentelemetry/sdk-trace';
 import { ActorSpanProcessor } from '../processors/actor-span.processor';
 import { OTEL_LOG_LEVEL_ENV, resolveDiagLogLevel } from './diag-log-level';
+import { resolveMetricExportTiming } from './metric-export-env';
 import { metricsExportEnabled } from './metrics-enabled';
 import type { OtelInitConfig } from './otel.config';
 import {
@@ -106,8 +107,10 @@ const createBatchSpanProcessor = (exporter: SpanExporter, env: NodeJS.ProcessEnv
  * `BullMQQueueDepthRecorder`) and the auto-instrumentations becomes a
  * no-op. Safe to call from any code path without coordination.
  *
- * Export interval respects `OTEL_METRIC_EXPORT_INTERVAL` via the
- * `PeriodicExportingMetricReader` default behavior (60s when unset).
+ * Export interval and timeout come from `OTEL_METRIC_EXPORT_INTERVAL` and
+ * `OTEL_METRIC_EXPORT_TIMEOUT` via {@link resolveMetricExportTiming}. The
+ * reader doesn't read them itself, and NodeSDK reads them only for
+ * readers it builds, so they are passed here (#1436).
  */
 const resolveMetricReader = (env: NodeJS.ProcessEnv): MetricReader | undefined => {
   if (!metricsExportEnabled(env)) {
@@ -117,7 +120,7 @@ const resolveMetricReader = (env: NodeJS.ProcessEnv): MetricReader | undefined =
   const protocol = env[OTEL_EXPORTER_OTLP_PROTOCOL_ENV] ?? OTEL_OTLP_PROTOCOL_HTTP;
   const exporter = protocol === OTEL_OTLP_PROTOCOL_GRPC ? new OtlpGrpcMetricExporter() : new OtlpHttpMetricExporter();
 
-  return new PeriodicExportingMetricReader({ exporter });
+  return new PeriodicExportingMetricReader({ exporter, ...resolveMetricExportTiming(env) });
 };
 
 /**

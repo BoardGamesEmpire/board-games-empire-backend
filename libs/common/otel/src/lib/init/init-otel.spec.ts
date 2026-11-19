@@ -57,7 +57,7 @@ jest.mock('@opentelemetry/sdk-metrics', () => {
     ...actual,
     PeriodicExportingMetricReader: jest.fn().mockImplementation((options: { exporter: unknown }) => ({
       __kind: 'PeriodicExportingMetricReader',
-      exporter: options.exporter,
+      ...options,
     })),
   };
 });
@@ -111,6 +111,8 @@ describe('initOtel', () => {
     delete process.env['OTEL_LOG_LEVEL'];
     delete process.env['OTEL_METRICS_EXPORTER'];
     delete process.env['OTEL_LOGS_EXPORTER'];
+    delete process.env['OTEL_METRIC_EXPORT_INTERVAL'];
+    delete process.env['OTEL_METRIC_EXPORT_TIMEOUT'];
   });
 
   afterAll(() => {
@@ -385,6 +387,66 @@ describe('initOtel', () => {
 
       expect(PeriodicReaderMock).not.toHaveBeenCalled();
       expect(lastSdkConfig().metricReaders).toBeUndefined();
+    });
+  });
+
+  // #1436: NodeSDK reads OTEL_METRIC_EXPORT_INTERVAL / _TIMEOUT only for
+  // readers it builds itself, so initOtel must pass them to its own reader.
+  describe('metric export timing', () => {
+    const readerOptions = (): { exportIntervalMillis?: number; exportTimeoutMillis?: number } =>
+      PeriodicReaderMock.mock.calls[0][0];
+
+    beforeEach(() => {
+      process.env['OTEL_EXPORTER_OTLP_ENDPOINT'] = 'http://localhost:4318';
+      process.env['OTEL_METRICS_EXPORTER'] = 'otlp';
+    });
+
+    it('uses the SDK defaults (60000 ms interval, 30000 ms timeout) when both are unset', () => {
+      initOtel(baseConfig);
+
+      expect(readerOptions()).toMatchObject({ exportIntervalMillis: 60_000, exportTimeoutMillis: 30_000 });
+    });
+
+    it('passes OTEL_METRIC_EXPORT_INTERVAL to the reader (#1436)', () => {
+      process.env['OTEL_METRIC_EXPORT_INTERVAL'] = '120000';
+
+      initOtel(baseConfig);
+
+      expect(readerOptions()).toMatchObject({ exportIntervalMillis: 120_000, exportTimeoutMillis: 30_000 });
+    });
+
+    it('passes OTEL_METRIC_EXPORT_TIMEOUT to the reader (#1436)', () => {
+      process.env['OTEL_METRIC_EXPORT_TIMEOUT'] = '5000';
+
+      initOtel(baseConfig);
+
+      expect(readerOptions()).toMatchObject({ exportIntervalMillis: 60_000, exportTimeoutMillis: 5_000 });
+    });
+
+    it('falls back to the defaults for invalid values (#1436)', () => {
+      process.env['OTEL_METRIC_EXPORT_INTERVAL'] = 'not-a-number';
+      process.env['OTEL_METRIC_EXPORT_TIMEOUT'] = '0';
+
+      initOtel(baseConfig);
+
+      expect(readerOptions()).toMatchObject({ exportIntervalMillis: 60_000, exportTimeoutMillis: 30_000 });
+    });
+
+    it('limits the timeout to the interval, which the reader requires, when only a short interval is set (#1436)', () => {
+      process.env['OTEL_METRIC_EXPORT_INTERVAL'] = '10000';
+
+      initOtel(baseConfig);
+
+      expect(readerOptions()).toMatchObject({ exportIntervalMillis: 10_000, exportTimeoutMillis: 10_000 });
+    });
+
+    it('limits a timeout larger than the interval to the interval (#1436)', () => {
+      process.env['OTEL_METRIC_EXPORT_INTERVAL'] = '15000';
+      process.env['OTEL_METRIC_EXPORT_TIMEOUT'] = '20000';
+
+      initOtel(baseConfig);
+
+      expect(readerOptions()).toMatchObject({ exportIntervalMillis: 15_000, exportTimeoutMillis: 15_000 });
     });
   });
 });
