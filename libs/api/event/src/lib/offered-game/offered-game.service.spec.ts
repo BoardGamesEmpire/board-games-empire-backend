@@ -307,6 +307,21 @@ describe('OfferedGameService (#1185, #1187)', () => {
       expect(page.total).toBe(4);
       expect(page.rows).toEqual([expect.objectContaining({ id: 'a', supplies: { nominations: 0, lineup: 0 } })]);
     });
+
+    // A platform game's own content type is one of its overrides, so an
+    // offered game sends it beside its players, play time and images, a value
+    // or null (#1391).
+    it("sends the platform game's own content type beside its other overrides (#1391)", () => {
+      expect(OFFERED_GAME_SELECT.collection.select.platformGame.select).toMatchObject({
+        image: true,
+        thumbnail: true,
+        minPlayers: true,
+        maxPlayers: true,
+        minPlayTime: true,
+        maxPlayTime: true,
+        contentType: true,
+      });
+    });
   });
 
   describe('forAttendees (#404)', () => {

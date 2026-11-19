@@ -435,6 +435,20 @@ describe('GameService', () => {
       expect(game).toEqual({ id: 'game-1', platformGames: [row], expansions: [], baseGames: [] });
     });
 
+    // A platform game's own content type is one of its overrides, so it is
+    // sent wherever they are, a value or null (#1391).
+    it("sends each platform game's own content type beside its other overrides (#1391)", () => {
+      expect(PLATFORM_GAME_DETAIL_SELECT).toMatchObject({
+        image: true,
+        thumbnail: true,
+        minPlayers: true,
+        maxPlayers: true,
+        minPlayTime: true,
+        maxPlayTime: true,
+        contentType: true,
+      });
+    });
+
     // Being allowed to read the game is what protects a private game's platform
     // games: `read:platform_game` reaches every one of them for a User.
     it.each([

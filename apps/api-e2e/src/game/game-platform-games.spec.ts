@@ -1,4 +1,4 @@
-import { PlatformType, Reach, ResourceType } from '@bge/database';
+import { ContentType, PlatformType, Reach, ResourceType } from '@bge/database';
 import type { Actors, AuthenticatedActor } from '@bge/testing-e2e';
 import { befriend, createActors } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
@@ -79,8 +79,10 @@ describe('platform games on GET /games/:id (#791)', () => {
     // created second, so either one appearing fails the whole-row comparison.
     const beta = await arrangePlatform('Beta');
     const alpha = await arrangePlatform('Alpha');
+    // Beta's platform game has a content type of its own, sent as its other
+    // overrides are; Alpha's has none, and sends null (#1391).
     const betaRow = await db.client.platformGame.create({
-      data: { gameId: game.id, platformId: beta.id },
+      data: { gameId: game.id, platformId: beta.id, contentType: ContentType.DLC },
       select: { id: true },
     });
     const alphaRow = await db.client.platformGame.create({
@@ -88,7 +90,7 @@ describe('platform games on GET /games/:id (#791)', () => {
       select: { id: true },
     });
 
-    const row = (id: string, platform: { id: string; name: string }) => ({
+    const row = (id: string, platform: { id: string; name: string }, contentType: ContentType | null) => ({
       id,
       gameId: game.id,
       image: null,
@@ -97,6 +99,7 @@ describe('platform games on GET /games/:id (#791)', () => {
       maxPlayers: null,
       minPlayTime: null,
       maxPlayTime: null,
+      contentType,
       supportsSolo: false,
       supportsLocal: false,
       supportsOnline: false,
@@ -109,8 +112,8 @@ describe('platform games on GET /games/:id (#791)', () => {
     });
 
     expect(await platformGamesFor(creator, game.id, 'the creator')).toEqual([
-      row(alphaRow.id, alpha),
-      row(betaRow.id, beta),
+      row(alphaRow.id, alpha, null),
+      row(betaRow.id, beta, ContentType.DLC),
     ]);
   });
 

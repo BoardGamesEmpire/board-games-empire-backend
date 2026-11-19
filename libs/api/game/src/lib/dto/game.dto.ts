@@ -168,6 +168,16 @@ export class PlatformGameDetailDto implements PlatformGameDetail {
   })
   maxPlayTime!: number | null;
 
+  @ApiProperty({
+    enum: ContentType,
+    enumName: 'ContentType',
+    nullable: true,
+    description:
+      'This platform game’s own content type, which overrides the game’s on this platform. Null when it has none, ' +
+      'and the game’s applies (#1391).',
+  })
+  contentType!: ContentType | null;
+
   @ApiProperty({ description: 'Whether one person can play it alone' })
   supportsSolo!: boolean;
 

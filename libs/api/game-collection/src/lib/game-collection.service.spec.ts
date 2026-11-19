@@ -14,6 +14,7 @@ import { AbilityService, ScopeComposer } from '@bge/permissions';
 import type { MockDatabaseService } from '@bge/testing';
 import { batchTransactionCall, createTestingModuleWithDb, paginationQuery } from '@bge/testing';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { COLLECTION_INCLUDE } from './collection-row';
 import { GameCollectionService } from './game-collection.service';
 
 const dependentRecordNotFound = () =>
@@ -130,6 +131,21 @@ describe('GameCollectionService', () => {
       await service.listOwn(paginationQuery({ limit: 20 }));
 
       expect(compose).toHaveBeenCalledWith(ResourceType.GameCollection, Action.read, { userId: ME });
+    });
+
+    // A platform game's own content type is one of its overrides, so a row
+    // sends it beside its players, play time and images, a value or null
+    // (#1391).
+    it("sends the platform game's own content type beside its other overrides (#1391)", () => {
+      expect(COLLECTION_INCLUDE.platformGame.select).toMatchObject({
+        image: true,
+        thumbnail: true,
+        minPlayers: true,
+        maxPlayers: true,
+        minPlayTime: true,
+        maxPlayTime: true,
+        contentType: true,
+      });
     });
 
     // The tombstone, medium, favourite and date filters are caller input, not

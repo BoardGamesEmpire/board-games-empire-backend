@@ -22,8 +22,9 @@ export class OfferedGameController {
     description:
       'One paged read of every game offered to the event. A row is one offered entry: two attendees offering the ' +
       "same game give two rows, each with its own `attendeeId`. A row carries the game, the offered copy's medium " +
-      'and platform, the base games an expansion plays with, and `supplies`: the open nominations naming the entry ' +
-      'and its lineup games still ahead, each `null` when you cannot read that kind of record. Its `attendee` is ' +
+      "and platform, the base games on the offered copy's platform that an add-on plays with, and `supplies`: the " +
+      'open nominations naming the entry and its lineup games still ahead, each `null` when you cannot read that ' +
+      'kind of record. Its `attendee` is ' +
       '`null` when you cannot read that attendee. Its `onWishlist` says whether the game, or that platform game, ' +
       'is on your own wishlist, and is `null` rather than `false` when this request cannot read your wishlist.\n\n' +
       'Ordered by game title, then entry id. Games taken back, and every game of an attendee removed from ' +

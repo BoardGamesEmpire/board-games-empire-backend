@@ -6,8 +6,11 @@ import { offeredGamesFilter } from './offered-games.filter';
 
 const query = (init: Partial<ListOfferedGamesQueryDto>) => plainToInstance(ListOfferedGamesQueryDto, init);
 
+/** The condition `platformGame` names, on an offered entry's platform game. */
+const onPlatformGame = (platformGame: object) => ({ collection: { is: { platformGame: { is: platformGame } } } });
+
 /** The condition `game` names, on an offered entry's game. */
-const onGame = (game: object) => ({ collection: { is: { platformGame: { is: { game: { is: game } } } } } });
+const onGame = (game: object) => onPlatformGame({ game: { is: game } });
 
 describe('offeredGamesFilter (#1187)', () => {
   it('narrows nothing without a filter', () => {
@@ -35,21 +38,62 @@ describe('offeredGamesFilter (#1187)', () => {
     ]);
   });
 
-  it("filters the entry's medium and its game's content type, each both ways", () => {
+  it("filters the entry's medium both ways", () => {
+    expect(offeredGamesFilter(query({ mediums: [GameMedium.Physical], excludeMediums: [GameMedium.Digital] }))).toEqual(
+      [
+        { collection: { is: { medium: { in: ['Physical'] } } } },
+        { NOT: { collection: { is: { medium: { in: ['Digital'] } } } } },
+      ],
+    );
+  });
+
+  // The offered copy is one platform game, so its content type is the
+  // platform game's own when it has one, else the game's (#1391).
+  it("includes by the platform game's own content type, else its game's (#1391)", () => {
+    expect(offeredGamesFilter(query({ contentTypes: [ContentType.DLC, ContentType.Unknown] }))).toEqual([
+      onPlatformGame({
+        OR: [
+          { contentType: { in: ['DLC', 'Unknown'] } },
+          { contentType: null, game: { is: { contentType: { in: ['DLC', 'Unknown'] } } } },
+        ],
+      }),
+    ]);
+  });
+
+  // The platform game's own content type is nullable. A NOT over a comparison
+  // with NULL is unknown, not true, so the exclude is its own positive
+  // condition: a NOT of the include could drop every entry with no content
+  // type of its own (#1391).
+  it("excludes by the platform game's own content type, else its game's, with no NOT (#1391)", () => {
+    const filter = offeredGamesFilter(query({ excludeContentTypes: [ContentType.DLC] }));
+
+    expect(filter).toEqual([
+      onPlatformGame({
+        OR: [
+          { contentType: { notIn: ['DLC'] } },
+          { contentType: null, game: { is: { contentType: { notIn: ['DLC'] } } } },
+        ],
+      }),
+    ]);
+    expect(JSON.stringify(filter)).not.toContain('NOT');
+  });
+
+  it('takes a content type include and exclude at once (#1391)', () => {
     expect(
-      offeredGamesFilter(
-        query({
-          mediums: [GameMedium.Physical],
-          excludeMediums: [GameMedium.Digital],
-          contentTypes: [ContentType.BaseGame, ContentType.Unknown],
-          excludeContentTypes: [ContentType.Expansion],
-        }),
-      ),
+      offeredGamesFilter(query({ contentTypes: [ContentType.BaseGame], excludeContentTypes: [ContentType.Expansion] })),
     ).toEqual([
-      { collection: { is: { medium: { in: ['Physical'] } } } },
-      { NOT: { collection: { is: { medium: { in: ['Digital'] } } } } },
-      onGame({ contentType: { in: ['BaseGame', 'Unknown'] } }),
-      { NOT: onGame({ contentType: { in: ['Expansion'] } }) },
+      onPlatformGame({
+        OR: [
+          { contentType: { in: ['BaseGame'] } },
+          { contentType: null, game: { is: { contentType: { in: ['BaseGame'] } } } },
+        ],
+      }),
+      onPlatformGame({
+        OR: [
+          { contentType: { notIn: ['Expansion'] } },
+          { contentType: null, game: { is: { contentType: { notIn: ['Expansion'] } } } },
+        ],
+      }),
     ]);
   });
 
