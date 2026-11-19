@@ -1,5 +1,12 @@
 import type { Prisma } from '../client';
-import { readBaseGameLinks } from './expansion-links';
+import { ContentType } from '../client';
+import {
+  ADD_ON_CONTENT_TYPES,
+  effectiveContentType,
+  isStandaloneAddOn,
+  linkPlatformIds,
+  readBaseGameLinks,
+} from './expansion-links';
 
 /** A stand-in for the where the caller composes for the base games. */
 const BASE_WHERE: Prisma.GameWhereInput = { id: 'sentinel-base-game-where' };
@@ -54,5 +61,48 @@ describe('readBaseGameLinks', () => {
 
     expect(findMany).not.toHaveBeenCalled();
     expect(links.size).toBe(0);
+  });
+});
+
+describe('effectiveContentType', () => {
+  // A platform game's own content type wins over the game's; without one the
+  // game's applies (#1391).
+  it("is the platform game's own content type, else the game's (#1391)", () => {
+    expect(effectiveContentType(null, ContentType.BaseGame)).toBe(ContentType.BaseGame);
+    expect(effectiveContentType(ContentType.DLC, ContentType.StandaloneExpansion)).toBe(ContentType.DLC);
+  });
+});
+
+describe('isStandaloneAddOn', () => {
+  it('is true for a standalone expansion only, across every content type (#1391)', () => {
+    for (const contentType of Object.values(ContentType)) {
+      expect(isStandaloneAddOn(contentType)).toBe(contentType === ContentType.StandaloneExpansion);
+    }
+  });
+});
+
+describe('linkPlatformIds', () => {
+  // The platforms an add-on link holds on are those both games are on, read in
+  // the add-on's order (#1391).
+  it("keeps the ids also in the other game's, in the given order (#1391)", () => {
+    expect(linkPlatformIds(['p2', 'p1', 'p3'], ['p3', 'p2'])).toEqual(['p2', 'p3']);
+  });
+
+  it('is empty when the games share no platform (#1391)', () => {
+    expect(linkPlatformIds(['p1'], [])).toEqual([]);
+  });
+});
+
+describe('ADD_ON_CONTENT_TYPES', () => {
+  it('is exactly the five content types that add to a base game (#1391)', () => {
+    expect([...ADD_ON_CONTENT_TYPES].sort()).toEqual(
+      [
+        ContentType.Expansion,
+        ContentType.DLC,
+        ContentType.Mod,
+        ContentType.StandaloneExpansion,
+        ContentType.Accessory,
+      ].sort(),
+    );
   });
 });

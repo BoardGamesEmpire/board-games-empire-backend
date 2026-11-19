@@ -1,4 +1,5 @@
 import type { Prisma } from '../client';
+import { ContentType } from '../client';
 
 /**
  * One end of an expansion link, seen from the other: `gameId` is the game at
@@ -56,4 +57,43 @@ export async function readBaseGameLinks(
   }
 
   return links;
+}
+
+/**
+ * The content types that add to a base game rather than being a version of
+ * it, and so the only ones that get an add-on link (#1391). The importer uses
+ * this set to decide whether an imported game is an add-on.
+ */
+export const ADD_ON_CONTENT_TYPES: ReadonlySet<ContentType> = new Set([
+  ContentType.Expansion,
+  ContentType.DLC,
+  ContentType.Mod,
+  ContentType.StandaloneExpansion,
+  ContentType.Accessory,
+]);
+
+/**
+ * The content type a platform game has: its own when it differs from the
+ * game's, else the game's (#1391).
+ */
+export function effectiveContentType(own: ContentType | null, game: ContentType): ContentType {
+  return own ?? game;
+}
+
+/**
+ * True when an add-on of this content type plays without its base game, so it
+ * is the only content type whose add-on link can be standalone (#1391).
+ */
+export function isStandaloneAddOn(contentType: ContentType): boolean {
+  return contentType === ContentType.StandaloneExpansion;
+}
+
+/**
+ * The platforms an add-on link holds on: the ids of `ordered` that are also in
+ * `other`, in `ordered`'s order (#1391).
+ */
+export function linkPlatformIds(ordered: readonly string[], other: Iterable<string>): string[] {
+  const shared = new Set(other);
+
+  return ordered.filter((id) => shared.has(id));
 }
