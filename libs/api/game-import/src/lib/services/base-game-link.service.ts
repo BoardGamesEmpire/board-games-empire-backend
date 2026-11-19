@@ -44,9 +44,11 @@ export interface LinkBaseGamesResult {
 
 /**
  * The content types that are played with a base game, so an import of one
- * whose base game is missing adds it. Every other content type that names a
- * base game (an edition, a remake, a port) is linked to it but never adds it
- * (#971, #658).
+ * whose base game is missing adds it. A standalone expansion or accessory is
+ * linked to a base game that is in the game catalog but never adds one. A
+ * remake, remaster, port, expanded edition or bundle names its original on
+ * `GameSource.baseExternalIds` alone, for #658, and gets no add-on link
+ * (#971, #1391).
  */
 const NEEDS_BASE_GAME: ReadonlySet<ContentType> = new Set([ContentType.Expansion, ContentType.DLC, ContentType.Mod]);
 
@@ -73,18 +75,24 @@ export class BaseGameLinkService {
    */
   async link(input: LinkBaseGamesInput): Promise<LinkBaseGamesResult> {
     const named = this.namedBaseGames(input);
+    // Only an add-on gets an add-on link to its base games. A remake,
+    // remaster, port, expanded edition or bundle names its original on
+    // `GameSource.baseExternalIds` alone, for #658 (#1391).
+    const isAddOn = ADD_ON_CONTENT_TYPES.has(input.contentType);
     // Independent: one reads the base games' DataGateway links, the other the add-ons'.
-    const [baseGameIds] = await Promise.all([this.linkToBaseGames(input, named.externalIds), this.linkAddOns(input)]);
+    const [baseGameIds] = await Promise.all([
+      isAddOn ? this.linkToBaseGames(input, named.externalIds) : Promise.resolve<string[]>([]),
+      this.linkAddOns(input),
+    ]);
 
     const needsOne = named.fromDataGateway && baseGameIds.length === 0 && NEEDS_BASE_GAME.has(input.contentType);
     const baseGameToAdd = needsOne ? named.externalIds[0] : undefined;
     // A game of an add-on content type with a base game is an expansion to
-    // the import's events, notifications and game watches; a remake,
-    // remaster, port, edition or bundle linked to its original is not (#971,
-    // #658). An add-on whose base game is being added counts already: the
-    // base game's own import makes the link, after this game's events fired.
-    const isExpansion =
-      ADD_ON_CONTENT_TYPES.has(input.contentType) && (baseGameIds.length > 0 || baseGameToAdd !== undefined);
+    // the import's events, notifications and game watches; a game of any
+    // other content type is not, and gets no add-on link (#971, #658, #1391).
+    // An add-on whose base game is being added counts already: the base
+    // game's own import makes the link, after this game's events fired.
+    const isExpansion = isAddOn && (baseGameIds.length > 0 || baseGameToAdd !== undefined);
 
     return baseGameToAdd ? { baseGameIds, baseGameToAdd, isExpansion } : { baseGameIds, isExpansion };
   }
@@ -130,10 +138,20 @@ export class BaseGameLinkService {
     return baseGameIds;
   }
 
-  /** Links the add-ons in the game catalog whose DataGateway links name this game as their base game. */
+  /**
+   * Links the add-ons in the game catalog whose DataGateway links name this
+   * game as their base game. A game of any other content type that names it
+   * is not an add-on and gets no link (#1391). Runs for every game, since a
+   * bundle is a base game for the add-ons that name it.
+   */
   private async linkAddOns(input: LinkBaseGamesInput): Promise<void> {
     const addOns = await this.db.gameSource.findMany({
-      where: { gatewayId: input.gatewayId, baseExternalIds: { has: input.externalId }, gameId: { not: input.gameId } },
+      where: {
+        gatewayId: input.gatewayId,
+        baseExternalIds: { has: input.externalId },
+        gameId: { not: input.gameId },
+        game: { is: { contentType: { in: [...ADD_ON_CONTENT_TYPES] } } },
+      },
       select: { gameId: true },
     });
 

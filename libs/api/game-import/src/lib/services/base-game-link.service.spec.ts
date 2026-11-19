@@ -1,4 +1,4 @@
-import { ContentType, Prisma } from '@bge/database';
+import { ADD_ON_CONTENT_TYPES, ContentType, Prisma } from '@bge/database';
 import type { MockDatabaseService } from '@bge/testing';
 import { createTestingModuleWithDb } from '@bge/testing';
 import type { LinkBaseGamesInput } from './base-game-link.service';
@@ -43,9 +43,16 @@ describe('BaseGameLinkService', () => {
 
       const named = (where.baseExternalIds as { has?: string } | undefined)?.has;
       const excluded = (where.gameId as { not?: string } | undefined)?.not;
+      const addOnTypes = (where.game as { is?: { contentType?: { in?: ContentType[] } } } | undefined)?.is?.contentType
+        ?.in;
       if (named) {
         return addOns
-          .filter((addOn) => addOn.baseExternalIds.includes(named) && addOn.gameId !== excluded)
+          .filter(
+            (addOn) =>
+              addOn.baseExternalIds.includes(named) &&
+              addOn.gameId !== excluded &&
+              (addOnTypes === undefined || addOnTypes.includes(addOn.contentType)),
+          )
           .map((addOn) => ({ gameId: addOn.gameId }));
       }
 
@@ -138,12 +145,22 @@ describe('BaseGameLinkService', () => {
     ContentType.Bundle,
     ContentType.BaseGame,
     ContentType.Unknown,
-  ])('links a %s to its original without counting it as an expansion', async (contentType) => {
+  ])('writes no add-on link for a %s that names its original (#1391)', async (contentType) => {
     catalog = { '13': { gameId: 'game-catan' } };
 
     const result = await service.link(input({ contentType, baseExternalIds: ['13'] }));
 
-    expect(result).toEqual({ baseGameIds: ['game-catan'], isExpansion: false });
+    expect(result).toEqual({ baseGameIds: [], isExpansion: false });
+    expect(db.gameExpansion.upsert).not.toHaveBeenCalled();
+  });
+
+  // A bundle names no base game, but it is one for the add-ons that name it (#1391).
+  it('still links the add-ons that name an imported bundle (#1391)', async () => {
+    addOns = [{ gameId: 'game-seafarers', baseExternalIds: ['13'], contentType: ContentType.Expansion }];
+
+    await service.link(input({ gameId: 'game-bundle', externalId: '13', contentType: ContentType.Bundle }));
+
+    expect(linkedPairs()).toEqual([['game-bundle', 'game-seafarers']]);
   });
 
   it.each([ContentType.StandaloneExpansion, ContentType.Accessory])(
@@ -176,12 +193,19 @@ describe('BaseGameLinkService', () => {
       { gameId: 'game-seafarers', baseExternalIds: ['13'], contentType: ContentType.Expansion },
       { gameId: 'game-catan-mod', baseExternalIds: ['13', '99'], contentType: ContentType.Mod },
       { gameId: 'game-unrelated', baseExternalIds: ['99'], contentType: ContentType.Expansion },
+      // A version names its original on the DataGateway link, but is no add-on (#1391).
+      { gameId: 'game-catan-remaster', baseExternalIds: ['13'], contentType: ContentType.Remaster },
     ];
 
     await service.link(input({ gameId: 'game-catan', externalId: '13', contentType: ContentType.BaseGame }));
 
     expect(db.gameSource.findMany).toHaveBeenCalledWith({
-      where: { gatewayId: GATEWAY_ID, baseExternalIds: { has: '13' }, gameId: { not: 'game-catan' } },
+      where: {
+        gatewayId: GATEWAY_ID,
+        baseExternalIds: { has: '13' },
+        gameId: { not: 'game-catan' },
+        game: { is: { contentType: { in: [...ADD_ON_CONTENT_TYPES] } } },
+      },
       select: { gameId: true },
     });
     expect(linkedPairs()).toEqual([
