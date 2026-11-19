@@ -25,6 +25,7 @@ import {
   BadRequestException,
   ForbiddenException,
   InternalServerErrorException,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { Http, PrismaError } from '@status/codes';
@@ -566,6 +567,51 @@ describe('HouseholdService', () => {
     // no invite revocation is announced for a delete that did not happen.
     expect(permissions.invalidateUsers).not.toHaveBeenCalled();
     expect(invites.emit).not.toHaveBeenCalled();
+  });
+
+  // #1427. A 404 or 403 is an answer the endpoint is specified to give, not a
+  // server failure, so it stays out of error-level logs. A 5xx and an
+  // unexpected throw still reach them.
+  describe('deleteHousehold, what it logs as an error (#1427)', () => {
+    let loggedError: jest.SpyInstance;
+
+    beforeEach(() => {
+      loggedError = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    });
+
+    afterEach(() => loggedError.mockRestore());
+
+    it('does not log the 404 when the probe finds nothing', async () => {
+      db.household.count.mockResolvedValue(0);
+
+      await expect(service.deleteHousehold('hh-1')).rejects.toThrow(NotFoundException);
+      expect(loggedError).not.toHaveBeenCalled();
+    });
+
+    it('does not log the 403 when the scoped update misses', async () => {
+      db.household.count.mockResolvedValue(1);
+      unwrapTransaction(db);
+      db.household.update.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('no rows', {
+          code: PrismaError.DependentRecordNotFound,
+          clientVersion: 'test',
+        }),
+      );
+
+      await expect(service.deleteHousehold('hh-1')).rejects.toThrow(ForbiddenException);
+      expect(loggedError).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['an unexpected throw', new Error('connection reset')],
+      ['a 5xx HttpException', new InternalServerErrorException()],
+    ])('logs and rethrows %s', async (_name, failure) => {
+      db.household.count.mockResolvedValue(1);
+      db.$transaction.mockRejectedValue(failure);
+
+      await expect(service.deleteHousehold('hh-1')).rejects.toBe(failure);
+      expect(loggedError).toHaveBeenCalledWith('Error deleting household with id hh-1', failure);
+    });
   });
 
   describe('recovery grants on delete (#175)', () => {

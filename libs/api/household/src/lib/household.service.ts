@@ -26,6 +26,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  HttpException,
   Injectable,
   InternalServerErrorException,
   Logger,
@@ -741,6 +742,13 @@ export class HouseholdService {
       // (owner-only), or a concurrent delete got there first.
       if (isPrismaDependentRecordNotFoundError(error)) {
         throw await this.scopedWriteRefusal(id, t('common.forbidden.delete'));
+      }
+
+      // The probe's 404, or any other client error, is an answer the endpoint
+      // is specified to give, not a server failure, so it stays out of
+      // error-level logs (#1427).
+      if (error instanceof HttpException && error.getStatus() < 500) {
+        throw error;
       }
 
       this.logger.error(`Error deleting household with id ${id}`, error);
