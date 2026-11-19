@@ -36,8 +36,8 @@ export interface LinkBaseGamesResult {
 
   /**
    * True when the game is an add-on that has a base game: linked to one, or
-   * missing the one it needs. A remake, remaster, port or edition linked to
-   * its original is not an expansion (#971).
+   * missing the one it needs. A game of any other content type is not an
+   * expansion and gets no add-on link (#971, #1391).
    */
   isExpansion: boolean;
 }
@@ -46,8 +46,7 @@ export interface LinkBaseGamesResult {
  * The content types that are played with a base game, so an import of one
  * whose base game is missing adds it. A standalone expansion or accessory is
  * linked to a base game that is in the game catalog but never adds one. A
- * remake, remaster, port, expanded edition or bundle names its original on
- * `GameSource.baseExternalIds` alone, for #658, and gets no add-on link
+ * game that is not an add-on gets no add-on link at all, as `link()` says
  * (#971, #1391).
  */
 const NEEDS_BASE_GAME: ReadonlySet<ContentType> = new Set([ContentType.Expansion, ContentType.DLC, ContentType.Mod]);

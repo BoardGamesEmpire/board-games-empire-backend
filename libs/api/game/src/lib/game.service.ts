@@ -177,7 +177,7 @@ export class GameService {
     // game's side is the platform games already read under the ceiling, so an
     // actor who may read none of them gets links that hold on none.
     const ownPlatformIds = platformGames.map(({ platform }) => platform.id);
-    const holdsOn = (gameId: string) => linkPlatformIds(platformIds.get(gameId) ?? [], ownPlatformIds);
+    const linkPlatformIdsWith = (gameId: string) => linkPlatformIds(platformIds.get(gameId) ?? [], ownPlatformIds);
     // On its base games' links this game is the add-on, so its own content
     // type decides them all (#1391).
     const isStandalone = isStandaloneAddOn(game.contentType);
@@ -189,13 +189,13 @@ export class GameService {
         gameId: expansionGame.id,
         isStandalone: isStandaloneAddOn(expansionGame.contentType),
         game: expansionGame,
-        platformIds: holdsOn(expansionGame.id),
+        platformIds: linkPlatformIdsWith(expansionGame.id),
       })),
       baseGames: baseGameRows.map(({ baseGame }) => ({
         gameId: baseGame.id,
         isStandalone,
         game: baseGame,
-        platformIds: holdsOn(baseGame.id),
+        platformIds: linkPlatformIdsWith(baseGame.id),
       })),
     };
   }
@@ -220,8 +220,8 @@ export class GameService {
    * The platforms each of `gameIds` has a platform game on, in platform name
    * order, through the platform game ceiling (#1069). One read covers the
    * linked games at the far end of each of a game's add-on links, expansions
-   * and base games alike (#1391). Empty for an API key
-   * with no `read:platform_game`, as its platform games are (#791).
+   * and base games alike (#1391). Empty for an API key with no
+   * `read:platform_game`, as its platform games are (#791).
    */
   private async readPlatformIds(gameIds: readonly string[]): Promise<ReadonlyMap<string, string[]>> {
     const byGame = new Map<string, string[]>();

@@ -349,7 +349,7 @@ describe('GameImportProcessor', () => {
       );
     });
 
-    it('reports a game linked to its original but not an add-on, a remaster say, as not an expansion', async () => {
+    it('reports a game that is not an add-on, though its DataGateway names base games, as not an expansion (#1391)', async () => {
       gameUpsert.upsert.mockResolvedValue(linkedTo(['g-13'], false));
 
       await processor.process(makeJob(JobNames.GameImport, basePayload));

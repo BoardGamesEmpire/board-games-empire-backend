@@ -162,7 +162,7 @@ export class OfferedGameService {
     const [links, nominations, lineup, wishlisted] = await Promise.all([
       readBaseGameLinksOnPlatform(
         this.db,
-        entries.map(({ collection: { platformGame } }) => ({ ...platformGame, platformId: platformGame.platform.id })),
+        entries.map(({ collection }) => collection.platformGame),
         this.scopeComposer.compose(ResourceType.Game, Action.read, { deletedAt: null }),
       ),
       this.tallyNominations(entryIds),

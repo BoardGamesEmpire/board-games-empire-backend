@@ -129,7 +129,7 @@ describe('GameWatchListener', () => {
     ]);
   });
 
-  it('skips a game that is not an expansion, a remaster linked to its original say (#971)', async () => {
+  it('skips a game that is not an add-on, though its DataGateway names base games (#971, #1391)', async () => {
     await listener.handle(makeExpansionCompleted({ isExpansion: false }));
     expect(db.gameWatch.findMany).not.toHaveBeenCalled();
   });

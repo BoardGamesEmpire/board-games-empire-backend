@@ -5,7 +5,10 @@ import type { ListOfferedGamesQueryDto } from './dto/list-offered-games.query.dt
 
 type EntryWhere = Prisma.EventAttendeeGameListWhereInput;
 
-/** `platformGame` on the offered entry's platform game. */
+/** An include list of content types as `in`, or an exclude list as `notIn` (#1391). */
+type ContentTypeFilter = { in: ContentType[] } | { notIn: ContentType[] };
+
+/** `platformGame` on the offered entry's platform game (#1391). */
 const onPlatformGame = (platformGame: Prisma.PlatformGameWhereInput): EntryWhere => ({
   collection: { is: { platformGame: { is: platformGame } } },
 });
@@ -21,8 +24,8 @@ const onGame = (game: Prisma.GameWhereInput): EntryWhere => onPlatformGame({ gam
  *
  * Content type isn't filtered this way. The offered copy's content type is
  * its platform game's own when it has one, and that column is nullable
- * (#1391), so it has its own include and exclude conditions:
- * {@link effectiveContentTypeIn} and {@link effectiveContentTypeNotIn}.
+ * (#1391), so its include and exclude conditions come from
+ * {@link effectiveContentTypeWhere}.
  */
 function facet<T>(
   include: readonly T[] | undefined,
@@ -36,30 +39,18 @@ function facet<T>(
 }
 
 /**
- * A platform game whose content type is one of `types`: its own, or its
- * game's when it has none of its own (#1391).
- */
-function effectiveContentTypeIn(types: ContentType[]): Prisma.PlatformGameWhereInput {
-  return {
-    OR: [{ contentType: { in: types } }, { contentType: null, game: { is: { contentType: { in: types } } } }],
-  };
-}
-
-/**
- * A platform game whose content type is none of `types`: its own, or its
- * game's when it has none of its own (#1391).
+ * A platform game whose content type matches `filter`: its own, or its game's
+ * when it has none of its own (#1391).
  *
- * This is its own positive condition, never `NOT` of
- * {@link effectiveContentTypeIn}. The platform game's column is nullable, and
- * a `NOT` over a comparison with NULL is unknown, not true, so it could drop
- * every entry with no content type of its own. Here no `NOT` sits above one:
- * for an entry with no content type of its own, the `notIn` arm never matches
- * and the second arm decides, on the game's column, which is required.
+ * The exclude, `{ notIn: types }`, is its own positive condition, never `NOT`
+ * of the include. The platform game's column is nullable, and a `NOT` over a
+ * comparison with NULL is unknown, not true, so it could drop every entry with
+ * no content type of its own. Here no `NOT` sits above one: for an entry with
+ * no content type of its own, the first arm never matches and the second arm
+ * decides, on the game's column, which is required.
  */
-function effectiveContentTypeNotIn(types: ContentType[]): Prisma.PlatformGameWhereInput {
-  return {
-    OR: [{ contentType: { notIn: types } }, { contentType: null, game: { is: { contentType: { notIn: types } } } }],
-  };
+function effectiveContentTypeWhere(filter: ContentTypeFilter): Prisma.PlatformGameWhereInput {
+  return { OR: [{ contentType: filter }, { contentType: null, game: { is: { contentType: filter } } }] };
 }
 
 /**
@@ -85,9 +76,9 @@ export function offeredGamesFilter(query: ListOfferedGamesQueryDto): EntryWhere[
       collection: { is: { platformGame: { is: { platform: { is: { platformType: { in: types } } } } } } },
     })),
     ...facet(query.mediums, query.excludeMediums, (mediums) => ({ collection: { is: { medium: { in: mediums } } } })),
-    ...(query.contentTypes?.length ? [onPlatformGame(effectiveContentTypeIn(query.contentTypes))] : []),
+    ...(query.contentTypes?.length ? [onPlatformGame(effectiveContentTypeWhere({ in: query.contentTypes }))] : []),
     ...(query.excludeContentTypes?.length
-      ? [onPlatformGame(effectiveContentTypeNotIn(query.excludeContentTypes))]
+      ? [onPlatformGame(effectiveContentTypeWhere({ notIn: query.excludeContentTypes }))]
       : []),
     ...gameRangeConditions(query).map(onGame),
     ...terms.map((term) => {

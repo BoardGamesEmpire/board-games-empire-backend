@@ -24,7 +24,7 @@ model PlatformGame {
   maxPlayTime Int?         @map("max_play_time")
   image       String?
   thumbnail   String?
-  // this platform's content type, overriding the game's (#1391); null falls back to the game's
+  // this platform game's own content type, overriding the game's (#1391); null falls back to the game's
   contentType ContentType? @map("content_type")
 
   supportsSolo   Boolean @default(false) @map("supports_solo")

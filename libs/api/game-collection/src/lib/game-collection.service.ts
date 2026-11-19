@@ -345,7 +345,7 @@ export class GameCollectionService {
   private async rowsWithBaseGames(rows: readonly GameCollectionWithRelations[]): Promise<GameCollectionRow[]> {
     const links = await readBaseGameLinksOnPlatform(
       this.db,
-      rows.map(({ platformGame }) => ({ ...platformGame, platformId: platformGame.platform.id })),
+      rows.map(({ platformGame }) => platformGame),
       this.scopeComposer.compose(ResourceType.Game, Action.read, { deletedAt: null }),
     );
 

@@ -568,9 +568,8 @@ export class EventAttendeeService {
    * - An expansion must also expand its item's game: a `GameExpansion` link
    *   from that game to its own, the direction base games are read in, else
    *   `notAnExpansionOfBase`. Its entry must also be on its game's platform,
-   *   else `differentPlatform` (#1391). The
-   *   expansions of a refused game are refused as `baseRefused`; those of a
-   *   game already offered go ahead.
+   *   else `differentPlatform` (#1391). The expansions of a refused game are
+   *   refused as `baseRefused`; those of a game already offered go ahead.
    * - An entry already offered is `alreadyOffered`, with its entry, and
    *   emits nothing, before any judgement: nothing is written for it, so
    *   nothing is refused. That holds for one removed from its collection

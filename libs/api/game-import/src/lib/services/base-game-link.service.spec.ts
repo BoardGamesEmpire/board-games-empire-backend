@@ -193,7 +193,8 @@ describe('BaseGameLinkService', () => {
       { gameId: 'game-seafarers', baseExternalIds: ['13'], contentType: ContentType.Expansion },
       { gameId: 'game-catan-mod', baseExternalIds: ['13', '99'], contentType: ContentType.Mod },
       { gameId: 'game-unrelated', baseExternalIds: ['99'], contentType: ContentType.Expansion },
-      // A version names its original on the DataGateway link, but is no add-on (#1391).
+      // A remake, remaster, port, expanded edition or bundle names its original
+      // on its DataGateway link, but is no add-on (#1391).
       { gameId: 'game-catan-remaster', baseExternalIds: ['13'], contentType: ContentType.Remaster },
     ];
 

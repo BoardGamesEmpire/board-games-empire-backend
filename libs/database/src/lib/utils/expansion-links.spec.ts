@@ -112,7 +112,7 @@ describe('readBaseGameLinksOnPlatform', () => {
     platformId: string,
     game: PlatformGameInView['game'],
     contentType: ContentType | null = null,
-  ): PlatformGameInView => ({ id, platformId, contentType, game });
+  ): PlatformGameInView => ({ id, platform: { id: platformId }, contentType, game });
 
   /** A link row as the read returns it: the base game's platform games, among the page's platforms. */
   const linkRow = (expansionGameId: string, baseGameId: string, basePlatformIds: readonly string[]) => ({

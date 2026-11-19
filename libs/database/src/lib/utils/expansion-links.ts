@@ -5,8 +5,8 @@ import { ContentType } from '../client';
  * One end of an add-on link, seen from the other: `gameId` is the game at the
  * far end, and `isStandalone` is the add-on's. It follows the add-on's content
  * type: the platform game's own where one platform is in view (a collection or
- * offered-game row), else the game's. So every link on one row, or of one game
- * where no platform is in view, carries the same value (#1391).
+ * offered-game row), else the game's. So all of one add-on's links carry the
+ * same value, on a row and wherever no platform is in view (#1391).
  */
 export interface ExpansionLink {
   readonly gameId: string;
@@ -22,7 +22,7 @@ export interface PlatformGameInView {
   readonly contentType: ContentType | null;
   readonly game: { readonly contentType: ContentType; readonly id: string };
   readonly id: string;
-  readonly platformId: string;
+  readonly platform: { readonly id: string };
 }
 
 const BASE_GAME_LINK_SELECT = {
@@ -76,7 +76,7 @@ export async function readBaseGameLinks(
   return links;
 }
 
-/** A base game an add-on links to, and the platforms in view it has a platform game on. */
+/** A base game an add-on links to, and the platforms in view it has a platform game on (#1391). */
 interface BaseGameOnPlatforms {
   readonly baseGameId: string;
   readonly platformIds: ReadonlySet<string>;
@@ -98,8 +98,8 @@ interface BaseGameOnPlatforms {
  *   presence check under no ceiling, and none of it is sent. It still decides
  *   which base games a row lists, so a key with no `read:platform_game` can
  *   infer that a listed base game has a platform game on the row's platform.
- *   That is accepted: it is catalog data, of the kind the row's own platform
- *   game already shows.
+ *   That is accepted: it is game catalog data, of the kind the row's own
+ *   platform game already shows.
  * - Each link's `isStandalone` follows the add-on's content type on that
  *   platform: the platform game's own where it has one, else the game's.
  * - A game given more than once is read once. Each platform game's links come
@@ -117,7 +117,7 @@ export async function readBaseGameLinksOnPlatform(
   }
 
   const gameIds = new Set(platformGames.map(({ game }) => game.id));
-  const platformIds = new Set(platformGames.map(({ platformId }) => platformId));
+  const platformIds = new Set(platformGames.map(({ platform }) => platform.id));
   const rows = await db.gameExpansion.findMany({
     where: { expansionGameId: { in: [...gameIds] }, baseGame: { is: baseGameWhere } },
     select: {
@@ -141,7 +141,7 @@ export async function readBaseGameLinksOnPlatform(
       effectiveContentType(platformGame.contentType, platformGame.game.contentType),
     );
     const onPlatform = (baseGamesOf.get(platformGame.game.id) ?? [])
-      .filter((baseGame) => baseGame.platformIds.has(platformGame.platformId))
+      .filter((baseGame) => baseGame.platformIds.has(platformGame.platform.id))
       .map(({ baseGameId }) => ({ gameId: baseGameId, isStandalone }));
 
     if (onPlatform.length > 0) {
@@ -153,9 +153,10 @@ export async function readBaseGameLinksOnPlatform(
 }
 
 /**
- * The content types that add to a base game rather than being a version of
- * it, and so the only ones that get an add-on link (#1391). The importer uses
- * this set to decide whether an imported game is an add-on.
+ * The content types that add to a base game rather than being a remake,
+ * remaster, port, expanded edition or bundle of it, and so the only ones that
+ * get an add-on link (#1391). The importer uses this set to decide whether an
+ * imported game is an add-on.
  */
 export const ADD_ON_CONTENT_TYPES: ReadonlySet<ContentType> = new Set([
   ContentType.Expansion,
@@ -166,8 +167,8 @@ export const ADD_ON_CONTENT_TYPES: ReadonlySet<ContentType> = new Set([
 ]);
 
 /**
- * The content type a platform game has: its own when it differs from the
- * game's, else the game's (#1391).
+ * The content type a platform game has: its own when it has one, else the
+ * game's (#1391).
  */
 export function effectiveContentType(own: ContentType | null, game: ContentType): ContentType {
   return own ?? game;

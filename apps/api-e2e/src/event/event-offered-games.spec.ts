@@ -187,14 +187,18 @@ describe('GET /api/events/:eventId/offered-games (#1187)', () => {
    * against a row in the same response that the filter treats the other way.
    */
   describe("content type, by the offered platform game's own, else the game's (#1391)", () => {
-    /** Offers a base game whose platform game has `contentType` as its own. */
+    /**
+     * Offers a game, a base game unless `gameContentType` names another, whose
+     * platform game has `contentType` as its own.
+     */
     const offerOverridden = async (
       eventId: string,
       owner: AuthenticatedActor,
       title: string,
       contentType: ContentType,
+      gameContentType: ContentType = ContentType.BaseGame,
     ) => {
-      const arranged = await offer(eventId, owner, { title, contentType: ContentType.BaseGame });
+      const arranged = await offer(eventId, owner, { title, contentType: gameContentType });
       await db.client.platformGame.update({ where: { id: arranged.platformGameId }, data: { contentType } });
 
       return arranged;
@@ -252,6 +256,22 @@ describe('GET /api/events/:eventId/offered-games (#1187)', () => {
       expect(await listedTitles(host, eventId, { excludeContentTypes: ContentType.DLC })).toEqual([
         'Base, expansion here',
         'Base, no override',
+      ]);
+      expect(await listedTitles(host, eventId, { contentTypes: ContentType.DLC })).toEqual(['DLC, no override']);
+    });
+
+    // The rescue direction: an override can also save an entry its game's
+    // content type would filter. Read on the game alone, the DLC game would
+    // fall to the exclude and be matched by the include.
+    it('keeps a DLC game whose platform game is a base game under excludeContentTypes, and out of contentTypes', async () => {
+      const { host, eventId } = await arrangeEvent(0);
+      await offer(eventId, host, { title: 'DLC, no override', contentType: ContentType.DLC });
+      await offerOverridden(eventId, host, 'DLC, base game here', ContentType.BaseGame, ContentType.DLC);
+
+      expect(await listedTitles(host, eventId, {})).toEqual(['DLC, base game here', 'DLC, no override']);
+      // Its game is DLC, as the control's is: only the override tells them apart.
+      expect(await listedTitles(host, eventId, { excludeContentTypes: ContentType.DLC })).toEqual([
+        'DLC, base game here',
       ]);
       expect(await listedTitles(host, eventId, { contentTypes: ContentType.DLC })).toEqual(['DLC, no override']);
     });

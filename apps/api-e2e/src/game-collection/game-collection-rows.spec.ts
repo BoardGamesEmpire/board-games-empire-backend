@@ -47,11 +47,11 @@ describe('collection rows (#1070)', () => {
     readonly game?: Partial<Prisma.GameUncheckedCreateInput>;
 
     /**
-     * The platform game's overrides of the game's players and play time, and
-     * its platform when not the seeded Tabletop one (#1391).
+     * The platform game's overrides of the game's players, play time and
+     * content type, and its platform when not the seeded Tabletop one (#1391).
      */
     readonly platformGame?: Pick<Prisma.PlatformGameUncheckedCreateInput, PlayerAndPlayTimeField> &
-      Partial<Pick<Prisma.PlatformGameUncheckedCreateInput, 'platformId'>>;
+      Partial<Pick<Prisma.PlatformGameUncheckedCreateInput, 'contentType' | 'platformId'>>;
   }
 
   /** A game of its own and its platform game, on the seeded Tabletop platform unless the options name another. */
@@ -170,7 +170,14 @@ describe('collection rows (#1070)', () => {
         minPlayTime: 30,
         maxPlayTime: 60,
       },
-      platformGame: { minPlayers: 1, maxPlayers: 5, minPlayTime: 20, maxPlayTime: 90 },
+      // The platform game's content type overrides the game's (#1391).
+      platformGame: {
+        contentType: ContentType.StandaloneExpansion,
+        minPlayers: 1,
+        maxPlayers: 5,
+        minPlayTime: 20,
+        maxPlayTime: 90,
+      },
     });
     const bare = await arrangeRow(owner.user.id, { reach: Reach.Private });
     const { platformType } = await tabletopPlatform(db.client);
@@ -185,12 +192,20 @@ describe('collection rows (#1070)', () => {
         minPlayTime: 30,
         maxPlayTime: 60,
       });
-      expect(platformGame).toMatchObject({ minPlayers: 1, maxPlayers: 5, minPlayTime: 20, maxPlayTime: 90 });
+      expect(platformGame).toMatchObject({
+        contentType: ContentType.StandaloneExpansion,
+        minPlayers: 1,
+        maxPlayers: 5,
+        minPlayTime: 20,
+        maxPlayTime: 90,
+      });
       expect(platformGame.platform.platformType).toBe(platformType);
     }
 
     // A fact the game or platform game leaves unset is sent as null, never left
     // off: a client reading an absent key cannot tell "unknown" from "not sent".
+    // A platform game with no content type of its own sends null, and the
+    // client falls back to the game's (#1391).
     for (const platformGame of await embeddedEverywhere(owner, bare.entryId)) {
       expect(platformGame.game).toMatchObject({
         id: bare.gameId,
@@ -201,7 +216,13 @@ describe('collection rows (#1070)', () => {
         minPlayTime: null,
         maxPlayTime: null,
       });
-      expect(platformGame).toMatchObject({ minPlayers: null, maxPlayers: null, minPlayTime: null, maxPlayTime: null });
+      expect(platformGame).toMatchObject({
+        contentType: null,
+        minPlayers: null,
+        maxPlayers: null,
+        minPlayTime: null,
+        maxPlayTime: null,
+      });
     }
   });
 
