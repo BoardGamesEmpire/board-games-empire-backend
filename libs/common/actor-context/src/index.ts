@@ -79,6 +79,10 @@ export {
 // columns only, and no domain event when nothing changed.
 export { changedKeys, pickSnapshot } from './lib/utils/mutation-snapshot.util';
 
+// The guarded emit every after-commit publisher uses (#245): a listener's
+// throw is logged, never answered as the committed change's failure.
+export { emitAfterCommit, type AfterCommitEmitter } from './lib/utils/emit-after-commit.util';
+
 // Module (registers reader + internal populator + system scope; ClsModule.forRoot
 // is the caller's responsibility).
 export { AuditContextModule } from './lib/audit-context.module';
