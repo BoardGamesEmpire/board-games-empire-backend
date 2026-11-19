@@ -31,6 +31,16 @@ module.exports = {
           input: '../../libs/common/i18n-core/src/lib/i18n',
           output: 'i18n',
         },
+        // The standard privacy policy from @bge/i18n-core, one Markdown file per
+        // language, read at boot from `PRIVACY_POLICY_DIR`,
+        // `join(__dirname, 'privacy-policy')`. The directory is the policy's
+        // alone, so an operator can mount their own files over it without
+        // hiding anything else (#934). Only the api serves the policy.
+        {
+          glob: '**/*.md',
+          input: '../../libs/common/i18n-core/src/lib/privacy-policy',
+          output: 'privacy-policy',
+        },
         // The migrator (#236): `prisma migrate deploy` runs as a child
         // process from the bundle's directory, so the datasource
         // (`schema.prisma`), the migration chain and the config that points at

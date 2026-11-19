@@ -99,6 +99,22 @@ describe('LocaleResolutionService', () => {
     });
   });
 
+  // For a caller with languages of its own, such as the privacy policy (#934).
+  describe('storedLanguage', () => {
+    it('answers the stored tag as stored, even one no catalog ships', async () => {
+      await expect(build({ tag: 'fr-CA' }).storedLanguage('u1')).resolves.toBe('fr-CA');
+    });
+
+    it('answers null when the user stored none, or the lookup fails', async () => {
+      const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+
+      await expect(build(null).storedLanguage('u1')).resolves.toBeNull();
+      await expect(build(new Error('connection refused')).storedLanguage('u1')).resolves.toBeNull();
+
+      warnSpy.mockRestore();
+    });
+  });
+
   // For a request refused before its actor was known (#527).
   describe('resolveAcceptLanguage', () => {
     it('resolves the header to its best supported catalog', () => {

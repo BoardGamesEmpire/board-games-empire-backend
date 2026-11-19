@@ -125,6 +125,17 @@ export class BgeDiscoveryDto {
   bgeServerDiscoveryEndpoint!: string;
 
   /**
+   * Where to read the server's privacy policy (#934), relative path. Anyone
+   * can read it, signed in or not.
+   */
+  @ApiProperty({
+    description:
+      "Where to read the server's privacy policy, as a root-relative path. Anyone can read it, signed in or not.",
+    example: '/api/privacy-policy',
+  })
+  bgePrivacyPolicyEndpoint!: string;
+
+  /**
    * Passkey (WebAuthn) authentication is always available.
    * Clients should offer passkey registration/sign-in flows.
    */

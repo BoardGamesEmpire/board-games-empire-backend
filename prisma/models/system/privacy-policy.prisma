@@ -1,0 +1,17 @@
+// The operator's privacy policy in one language. A row wins over the privacy
+// policy file for its language, if there is one; deleting the row falls back
+// to the files (#934). At most one row per language tag.
+model PrivacyPolicy {
+  id String @id @default(cuid(2))
+
+  languageTag   LanguageTag @relation(fields: [languageTagId], references: [id], onDelete: Cascade)
+  languageTagId String      @unique @map("language_tag_id")
+
+  // The policy text as Markdown.
+  markdown String
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("privacy_policies")
+}

@@ -309,6 +309,7 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     'manage:quota',
     'read:quota',
     'update:system_setting',
+    'manage:privacy_policy',
   ],
   [SystemRole.Moderator]: [
     // Cross-subject read: a moderator triages content in households they are
