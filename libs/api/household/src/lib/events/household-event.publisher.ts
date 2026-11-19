@@ -3,7 +3,7 @@ import type { WebhookEmittableEvent, WebhookEventType } from '@bge/webhooks';
 import { webhookEnvelope } from '@bge/webhooks';
 import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import type { HouseholdEvents } from '../constants/household-events.constant';
+import type { HouseholdDomainEvent } from './household.events';
 
 /** A household change's webhook: its versioned wire name, and the envelope sent under it. */
 export interface HouseholdWebhook {
@@ -73,8 +73,9 @@ export class HouseholdEventPublisher {
 
   constructor(private readonly events: EventEmitter2) {}
 
-  publish(name: HouseholdEvents, event: MutationEvent<unknown>, webhook?: HouseholdWebhook): void {
-    this.emitGuarded(name, event, event);
+  /** Emits `event` under its own name, then `webhook`, when there is one. */
+  publish(event: HouseholdDomainEvent, webhook?: HouseholdWebhook): void {
+    this.emitGuarded(event.eventName, event, event);
 
     if (webhook) {
       this.emitGuarded(webhook.type, webhook.envelope, event);

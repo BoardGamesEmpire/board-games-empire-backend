@@ -28,6 +28,14 @@ import type { HOUSEHOLD_SETTINGS_SELECT } from '../read-shapes';
  */
 
 /**
+ * A household change's domain event, as `HouseholdEventPublisher` takes it.
+ * Each class carries its name on the instance as well as statically, as the
+ * invite events do, so the publisher emits an event under its own name and a
+ * caller cannot pair it with another's (#245).
+ */
+export type HouseholdDomainEvent = MutationEvent<unknown> & { readonly eventName: HouseholdEvents };
+
+/**
  * Who owns a household, as a diffable projection.
  *
  * Deliberately NOT a `Pick<HouseholdRole, …>`. The mutation writes two
@@ -60,6 +68,7 @@ export interface HouseholdOwnershipSnapshot {
  */
 export class HouseholdOwnershipTransferredEvent extends MutationEvent<HouseholdOwnershipSnapshot> {
   static readonly eventName = HouseholdEvents.OwnershipTransferred;
+  readonly eventName = HouseholdOwnershipTransferredEvent.eventName;
   declare readonly before: HouseholdOwnershipSnapshot;
   declare readonly after: HouseholdOwnershipSnapshot;
   readonly subject = ResourceType.Household;
@@ -82,6 +91,7 @@ export class HouseholdOwnershipTransferredEvent extends MutationEvent<HouseholdO
  */
 export class HouseholdGameShareApprovedEvent extends MutationEvent<GameShareSnapshot> {
   static readonly eventName = HouseholdEvents.GameShareApproved;
+  readonly eventName = HouseholdGameShareApprovedEvent.eventName;
   declare readonly before: GameShareSnapshot;
   declare readonly after: GameShareSnapshot;
   readonly subject = ResourceType.GameShare;
@@ -105,6 +115,7 @@ export class HouseholdGameShareApprovedEvent extends MutationEvent<GameShareSnap
  */
 export class HouseholdGameShareEndedEvent extends MutationEvent<GameShareSnapshot> {
   static readonly eventName = HouseholdEvents.GameShareEnded;
+  readonly eventName = HouseholdGameShareEndedEvent.eventName;
   declare readonly before: GameShareSnapshot;
   declare readonly after: null;
   readonly subject = ResourceType.GameShare;
@@ -255,8 +266,9 @@ export function householdStateSnapshot(row: HouseholdStateRow): HouseholdStateSn
  * a fresh create: a replayed create changed nothing (#210). Only `after` is
  * populated, so `action` derives to `create`.
  */
-export class HouseholdCreatedEvent extends MutationEvent<HouseholdStateSnapshot> {
+export class HouseholdCreatedEvent extends MutationEvent<HouseholdCreatedSnapshot> {
   static readonly eventName = HouseholdEvents.Created;
+  readonly eventName = HouseholdCreatedEvent.eventName;
   declare readonly before: null;
   declare readonly after: HouseholdCreatedSnapshot;
   readonly subject = ResourceType.Household;
@@ -275,6 +287,7 @@ export class HouseholdCreatedEvent extends MutationEvent<HouseholdStateSnapshot>
  */
 export class HouseholdUpdatedEvent extends MutationEvent<HouseholdStateSnapshot> {
   static readonly eventName = HouseholdEvents.Updated;
+  readonly eventName = HouseholdUpdatedEvent.eventName;
   declare readonly before: HouseholdUpdatedSnapshot;
   declare readonly after: HouseholdUpdatedSnapshot;
   readonly subject = ResourceType.Household;
@@ -294,6 +307,7 @@ export class HouseholdUpdatedEvent extends MutationEvent<HouseholdStateSnapshot>
  */
 export class HouseholdDeletedEvent extends MutationEvent<HouseholdDeletedSnapshot> {
   static readonly eventName = HouseholdEvents.Deleted;
+  readonly eventName = HouseholdDeletedEvent.eventName;
   declare readonly before: HouseholdDeletedSnapshot;
   declare readonly after: null;
   readonly subject = ResourceType.Household;
@@ -311,6 +325,7 @@ export class HouseholdDeletedEvent extends MutationEvent<HouseholdDeletedSnapsho
  */
 export class HouseholdRestoredEvent extends MutationEvent<HouseholdRestoreSnapshot> {
   static readonly eventName = HouseholdEvents.Restored;
+  readonly eventName = HouseholdRestoredEvent.eventName;
   declare readonly before: HouseholdRestoreSnapshot;
   declare readonly after: HouseholdRestoreSnapshot;
   readonly subject = ResourceType.Household;
@@ -329,6 +344,7 @@ export class HouseholdRestoredEvent extends MutationEvent<HouseholdRestoreSnapsh
  */
 export class HouseholdMemberAdmittedEvent extends MutationEvent<HouseholdMembershipSnapshot> {
   static readonly eventName = HouseholdEvents.MemberAdmitted;
+  readonly eventName = HouseholdMemberAdmittedEvent.eventName;
   declare readonly before: HouseholdMembershipSnapshot;
   declare readonly after: HouseholdMembershipSnapshot;
   readonly subject = ResourceType.Household;
@@ -347,6 +363,7 @@ export class HouseholdMemberAdmittedEvent extends MutationEvent<HouseholdMembers
  */
 export class HouseholdMemberRoleChangedEvent extends MutationEvent<HouseholdMembershipSnapshot> {
   static readonly eventName = HouseholdEvents.MemberRoleChanged;
+  readonly eventName = HouseholdMemberRoleChangedEvent.eventName;
   declare readonly before: HouseholdMembershipSnapshot;
   declare readonly after: HouseholdMembershipSnapshot;
   readonly subject = ResourceType.Household;
@@ -367,6 +384,7 @@ export class HouseholdMemberRoleChangedEvent extends MutationEvent<HouseholdMemb
  */
 export class HouseholdMemberRemovedEvent extends MutationEvent<HouseholdMembershipSnapshot> {
   static readonly eventName = HouseholdEvents.MemberRemoved;
+  readonly eventName = HouseholdMemberRemovedEvent.eventName;
   declare readonly before: HouseholdMembershipSnapshot;
   declare readonly after: HouseholdMembershipSnapshot;
   readonly subject = ResourceType.Household;
@@ -389,6 +407,7 @@ export class HouseholdMemberRemovedEvent extends MutationEvent<HouseholdMembersh
  */
 export class HouseholdBanCreatedEvent extends MutationEvent<HouseholdBanSnapshot> {
   static readonly eventName = HouseholdEvents.BanCreated;
+  readonly eventName = HouseholdBanCreatedEvent.eventName;
   declare readonly before: HouseholdBanSnapshot;
   declare readonly after: HouseholdBanSnapshot;
   readonly subject = ResourceType.Household;
@@ -407,6 +426,7 @@ export class HouseholdBanCreatedEvent extends MutationEvent<HouseholdBanSnapshot
  */
 export class HouseholdBanUpdatedEvent extends MutationEvent<HouseholdBanSnapshot> {
   static readonly eventName = HouseholdEvents.BanUpdated;
+  readonly eventName = HouseholdBanUpdatedEvent.eventName;
   declare readonly before: HouseholdBanSnapshot;
   declare readonly after: HouseholdBanSnapshot;
   readonly subject = ResourceType.Household;
@@ -425,6 +445,7 @@ export class HouseholdBanUpdatedEvent extends MutationEvent<HouseholdBanSnapshot
  */
 export class HouseholdBanLiftedEvent extends MutationEvent<HouseholdBanSnapshot> {
   static readonly eventName = HouseholdEvents.BanLifted;
+  readonly eventName = HouseholdBanLiftedEvent.eventName;
   declare readonly before: HouseholdBanSnapshot;
   declare readonly after: HouseholdBanSnapshot;
   readonly subject = ResourceType.Household;

@@ -46,7 +46,13 @@ import {
   householdStateSnapshot,
   HouseholdUpdatedEvent,
 } from './events/household.events';
-import { assertHouseholdExists, householdExists, lockHouseholdForRoleTransition } from './household-access.helpers';
+import type { LockFreeReadClient } from './household-access.helpers';
+import {
+  assertHouseholdExists,
+  householdExists,
+  lockDeletedHousehold,
+  lockHouseholdForRoleTransition,
+} from './household-access.helpers';
 import { HOUSEHOLD_SETTINGS_SELECT, MEMBER_SELECT } from './read-shapes';
 
 /**
@@ -421,7 +427,6 @@ export class HouseholdService {
       const { id, name, description, image, reach, languageTagId } = household;
 
       this.publisher.publish(
-        HouseholdCreatedEvent.eventName,
         new HouseholdCreatedEvent({ id, name, description, image, reach, languageTagId }, initiatedAt),
       );
     }
@@ -445,6 +450,12 @@ export class HouseholdService {
    * published, before and after, with the `household.household.updated.v1`
    * webhook naming them. A patch that re-sends stored values changes nothing,
    * so it publishes nothing (#728).
+   *
+   * A household with no settings row has no member invite or share policy,
+   * which no invite or share grant matches. The row the upsert creates gives
+   * it both, the one the patch sent and the other's column default, so both
+   * are recorded as changed: the second is a change in what members may do,
+   * though the patch did not name it.
    */
   async updateHousehold(id: string, updateHouseholdDto: UpdateHouseholdDto) {
     const initiatedAt = new Date();
@@ -468,14 +479,12 @@ export class HouseholdService {
     } satisfies Prisma.HouseholdWhereInput;
 
     try {
-      // Existence first (→ 404), which costs no transaction for an unknown id.
-      await assertHouseholdExists(this.db, id);
-
       const { before, household } = await this.db.$transaction(async (tx) => {
-        // Permission next, as the scoped write's own where: 403, unless a
-        // delete landed since the probe (see `scopedWriteRefusal`). Asked
-        // before the lock, so a caller who may not edit the household never
-        // holds its row.
+        // Permission first, as the scoped write's own where. A miss answers
+        // 403, or 404 for an unknown or deleted household (see
+        // `scopedWriteRefusal`), so no separate existence probe runs in front
+        // of the transaction. Asked before the lock, so a caller who may not
+        // edit the household never holds its row.
         if ((await tx.household.count({ where: editable })) === 0) {
           throw await this.scopedWriteRefusal(id, t('common.forbidden.update'), tx);
         }
@@ -548,7 +557,6 @@ export class HouseholdService {
     }
 
     this.publisher.publish(
-      HouseholdUpdatedEvent.eventName,
       new HouseholdUpdatedEvent(pickSnapshot(before, changed), pickSnapshot(after, changed), initiatedAt),
       householdWebhook(WebhookEventType.HouseholdUpdated, { householdId: after.id, changedFields: changed }),
     );
@@ -866,7 +874,6 @@ export class HouseholdService {
 
       // The owners given a restore window go in the audit entry only (#245).
       this.publisher.publish(
-        HouseholdDeletedEvent.eventName,
         new HouseholdDeletedEvent(
           { id, name: household.name, restoreWindowUserIds: recovery.windowUserIds },
           initiatedAt,
@@ -889,12 +896,12 @@ export class HouseholdService {
 
   /**
    * What a scoped write on a household that matched nothing (P2025), or an
-   * edit's scoped count that found nothing, should answer. The existence probe
-   * in front of it takes no lock, so a soft-delete can commit in between, and
-   * a second of two concurrent deletes then misses on `deletedAt: null` rather
-   * than on permission. The household is gone, so the answer is the 404 every
-   * route gives a deleted household (#299), not a denial. Otherwise it is
-   * there and the actor may not do this: 403.
+   * edit's scoped count that found nothing, should answer. A miss on
+   * `deletedAt: null` rather than on permission means the household is unknown
+   * or gone: a delete's existence probe takes no lock, so a soft-delete can
+   * commit between it and the write, and the edit runs no probe at all. The
+   * answer is then the 404 every route gives a deleted household (#299), not a
+   * denial. Otherwise it is there and the actor may not do this: 403.
    *
    * Not logged: both are outcomes the endpoint is specified to produce.
    *
@@ -905,7 +912,7 @@ export class HouseholdService {
   private async scopedWriteRefusal(
     id: string,
     forbidden: ReturnType<typeof t>,
-    client: DatabaseService | Prisma.TransactionClient = this.db,
+    client: LockFreeReadClient = this.db,
   ): Promise<ForbiddenException | NotFoundException> {
     return (await householdExists(client, id))
       ? new ForbiddenException(forbidden)
@@ -921,7 +928,9 @@ export class HouseholdService {
    * domain event, whose audit entry records when the household was deleted
    * and the restore windows the restore ends, and the
    * `household.household.restored.v1` webhook, which carries the household's
-   * id alone. A miss publishes nothing.
+   * id alone. A miss publishes nothing. The tombstone is read under the row
+   * lock ({@link lockDeletedHousehold}), so the deletion the event records is
+   * the one the restore undoes.
    *
    * The write is scoped by the actor's `update` rules on Household, and the
    * only ones that can match a deleted row are the two restore slugs, both
@@ -944,18 +953,25 @@ export class HouseholdService {
    * evicted, since all of their household grants come back, not only the
    * restorer's.
    *
-   * A miss (P2025) is resolved by {@link restoreRefusal}: 409 when the
-   * household is live and the actor may read it, otherwise 404.
+   * A household that is not deleted, and a miss (P2025), are resolved by
+   * {@link restoreRefusal}: 409 when the household is live and the actor may
+   * read it, otherwise 404.
    */
   async restoreHousehold(id: string): Promise<Household> {
     const initiatedAt = new Date();
 
     try {
-      const { household, memberUserIds, deletedAt, windowUserIds } = await this.db.$transaction(async (tx) => {
+      const restored = await this.db.$transaction(async (tx) => {
         // When the household was deleted, for the household restored domain
-        // event (#245). Read before the update clears it. A caller the update
-        // refuses rolls this back with the rest, and learns nothing from it.
-        const tombstone = await tx.household.findUnique({ where: { id }, select: { deletedAt: true } });
+        // event (#245), read under the row lock so it is the deletion the
+        // update below clears. A caller the update refuses rolls this back
+        // with the rest, and learns nothing from it.
+        const deletedAt = await lockDeletedHousehold(tx, id);
+
+        // Live or unknown: nothing to restore, and no write to attempt.
+        if (deletedAt === null) {
+          return null;
+        }
 
         const household = await tx.household.update({
           where: {
@@ -997,15 +1013,20 @@ export class HouseholdService {
         return {
           household,
           memberUserIds: members.map((member) => member.userId),
-          deletedAt: tombstone?.deletedAt ?? null,
+          deletedAt,
           windowUserIds: windows.map((grant) => grant.userId),
         };
       });
 
+      if (restored === null) {
+        throw await this.restoreRefusal(id);
+      }
+
+      const { household, memberUserIds, deletedAt, windowUserIds } = restored;
+
       await this.permissions.invalidateUsers(memberUserIds);
 
       this.publisher.publish(
-        HouseholdRestoredEvent.eventName,
         new HouseholdRestoredEvent(
           { id, deletedAt, restoreWindowUserIds: windowUserIds },
           { id, deletedAt: null, restoreWindowUserIds: [] },
@@ -1016,6 +1037,12 @@ export class HouseholdService {
 
       return household;
     } catch (error) {
+      // The refusal for a household that is not deleted, thrown above: an
+      // outcome the route is specified to produce, not a failure to log.
+      if (error instanceof HttpException && error.getStatus() < 500) {
+        throw error;
+      }
+
       if (isPrismaDependentRecordNotFoundError(error)) {
         throw await this.restoreRefusal(id);
       }

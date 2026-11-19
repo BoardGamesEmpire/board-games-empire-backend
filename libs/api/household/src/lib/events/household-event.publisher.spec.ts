@@ -36,7 +36,7 @@ describe('HouseholdEventPublisher (#245)', () => {
     const domainEvent = event();
     const { type, envelope } = webhook();
 
-    publisher.publish(HouseholdEvents.Updated, domainEvent, { type, envelope });
+    publisher.publish(domainEvent, { type, envelope });
 
     expect(events.emit.mock.calls).toEqual([
       [HouseholdEvents.Updated, domainEvent],
@@ -54,7 +54,7 @@ describe('HouseholdEventPublisher (#245)', () => {
       throw failure;
     });
 
-    expect(() => publisher.publish(HouseholdEvents.Updated, event(), webhook())).not.toThrow();
+    expect(() => publisher.publish(event(), webhook())).not.toThrow();
 
     expect(events.emit).toHaveBeenCalledTimes(2);
     expect(events.emit.mock.calls[1]?.[0]).toBe(WebhookEventType.HouseholdUpdated);
@@ -72,7 +72,7 @@ describe('HouseholdEventPublisher (#245)', () => {
       throw 'boom';
     });
 
-    expect(() => publisher.publish(HouseholdEvents.Updated, event())).not.toThrow();
+    expect(() => publisher.publish(event())).not.toThrow();
 
     expect(logged).toHaveBeenCalledTimes(1);
     expect(logged.mock.calls[0]).toHaveLength(1);
@@ -85,7 +85,7 @@ describe('HouseholdEventPublisher (#245)', () => {
       throw new Error('dispatcher exploded');
     });
 
-    expect(() => publisher.publish(HouseholdEvents.Updated, event(), webhook())).not.toThrow();
+    expect(() => publisher.publish(event(), webhook())).not.toThrow();
 
     expect(events.emit).toHaveBeenCalledTimes(2);
     expect(logged).toHaveBeenCalledTimes(1);
@@ -96,7 +96,7 @@ describe('HouseholdEventPublisher (#245)', () => {
   it('emits no webhook when none is given', () => {
     const domainEvent = event();
 
-    publisher.publish(HouseholdEvents.Updated, domainEvent);
+    publisher.publish(domainEvent);
 
     expect(events.emit.mock.calls).toEqual([[HouseholdEvents.Updated, domainEvent]]);
   });

@@ -1305,7 +1305,6 @@ export class HouseholdMemberService {
     const membership: MembershipIds = { householdId: member.householdId, memberId: member.id, userId: member.userId };
 
     this.publisher.publish(
-      HouseholdMemberAdmittedEvent.eventName,
       new HouseholdMemberAdmittedEvent({ ...membership, role: householdRoleName(member), origin }, initiatedAt),
       householdWebhook(WebhookEventType.HouseholdMemberAdmitted, membership),
     );
@@ -1327,7 +1326,6 @@ export class HouseholdMemberService {
     };
 
     this.publisher.publish(
-      HouseholdMemberRemovedEvent.eventName,
       new HouseholdMemberRemovedEvent({ ...ids, role: membership.role }, cause, initiatedAt),
       householdWebhook(WebhookEventType.HouseholdMemberRemoved, ids),
     );
@@ -1343,10 +1341,7 @@ export class HouseholdMemberService {
    */
   emitGameSharesEnded(shares: readonly GameShare[], initiatedAt: Date): void {
     for (const share of shares) {
-      this.publisher.publish(
-        HouseholdGameShareEndedEvent.eventName,
-        new HouseholdGameShareEndedEvent(gameShareSnapshot(share), initiatedAt),
-      );
+      this.publisher.publish(new HouseholdGameShareEndedEvent(gameShareSnapshot(share), initiatedAt));
     }
   }
 
@@ -1440,7 +1435,6 @@ export class HouseholdMemberService {
     initiatedAt: Date,
   ): void {
     this.publisher.publish(
-      HouseholdOwnershipTransferredEvent.eventName,
       new HouseholdOwnershipTransferredEvent(before, after, initiatedAt),
       householdWebhook(WebhookEventType.HouseholdOwnershipTransferred, {
         householdId: after.householdId,
@@ -1475,7 +1469,6 @@ export class HouseholdMemberService {
     };
 
     this.publisher.publish(
-      HouseholdMemberRoleChangedEvent.eventName,
       new HouseholdMemberRoleChangedEvent({ ...membership, role: lockedRole }, { ...membership, role }, initiatedAt),
       householdWebhook(WebhookEventType.HouseholdMemberRoleChanged, membership),
     );

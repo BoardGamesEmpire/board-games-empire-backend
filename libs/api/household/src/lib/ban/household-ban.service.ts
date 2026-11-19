@@ -147,7 +147,6 @@ export class HouseholdBanService {
 
     this.members.emitGameSharesEnded(endedShares, initiatedAt);
     this.publisher.publish(
-      HouseholdBanCreatedEvent.eventName,
       new HouseholdBanCreatedEvent(
         { householdId, userId: ban.user.id, banId: ban.id, reason: ban.reason },
         initiatedAt,
@@ -184,7 +183,6 @@ export class HouseholdBanService {
 
     if (existing.reason !== ban.reason) {
       this.publisher.publish(
-        HouseholdBanUpdatedEvent.eventName,
         new HouseholdBanUpdatedEvent(
           { householdId, userId, banId: existing.id, reason: existing.reason },
           { householdId, userId, banId: ban.id, reason: ban.reason },
@@ -225,7 +223,6 @@ export class HouseholdBanService {
     });
 
     this.publisher.publish(
-      HouseholdBanLiftedEvent.eventName,
       new HouseholdBanLiftedEvent({ householdId, userId, banId: ban.id, reason: ban.reason }, initiatedAt),
     );
     await this.notifier.onInvitesReleased(released);

@@ -174,7 +174,6 @@ export class HouseholdGameShareService {
     });
 
     this.publisher.publish(
-      HouseholdGameShareApprovedEvent.eventName,
       new HouseholdGameShareApprovedEvent(gameShareSnapshot(before), gameShareSnapshot(after), now),
     );
 
