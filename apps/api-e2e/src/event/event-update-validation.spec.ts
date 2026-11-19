@@ -12,8 +12,9 @@ import { createEventClient, EVENTS_PATH } from './event-request';
  *
  * `UpdateEventDto` inherited `title`, `type` and `schedulingMode` through
  * `PartialType`, whose `IsOptional` skips `null`, so a `null` for one of these
- * non-nullable columns passed the pipe and answered 500 at the database. A
- * blank title passed on create and update alike. The nullable columns still
+ * non-nullable columns passed the pipe and answered 500 at the database.
+ * `CreateEventDto`'s own `IsOptional` did the same for `type` and
+ * `schedulingMode` on create. A blank title passed on create and update alike. The nullable columns still
  * clear with `null`.
  */
 describe("an event's fields on create and update (#1404)", () => {
@@ -55,6 +56,14 @@ describe("an event's fields on create and update (#1404)", () => {
     const host = await actors.user();
 
     expectErrorEnvelope(await createEvent(host, { title }), { status: 400, code: null });
+  });
+
+  // Create's IsOptional skipped null too, so these reached the non-nullable
+  // columns as a 500 (#1404).
+  it.each([[{ type: null }], [{ schedulingMode: null }]])('POST answers 400 to %p', async (body) => {
+    const host = await actors.user();
+
+    expectErrorEnvelope(await createEvent(host, body), { status: 400, code: null });
   });
 
   it('PATCH clears description, image, location and url with null', async () => {

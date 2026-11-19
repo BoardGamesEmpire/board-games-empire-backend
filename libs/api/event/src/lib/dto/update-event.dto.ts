@@ -1,9 +1,7 @@
 import { EventSchedulingMode, EventType } from '@bge/database';
-import { i18nValidationMessage } from '@bge/i18n';
-import { ApiPropertyOptional, OmitType, PartialType } from '@nestjs/swagger';
-import { IsEnum, ValidateIf } from 'class-validator';
+import { OmitType, PartialType } from '@nestjs/swagger';
 import type { EventReach } from './create-event.dto';
-import { CreateEventDto, EventReachProperty, EventTitleProperty } from './create-event.dto';
+import { CreateEventDto, EventEnumProperty, EventReachProperty, EventTitleProperty } from './create-event.dto';
 
 /**
  * `householdId` is create-only (#454). Attaching an event to a household is
@@ -45,16 +43,12 @@ export class UpdateEventDto extends PartialType(
   @EventTitleProperty({ optional: true })
   title?: string;
 
-  @ApiPropertyOptional({ enum: EventType })
-  @ValidateIf((_, value) => value !== undefined)
-  @IsEnum(EventType, { message: i18nValidationMessage('validation.isEnum') })
+  @EventEnumProperty(EventType)
   type?: EventType;
 
   @EventReachProperty()
   reach?: EventReach;
 
-  @ApiPropertyOptional({ enum: EventSchedulingMode })
-  @ValidateIf((_, value) => value !== undefined)
-  @IsEnum(EventSchedulingMode, { message: i18nValidationMessage('validation.isEnum') })
+  @EventEnumProperty(EventSchedulingMode)
   schedulingMode?: EventSchedulingMode;
 }

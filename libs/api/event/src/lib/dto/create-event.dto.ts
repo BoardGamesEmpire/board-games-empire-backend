@@ -75,6 +75,26 @@ export function EventTitleProperty({ optional = false }: { optional?: boolean } 
   );
 }
 
+/**
+ * An enum field an event can leave out but never clear: `type` and
+ * `schedulingMode`. Shared with `UpdateEventDto`, which names no default.
+ *
+ * `ValidateIf` rather than `IsOptional`, which skips null as well as
+ * undefined: left out, the column default applies on a create and the stored
+ * value stays on an update, but `null` is refused here instead of reaching the
+ * non-nullable column as a 500 (#1404).
+ */
+export function EventEnumProperty<TEnum extends Record<string, string>>(
+  enumType: TEnum,
+  defaultValue?: TEnum[keyof TEnum],
+): PropertyDecorator {
+  return applyDecorators(
+    ApiPropertyOptional({ enum: enumType, ...(defaultValue === undefined ? {} : { default: defaultValue }) }),
+    ValidateIf((_, value) => value !== undefined),
+    IsEnum(enumType, { message: i18nValidationMessage('validation.isEnum') }),
+  );
+}
+
 export class CreateEventDto {
   @EventTitleProperty()
   title!: string;
@@ -111,17 +131,13 @@ export class CreateEventDto {
   @IsOptional()
   url?: string;
 
-  @ApiPropertyOptional({ enum: EventType, default: EventType.CasualGathering })
-  @IsEnum(EventType, { message: i18nValidationMessage('validation.isEnum') })
-  @IsOptional()
+  @EventEnumProperty(EventType, EventType.CasualGathering)
   type?: EventType;
 
   @EventReachProperty(Reach.Friends)
   reach?: EventReach;
 
-  @ApiPropertyOptional({ enum: EventSchedulingMode, default: EventSchedulingMode.Fixed })
-  @IsEnum(EventSchedulingMode, { message: i18nValidationMessage('validation.isEnum') })
-  @IsOptional()
+  @EventEnumProperty(EventSchedulingMode, EventSchedulingMode.Fixed)
   schedulingMode?: EventSchedulingMode;
 
   @ApiPropertyOptional({

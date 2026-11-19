@@ -40,6 +40,23 @@ describe('CreateEventDto', () => {
     expect(dto.title).toBe('Game night');
   });
 
+  // IsOptional skipped null as well as a missing key, so a null for either
+  // non-nullable column passed the pipe and answered 500 at the database
+  // (#1404).
+  it.each([['type'], ['schedulingMode']])('rejects a null %s (#1404)', async (field) => {
+    await expect(propertiesWithErrors({ title: 'Game night', [field]: null })).resolves.toEqual([field]);
+  });
+
+  // Left out, each stays undefined, so the column default applies:
+  // CasualGathering and Fixed (#1404).
+  it('accepts an event that leaves out type and schedulingMode (#1404)', async () => {
+    const dto = plainToInstance(CreateEventDto, { title: 'Game night' });
+
+    await expect(validate(dto, { whitelist: true, forbidNonWhitelisted: true })).resolves.toEqual([]);
+    expect(dto.type).toBeUndefined();
+    expect(dto.schedulingMode).toBeUndefined();
+  });
+
   // The create check reads an empty string as a household id, which no
   // household role matches, so it would answer 403 to a request that only
   // meant "no household".
