@@ -415,11 +415,33 @@ describe('PluginLifecycleService', () => {
       expect(event.after.config).toEqual({ webhookUrl: 'https://z.example.test' });
     });
 
+    // Compared with the document the claim read, in the transaction: key
+    // order is no change, and the row served is the one read there (#903).
+    it('a document equal to the stored one writes nothing and emits nothing (#903)', async () => {
+      const stored = { webhookUrl: 'https://same.example.test', retries: 2 };
+      db.plugin.findUnique.mockResolvedValue(makePlugin({ config: { webhookUrl: 'https://stale.example.test' } }));
+      db.$queryRaw.mockResolvedValue([claimedRow({ config: stored })] as never);
+      const current = makePlugin({ config: stored });
+      db.plugin.findUniqueOrThrow.mockResolvedValue(current);
+
+      const result = await service.updateConfig({
+        slug: 'demo-sink',
+        actorId: 'admin-1',
+        config: { retries: 2, webhookUrl: 'https://same.example.test' },
+      });
+
+      expect(db.plugin.update).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+      expect(result).toBe(current);
+      expect(db.plugin.findUniqueOrThrow).toHaveBeenCalledWith({ where: { id: 'plugin-1' } });
+    });
+
     describe('the plugin-row claim (#578)', () => {
       it('claims the plugin row FOR NO KEY UPDATE, comparing the plugin manifest it validated against, before the write', async () => {
         db.plugin.findUnique.mockResolvedValue(makePlugin());
 
-        await service.updateConfig({ slug: 'demo-sink', actorId: 'admin-1', config: {} });
+        // A document other than the stored `{}`, which would write nothing (#903).
+        await service.updateConfig({ slug: 'demo-sink', actorId: 'admin-1', config: { webhookUrl: 'https://x.test' } });
 
         const [strings, ...values] = db.$queryRaw.mock.calls[0] as unknown as [TemplateStringsArray, ...unknown[]];
         expect(rawQueryText(strings)).toBe(
@@ -504,7 +526,7 @@ describe('PluginLifecycleService', () => {
         );
         expect(db.plugin.update).not.toHaveBeenCalled();
 
-        await service.updateConfig({ slug: 'demo-sink', actorId: 'admin-1', config: {} });
+        await service.updateConfig({ slug: 'demo-sink', actorId: 'admin-1', config: { webhookUrl: 'https://x.test' } });
 
         expect(db.plugin.update).toHaveBeenCalledTimes(1);
         const [, ...retryValues] = db.$queryRaw.mock.calls[1] as unknown as [TemplateStringsArray, ...unknown[]];

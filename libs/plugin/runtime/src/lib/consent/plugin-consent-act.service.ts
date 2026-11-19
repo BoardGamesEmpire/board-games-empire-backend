@@ -6,6 +6,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PluginConfigValidationError } from '../config/config-schema.errors';
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
+import { isSameConfigDocument } from '../config/same-config-document';
 import { householdSwitchSnapshot, userSwitchSnapshot } from '../events/plugin-event-snapshots';
 import {
   HouseholdPluginConfigUpdatedEvent,
@@ -284,6 +285,14 @@ export class PluginConsentActService {
       // the unit (ADR 0002, docs/adr/0002-retried-writes-use-client-request-ids.md).
       const unitBefore = await this.readUnitEnablement(tx, unit, plugin.id);
 
+      // A document equal to the stored one is no document: the switch-on
+      // answers as one that sent none, so it writes no document and
+      // announces none (#903).
+      const configToWrite =
+        unitBefore !== null && config !== undefined && isSameConfigDocument(unitBefore.config, config)
+          ? undefined
+          : config;
+
       // A household switch-on that supplies no document asks the dormancy
       // rule, with the active manifest, about the document it would leave
       // the unit holding: the retained one, or `{}` for a new unit
@@ -292,7 +301,7 @@ export class PluginConsentActService {
       // so a unit the read would call dormant is refused rather than
       // answered or half-recorded, whether or not it is already switched on
       // (#323, #1151). A supplied document was judged before the transaction.
-      if (household && kind === 'SwitchOn' && config === undefined) {
+      if (household && kind === 'SwitchOn' && configToWrite === undefined) {
         // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- a household unit reads from the household table, and TypeScript can't relate readUnitEnablement's result to the household flag (#1321)
         assertHeldConfigSatisfiesGate(this.configSchema, named.active, unitBefore as HouseholdPlugin | null);
       }
@@ -309,7 +318,7 @@ export class PluginConsentActService {
       const stand = decisionsStand(plan.decisions, standingBySlug);
 
       if (kind === 'SwitchOn') {
-        if (stand && unitBefore !== null && unitBefore.enabled && config === undefined) {
+        if (stand && unitBefore !== null && unitBefore.enabled && configToWrite === undefined) {
           return { changed: false, unit: unitBefore, switchedOff: false };
         }
       } else {
@@ -406,7 +415,7 @@ export class PluginConsentActService {
       if (household) {
         // A unit already switched on, with no document supplied, needs no
         // write: the gate above has judged the document it holds.
-        if (unitBefore !== null && unitBefore.enabled && config === undefined) {
+        if (unitBefore !== null && unitBefore.enabled && configToWrite === undefined) {
           return writtenOutcome(unitBefore);
         }
 
@@ -414,9 +423,9 @@ export class PluginConsentActService {
         // enablement: a first switch-on racing this one can insert the row
         // after this act's read, and the later write then updates it rather
         // than colliding with it (#1152). A new unit enablement holds the
-        // supplied document or `{}`; `config` undefined leaves a retained
-        // document as it is, since Prisma writes no column whose value is
-        // undefined.
+        // supplied document or `{}`; `configToWrite` undefined leaves a
+        // retained document as it is, since Prisma writes no column whose
+        // value is undefined.
         const written = await tx.householdPlugin.upsert({
           where: { householdId_pluginId: { householdId: unit.householdId, pluginId: plugin.id } },
           create: {
@@ -424,13 +433,13 @@ export class PluginConsentActService {
             pluginId: plugin.id,
             enabled: true,
             // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Prisma's InputJsonValue can't take Record<string, unknown>; the document is JSON the plugin's config schema has checked (#1321)
-            config: (config ?? {}) as Prisma.InputJsonValue,
+            config: (configToWrite ?? {}) as Prisma.InputJsonValue,
           },
           // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Prisma's InputJsonValue can't take Record<string, unknown>; the document is JSON the plugin's config schema has checked (#1321)
-          update: { enabled: true, config: config as Prisma.InputJsonValue | undefined },
+          update: { enabled: true, config: configToWrite as Prisma.InputJsonValue | undefined },
         });
 
-        return writtenOutcome(written, { configWritten: config !== undefined });
+        return writtenOutcome(written, { configWritten: configToWrite !== undefined });
       }
 
       const written = await tx.userPlugin.upsert({
@@ -586,7 +595,8 @@ export class PluginConsentActService {
    * names it, and every recorded act leaves at least one: a changed decision,
    * a switch or a config write (#1150). An act is recorded only when one of
    * those changes: a switch-on whose decisions stand over a unit already on,
-   * with no document supplied, answers `changed: false` and writes nothing.
+   * with no document supplied or the one it holds (#903), answers
+   * `changed: false` and writes nothing.
    */
   private emitEvents(
     outcome: Extract<ActOutcome, { changed: true }>,

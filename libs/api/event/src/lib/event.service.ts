@@ -63,6 +63,7 @@ import {
 import type { EventWithStatus } from './utils/event-status.util';
 import { EVENT_STATUS_DATE_SELECT, withEventStatus } from './utils/event-status.util';
 import { lockLiveEvent } from './utils/lock-live-event.util';
+import { rsvpDateFor } from './utils/rsvp-date.util';
 import { pageUpcomingEvents } from './utils/upcoming-events.util';
 
 @Injectable()
@@ -492,10 +493,12 @@ export class EventService {
 
               attendees: {
                 create: [
-                  // The creator joins as the event's host
+                  // The creator joins as the event's host, who has answered by
+                  // creating it, so the answer is dated (#1027)
                   {
                     user: { connect: { id: userId } },
                     status: EventParticipationStatus.Attending,
+                    rsvpDate: rsvpDateFor(EventParticipationStatus.Attending, initiatedAt),
                     role: {
                       create: {
                         role: { connect: { name: SystemRole.EventHost } },

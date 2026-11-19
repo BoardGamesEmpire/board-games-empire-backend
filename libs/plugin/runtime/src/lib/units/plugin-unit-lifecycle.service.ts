@@ -5,6 +5,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PluginConfigValidationError } from '../config/config-schema.errors';
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
+import { isSameConfigDocument } from '../config/same-config-document';
 import { householdSwitchSnapshot, userSwitchSnapshot } from '../events/plugin-event-snapshots';
 import {
   HouseholdPluginConfigUpdatedEvent,
@@ -187,11 +188,16 @@ export class PluginUnitLifecycleService {
       throw new PluginConfigValidationError(plugin.slug, issues);
     }
 
-    const { before, row } = await this.db.$transaction(async (tx) => {
+    const { before, row, changed } = await this.db.$transaction(async (tx) => {
       const existing = await this.openHouseholdUnit(tx, plugin, input.householdId, { expected: plugin });
 
       if (existing === null) {
         throw new PluginUnitNotEnrolledError(plugin.slug, 'Household');
+      }
+
+      // The document it holds, sent again, changes nothing: no write, no event (#903).
+      if (isSameConfigDocument(existing.config, input.config)) {
+        return { before: existing, row: existing, changed: false };
       }
 
       const updated = await tx.householdPlugin.update({
@@ -200,13 +206,15 @@ export class PluginUnitLifecycleService {
         data: { config: input.config as Prisma.InputJsonValue },
       });
 
-      return { before: existing, row: updated };
+      return { before: existing, row: updated, changed: true };
     });
 
-    this.emitter.emit(
-      HouseholdPluginConfigUpdatedEvent.eventName,
-      new HouseholdPluginConfigUpdatedEvent(before, row, initiatedAt),
-    );
+    if (changed) {
+      this.emitter.emit(
+        HouseholdPluginConfigUpdatedEvent.eventName,
+        new HouseholdPluginConfigUpdatedEvent(before, row, initiatedAt),
+      );
+    }
 
     return row;
   }

@@ -9,7 +9,10 @@ import type { EventWithStatus } from './event-status.util';
 export interface EventAttendance {
   readonly attendeeId: string;
   readonly role: string | null;
+
+  /** When the current answer was given; null exactly when the status is Invited (#1027). */
   readonly rsvpDate: Date | null;
+
   readonly status: EventParticipationStatus;
 }
 

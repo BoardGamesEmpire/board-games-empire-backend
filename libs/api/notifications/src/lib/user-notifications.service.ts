@@ -62,8 +62,8 @@ export class UserNotificationsService {
   }
 
   /**
-   * Marks the named notifications read, of those that are the user's own and
-   * that the caller may update. Both writes AND the caller's `update` ceiling
+   * Marks the named unread notifications read, of those that are the user's
+   * own and that the caller may update. Both writes AND the caller's `update` ceiling
    * into their filter, as a read composes its own: without it an API key
    * scoped to one notification marked every notification of its owner's
    * (#649). An id outside the ceiling is skipped, not refused, as an id that
@@ -75,6 +75,8 @@ export class UserNotificationsService {
       where: {
         id: { in: notificationIds },
         userId,
+        // As markAllRead: one already read keeps the readAt it has (#903).
+        read: false,
         // eslint-disable-next-line no-restricted-syntax -- a write's filter by the caller's ids, not a collection read
         AND: this.abilityService.getCurrentResourceConditions(ResourceType.Notification, Action.update),
       },

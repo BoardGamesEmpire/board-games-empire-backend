@@ -65,7 +65,8 @@ describe('UserNotificationsService', () => {
       db.notification.updateMany.mockResolvedValue({ count: 1 });
     });
 
-    it("markRead keeps to the named ids of the user's own, within the caller's update ceiling", async () => {
+    // A notification already read keeps the readAt it has (#903).
+    it("markRead keeps to the named unread ids of the user's own, within the caller's update ceiling", async () => {
       await service.markRead('user-1', ['n-1', 'n-2']);
 
       expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(
@@ -73,7 +74,7 @@ describe('UserNotificationsService', () => {
         Action.update,
       );
       expect(db.notification.updateMany).toHaveBeenCalledWith({
-        where: { id: { in: ['n-1', 'n-2'] }, userId: 'user-1', AND: [COND] },
+        where: { id: { in: ['n-1', 'n-2'] }, userId: 'user-1', read: false, AND: [COND] },
         data: { read: true, readAt: expect.any(Date) },
       });
     });
