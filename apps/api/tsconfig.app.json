@@ -65,6 +65,9 @@
       "path": "../../libs/api/user/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/api/upstream-account/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/api/system-settings/tsconfig.lib.json"
     },
     {

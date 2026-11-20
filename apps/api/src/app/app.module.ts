@@ -39,6 +39,7 @@ import { CACHE_REDIS_CLIENT, createCacheStore, QUEUE_REDIS_CLIENT, RedisModule }
 import { SafeHttpModule } from '@bge/safe-http';
 import { SecureHttpModule } from '@bge/secure-http';
 import { PrivacyPolicyModule, SystemSettingsModule } from '@bge/system-settings';
+import { UpstreamAccountModule } from '@bge/upstream-account';
 import { UserModule } from '@bge/user';
 import { WebhookSubscriptionModule } from '@bge/webhook-subscription';
 import { WellKnownModule } from '@bge/well-known';
@@ -239,6 +240,8 @@ import { apiPluginModuleOptions } from './plugin-module.options';
     QuotasModule,
     SafeHttpModule,
     SystemSettingsModule,
+    // A user's own upstream accounts under users/me/upstream-accounts (#935).
+    UpstreamAccountModule,
     UserModule,
     WebhookSubscriptionModule,
     // Webhook delivery PRODUCER: the onAny dispatcher that turns the Event

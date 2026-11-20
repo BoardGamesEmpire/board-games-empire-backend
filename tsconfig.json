@@ -266,6 +266,9 @@
     },
     {
       "path": "./apps/gateway-coordinator-e2e"
+    },
+    {
+      "path": "./libs/api/upstream-account"
     }
   ]
 }
