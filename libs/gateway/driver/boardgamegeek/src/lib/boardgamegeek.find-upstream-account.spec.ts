@@ -143,6 +143,25 @@ describe('BoardGameGeekDriver findUpstreamAccount (#1226)', () => {
     expect(answer.message).toContain('502');
   });
 
+  it("logs a failed lookup by the error's name, never its message, which can quote the username", async () => {
+    const error = jest.fn();
+    const fetch: DriverOptions['fetch'] = () =>
+      Promise.reject(new Error('Request to https://boardgamegeek.com/xmlapi2/user?name=bgfan timed out'));
+    const driver = new BoardGameGeekDriver({
+      fetch,
+      apiKey: 'test-key',
+      version: '0.0.0-test',
+      logger: { ...silent, error },
+      timing: { rateLimitRetryMs: 1 },
+    });
+
+    const answer = await find({ username: 'bgfan' }, driver);
+
+    expect(answer.status).toBe(proto.ResultStatus.RESULT_STATUS_ERROR);
+    expect(error).toHaveBeenCalledWith('findUpstreamAccount failed: Error');
+    expect(JSON.stringify(error.mock.calls)).not.toContain('bgfan');
+  });
+
   // BoardGameGeek keys users by name, so an account's external id is its
   // username, and a lookup by it is the same request with the same answer.
   it('looks an external id up as the username it is: the same request, the same answer', async () => {

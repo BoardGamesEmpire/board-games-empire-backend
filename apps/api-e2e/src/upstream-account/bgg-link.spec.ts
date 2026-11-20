@@ -144,15 +144,14 @@ describe('linking a BoardGameGeek account (#1226)', () => {
 
     // An API key acts for its owner but is not the owner. This one holds the
     // grants to read and link the owner's upstream accounts; the list
-    // answering it shows the key works. That the 403 is the route's own
-    // refusal of a key, past the permission check, is pinned by the
-    // controller's unit spec.
+    // answering it shows the key works. The code shows the 403 is the
+    // route's own refusal of a key, past the permission check.
     const key = await mintApiKey(baseUrl, db.client, user, {
       resourceType: ResourceType.UpstreamAccount,
       slugs: ['create:upstream_account:own', 'read:upstream_account:own'],
     });
     await request(baseUrl).get(LIST).set(key.headers).expect(200);
-    await link(key.headers).expect(403);
+    expectErrorEnvelope(await link(key.headers), { status: 403, code: 'UPSTREAM_LINK_SESSION_REQUIRED' });
 
     const anonymous = await actors.anonymous();
     await link(anonymous.headers).expect(403);

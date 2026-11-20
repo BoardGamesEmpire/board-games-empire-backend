@@ -1,4 +1,4 @@
-import { AuditContextService, requireSessionUserId } from '@bge/actor-context';
+import { AuditContextService } from '@bge/actor-context';
 import type { UpstreamAccount } from '@bge/database';
 import { Action, ResourceType, Upstream } from '@bge/database';
 import type { I18nMessage } from '@bge/i18n';
@@ -10,6 +10,7 @@ import { Http } from '@status/codes';
 import type { Response } from 'express';
 import type { UpstreamAccountDto } from '../dto/upstream-account.dto';
 import { toUpstreamAccountDto } from '../dto/upstream-account.dto';
+import { linkingUserId } from '../linking-user-id';
 import { UpstreamAccountErrorCode } from '../upstream-account.constants';
 import { UpstreamThrottledException } from '../upstream-throttled.exception';
 import { BGG_LOOKUP_TIMEOUT_MS, BggLinkService } from './bgg-link.service';
@@ -49,7 +50,9 @@ export class BggLinkController {
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({
     status: Http.Forbidden,
-    description: "Insufficient permissions, or not a registered user's own session: an API key or an anonymous user",
+    description:
+      "Insufficient permissions, or not a registered user's own session: an API key or an anonymous user " +
+      `(code ${UpstreamAccountErrorCode.SessionRequired})`,
   })
   @ApiResponse({
     status: Http.NotFound,
@@ -76,7 +79,7 @@ export class BggLinkController {
     @Body() body: LinkByUsernameDto,
     @Res({ passthrough: true }) response: Response,
   ): Promise<{ message: I18nMessage; upstreamAccount: UpstreamAccountDto }> {
-    const userId = requireSessionUserId(this.auditContext.getActor());
+    const userId = linkingUserId(this.auditContext.getActor(), Upstream.BoardGameGeek);
 
     let account: UpstreamAccount;
     try {

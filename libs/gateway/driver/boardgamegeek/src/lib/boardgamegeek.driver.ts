@@ -57,6 +57,23 @@ const SEARCH_THINGS_DEADLINE_MS = 12_000;
 /** BGG's profile page for a user, which the account's profile address names. */
 const profileUrlOf = (name: string): string => `https://boardgamegeek.com/user/${encodeURIComponent(name)}`;
 
+/**
+ * A failed lookup as its log line names it: the error's name, and its code
+ * when it has one. A failed call's message can quote the request's address,
+ * whose query carries the username, as a plugin's fetch does when it times
+ * out (#1226).
+ */
+const failureKind = (err: unknown): string => {
+  if (!(err instanceof Error)) {
+    return typeof err;
+  }
+
+  const code =
+    'code' in err && (typeof err.code === 'number' || typeof err.code === 'string') ? `, code ${err.code}` : '';
+
+  return `${err.name}${code}`;
+};
+
 /** The account for a user, its name decoded once from the entities BGG encodes it with (#716). */
 const toUpstreamAccount = (user: BggUser): proto.UpstreamAccountData => {
   const name = decodeText(user.name);
@@ -408,9 +425,10 @@ export class BoardGameGeekDriver implements DataGatewayDriver {
           } satisfies proto.FindUpstreamAccountResponse);
         }
 
-        // The username stays out of the log: it names a person.
+        // The username stays out of the log: it names a person. The answer
+        // keeps the message, which the api doesn't log either.
         const message = err instanceof Error ? err.message : String(err);
-        this.logger.error(`findUpstreamAccount failed: ${message}`);
+        this.logger.error(`findUpstreamAccount failed: ${failureKind(err)}`);
 
         return of({
           correlationId: request.correlationId,

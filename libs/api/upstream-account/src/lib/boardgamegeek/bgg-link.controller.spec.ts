@@ -177,12 +177,14 @@ describe('BggLinkController (#1226)', () => {
     it.each<[string, Actor]>([
       ['an API key', { kind: 'apiKey', apiKeyId: 'key-1', userId: ME }],
       ['an anonymous user', { kind: 'anonymous', userId: ME }],
-    ])('refuses %s with 403, asking no one', async (_, actor) => {
+    ])('refuses %s with 403 UPSTREAM_LINK_SESSION_REQUIRED, asking no one', async (_, actor) => {
       getActor.mockReturnValue(actor);
 
       const answer = await post({ username: 'bgfan' });
 
       expect(answer.status).toBe(HttpStatus.FORBIDDEN);
+      // Its own code, so a client can tell it from a missing permission.
+      await expect(answer.json()).resolves.toMatchObject({ code: 'UPSTREAM_LINK_SESSION_REQUIRED' });
       expect(linkAccount).not.toHaveBeenCalled();
     });
 
