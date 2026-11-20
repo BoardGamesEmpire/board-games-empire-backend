@@ -17,7 +17,7 @@ export interface MetricExportTiming {
  *
  * NodeSDK reads these vars only for readers it builds itself; `initOtel`
  * passes its own reader, so it must pass them along. A missing, empty,
- * non-numeric or non-positive value falls back to the SDK default.
+ * non-numeric, infinite or non-positive value falls back to the SDK default.
  *
  * The timeout is limited to the interval: `PeriodicExportingMetricReader`
  * throws when the timeout is longer, so setting only a short interval
@@ -25,20 +25,25 @@ export interface MetricExportTiming {
  */
 export function resolveMetricExportTiming(env: NodeJS.ProcessEnv = process.env): MetricExportTiming {
   const exportIntervalMillis =
-    readPositiveInt(env[OTEL_METRIC_EXPORT_INTERVAL_ENV]) ?? DEFAULT_METRIC_EXPORT_INTERVAL_MS;
+    readPositiveNumber(env[OTEL_METRIC_EXPORT_INTERVAL_ENV]) ?? DEFAULT_METRIC_EXPORT_INTERVAL_MS;
   const exportTimeoutMillis = Math.min(
-    readPositiveInt(env[OTEL_METRIC_EXPORT_TIMEOUT_ENV]) ?? DEFAULT_METRIC_EXPORT_TIMEOUT_MS,
+    readPositiveNumber(env[OTEL_METRIC_EXPORT_TIMEOUT_ENV]) ?? DEFAULT_METRIC_EXPORT_TIMEOUT_MS,
     exportIntervalMillis,
   );
 
   return { exportIntervalMillis, exportTimeoutMillis };
 }
 
-function readPositiveInt(raw: string | undefined): number | undefined {
-  if (raw === undefined || raw === '') {
+/**
+ * Parses the way the SDK's `getNumberFromEnv` does, with `Number` rather
+ * than `parseInt`: `10000ms` falls back instead of reading as `10000`, and
+ * `5.5` is kept whole instead of truncated to `5`.
+ */
+function readPositiveNumber(raw: string | undefined): number | undefined {
+  if (raw === undefined || raw.trim() === '') {
     return undefined;
   }
 
-  const parsed = Number.parseInt(raw, 10);
+  const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }
