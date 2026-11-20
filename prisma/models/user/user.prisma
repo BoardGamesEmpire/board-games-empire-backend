@@ -35,16 +35,16 @@ model User {
   sessions                   Session[]
   twofactors                 TwoFactor[]
   sessionPlayers             SessionPlayer[]
-  mediaOwned                 MediaObject[]           @relation("MediaOwner")
-  mediaUploaded              MediaObject[]           @relation("MediaUploader")
-  mediaSharesCreated         MediaShare[]            @relation("MediaSharedBy")
-  mediaContributed           MediaContribution[]     @relation("MediaContributedBy")
-  mediaContributionsReviewed MediaContribution[]     @relation("MediaContributionReviewer")
+  mediaOwned                 MediaObject[]         @relation("MediaOwner")
+  mediaUploaded              MediaObject[]         @relation("MediaUploader")
+  mediaSharesCreated         MediaShare[]          @relation("MediaSharedBy")
+  mediaContributed           MediaContribution[]   @relation("MediaContributedBy")
+  mediaContributionsReviewed MediaContribution[]   @relation("MediaContributionReviewer")
   lists                      List[]
-  gatewayConnections         UserGatewayConnection[]
+  upstreamAccounts           UpstreamAccount[]
   userPlugins                UserPlugin[]
-  householdMember            HouseholdMember[]       @relation("HouseholdMemberships")
-  webhookSubscriptions       WebhookSubscription[]   @relation("WebhookSubscriptionsCreated")
+  householdMember            HouseholdMember[]     @relation("HouseholdMemberships")
+  webhookSubscriptions       WebhookSubscription[] @relation("WebhookSubscriptionsCreated")
 
   preferences UserPreferences?
   profile     UserProfile?

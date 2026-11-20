@@ -72,10 +72,9 @@ model DataGateway {
   lastInterviewFailedAt DateTime?                    @map("last_interview_failed_at") @db.Timestamptz(3)
   lastInterviewFailure  DataGatewayInterviewFailure? @map("last_interview_failure")
 
-  gameSources            GameSource[]
-  importActivities       ImportActivity[]
-  sections               DataGatewaySection[]
-  userGatewayConnections UserGatewayConnection[]
+  gameSources      GameSource[]
+  importActivities ImportActivity[]
+  sections         DataGatewaySection[]
 
   createdBy   User?   @relation("DataGatewayCreator", fields: [createdById], references: [id])
   createdById String? @map("created_by_id")

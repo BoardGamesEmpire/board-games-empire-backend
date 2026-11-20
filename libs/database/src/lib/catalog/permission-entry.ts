@@ -121,6 +121,8 @@ export type SubjectWhereInput = ForEverySubject<{
   // System
   SystemSetting: Prisma.SystemSettingWhereInput;
 
+  UpstreamAccount: Prisma.UpstreamAccountWhereInput;
+
   // User
   User: Prisma.UserWhereInput;
 
@@ -202,6 +204,8 @@ export type SubjectScalarField = ForEverySubject<{
 
   // System
   SystemSetting: Prisma.SystemSettingScalarFieldEnum;
+
+  UpstreamAccount: Prisma.UpstreamAccountScalarFieldEnum;
 
   // User
   User: Prisma.UserScalarFieldEnum;

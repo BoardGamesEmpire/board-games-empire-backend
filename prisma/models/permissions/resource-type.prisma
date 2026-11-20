@@ -24,6 +24,7 @@ enum ResourceType {
   UserProfile
   UserGameCustomization
   Friendship
+  UpstreamAccount
 
   // ─── Feedback ───────────────────────────────────────────
   FeedbackReport

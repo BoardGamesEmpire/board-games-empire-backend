@@ -127,6 +127,9 @@ const KNOWN_READ_CEILINGS: PinnedReadCeilings = {
   Friendship: {
     User: { 'read:friendships:own': 'binds user.id' },
   },
+  UpstreamAccount: {
+    User: { 'read:upstream_account:own': 'binds user.id' },
+  },
   FeedbackReport: {
     Admin: { 'read:feedback_report': 'every row', 'manage:feedback_report': 'every row' },
     Moderator: { 'read:feedback_report': 'every row' },

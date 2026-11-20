@@ -513,6 +513,33 @@ export const PERMISSION_CATALOG = [
     riskLevel: RiskLevel.Low,
     reason: 'Remove a friendship you are part of',
   }),
+  // --- Upstream accounts ---
+  // A user manages only their own upstream accounts (#935); staff read them
+  // through `read:all`.
+  permission({
+    action: Action.create,
+    subject: ResourceType.UpstreamAccount,
+    conditions: { userId: '{{ user.id }}' },
+    slug: 'create:upstream_account:own',
+    riskLevel: RiskLevel.Low,
+    reason: 'Link your own upstream account',
+  }),
+  permission({
+    action: Action.read,
+    subject: ResourceType.UpstreamAccount,
+    conditions: { userId: '{{ user.id }}' },
+    slug: 'read:upstream_account:own',
+    riskLevel: RiskLevel.Low,
+    reason: 'View your own upstream accounts',
+  }),
+  permission({
+    action: Action.delete,
+    subject: ResourceType.UpstreamAccount,
+    conditions: { userId: '{{ user.id }}' },
+    slug: 'delete:upstream_account:own',
+    riskLevel: RiskLevel.Low,
+    reason: 'Unlink your own upstream account',
+  }),
   // Friends reach: read what a friend's reach admits their friends to. The
   // ladder reads upwards, so `Public` admits a friend as `Friends` does (#495).
   permission({

@@ -1,0 +1,31 @@
+// A user's account at an upstream (Steam, BoardGameGeek, ...), which a
+// DataGateway that serves the upstream can sync from (#935).
+//
+// `verified` is true once the upstream itself vouched for the account (Steam
+// sign-in). One verified external id belongs to one user: a partial unique
+// index, hand-written in the migration, `upstream_accounts_verified_external_id`
+// on (upstream, external_id) WHERE verified. Unverified rows are claims and may
+// repeat.
+model UpstreamAccount {
+  id String @id @default(cuid(2))
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String @map("user_id")
+
+  upstream Upstream
+
+  // The upstream's own id for the account: a Steam id, a BoardGameGeek username.
+  externalId  String  @map("external_id")
+  displayName String? @map("display_name")
+  profileUrl  String? @map("profile_url")
+
+  verified Boolean @default(false)
+
+  syncLogs UpstreamAccountSyncLog[]
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([userId, upstream])
+  @@map("upstream_accounts")
+}

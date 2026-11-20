@@ -16,7 +16,7 @@
 /// userId would orphan enablement rows on the very next account deletion.
 /// The AuditLog precedent does not transfer either — that table is history,
 /// where a stale id is a record; this one is live state a serving predicate
-/// reads. Cascade matches UserGatewayConnection: per-user configuration
+/// reads. Cascade matches UpstreamAccount: per-user configuration
 /// dies with the user.
 model UserPlugin {
   id String @id @default(cuid(2))
