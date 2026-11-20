@@ -1,4 +1,4 @@
-import type { DataGatewayCapability, Prisma, Upstream, UpstreamAccount } from '@bge/database';
+import type { Prisma, Upstream, UpstreamAccount } from '@bge/database';
 import {
   constraintIdentity,
   DatabaseService,
@@ -6,13 +6,15 @@ import {
   isPrismaDependentRecordNotFoundError,
   isPrismaUniqueConstraintError,
 } from '@bge/database';
+import { PLUGIN_SERVED_WHERE } from '@bge/gateway-registry';
 import { CodedHttpException, t } from '@bge/i18n';
 import { PRIVACY_POLICY_PATH, PrivacyPolicyService } from '@bge/system-settings';
 import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Http } from '@status/codes';
 import type { UpstreamPrivacyPolicyDto } from './dto/upstream-accounts-response.dto';
-import { UpstreamAccountErrorCode, UPSTREAMS_WITH_LINK_METHOD } from './upstream-account.constants';
+import type { LinkMethod } from './upstream-account.constants';
+import { LINK_METHODS, UpstreamAccountErrorCode } from './upstream-account.constants';
 import type { UpstreamAccountSnapshot } from './upstream-account.events';
 import {
   UpstreamAccountLinkedEvent,
@@ -68,15 +70,18 @@ const VERIFIED_EXTERNAL_ID_SPELLINGS = [
 
 /**
  * The DataGateways a link at `upstream` can go through (#935, #1226): enabled,
- * undeleted and declaring the upstream, and, when the link asks the
- * DataGateway something, serving that capability ({@link
- * UPSTREAMS_WITH_LINK_METHOD}) with an admin not having switched it off.
+ * undeleted and declaring the upstream; for a plugin DataGateway, with a
+ * plugin the server serves, by routing's own rule (`PLUGIN_SERVED_WHERE`,
+ * #1083); and, when the link asks the DataGateway something, serving the
+ * capability its {@link LinkMethod} names, with an admin not having switched
+ * it off.
  */
-function usableForLink(upstream: Upstream, capability: DataGatewayCapability | null): Prisma.DataGatewayWhereInput {
+function usableForLink(upstream: Upstream, { capability }: LinkMethod): Prisma.DataGatewayWhereInput {
   return {
     enabled: true,
     deletedAt: null,
     upstream,
+    AND: [PLUGIN_SERVED_WHERE],
     ...(capability !== null && {
       capabilities: { has: capability },
       NOT: { disabledCapabilities: { has: capability } },
@@ -85,9 +90,11 @@ function usableForLink(upstream: Upstream, capability: DataGatewayCapability | n
 }
 
 /**
- * A user's upstream accounts (#935): which upstreams can be linked, the
- * user's own accounts, unlinking one, and storing one a link has proved. Each
- * link and unlink is audited through its event.
+ * A user's upstream accounts (#935): which upstreams can be linked and the
+ * DataGateway a link goes through, the user's own accounts, unlinking one,
+ * and storing one a link makes: verified when the upstream vouched for it, as
+ * Steam sign-in does, or an unverified claim, as a BoardGameGeek username is
+ * (#1226). Each link and unlink is audited through its event.
  */
 @Injectable()
 export class UpstreamAccountService {
@@ -101,15 +108,13 @@ export class UpstreamAccountService {
 
   /**
    * The upstreams a user can link an account at now: those this server has a
-   * way to link ({@link UPSTREAMS_WITH_LINK_METHOD}) with a DataGateway usable
-   * for the link, the rule {@link linkDataGateway} picks one by. Ordered as
-   * the `Upstream` enum is.
+   * way to link ({@link LINK_METHODS}) with a DataGateway usable for the
+   * link, the rule {@link linkDataGateway} picks one by. Ordered as the
+   * `Upstream` enum is.
    */
   async linkableUpstreams(): Promise<Upstream[]> {
     const usable = await this.db.dataGateway.findMany({
-      where: {
-        OR: [...UPSTREAMS_WITH_LINK_METHOD].map(([upstream, capability]) => usableForLink(upstream, capability)),
-      },
+      where: { OR: [...LINK_METHODS].map(([upstream, method]) => usableForLink(upstream, method)) },
       select: { upstream: true },
       distinct: ['upstream'],
       orderBy: { upstream: 'asc' },
@@ -119,22 +124,38 @@ export class UpstreamAccountService {
   }
 
   /**
-   * The DataGateway a link at `upstream` goes through (#1226): of those usable
-   * for it, by the rule {@link linkableUpstreams} lists upstreams by, the one
-   * added first, so the same one answers while it stays usable. Null when none
-   * is usable, or this server has no way to link at `upstream`.
+   * The DataGateway a link at `upstream` goes through, the one check every
+   * link makes before it starts (#935, #1226): of those usable for it, by the
+   * rule {@link linkableUpstreams} lists upstreams by, the one added first, so
+   * the same one answers while it stays usable. Refuses with 409
+   * `UPSTREAM_NOT_LINKABLE` when none is usable, or this server has no way to
+   * link at `upstream`. For a link that asks the DataGateway something, the
+   * message also tells a server admin about the capability it needs: a
+   * DataGateway can be on and still not serve it, as one interviewed before
+   * it declared it does (#1226).
    */
-  async linkDataGateway(upstream: Upstream): Promise<{ id: string } | null> {
-    const capability = UPSTREAMS_WITH_LINK_METHOD.get(upstream);
-    if (capability === undefined) {
-      return null;
+  async linkDataGateway(upstream: Upstream): Promise<{ id: string }> {
+    const method = LINK_METHODS.get(upstream);
+    const dataGateway =
+      method === undefined
+        ? null
+        : await this.db.dataGateway.findFirst({
+            where: usableForLink(upstream, method),
+            select: { id: true },
+            orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+          });
+
+    if (dataGateway === null) {
+      throw new CodedHttpException(
+        Http.Conflict,
+        UpstreamAccountErrorCode.NotLinkable,
+        method?.capability
+          ? t('errors.upstream_account.not_linkable_by_lookup', { upstream })
+          : t('errors.upstream_account.not_linkable', { upstream }),
+      );
     }
 
-    return this.db.dataGateway.findFirst({
-      where: usableForLink(upstream, capability),
-      select: { id: true },
-      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-    });
+    return dataGateway;
   }
 
   /**

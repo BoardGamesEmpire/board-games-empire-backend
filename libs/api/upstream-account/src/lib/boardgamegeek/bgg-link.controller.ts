@@ -1,14 +1,17 @@
 import { AuditContextService, requireSessionUserId } from '@bge/actor-context';
+import type { UpstreamAccount } from '@bge/database';
 import { Action, ResourceType, Upstream } from '@bge/database';
 import type { I18nMessage } from '@bge/i18n';
 import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
-import { Body, Controller, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Post, Res, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiCreatedResponse, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
+import type { Response } from 'express';
 import type { UpstreamAccountDto } from '../dto/upstream-account.dto';
 import { toUpstreamAccountDto } from '../dto/upstream-account.dto';
 import { UpstreamAccountErrorCode } from '../upstream-account.constants';
+import { UpstreamThrottledException } from '../upstream-throttled.exception';
 import { BGG_LOOKUP_TIMEOUT_MS, BggLinkService } from './bgg-link.service';
 import { LinkByUsernameDto, UpstreamAccountLinkedResponseDto } from './dto/link-by-username.dto';
 
@@ -63,14 +66,30 @@ export class BggLinkController {
     status: Http.ServiceUnavailable,
     description:
       'Nothing was linked. BoardGameGeek is getting too many requests from this server: try again after ' +
-      `\`retryAfterMs\` milliseconds (code ${UpstreamAccountErrorCode.Throttled}); or BoardGameGeek could not be ` +
+      `\`retryAfterMs\` milliseconds, also sent as the \`Retry-After\` header in seconds ` +
+      `(code ${UpstreamAccountErrorCode.Throttled}); or BoardGameGeek could not be ` +
       `reached, or didn't answer in time (code ${UpstreamAccountErrorCode.Unreachable})`,
   })
   @CheckPolicies((ability) => ability.can(Action.create, ResourceType.UpstreamAccount))
   @Post()
-  async link(@Body() body: LinkByUsernameDto): Promise<{ message: I18nMessage; upstreamAccount: UpstreamAccountDto }> {
+  async link(
+    @Body() body: LinkByUsernameDto,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<{ message: I18nMessage; upstreamAccount: UpstreamAccountDto }> {
     const userId = requireSessionUserId(this.auditContext.getActor());
-    const account = await this.bggLink.link(userId, body.username);
+
+    let account: UpstreamAccount;
+    try {
+      account = await this.bggLink.link(userId, body.username);
+    } catch (error) {
+      // A throttled link's wait goes in the header too, in seconds, for a
+      // client or proxy that reads only the header (#1226).
+      if (error instanceof UpstreamThrottledException) {
+        response.setHeader('Retry-After', String(error.retryAfterSeconds));
+      }
+
+      throw error;
+    }
 
     return {
       message: t('success.upstream_account.linked_by_username', { upstream: Upstream.BoardGameGeek }),

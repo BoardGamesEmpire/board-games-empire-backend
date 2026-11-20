@@ -410,7 +410,8 @@ export class InMemoryGatewayDriver implements DataGatewayDriver {
     }
 
     const value = 'username' in key ? key.username : key.externalId;
-    const retryAfterMs = this.fixtures.throttledUpstreamAccountKeys?.[value];
+    // A Map, so a key such as `constructor` reads nothing off Object.prototype.
+    const retryAfterMs = new Map(Object.entries(this.fixtures.throttledUpstreamAccountKeys ?? {})).get(value);
     if (retryAfterMs !== undefined) {
       return of<proto.FindUpstreamAccountResponse>({
         correlationId: request.correlationId,

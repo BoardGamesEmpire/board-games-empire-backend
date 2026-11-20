@@ -36,7 +36,9 @@ service GatewayService {
   // Looks up a user's upstream account, by username or by external ID
   // (#1226). It answers RESULT with the account, NOT_FOUND when the upstream
   // has none by that key, or RATE_LIMITED with retry_after_ms. A request
-  // naming neither key is refused with INVALID_ARGUMENT.
+  // naming neither key is refused with INVALID_ARGUMENT. Every DataGateway
+  // declaring it looks up by username; see FindUpstreamAccountRequest for
+  // the external ID.
   rpc FindUpstreamAccount(FindUpstreamAccountRequest) returns (FindUpstreamAccountResponse);
 }
 
@@ -344,8 +346,11 @@ message FetchGamesResponse {
 message FindUpstreamAccountRequest {
   string correlation_id = 1;
 
-  // The key the upstream account is looked up by. A DataGateway may serve
-  // only one of them, and answers the other INVALID_ARGUMENT.
+  // The key the upstream account is looked up by. Every DataGateway that
+  // declares FindUpstreamAccount looks up by username. It looks up by
+  // external ID where the upstream keys accounts by an id it can look up
+  // (BoardGameGeek's id is the username itself), and otherwise answers a
+  // request by external ID INVALID_ARGUMENT.
   oneof key {
     // The name the user goes by at the upstream, as they typed it.
     string username = 2;

@@ -1,8 +1,9 @@
 import type { Prisma } from '@bge/database';
-import { AuthType, DataGatewayCapability, ResourceType, Upstream } from '@bge/database';
+import { AuthType, DataGatewayCapability, PluginCategory, PluginScope, ResourceType, Upstream } from '@bge/database';
 import type { Actors, SessionActor } from '@bge/testing-e2e';
 import { createActors } from '@bge/testing-e2e';
 import request from 'supertest';
+import { pluginRowData } from '../plugin/plugin-row-fixtures';
 import { mintApiKey } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import { expectErrorEnvelope } from '../support/error-envelope';
@@ -83,6 +84,33 @@ describe('linking a BoardGameGeek account (#1226)', () => {
 
     await expect(linkable(user)).resolves.toEqual(['boardgamegeek']);
     await expect(db.client.upstreamAccount.count({ where: { userId: user.user.id } })).resolves.toBe(0);
+  });
+
+  // A plugin DataGateway keeps its row enabled when its plugin is switched
+  // off, and routing refuses it then. The link reads past it as routing does,
+  // or every link would pick it and fail (#1083, #1226).
+  it('lists BoardGameGeek for a plugin DataGateway only while the server serves its plugin', async () => {
+    const user = await actors.user();
+    const plugin = await db.client.plugin.create({
+      data: pluginRowData({ category: PluginCategory.DataGateway, scope: PluginScope.Server, enabled: false }),
+    });
+    await db.client.dataGateway.create({
+      data: {
+        name: `BoardGameGeek Plugin Gateway ${++seq}`,
+        upstream: Upstream.BoardGameGeek,
+        enabled: true,
+        capabilities: [DataGatewayCapability.Search, DataGatewayCapability.FindUpstreamAccount],
+        pluginId: plugin.id,
+      },
+    });
+
+    await expect(linkable(user)).resolves.toEqual([]);
+    expectErrorEnvelope(await link(user.headers), { status: 409, code: 'UPSTREAM_NOT_LINKABLE' });
+
+    // The control: the same plugin, switched on, makes BoardGameGeek linkable.
+    await db.client.plugin.update({ where: { id: plugin.id }, data: { enabled: true } });
+
+    await expect(linkable(user)).resolves.toEqual(['boardgamegeek']);
   });
 
   // The user is told the lookup failed, never a 500, and nothing is stored.

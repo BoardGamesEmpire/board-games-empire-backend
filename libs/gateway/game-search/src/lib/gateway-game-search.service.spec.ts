@@ -1328,6 +1328,46 @@ describe('GatewayGameSearchService', () => {
         message: 'upstream exploded',
       });
     });
+
+    // A driver's error may quote the username, which is the user's personal
+    // data (#1226), so the log names the failure by its kind and code only.
+    it('logs a failed lookup by the error’s name and gRPC code, never its message', async () => {
+      const error = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      const failing = new InMemoryGatewayDriver({ upstreamAccountsByUsername: { ada } });
+      failing.failWith(Object.assign(new TypeError('no user named ada-lovelace'), { code: 13 }));
+      registry.register('bgg', failing);
+
+      try {
+        await lastValueFrom(service.findUpstreamAccount(findRequest('bgg', 'ada-lovelace')));
+
+        const logged = error.mock.calls.map((args) => args.map(String).join(' ')).join('\n');
+        expect(logged).toContain('DataGateway bgg');
+        expect(logged).toContain('TypeError');
+        expect(logged).toContain('13');
+        expect(logged).not.toContain('ada-lovelace');
+      } finally {
+        error.mockRestore();
+      }
+    });
+
+    // Over gRPC the request's oneof carries one key; in-process both fields
+    // may be present, and an empty one names no key (#1226).
+    it('asks by the key the request names, as the contract reads it: an empty username is none', async () => {
+      const bgg = new InMemoryGatewayDriver({ upstreamAccountsByUsername: { ada } });
+      registry.register('bgg', bgg);
+      const found = jest.spyOn(bgg, 'findUpstreamAccount');
+
+      const response = await lastValueFrom(
+        service.findUpstreamAccount({ correlationId: 'corr-4', gatewayId: 'bgg', username: '', externalId: 'Ada' }),
+      );
+
+      expect(response).toEqual(expect.objectContaining({ status: RESULT, account: ada }));
+      expect(found.mock.calls[0]?.[0]).toEqual({
+        correlationId: 'corr-4',
+        externalId: 'Ada',
+        trafficClass: proto.TrafficClass.TRAFFIC_CLASS_LIVE,
+      });
+    });
   });
 
   describe('fetchExpansions', () => {

@@ -106,14 +106,32 @@ describe('a plugin DataGateway the coordinator runs', () => {
   it('routes FindUpstreamAccount through CoordinatorService to the plugin DataGateway (#1226)', async () => {
     const { username, ...account } = FIRST_BUILD.upstreamAccount;
 
-    await expect(coordinator().service.findUpstreamAccount(plugin.gatewayId, username)).resolves.toMatchObject({
+    await expect(coordinator().service.findUpstreamAccount(plugin.gatewayId, { username })).resolves.toMatchObject({
       gatewayId: plugin.gatewayId,
       status: 'RESULT_STATUS_RESULT',
       account,
     });
 
     await expect(
-      coordinator().service.findUpstreamAccount(plugin.gatewayId, 'nobody-by-this-name'),
+      coordinator().service.findUpstreamAccount(plugin.gatewayId, { username: 'nobody-by-this-name' }),
+    ).resolves.toMatchObject({ gatewayId: plugin.gatewayId, status: 'RESULT_STATUS_NOT_FOUND' });
+  });
+
+  // A request by external id carries only that member of the oneof over the
+  // wire, so the coordinator must read the username as unset, not as an
+  // empty name, and ask by the external id (#1226).
+  it('routes FindUpstreamAccount by external id through CoordinatorService (#1226)', async () => {
+    const { externalId, displayName, profileUrl } = FIRST_BUILD.upstreamAccount;
+    const account = { externalId, displayName, profileUrl };
+
+    await expect(coordinator().service.findUpstreamAccount(plugin.gatewayId, { externalId })).resolves.toMatchObject({
+      gatewayId: plugin.gatewayId,
+      status: 'RESULT_STATUS_RESULT',
+      account,
+    });
+
+    await expect(
+      coordinator().service.findUpstreamAccount(plugin.gatewayId, { externalId: 'no-account-by-this-id' }),
     ).resolves.toMatchObject({ gatewayId: plugin.gatewayId, status: 'RESULT_STATUS_NOT_FOUND' });
   });
 

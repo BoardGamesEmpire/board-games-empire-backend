@@ -133,7 +133,13 @@ export interface CoordinatorClient {
   check(): Promise<{ readonly status: string }>;
   connectGateway(call: ConnectGatewayCall): Promise<GatewayAdminReply>;
   fetchGame(gatewayId: string, externalId: string, actor?: Actor): Promise<CoordinatorFetchReply>;
-  findUpstreamAccount(gatewayId: string, username: string): Promise<CoordinatorFindUpstreamAccountReply>;
+
+  /** Looks an upstream account up by the one key given: the request's oneof carries only that member. */
+  findUpstreamAccount(
+    gatewayId: string,
+    key: { readonly username: string } | { readonly externalId: string },
+  ): Promise<CoordinatorFindUpstreamAccountReply>;
+
   reinterviewGateway(gatewayId: string): Promise<GatewayAdminReply>;
 
   /** Every frame of a search that names `gatewayId`. `query` keys the coordinator's search cache. */
@@ -312,13 +318,8 @@ function coordinatorClient(client: ServiceClient): CoordinatorClient {
       ),
     fetchGame: (gatewayId, externalId, actor = E2E_ACTOR) =>
       unary(client, 'FetchGame', { correlationId: randomUUID(), gatewayId, externalId }, callMetadata(actor)),
-    findUpstreamAccount: (gatewayId, username) =>
-      unary(
-        client,
-        'FindUpstreamAccount',
-        { correlationId: randomUUID(), gatewayId, username },
-        callMetadata(E2E_ACTOR),
-      ),
+    findUpstreamAccount: (gatewayId, key) =>
+      unary(client, 'FindUpstreamAccount', { correlationId: randomUUID(), gatewayId, ...key }, callMetadata(E2E_ACTOR)),
     reinterviewGateway: (gatewayId) => unary(client, 'ReinterviewGateway', { gatewayId }, callMetadata(E2E_ACTOR)),
     connectGateway: (call) => unary(client, 'ConnectGateway', call, callMetadata(E2E_ACTOR)),
   };

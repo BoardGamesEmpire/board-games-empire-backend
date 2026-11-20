@@ -385,6 +385,14 @@ describe('InMemoryGatewayDriver findUpstreamAccount', () => {
     });
   });
 
+  // The throttled keys are a plain record: a key that names one of
+  // Object.prototype's members must not read as throttled.
+  it('answers a username named like an object member NOT_FOUND, not throttled', async () => {
+    await expect(
+      firstValueFrom(driver().findUpstreamAccount({ correlationId: 'c', username: 'constructor' })),
+    ).resolves.toEqual({ correlationId: 'c', status: proto.ResultStatus.RESULT_STATUS_NOT_FOUND });
+  });
+
   it.each([
     ['neither key', {}],
     ['an empty username', { username: '' }],

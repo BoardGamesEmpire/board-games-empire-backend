@@ -23,9 +23,10 @@ import { UpstreamAccountService } from './upstream-account.service';
  * username looks the username up through, at a DataGateway (#1226).
  * `PrivacyPolicyModule` supplies the privacy policy a link shows (#934), in the
  * user's stored language. `AuthModule` supplies the trusted-origin check a
- * link's return address passes, and the `auth.url` config the Steam sign-in's realm comes from. No import for
- * `PoliciesGuard`, `AbilityService` and `ScopeComposer`: `PermissionsModule`
- * is global, as is the cache Redis the pending sign-ins are kept in.
+ * link's return address passes, and the `auth.url` config the Steam
+ * sign-in's realm comes from. No import for `PoliciesGuard`, `AbilityService`
+ * and `ScopeComposer`: `PermissionsModule` is global, as is the cache Redis
+ * the pending sign-ins are kept in.
  *
  * The verifier's constructor takes Steam's endpoints and its timeout as plain
  * values, defaulting to Steam's own, so it is built by a factory rather than

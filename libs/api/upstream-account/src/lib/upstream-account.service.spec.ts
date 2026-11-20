@@ -1,7 +1,8 @@
 import type { UpstreamAccount } from '@bge/database';
 import { DataGatewayCapability, Prisma, ResourceType, Upstream } from '@bge/database';
 import { uniqueViolation, uniqueViolationWithoutMeta } from '@bge/database/testing';
-import { CodedHttpException } from '@bge/i18n';
+import { PLUGIN_SERVED_WHERE } from '@bge/gateway-registry';
+import { CodedHttpException, t } from '@bge/i18n';
 import type { PrivacyPolicyDto } from '@bge/system-settings';
 import { PrivacyPolicyService } from '@bge/system-settings';
 import type { MockDatabaseService } from '@bge/testing';
@@ -107,18 +108,21 @@ describe('UpstreamAccountService (#935)', () => {
 
   /**
    * The DataGateways a link can go through, as both reads ask for them:
-   * BoardGameGeek's only when it serves the lookup a link by username makes
-   * and an admin hasn't switched it off (#1226); Steam's whatever it serves,
-   * since Steam sign-in asks it nothing (#935).
+   * enabled, undeleted, and, for a plugin DataGateway, with a plugin the
+   * server serves, as routing has it (#1083); BoardGameGeek's only when it
+   * serves the lookup a link by username makes and an admin hasn't switched
+   * it off (#1226); Steam's whatever it serves, since Steam sign-in asks it
+   * nothing (#935).
    */
   const USABLE_FOR_BOARDGAMEGEEK = {
     enabled: true,
     deletedAt: null,
     upstream: Upstream.BoardGameGeek,
+    AND: [PLUGIN_SERVED_WHERE],
     capabilities: { has: DataGatewayCapability.FindUpstreamAccount },
     NOT: { disabledCapabilities: { has: DataGatewayCapability.FindUpstreamAccount } },
   };
-  const USABLE_FOR_STEAM = { enabled: true, deletedAt: null, upstream: Upstream.Steam };
+  const USABLE_FOR_STEAM = { enabled: true, deletedAt: null, upstream: Upstream.Steam, AND: [PLUGIN_SERVED_WHERE] };
 
   describe('linkableUpstreams', () => {
     // The list tells a client which upstreams to offer a link for, so it names
@@ -171,15 +175,49 @@ describe('UpstreamAccountService (#935)', () => {
       });
     });
 
-    it('answers null when no DataGateway is usable', async () => {
-      db.dataGateway.findFirst.mockResolvedValue(null);
+    // A plugin DataGateway whose plugin was switched off, uninstalled or
+    // quarantined keeps its row enabled, and routing refuses it. Picking it
+    // would answer every link 503 while a served DataGateway sat unused, and
+    // the list would offer a link nothing can serve (#1083, #1226).
+    it.each([Upstream.BoardGameGeek, Upstream.Steam])(
+      'reads past a plugin DataGateway whose plugin the server does not serve, at %s, as routing does',
+      async (upstream) => {
+        db.dataGateway.findFirst.mockResolvedValue({ id: 'dg-1' } as never);
+        db.dataGateway.findMany.mockResolvedValue([]);
 
-      await expect(service.linkDataGateway(Upstream.BoardGameGeek)).resolves.toBeNull();
-    });
+        await service.linkDataGateway(upstream);
+        await service.linkableUpstreams();
 
-    it('answers null, reading nothing, for an upstream this server has no way to link', async () => {
-      await expect(service.linkDataGateway(Upstream.IGDB)).resolves.toBeNull();
+        const [linkRead] = db.dataGateway.findFirst.mock.calls[0];
+        const [listRead] = db.dataGateway.findMany.mock.calls[0];
+        expect(linkRead?.where).toMatchObject({ AND: [PLUGIN_SERVED_WHERE] });
+        expect(listRead?.where?.OR).toContainEqual(expect.objectContaining({ upstream, AND: [PLUGIN_SERVED_WHERE] }));
+      },
+    );
 
+    // A BoardGameGeek link asks its DataGateway to look the username up, so a
+    // server admin is told about that capability too: a DataGateway can be on
+    // and not serve it (#1226). Steam sign-in asks the DataGateway nothing.
+    it.each([
+      [Upstream.BoardGameGeek, 'errors.upstream_account.not_linkable_by_lookup'],
+      [Upstream.Steam, 'errors.upstream_account.not_linkable'],
+    ] as const)(
+      'refuses with 409 UPSTREAM_NOT_LINKABLE when no DataGateway is usable for a link at %s',
+      async (upstream, key) => {
+        db.dataGateway.findFirst.mockResolvedValue(null);
+
+        const error = await refusal(service.linkDataGateway(upstream));
+
+        expect(error.getStatus()).toBe(Http.Conflict);
+        expect(error.code).toBe(UpstreamAccountErrorCode.NotLinkable);
+        expect(error.getResponse()).toMatchObject({ message: t(key, { upstream }) });
+      },
+    );
+
+    it('refuses with 409 UPSTREAM_NOT_LINKABLE, reading nothing, at an upstream this server has no way to link', async () => {
+      const error = await refusal(service.linkDataGateway(Upstream.IGDB));
+
+      expect(error.code).toBe(UpstreamAccountErrorCode.NotLinkable);
       expect(db.dataGateway.findFirst).not.toHaveBeenCalled();
     });
   });

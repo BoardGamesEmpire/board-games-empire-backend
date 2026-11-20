@@ -4,6 +4,7 @@ import { CodedHttpException, t } from '@bge/i18n';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Http } from '@status/codes';
+import { httpAddress } from '../http-address';
 import { UpstreamAccountErrorCode } from '../upstream-account.constants';
 import { UpstreamAccountService } from '../upstream-account.service';
 import { UPSTREAM_KEYS } from '../upstream-keys';
@@ -96,17 +97,6 @@ function linkResultAddress(returnTo: string, outcome: SteamLinkOutcome): string 
   return address.toString();
 }
 
-/** `returnTo` as an absolute http or https address, or null when it is none. */
-function httpAddress(returnTo: string): URL | null {
-  if (!URL.canParse(returnTo)) {
-    return null;
-  }
-
-  const address = new URL(returnTo);
-
-  return address.protocol === 'https:' || address.protocol === 'http:' ? address : null;
-}
-
 /**
  * Linking a Steam account through Steam sign-in (#935).
  *
@@ -150,8 +140,8 @@ export class SteamLinkService {
   /**
    * Starts a Steam sign-in for `userId`, replacing one they have pending,
    * once `returnTo` is an absolute http or https address at a trusted origin
-   * (else 400 `UPSTREAM_LINK_RETURN_ADDRESS_REFUSED`), an enabled DataGateway
-   * declares Steam (else 409 `UPSTREAM_NOT_LINKABLE`), and the user has no
+   * (else 400 `UPSTREAM_LINK_RETURN_ADDRESS_REFUSED`), a DataGateway declaring
+   * Steam is usable for the link (else 409 `UPSTREAM_NOT_LINKABLE`), and the user has no
    * Steam account (else 409 `UPSTREAM_ACCOUNT_ALREADY_LINKED`). The answer
    * carries the privacy policy in the user's language (#934), read before the
    * sign-in starts so a failed read replaces nothing.
@@ -159,15 +149,7 @@ export class SteamLinkService {
   async startSignIn(userId: string, returnTo: string, acceptLanguage: string | undefined): Promise<SteamSignInDto> {
     const address = await this.trustedReturnAddress(returnTo);
 
-    const linkable = await this.upstreamAccounts.linkableUpstreams();
-    if (!linkable.includes(Upstream.Steam)) {
-      throw new CodedHttpException(
-        Http.Conflict,
-        UpstreamAccountErrorCode.NotLinkable,
-        t('errors.upstream_account.not_linkable', { upstream: Upstream.Steam }),
-      );
-    }
-
+    await this.upstreamAccounts.linkDataGateway(Upstream.Steam);
     await this.upstreamAccounts.assertNotLinked(userId, Upstream.Steam);
     const privacyPolicy = await this.upstreamAccounts.privacyPolicy(userId, acceptLanguage);
     const { state, expiresAt } = await this.signIns.start({ userId, returnTo: address });

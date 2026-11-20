@@ -2,7 +2,7 @@ import type { Actor } from '@bge/actor-context';
 import { AuditContextService } from '@bge/actor-context';
 import type { UpstreamAccount } from '@bge/database';
 import { Action, ResourceType, Upstream } from '@bge/database';
-import { I18nExceptionFilter, LocaleResolutionService } from '@bge/i18n';
+import { CodedHttpException, I18nExceptionFilter, LocaleResolutionService, t } from '@bge/i18n';
 import type { AppAbility } from '@bge/permissions';
 import { CHECK_POLICIES_KEY, PoliciesGuard } from '@bge/permissions';
 import type { INestApplication } from '@nestjs/common';
@@ -12,6 +12,8 @@ import { APP_FILTER } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import { AllowAnonymous, OptionalAuth } from '@thallesp/nestjs-better-auth';
 import { I18nService, I18nValidationPipe } from 'nestjs-i18n';
+import { UpstreamAccountErrorCode } from '../upstream-account.constants';
+import { UpstreamThrottledException } from '../upstream-throttled.exception';
 import { BggLinkController } from './bgg-link.controller';
 import { BggLinkService } from './bgg-link.service';
 import { LINK_USERNAME_MAX_LENGTH } from './dto/link-by-username.dto';
@@ -182,6 +184,34 @@ describe('BggLinkController (#1226)', () => {
 
       expect(answer.status).toBe(HttpStatus.FORBIDDEN);
       expect(linkAccount).not.toHaveBeenCalled();
+    });
+
+    // A client or proxy that reads only the header still waits as the
+    // DataGateway asked: the body's retryAfterMs is milliseconds, the header
+    // whole seconds (#1226).
+    it('answers a throttled link 503 with Retry-After in seconds beside retryAfterMs', async () => {
+      linkAccount.mockRejectedValue(new UpstreamThrottledException(Upstream.BoardGameGeek, 12_500));
+
+      const answer = await post({ username: 'bgfan' });
+
+      expect(answer.status).toBe(HttpStatus.SERVICE_UNAVAILABLE);
+      expect(answer.headers.get('retry-after')).toBe('13');
+      await expect(answer.json()).resolves.toMatchObject({ code: 'UPSTREAM_THROTTLED', retryAfterMs: 12_500 });
+    });
+
+    it('sends no Retry-After with any other refusal', async () => {
+      linkAccount.mockRejectedValue(
+        new CodedHttpException(
+          HttpStatus.SERVICE_UNAVAILABLE,
+          UpstreamAccountErrorCode.Unreachable,
+          t('errors.upstream_account.unreachable', { upstream: Upstream.BoardGameGeek }),
+        ),
+      );
+
+      const answer = await post({ username: 'bgfan' });
+
+      expect(answer.status).toBe(HttpStatus.SERVICE_UNAVAILABLE);
+      expect(answer.headers.get('retry-after')).toBeNull();
     });
   });
 });

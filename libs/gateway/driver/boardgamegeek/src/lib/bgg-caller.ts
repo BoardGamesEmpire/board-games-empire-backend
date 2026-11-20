@@ -7,6 +7,9 @@ import { BggHttpError } from './client/bgg-http.error';
 
 const TOO_MANY_REQUESTS = 429;
 
+/** The wait before retrying a 429 whose `Retry-After` names none (#1082). */
+export const DEFAULT_RATE_LIMIT_RETRY_MS = 2000;
+
 export interface BggCallerOptions {
   /**
    * The longest wait a 429's `Retry-After` may ask for. A 429 that asks for
@@ -38,7 +41,7 @@ export class BggCaller {
     private readonly logger: DriverLogger,
     options: BggCallerOptions = {},
   ) {
-    this.rateLimitRetryMs = options.rateLimitRetryMs ?? 2000;
+    this.rateLimitRetryMs = options.rateLimitRetryMs ?? DEFAULT_RATE_LIMIT_RETRY_MS;
     this.maxRateLimitWaitMs = options.maxRateLimitWaitMs ?? 30_000;
   }
 
@@ -72,6 +75,6 @@ export class BggCaller {
 }
 
 /** A 429 as the client throws it (#880). */
-function isRateLimit(err: unknown): err is BggHttpError {
+export function isRateLimit(err: unknown): err is BggHttpError {
   return err instanceof BggHttpError && err.status === TOO_MANY_REQUESTS;
 }

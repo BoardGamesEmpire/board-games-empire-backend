@@ -877,7 +877,7 @@ A quick check that a DataGateway is reachable and answering. Learning what the D
 _Avoid_: ping handshake
 
 **Upstream account**:
-A user's own account on an upstream, such as their BoardGameGeek username, used to sync their collection.
+A user's own account on an upstream, such as their BoardGameGeek username, used to sync their collection. Its external ID is the account's id at the upstream (a SteamID; for BoardGameGeek, the username), not an External ID in the catalog sense, which names an item at a DataGateway.
 _Avoid_: gateway connection, gateway account, external profile, linked account (a sign-in method)
 
 **Steam sign-in**:

@@ -1,21 +1,27 @@
 import { DataGatewayCapability, Upstream } from '@bge/database';
 
+/** How this server links an upstream account at one upstream (#935). */
+export interface LinkMethod {
+  /**
+   * The capability a DataGateway declaring the upstream must also serve for
+   * the link to go through it, or null when the link asks the DataGateway
+   * nothing.
+   */
+  readonly capability: DataGatewayCapability | null;
+}
+
 /**
- * The upstreams this server has a way to link an upstream account at (#935),
- * each with the capability a DataGateway declaring it must also serve for the
- * link to go through it, or null when the link asks the DataGateway nothing.
- * Steam's link is Steam sign-in, which needs only a DataGateway declaring
- * Steam; a BoardGameGeek link looks the username up through a DataGateway
- * (#1226). An upstream is linkable while it is here and a DataGateway usable
- * for its link exists; offering one with no way to link it would offer a link
- * every attempt refuses.
+ * The upstreams this server has a way to link an upstream account at, each
+ * with its link method (#935). An upstream absent here has none. Steam's link
+ * is Steam sign-in, which needs only a DataGateway declaring Steam; a
+ * BoardGameGeek link looks the username up through a DataGateway (#1226). An
+ * upstream is linkable while it is here and a DataGateway usable for its link
+ * exists; offering one with no way to link it would offer a link every
+ * attempt refuses.
  */
-export const UPSTREAMS_WITH_LINK_METHOD: ReadonlyMap<Upstream, DataGatewayCapability | null> = new Map<
-  Upstream,
-  DataGatewayCapability | null
->([
-  [Upstream.BoardGameGeek, DataGatewayCapability.FindUpstreamAccount],
-  [Upstream.Steam, null],
+export const LINK_METHODS: ReadonlyMap<Upstream, LinkMethod> = new Map<Upstream, LinkMethod>([
+  [Upstream.BoardGameGeek, { capability: DataGatewayCapability.FindUpstreamAccount }],
+  [Upstream.Steam, { capability: null }],
 ]);
 
 /**

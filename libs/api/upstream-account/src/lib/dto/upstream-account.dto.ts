@@ -25,7 +25,9 @@ export class UpstreamAccountDto {
   @ApiProperty({
     type: String,
     nullable: true,
-    description: 'The name the account goes by at the upstream, or null until a DataGateway has looked it up.',
+    description:
+      'The name the upstream shows for the account: for BoardGameGeek, the username as BoardGameGeek writes it. ' +
+      'Null for a Steam account until a DataGateway can look its name up.',
     example: null,
   })
   displayName!: string | null;

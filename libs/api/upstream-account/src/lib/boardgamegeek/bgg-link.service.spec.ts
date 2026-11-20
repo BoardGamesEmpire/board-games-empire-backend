@@ -10,11 +10,11 @@ import { ResultStatus } from '@boardgamesempire/proto-gateway';
 import { Logger } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { Http } from '@status/codes';
-import type { Observable } from 'rxjs';
-import { EMPTY, NEVER, of, throwError } from 'rxjs';
+import { EMPTY, Observable, of, throwError } from 'rxjs';
 import { UpstreamAccountErrorCode } from '../upstream-account.constants';
 import type { CreateUpstreamAccountInput } from '../upstream-account.service';
 import { UpstreamAccountService } from '../upstream-account.service';
+import { UpstreamThrottledException } from '../upstream-throttled.exception';
 import { BGG_LOOKUP_TIMEOUT_MS, BggLinkService } from './bgg-link.service';
 
 const ME = 'user-1';
@@ -120,15 +120,13 @@ describe('BggLinkService (#1226)', () => {
     // Only the key the request names: no external id beside the username.
     expect(findUpstreamAccount.mock.calls[0][0]).not.toHaveProperty('externalId');
     // A typed username proves nothing, so the account is a claim, never
-    // verified (#1226). The external id is BoardGameGeek's own spelling. The
-    // display name is the same username, and stays unstored: unlinking deletes
-    // the username, and the audit log leaves out only the external id and the
-    // profile address (#935).
+    // verified (#1226). The external id is BoardGameGeek's own spelling, and
+    // the display name the name BoardGameGeek shows.
     expect(create).toHaveBeenCalledWith({
       userId: ME,
       upstream: Upstream.BoardGameGeek,
       externalId: BGG_NAME,
-      displayName: null,
+      displayName: BGG_NAME,
       profileUrl: BGG_PROFILE,
       verified: false,
     });
@@ -193,21 +191,56 @@ describe('BggLinkService (#1226)', () => {
     expect(create).not.toHaveBeenCalled();
   });
 
-  it('answers a minute as retryAfterMs when a throttled answer gives no wait', async () => {
-    findUpstreamAccount.mockReturnValue(of(answer(ResultStatus.RESULT_STATUS_RATE_LIMITED)));
+  it('carries the wait in whole seconds, for the route to send as Retry-After', async () => {
+    findUpstreamAccount.mockReturnValue(of(answer(ResultStatus.RESULT_STATUS_RATE_LIMITED, { retryAfterMs: 12_500 })));
 
     const error = await refusal(service.link(ME, TYPED));
 
-    expect(error.getResponse()).toMatchObject({ code: 'UPSTREAM_THROTTLED', retryAfterMs: 60_000 });
+    expect(error).toBeInstanceOf(UpstreamThrottledException);
+    expect((error as UpstreamThrottledException).retryAfterSeconds).toBe(13);
   });
 
-  it('answers 409 UPSTREAM_NOT_LINKABLE, asking no one, when no DataGateway is usable for the link', async () => {
-    linkDataGateway.mockResolvedValue(null);
+  // A wait that is missing, zero or negative is no wait at all, read as every
+  // consumer of a DataGateway's wait reads it (#925): telling the user to try
+  // again in 0 seconds would send them straight back into the throttle.
+  it.each([
+    ['gives no wait', undefined],
+    ['gives a wait of zero', 0],
+    ['gives a negative wait', -5_000],
+  ])('answers a minute as retryAfterMs when a throttled answer %s', async (_name, retryAfterMs) => {
+    findUpstreamAccount.mockReturnValue(of(answer(ResultStatus.RESULT_STATUS_RATE_LIMITED, { retryAfterMs })));
 
     const error = await refusal(service.link(ME, TYPED));
 
-    expect(error.getStatus()).toBe(Http.Conflict);
-    expect(error.code).toBe(UpstreamAccountErrorCode.NotLinkable);
+    expect(error.getResponse()).toMatchObject({
+      code: 'UPSTREAM_THROTTLED',
+      retryAfterMs: 60_000,
+      message: t('errors.upstream_account.throttled', { upstream: Upstream.BoardGameGeek, seconds: 60 }),
+    });
+    expect((error as UpstreamThrottledException).retryAfterSeconds).toBe(60);
+  });
+
+  it('says one second, not 1 seconds, for a wait of a second or less', async () => {
+    findUpstreamAccount.mockReturnValue(of(answer(ResultStatus.RESULT_STATUS_RATE_LIMITED, { retryAfterMs: 1_000 })));
+
+    const error = await refusal(service.link(ME, TYPED));
+
+    expect(error.getResponse()).toMatchObject({
+      retryAfterMs: 1_000,
+      message: t('errors.upstream_account.throttled_one_second', { upstream: Upstream.BoardGameGeek }),
+    });
+  });
+
+  it('passes on the not-linkable refusal, asking no one, when no DataGateway is usable for the link', async () => {
+    const notLinkable = new CodedHttpException(
+      Http.Conflict,
+      UpstreamAccountErrorCode.NotLinkable,
+      t('errors.upstream_account.not_linkable_by_lookup', { upstream: Upstream.BoardGameGeek }),
+    );
+    linkDataGateway.mockRejectedValue(notLinkable);
+
+    await expect(service.link(ME, TYPED)).rejects.toBe(notLinkable);
+
     expect(assertNotLinked).not.toHaveBeenCalled();
     expect(findUpstreamAccount).not.toHaveBeenCalled();
     expect(create).not.toHaveBeenCalled();
@@ -267,10 +300,12 @@ describe('BggLinkService (#1226)', () => {
     });
 
     // A user is waiting on the answer, and neither the coordinator nor this
-    // client sets a gRPC deadline (#722), so the api bounds the wait itself.
-    it(`for a call that has not answered within ${BGG_LOOKUP_TIMEOUT_MS} ms, and not before`, async () => {
+    // client sets a gRPC deadline (#722), so the api bounds the wait itself,
+    // and the timeout's unsubscribe cancels the call.
+    it(`for a call that has not answered within ${BGG_LOOKUP_TIMEOUT_MS} ms, and not before, cancelling it`, async () => {
       jest.useFakeTimers();
-      findUpstreamAccount.mockReturnValue(NEVER);
+      const teardown = jest.fn();
+      findUpstreamAccount.mockReturnValue(new Observable<CoordinatorFindUpstreamAccountResponse>(() => teardown));
       let settled = false;
       const linking = service.link(ME, TYPED).finally(() => {
         settled = true;
@@ -279,14 +314,24 @@ describe('BggLinkService (#1226)', () => {
 
       await jest.advanceTimersByTimeAsync(BGG_LOOKUP_TIMEOUT_MS - 1);
       expect(settled).toBe(false);
+      expect(teardown).not.toHaveBeenCalled();
 
       await jest.advanceTimersByTimeAsync(1);
       const error = await failure;
 
       expect(error).toBeInstanceOf(CodedHttpException);
       expect((error as CodedHttpException).code).toBe(UpstreamAccountErrorCode.Unreachable);
+      expect(teardown).toHaveBeenCalledTimes(1);
       expect(create).not.toHaveBeenCalled();
     });
+  });
+
+  it('stores no display name when the DataGateway answers none', async () => {
+    findUpstreamAccount.mockReturnValue(of(found({ account: { externalId: BGG_NAME, profileUrl: BGG_PROFILE } })));
+
+    await service.link(ME, TYPED);
+
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ displayName: null }));
   });
 
   it('stores no profile address that is not an http or https address', async () => {

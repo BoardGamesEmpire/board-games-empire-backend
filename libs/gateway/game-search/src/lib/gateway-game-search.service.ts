@@ -3,6 +3,7 @@ import type { ContentFormat, SearchFilterAxis } from '@bge/database';
 import { DatabaseService, DataGatewayCapability } from '@bge/database';
 import type { GatewayResolution, SearchResolution, SearchRoute } from '@bge/gateway-registry';
 import { GatewayRegistryService, GatewayRoutingRefusedError } from '@bge/gateway-registry';
+import { upstreamAccountKeyOf } from '@boardgamesempire/gateway-driver-contract';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Inject, Injectable, Logger } from '@nestjs/common';
@@ -19,6 +20,28 @@ import { filterFor, matchesFilter, toResultFilter, unfilterableAxes } from './se
  * connection pool.
  */
 const DEDUP_CONCURRENCY = 10;
+
+/**
+ * A failure as a log line may name it when its message may carry personal
+ * data: the error's name, its gRPC code when it has one, and a routing
+ * refusal's reason, which are the server's own words (#1226).
+ */
+function failureKind(err: unknown): string {
+  if (!(err instanceof Error)) {
+    return typeof err;
+  }
+
+  const parts = [err.name];
+  if ('code' in err && (typeof err.code === 'number' || typeof err.code === 'string')) {
+    parts.push(`code ${err.code}`);
+  }
+
+  if (err instanceof GatewayRoutingRefusedError) {
+    parts.push(`reason ${err.reason}`);
+  }
+
+  return parts.join(', ');
+}
 
 /**
  * One live gateway stream's games, cached when the gateway sends SOURCE_DONE.
@@ -172,13 +195,15 @@ export class GatewayGameSearchService {
    * external ID the request names, as live traffic: the user is waiting to
    * link it (#1226). A DataGateway that can't be reached, may not serve the
    * lookup, or fails it answers ERROR with the reason, never an errored
-   * stream. The username is the user's personal data, so it stays out of the
-   * log.
+   * stream. The key is read as the driver contract reads it; a request naming
+   * no key reaches the driver without one, which refuses it. The username is
+   * the user's personal data, and a driver's error may quote it, so the log
+   * names a failure by the error's name and code, never its message.
    */
   findUpstreamAccount(
     request: proto.CoordinatorFindUpstreamAccountRequest,
   ): Observable<proto.CoordinatorFindUpstreamAccountResponse> {
-    const key = request.username !== undefined ? { username: request.username } : { externalId: request.externalId };
+    const key = upstreamAccountKeyOf(request);
 
     return defer(() => from(this.registry.resolve(request.gatewayId, DataGatewayCapability.FindUpstreamAccount))).pipe(
       concatMap((driver) =>
@@ -190,13 +215,13 @@ export class GatewayGameSearchService {
       ),
       tap((response) =>
         this.logger.debug(
-          `Received findUpstreamAccount response from gateway ${request.gatewayId} with status ${response.status}`,
+          `Received findUpstreamAccount response from DataGateway ${request.gatewayId} with status ${response.status}`,
         ),
       ),
       map((response): proto.CoordinatorFindUpstreamAccountResponse => ({ ...response, gatewayId: request.gatewayId })),
       catchError((err: unknown) => {
         const message = err instanceof Error ? err.message : String(err);
-        this.logger.error(`FindUpstreamAccount failed for gateway ${request.gatewayId}: ${message}`);
+        this.logger.error(`FindUpstreamAccount failed for DataGateway ${request.gatewayId}: ${failureKind(err)}`);
 
         return of<proto.CoordinatorFindUpstreamAccountResponse>({
           correlationId: request.correlationId,

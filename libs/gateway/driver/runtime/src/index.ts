@@ -16,6 +16,7 @@ export * from './lib/gateway-registry.module';
 export * from './lib/gateway-registry.service';
 export * from './lib/interfaces';
 export * from './lib/plugin-driver-source';
+export * from './lib/served-plugin';
 export * from './lib/utils/coverage-filter';
 export * from './lib/utils/hash-config';
 export * from './lib/utils/remote-connection-options';

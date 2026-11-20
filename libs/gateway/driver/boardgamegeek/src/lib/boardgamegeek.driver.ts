@@ -1,7 +1,5 @@
 import type { DataGatewayDriver, DriverLogger, UpstreamFetch } from '@boardgamesempire/gateway-driver-contract';
 import {
-  GRPC_STATUS_INVALID_ARGUMENT,
-  grpcStatusError,
   invalidUpstreamAccountKey,
   unsupportedOperation,
   upstreamAccountKeyOf,
@@ -11,9 +9,8 @@ import { randomUUID } from 'node:crypto';
 import type { Observable } from 'rxjs';
 import { defer, EMPTY, from, of, throwError } from 'rxjs';
 import { catchError, endWith, map, mergeMap, tap, timeout, toArray } from 'rxjs/operators';
-import { BggCaller } from './bgg-caller';
+import { BggCaller, DEFAULT_RATE_LIMIT_RETRY_MS, isRateLimit } from './bgg-caller';
 import { createBggClient } from './client/bgg-client';
-import { BggHttpError } from './client/bgg-http.error';
 import { BggThingType, DEFAULT_BGG_SEARCH_TYPES, MAX_THINGS_PER_BATCH } from './constants';
 import { decodeText } from './mappers/decode-text';
 import {
@@ -56,11 +53,6 @@ const SEARCH_THING_OPTIONS: ThingFetchOptions = { stats: 1, versions: 0, types: 
  * half a second, so a quick search leaves room for a rate limit's retry or a 202.
  */
 const SEARCH_THINGS_DEADLINE_MS = 12_000;
-
-const TOO_MANY_REQUESTS = 429;
-
-/** The wait a throttled lookup reports when BGG's 429 names none, as the caller's retry waits. */
-const DEFAULT_RATE_LIMIT_RETRY_MS = 2000;
 
 /** BGG's profile page for a user, which the account's profile address names. */
 const profileUrlOf = (name: string): string => `https://boardgamegeek.com/user/${encodeURIComponent(name)}`;
@@ -126,8 +118,9 @@ export class BoardGameGeekDriver implements DataGatewayDriver {
       acceptedRetries: timing?.acceptedRetries,
     });
 
-    this.caller = new BggCaller(client, options.logger, { rateLimitRetryMs: timing?.rateLimitRetryMs });
+    // A throttled lookup reports the wait the caller's own retry used.
     this.rateLimitRetryMs = timing?.rateLimitRetryMs ?? DEFAULT_RATE_LIMIT_RETRY_MS;
+    this.caller = new BggCaller(client, options.logger, { rateLimitRetryMs: this.rateLimitRetryMs });
     this.searchThingsDeadlineMs = timing?.searchThingsDeadlineMs ?? SEARCH_THINGS_DEADLINE_MS;
   }
 
@@ -375,11 +368,12 @@ export class BoardGameGeekDriver implements DataGatewayDriver {
   }
 
   /**
-   * Looks a BoardGameGeek user up by username through `/user`. The account's
-   * external id is the name as BGG writes it, since BGG keys users by name, so
-   * a lookup by external id is INVALID_ARGUMENT, as is a request naming
-   * neither. A name BGG doesn't know is NOT_FOUND, and a throttled call is
-   * RATE_LIMITED with the wait BGG asked for (#1226).
+   * Looks a BoardGameGeek user up by name through `/user`. BGG keys users by
+   * name, so an account's external id is its name as BGG writes it, and a
+   * lookup by external id asks for that name: the same request, with the
+   * same answer, as by username. A request naming neither is
+   * INVALID_ARGUMENT. A name BGG doesn't know is NOT_FOUND, and a throttled
+   * call is RATE_LIMITED with the wait BGG asked for (#1226).
    */
   findUpstreamAccount(request: proto.FindUpstreamAccountRequest): Observable<proto.FindUpstreamAccountResponse> {
     const key = upstreamAccountKeyOf(request);
@@ -388,16 +382,9 @@ export class BoardGameGeekDriver implements DataGatewayDriver {
       return invalidUpstreamAccountKey();
     }
 
-    if (!('username' in key)) {
-      return throwError(() =>
-        grpcStatusError(
-          GRPC_STATUS_INVALID_ARGUMENT,
-          'BoardGameGeek keys users by username, so FindUpstreamAccount needs a username',
-        ),
-      );
-    }
+    const name = 'username' in key ? key.username : key.externalId;
 
-    return this.caller.call(findUserRequest(key.username)).pipe(
+    return this.caller.call(findUserRequest(name)).pipe(
       map((user): proto.FindUpstreamAccountResponse => {
         this.logger.info(`findUpstreamAccount ${user ? 'found' : 'found no'} user`);
 
@@ -411,7 +398,7 @@ export class BoardGameGeekDriver implements DataGatewayDriver {
       }),
 
       catchError((err) => {
-        if (err instanceof BggHttpError && err.status === TOO_MANY_REQUESTS) {
+        if (isRateLimit(err)) {
           this.logger.warn('findUpstreamAccount was throttled by BGG');
 
           return of({

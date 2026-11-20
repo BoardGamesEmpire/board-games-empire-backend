@@ -31,13 +31,16 @@ export function upstreamAccountSnapshot(account: UpstreamAccount): UpstreamAccou
 }
 
 /**
- * The snapshot fields audit rows leave out: the upstream's id for the account
- * and the profile address that carries it. Unlinking deletes both, as the
- * privacy policy says (#935), so an audit row that outlives the account keeps
- * neither. In-process listeners still get them.
+ * The snapshot fields audit rows leave out: the upstream's id for the account,
+ * the name it goes by there, which for a BoardGameGeek account is the
+ * username again (#1226), and the profile address that carries the id.
+ * Unlinking deletes them, as the privacy policy says (#935), so an audit row
+ * that outlives the account keeps none of them. In-process listeners still
+ * get them.
  */
 const UPSTREAM_ACCOUNT_AUDIT_EXCLUDED = [
   'externalId',
+  'displayName',
   'profileUrl',
 ] satisfies readonly (keyof UpstreamAccountSnapshot)[];
 

@@ -49,21 +49,34 @@ describe('upstream account events (#935)', () => {
     expect(event).toMatchObject({ action: 'delete', subject: ResourceType.UpstreamAccount, subjectId: 'ua-1' });
   });
 
-  // Unlinking deletes the SteamID and the profile address that carries it, as
-  // the privacy policy says (#935), so no audit row keeps either. In-process
-  // listeners still get both.
+  // Unlinking deletes the SteamID or the BoardGameGeek username, as the
+  // privacy policy says (#935, #1226), so no audit row keeps the external id,
+  // the profile address that carries it, or the display name, which for a
+  // BoardGameGeek account is the username again. In-process listeners still
+  // get all three.
   it.each([UpstreamAccountLinkedEvent, UpstreamAccountUnlinkedEvent])(
-    '%p leaves the external id and the profile address out of its audit row',
+    '%p leaves the external id, the display name and the profile address out of its audit row',
     (cls) => {
+      const bggRow: UpstreamAccount = {
+        ...row,
+        upstream: Upstream.BoardGameGeek,
+        externalId: 'BGFan',
+        displayName: 'BGFan',
+        profileUrl: 'https://boardgamegeek.com/user/BGFan',
+        verified: false,
+      };
       const reflector = new Reflector();
       const denylist = reflector.get(AuditExclude, cls) ?? [];
-      const audited = Object.fromEntries(
-        Object.entries(upstreamAccountSnapshot(row)).filter(([key]) => !denylist.includes(key)),
-      );
 
       expect(reflector.get(Auditable, cls)).not.toBe(false);
-      expect(denylist).toEqual(['externalId', 'profileUrl']);
-      expect(JSON.stringify(audited)).not.toContain(row.externalId);
+      expect(denylist).toEqual(['externalId', 'displayName', 'profileUrl']);
+      for (const account of [row, bggRow]) {
+        const audited = Object.fromEntries(
+          Object.entries(upstreamAccountSnapshot(account)).filter(([key]) => !denylist.includes(key)),
+        );
+
+        expect(JSON.stringify(audited)).not.toContain(account.externalId);
+      }
     },
   );
 });

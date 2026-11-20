@@ -8,8 +8,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Http } from '@status/codes';
 import * as crypto from 'node:crypto';
 import { defer, firstValueFrom, timeout } from 'rxjs';
+import { httpAddress } from '../http-address';
 import { UpstreamAccountErrorCode } from '../upstream-account.constants';
 import { UpstreamAccountService } from '../upstream-account.service';
+import { UpstreamThrottledException } from '../upstream-throttled.exception';
 
 /**
  * How long a link waits for the DataGateway's answer before it answers
@@ -27,9 +29,6 @@ import { UpstreamAccountService } from '../upstream-account.service';
  */
 export const BGG_LOOKUP_TIMEOUT_MS = 50_000;
 
-/** The wait a throttled answer is given when the DataGateway names none, as live search's is. */
-const DEFAULT_RETRY_AFTER_MS = 60_000;
-
 /** The refusal a lookup that failed, or had no usable answer, ends in. */
 function unreachable(): CodedHttpException {
   return new CodedHttpException(
@@ -37,17 +36,6 @@ function unreachable(): CodedHttpException {
     UpstreamAccountErrorCode.Unreachable,
     t('errors.upstream_account.unreachable', { upstream: Upstream.BoardGameGeek }),
   );
-}
-
-/** `address` when it is an absolute http or https address, else null: a client shows it as a link. */
-function httpAddressOrNull(address: string | undefined): string | null {
-  if (address === undefined || !URL.canParse(address)) {
-    return null;
-  }
-
-  const { protocol } = new URL(address);
-
-  return protocol === 'https:' || protocol === 'http:' ? address : null;
 }
 
 /**
@@ -88,14 +76,6 @@ export class BggLinkService {
    */
   async link(userId: string, username: string): Promise<UpstreamAccount> {
     const dataGateway = await this.upstreamAccounts.linkDataGateway(Upstream.BoardGameGeek);
-    if (dataGateway === null) {
-      throw new CodedHttpException(
-        Http.Conflict,
-        UpstreamAccountErrorCode.NotLinkable,
-        t('errors.upstream_account.not_linkable', { upstream: Upstream.BoardGameGeek }),
-      );
-    }
-
     await this.upstreamAccounts.assertNotLinked(userId, Upstream.BoardGameGeek);
     const account = await this.lookUp(userId, dataGateway.id, username);
 
@@ -103,12 +83,11 @@ export class BggLinkService {
       userId,
       upstream: Upstream.BoardGameGeek,
       externalId: account.externalId,
-      // The display name BoardGameGeek answers is the username again. The
-      // audit log leaves out the external id and the profile address, so that
-      // unlinking deletes the username, as the privacy policy says (#935); a
-      // copy here would outlive the account in the audit log.
-      displayName: null,
-      profileUrl: httpAddressOrNull(account.profileUrl),
+      // The name BoardGameGeek shows, which is the username again: the audit
+      // log leaves it out with the external id, so unlinking deletes the
+      // username, as the privacy policy says (#935).
+      displayName: account.displayName || null,
+      profileUrl: httpAddress(account.profileUrl)?.href ?? null,
       verified: false,
     });
   }
@@ -139,18 +118,12 @@ export class BggLinkService {
       }
 
       case ResultStatus.RESULT_STATUS_RATE_LIMITED: {
-        const retryAfterMs = answer.retryAfterMs ?? DEFAULT_RETRY_AFTER_MS;
-        this.logger.warn(`DataGateway ${gatewayId} is throttled; a BoardGameGeek link waits ${retryAfterMs} ms`);
-
-        throw new CodedHttpException(
-          Http.ServiceUnavailable,
-          UpstreamAccountErrorCode.Throttled,
-          t('errors.upstream_account.throttled', {
-            upstream: Upstream.BoardGameGeek,
-            seconds: Math.ceil(retryAfterMs / 1000),
-          }),
-          { fields: { retryAfterMs } },
+        const throttled = new UpstreamThrottledException(Upstream.BoardGameGeek, answer.retryAfterMs);
+        this.logger.warn(
+          `DataGateway ${gatewayId} is throttled; a BoardGameGeek link waits ${throttled.retryAfterSeconds} s`,
         );
+
+        throw throttled;
       }
 
       default: {

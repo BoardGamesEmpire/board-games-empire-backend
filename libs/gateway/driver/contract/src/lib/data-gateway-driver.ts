@@ -44,10 +44,10 @@ import type { GatewayInboundEvent } from './types.js';
  *    serves it one fetch at a time for an upstream with no batch call (#925).
  *  - `findUpstreamAccount` answers a found account RESULT with `account`, and
  *    an upstream with no account by that key NOT_FOUND with none, a response
- *    rather than an errored Observable. It refuses a request naming neither
- *    a username nor an external ID with INVALID_ARGUMENT, and may refuse the
- *    key it can't look up by the same way. `upstreamAccountKeyOf` reads the
- *    key (#1226).
+ *    rather than an errored Observable. It looks up by username; by external
+ *    ID where its upstream has an id it can look up by, and otherwise refuses
+ *    that key with INVALID_ARGUMENT, as it refuses a request naming neither.
+ *    `upstreamAccountKeyOf` reads the key (#1226).
  *  - `dispose()` releases transport resources and must be safe to call on an
  *    already-disposed driver.
  *
