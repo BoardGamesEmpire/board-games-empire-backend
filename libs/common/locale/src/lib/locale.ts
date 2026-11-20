@@ -102,6 +102,10 @@ export function maximizeTag(value: string | null | undefined): ParsedTag | null 
  * best-matching available tag by progressively truncating each range from
  * the right ("zh-Hant-TW" → "zh-Hant" → "zh") before moving to the next
  * range. Returns the available tag in its original casing, or undefined.
+ *
+ * A range that `canonicalizeTag` rejects is skipped, not truncated: cut back
+ * from the right, a malformed range such as "de-@@" would otherwise match
+ * "de" and let a bad Accept-Language range choose a catalog (#1406).
  */
 export function lookupTag(ranges: readonly string[], available: Iterable<string>): string | undefined {
   const byLower = new Map<string, string>();
@@ -110,7 +114,12 @@ export function lookupTag(ranges: readonly string[], available: Iterable<string>
   }
 
   for (const range of ranges) {
-    let candidate = (canonicalizeTag(range) ?? range).trim().toLowerCase();
+    const canonical = canonicalizeTag(range);
+    if (!canonical) {
+      continue;
+    }
+
+    let candidate = canonical.toLowerCase();
 
     while (candidate) {
       const match = byLower.get(candidate);
@@ -170,8 +179,8 @@ export function resolveCatalogLocale(
  *
  * Deliberately forgiving, per the robustness principle: a malformed quality
  * value counts as `q=1`, empty items are skipped, and the `*` wildcard is
- * passed through (it matches no concrete tag in `lookupTag`, which lands on
- * the caller's fallback — the correct outcome for "anything is fine").
+ * passed through (`lookupTag` skips it as a non-tag, which lands on the
+ * caller's fallback — the correct outcome for "anything is fine").
  * Returns `[]` for a missing/empty header.
  */
 export function parseAcceptLanguage(header: string | null | undefined): string[] {

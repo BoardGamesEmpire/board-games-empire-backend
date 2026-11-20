@@ -73,11 +73,9 @@ export class PrivacyPolicyService {
   async read(request: PrivacyPolicyLanguageRequest): Promise<PrivacyPolicyDto> {
     const rowLanguages = await this.rowLanguages(this.db);
     const available = this.availableLanguages(rowLanguages);
-    // lookupTag cuts back a range that isn't a tag too, so `de-@@` would
-    // match `de`: only tags are tried (#934).
-    const ranges = [request.lang, request.storedLanguage, ...parseAcceptLanguage(request.acceptLanguage)]
-      .map((range) => canonicalizeTag(range))
-      .filter((tag) => tag !== null);
+    const ranges = [request.lang, request.storedLanguage, ...parseAcceptLanguage(request.acceptLanguage)].filter(
+      (range) => range != null,
+    );
     const language = lookupTag(ranges, available) ?? FALLBACK_LOCALE;
 
     const row = rowLanguages.includes(language) ? await this.rowText(language) : null;

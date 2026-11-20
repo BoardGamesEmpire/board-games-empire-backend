@@ -133,6 +133,19 @@ describe('lookupTag', () => {
     expect(lookupTag(['ja', 'ko'], available)).toBeUndefined();
     expect(lookupTag([], available)).toBeUndefined();
   });
+
+  it('skips a range that is not a language tag rather than truncating it (#1406)', () => {
+    expect(lookupTag(['de-@@'], ['de'])).toBeUndefined();
+    expect(lookupTag(['*'], available)).toBeUndefined();
+  });
+
+  it('moves past a malformed range to a later valid one (#1406)', () => {
+    expect(lookupTag(['de-@@', 'en'], ['de', 'en'])).toBe('en');
+  });
+
+  it('skips deprecated extlang ranges, which canonicalizeTag rejects (#1406)', () => {
+    expect(lookupTag(['zh-cmn-Hans', 'en'], available)).toBe('en');
+  });
 });
 
 describe('filterTags', () => {
@@ -175,6 +188,10 @@ describe('resolveCatalogLocale', () => {
   it('falls back when nothing matches', () => {
     expect(resolveCatalogLocale(['ja', 'ko'], supported, 'en')).toBe('en');
     expect(resolveCatalogLocale([], supported, 'en')).toBe('en');
+  });
+
+  it('falls back rather than letting a malformed range choose a catalog (#1406)', () => {
+    expect(resolveCatalogLocale(['zh-@@'], supported, 'en')).toBe('en');
   });
 });
 
