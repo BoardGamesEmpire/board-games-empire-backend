@@ -1,18 +1,14 @@
-import {
-  PluginManifestValidationError,
-  validatePluginManifest,
-  type ManifestIssue,
-  type PluginManifestValidationResult,
-} from '@boardgamesempire/plugin-manifest';
+import type { ManifestIssue, PluginManifestValidationResult } from '@boardgamesempire/plugin-manifest';
+import { PluginManifestValidationError, validatePluginManifest } from '@boardgamesempire/plugin-manifest';
 import type { PluginModuleOptions } from '../plugin-module.options';
 
 /**
  * The `Plugin` columns the re-validation cross-checks — pass `pendingVersion`/`pendingManifestJson` to validate a staged manifest.
  */
 export interface StoredManifestRow {
+  readonly manifestJson: unknown;
   readonly slug: string;
   readonly version: string;
-  readonly manifestJson: unknown;
 }
 
 /**

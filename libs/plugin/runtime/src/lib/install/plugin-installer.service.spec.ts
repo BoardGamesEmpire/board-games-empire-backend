@@ -1,4 +1,12 @@
 import type { AuditContextService } from '@bge/actor-context';
+import type {
+  DatabaseService,
+  HouseholdPlugin,
+  Permission,
+  Plugin,
+  PluginGrant,
+  PluginPermission,
+} from '@bge/database';
 import {
   PluginCategory,
   PluginConsentActKind,
@@ -8,28 +16,24 @@ import {
   PluginScope,
   RiskLevel,
   SERVER_SCOPE_SENTINEL,
-  type DatabaseService,
-  type HouseholdPlugin,
-  type Permission,
-  type Plugin,
-  type PluginGrant,
-  type PluginPermission,
 } from '@bge/database';
-import { createMockDatabaseService, UNIT_BOUND_RULES, type MockDatabaseService } from '@bge/testing';
-import type { PluginArtifactDirectory } from '@boardgamesempire/plugin-contract';
-import { buildPluginArtifactSha256 as sha, type PluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
-import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
+import type { MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService, UNIT_BOUND_RULES } from '@bge/testing';
+import type { PluginArtifactDirectory, PluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
+import { buildPluginArtifactSha256 as sha } from '@boardgamesempire/plugin-contract';
+import type { PluginManifest } from '@boardgamesempire/plugin-manifest';
+import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { Logger } from '@nestjs/common';
-import { EventEmitter2 } from '@nestjs/event-emitter';
+import type { EventEmitter2 } from '@nestjs/event-emitter';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
 import { PluginConsentActStaleError } from '../consent/plugin-consent-act.errors';
 import { PluginInstalledEvent } from '../events/plugin.events';
-import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
+import type { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
 import { PluginDirectoryLayoutError } from '../loader/loader.errors';
-import { PluginDirectoryResolverService } from '../loader/plugin-directory-resolver.service';
+import type { PluginDirectoryResolverService } from '../loader/plugin-directory-resolver.service';
 import { buildPluginModuleOptions } from '../testing/plugin-module-options.fixture';
 import {
   PluginInstallAuthorityError,
@@ -44,8 +48,9 @@ import {
   PluginReinstallConflictError,
 } from './install.errors';
 import { DEFAULT_PLUGIN_EXECUTION_MODE } from './manifest-enum.maps';
-import { PluginInstallerService, type PluginInstallInput } from './plugin-installer.service';
-import { PluginStaticAnalysisService } from './plugin-static-analysis.service';
+import type { PluginInstallInput } from './plugin-installer.service';
+import { PluginInstallerService } from './plugin-installer.service';
+import type { PluginStaticAnalysisService } from './plugin-static-analysis.service';
 import type { StaticAnalysisFinding, StaticAnalysisReport } from './static-analysis.types';
 
 describe('PluginInstallerService', () => {
@@ -190,7 +195,7 @@ describe('PluginInstallerService', () => {
     db.plugin.create.mockResolvedValue(makePlugin());
     db.pluginPermission.findMany.mockResolvedValue([]);
     db.pluginPermission.create.mockResolvedValue(makePluginPermission());
-    db.pluginGrant.create.mockResolvedValue(makePluginGrant());
+    db.pluginGrant.upsert.mockResolvedValue(makePluginGrant());
     db.pluginConsentAct.create.mockImplementation((({ data }: { data: Record<string, unknown> }) =>
       Promise.resolve({ id: 'act-1', createdAt: new Date(0), ...data })) as never);
     db.permission.findMany.mockResolvedValue([feedbackRead]);
@@ -303,26 +308,30 @@ describe('PluginInstallerService', () => {
     it('seeds Granted server-scope rows for EVERY server-consentable check — required and optional, both origins', async () => {
       const result = await service.install(input());
 
-      expect(db.pluginGrant.create).toHaveBeenCalledTimes(2);
-      expect(db.pluginGrant.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
-          pluginId: 'plugin-1',
-          scopeType: PluginGrantScope.Server,
-          scopeId: SERVER_SCOPE_SENTINEL,
-          permissionSlug: 'plugin|demo-sink|manage:digest',
-          status: PluginGrantStatus.Granted,
-          decidedById: 'admin-1',
-          decidedRiskLevel: RiskLevel.Low,
+      expect(db.pluginGrant.upsert).toHaveBeenCalledTimes(2);
+      expect(db.pluginGrant.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({
+            pluginId: 'plugin-1',
+            scopeType: PluginGrantScope.Server,
+            scopeId: SERVER_SCOPE_SENTINEL,
+            permissionSlug: 'plugin|demo-sink|manage:digest',
+            status: PluginGrantStatus.Granted,
+            decidedById: 'admin-1',
+            decidedRiskLevel: RiskLevel.Low,
+          }),
         }),
-      });
-      expect(db.pluginGrant.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
-          permissionSlug: 'feedback:read',
-          // Core risk propagates from the Permission row into decidedRiskLevel — the baseline
-          // update-time risk escalation compares against (#59).
-          decidedRiskLevel: RiskLevel.Medium,
+      );
+      expect(db.pluginGrant.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({
+            permissionSlug: 'feedback:read',
+            // Core risk propagates from the Permission row into decidedRiskLevel — the baseline
+            // update-time risk escalation compares against (#59).
+            decidedRiskLevel: RiskLevel.Medium,
+          }),
         }),
-      });
+      );
       expect(result.seededGrants).toHaveLength(2);
     });
 
@@ -411,6 +420,8 @@ describe('PluginInstallerService', () => {
           scopeId: SERVER_SCOPE_SENTINEL,
           manifestVersion: '1.2.0',
           manifestSha256: sha('a'),
+          // An install answers no staged update (#1152).
+          stagingId: null,
           presentation: expect.any(Object),
           decidedById: 'admin-1',
           decidedAt: expect.any(Date),
@@ -418,10 +429,10 @@ describe('PluginInstallerService', () => {
         },
       });
       expect(result.act.id).toBe('act-1');
-      expect(db.pluginGrant.create).toHaveBeenCalledTimes(2);
+      expect(db.pluginGrant.upsert).toHaveBeenCalledTimes(2);
 
-      for (const [{ data }] of db.pluginGrant.create.mock.calls as unknown as [{ data: { actId: string } }][]) {
-        expect(data.actId).toBe(result.act.id);
+      for (const [{ create }] of db.pluginGrant.upsert.mock.calls as unknown as [{ create: { actId: string } }][]) {
+        expect(create.actId).toBe(result.act.id);
       }
     });
 
@@ -435,7 +446,9 @@ describe('PluginInstallerService', () => {
       await service.install(input());
 
       const [[{ data: act }]] = db.pluginConsentAct.create.mock.calls as unknown as [[{ data: { decidedAt: Date } }]];
-      const [{ data: decision }] = db.pluginGrant.create.mock.calls[0] as unknown as [{ data: { decidedAt: Date } }];
+      const [{ create: decision }] = db.pluginGrant.upsert.mock.calls[0] as unknown as [
+        { create: { decidedAt: Date } },
+      ];
       const [{ data: plugin }] = db.plugin.create.mock.calls[0] as unknown as [{ data: { installedAt: Date } }];
       expect(decision.decidedAt).toBe(act.decidedAt);
       expect(plugin.installedAt).toBe(act.decidedAt);
@@ -475,7 +488,7 @@ describe('PluginInstallerService', () => {
       await service.install(input({ locale: 'fr' }));
 
       const [[{ data }]] = db.pluginConsentAct.create.mock.calls as unknown as [
-        [{ data: { presentation: { locale: string; checks: { usedFallback: boolean }[] } } }],
+        [{ data: { presentation: { checks: { usedFallback: boolean }[]; locale: string } } }],
       ];
       expect(data.presentation.locale).toBe('fr');
       // The fixture's reasons are English only, so each fell back.
@@ -485,8 +498,8 @@ describe('PluginInstallerService', () => {
     it('seeds the decisions in code-unit order of slug, the lock order every writer of the Server unit takes (#1336)', async () => {
       await service.install(input());
 
-      const slugs = (db.pluginGrant.create.mock.calls as unknown as [{ data: { permissionSlug: string } }][]).map(
-        ([{ data }]) => data.permissionSlug,
+      const slugs = (db.pluginGrant.upsert.mock.calls as unknown as [{ create: { permissionSlug: string } }][]).map(
+        ([{ create }]) => create.permissionSlug,
       );
       expect(slugs).toEqual(['feedback:read', 'plugin|demo-sink|manage:digest']);
     });
@@ -505,7 +518,7 @@ describe('PluginInstallerService', () => {
           presentation: { locale: options.defaultLocale, source: 'active', checks: [] },
         }),
       });
-      expect(db.pluginGrant.create).not.toHaveBeenCalled();
+      expect(db.pluginGrant.upsert).not.toHaveBeenCalled();
       expect(result.act.id).toBe('act-1');
     });
 
@@ -761,7 +774,7 @@ describe('PluginInstallerService', () => {
 
         expect(failure).toBeInstanceOf(PluginInstallCriticalConfirmationError);
         expect((failure as PluginInstallCriticalConfirmationError).expectedSlugs).toEqual(['read:audit_log']);
-        expect(db.pluginGrant.create).not.toHaveBeenCalled();
+        expect(db.pluginGrant.upsert).not.toHaveBeenCalled();
       });
 
       it('grants it on confirmation, with the Critical risk captured on the row', async () => {
@@ -769,13 +782,15 @@ describe('PluginInstallerService', () => {
 
         await service.install(input({ confirmCriticalSlugs: ['read:audit_log'] }));
 
-        expect(db.pluginGrant.create).toHaveBeenCalledWith({
-          data: expect.objectContaining({
-            permissionSlug: 'read:audit_log',
-            status: PluginGrantStatus.Granted,
-            decidedRiskLevel: RiskLevel.Critical,
+        expect(db.pluginGrant.upsert).toHaveBeenCalledWith(
+          expect.objectContaining({
+            create: expect.objectContaining({
+              permissionSlug: 'read:audit_log',
+              status: PluginGrantStatus.Granted,
+              decidedRiskLevel: RiskLevel.Critical,
+            }),
           }),
-        });
+        );
       });
     });
 
@@ -1035,8 +1050,8 @@ describe('PluginInstallerService', () => {
         expect(db.pluginPermission.create).toHaveBeenCalledWith(
           expect.objectContaining({ data: expect.objectContaining({ pluginId: 'existing' }) }),
         );
-        expect(db.pluginGrant.create).toHaveBeenCalledWith(
-          expect.objectContaining({ data: expect.objectContaining({ pluginId: 'existing' }) }),
+        expect(db.pluginGrant.upsert).toHaveBeenCalledWith(
+          expect.objectContaining({ create: expect.objectContaining({ pluginId: 'existing' }) }),
         );
       });
 
@@ -1055,10 +1070,10 @@ describe('PluginInstallerService', () => {
           }),
         });
         expect(result.act.id).toBe('act-reinstall');
-        expect(db.pluginGrant.create).toHaveBeenCalledTimes(2);
+        expect(db.pluginGrant.upsert).toHaveBeenCalledTimes(2);
 
-        for (const [{ data }] of db.pluginGrant.create.mock.calls as unknown as [{ data: { actId: string } }][]) {
-          expect(data.actId).toBe('act-reinstall');
+        for (const [{ create }] of db.pluginGrant.upsert.mock.calls as unknown as [{ create: { actId: string } }][]) {
+          expect(create.actId).toBe('act-reinstall');
         }
       });
 
@@ -1198,8 +1213,8 @@ describe('PluginInstallerService', () => {
 
   describe('the DataGateway row of a data-gateway plugin', () => {
     /** The rows the unique lookups find: by the plugin that owns one, and by the name one holds. */
-    const dataGatewayRows = (found: { readonly byPluginId?: string; readonly byName?: string }): void => {
-      db.dataGateway.findUnique.mockImplementation(((args: { where: { pluginId?: string; name?: string } }) => {
+    const dataGatewayRows = (found: { readonly byName?: string; readonly byPluginId?: string }): void => {
+      db.dataGateway.findUnique.mockImplementation(((args: { where: { name?: string; pluginId?: string } }) => {
         const id = args.where.pluginId !== undefined ? found.byPluginId : found.byName;
 
         return Promise.resolve(id === undefined ? null : { id });
@@ -1298,7 +1313,7 @@ describe('PluginInstallerService', () => {
       expect(db.$transaction).not.toHaveBeenCalled();
       expect(db.plugin.create).not.toHaveBeenCalled();
       expect(db.dataGateway.create).not.toHaveBeenCalled();
-      expect(db.pluginGrant.create).not.toHaveBeenCalled();
+      expect(db.pluginGrant.upsert).not.toHaveBeenCalled();
       expect(emitter.emit).not.toHaveBeenCalled();
     });
 
@@ -1424,21 +1439,16 @@ describe('PluginInstallerService', () => {
 
       const result = await service.install(input());
 
-      // Asserted on the issued creates: the delegate mock returns a fixed
+      // Asserted on the issued upserts: the delegate mock returns a fixed
       // row, and "seeds nothing for these scopes" is a claim about writes.
-      expect(db.pluginGrant.create).toHaveBeenCalledTimes(2);
-      expect(db.pluginGrant.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({ permissionSlug: 'plugin|demo-sink|manage:digest' }),
-      });
-      expect(db.pluginGrant.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({ permissionSlug: 'feedback:read' }),
-      });
-      expect(db.pluginGrant.create).not.toHaveBeenCalledWith({
-        data: expect.objectContaining({ permissionSlug: 'update:calendar' }),
-      });
-      expect(db.pluginGrant.create).not.toHaveBeenCalledWith({
-        data: expect.objectContaining({ permissionSlug: 'read:public_content' }),
-      });
+      const seeded = (permissionSlug: string) =>
+        expect.objectContaining({ create: expect.objectContaining({ permissionSlug }) });
+
+      expect(db.pluginGrant.upsert).toHaveBeenCalledTimes(2);
+      expect(db.pluginGrant.upsert).toHaveBeenCalledWith(seeded('plugin|demo-sink|manage:digest'));
+      expect(db.pluginGrant.upsert).toHaveBeenCalledWith(seeded('feedback:read'));
+      expect(db.pluginGrant.upsert).not.toHaveBeenCalledWith(seeded('update:calendar'));
+      expect(db.pluginGrant.upsert).not.toHaveBeenCalledWith(seeded('read:public_content'));
       expect(result.seededGrants).toHaveLength(2);
     });
   });

@@ -1,9 +1,12 @@
 import type { AuditContextService } from '@bge/actor-context';
 import { Action, ResourceType, RiskLevel } from '@bge/database';
 import type { SupportedLocalesService } from '@bge/i18n';
-import { CHECK_POLICIES_KEY, PoliciesGuard, ScopeComposer, type AppAbility } from '@bge/permissions';
-import { PluginConsentActLocaleError, type PluginInventoryService, type PluginUpdateAssessment } from '@bge/plugin';
-import { createMockAbilityService, MOCK_ACTING_USER_ID, type MockAbilityService } from '@bge/testing';
+import type { AppAbility } from '@bge/permissions';
+import { CHECK_POLICIES_KEY, PoliciesGuard, ScopeComposer } from '@bge/permissions';
+import type { PluginInventoryService, PluginUpdateAssessment } from '@bge/plugin';
+import { PluginConsentActLocaleError } from '@bge/plugin';
+import type { MockAbilityService } from '@bge/testing';
+import { createMockAbilityService, MOCK_ACTING_USER_ID } from '@bge/testing';
 import 'reflect-metadata';
 import { firstValueFrom } from 'rxjs';
 import { PluginArtifactSourceError } from './plugin-artifact-source.error';
@@ -89,7 +92,7 @@ const UPLOADED = { path: '/plugins/.incoming/x.tgz', size: 4096, sha256: 'b'.rep
 
 describe('PluginArtifactsController (#1094)', () => {
   let controller: PluginArtifactsController;
-  let receiver: { receiveByLink: jest.Mock; receiveUpload: jest.Mock; read: jest.Mock };
+  let receiver: { read: jest.Mock; receiveByLink: jest.Mock; receiveUpload: jest.Mock };
   let installer: { install: jest.Mock };
   let inventory: jest.Mocked<Pick<PluginInventoryService, 'getBySlug' | 'existsUnderCeiling'>>;
   let auditContext: jest.Mocked<Pick<AuditContextService, 'getLocale'>>;

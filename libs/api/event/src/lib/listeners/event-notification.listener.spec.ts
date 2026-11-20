@@ -1,21 +1,20 @@
+import type { Game, PlatformGame } from '@bge/database';
 import {
   EventParticipationStatus,
-  Game,
   NominationStatus,
   NotificationType,
   OccurrenceStatus,
-  PlatformGame,
   ScheduledGameRole,
   SystemRole,
 } from '@bge/database';
 import { LineupRemovalReason, NotificationsService } from '@bge/notifications-service';
+import type { MockDatabaseService } from '@bge/testing';
 import {
   createTestingModuleWithDb,
   makeEvent,
   makeEventAttendee,
   makeHouseholdMember,
   makePlatformGame,
-  MockDatabaseService,
 } from '@bge/testing';
 import { Logger } from '@nestjs/common';
 import {
@@ -147,8 +146,8 @@ describe('EventNotificationListener', () => {
       await listener.onEventCreated(makeCreatedEvent({}, ['user-b']));
 
       const allNotifications = notifications.createMany.mock.calls[0][0] as Array<{
-        userId: string;
         type: string;
+        userId: string;
       }>;
 
       // user-a gets EventCreated, user-b gets EventInviteReceived

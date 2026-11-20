@@ -1,5 +1,6 @@
-import { AuthService } from '@bge/auth';
-import { CodedHttpException, t, type I18nTranslations, type LocaleResolutionService } from '@bge/i18n';
+import type { AuthService } from '@bge/auth';
+import type { I18nTranslations, LocaleResolutionService } from '@bge/i18n';
+import { CodedHttpException, t } from '@bge/i18n';
 import { Logger, ServiceUnavailableException } from '@nestjs/common';
 import type { I18nService } from 'nestjs-i18n';
 import type { Namespace, Socket } from 'socket.io';
@@ -19,7 +20,7 @@ class OtherTestGateway extends AuthenticatedGateway {
 type Middleware = (client: Socket, next: (error?: Error) => void) => void;
 
 /** A namespace that records the middleware gateways register on it. */
-function fakeNamespace(): { namespace: Namespace; middleware: Middleware[] } {
+function fakeNamespace(): { middleware: Middleware[]; namespace: Namespace } {
   const middleware: Middleware[] = [];
   const namespace = { use: (fn: Middleware) => middleware.push(fn) } as unknown as Namespace;
 
@@ -44,7 +45,7 @@ const connection = ({
   token = 'token-1',
   acceptLanguage,
   headers = {},
-}: { token?: string | null; acceptLanguage?: string; headers?: Record<string, string> } = {}): Socket =>
+}: { acceptLanguage?: string; headers?: Record<string, string>; token?: string | null } = {}): Socket =>
   ({
     id: 'socket-1',
     handshake: {

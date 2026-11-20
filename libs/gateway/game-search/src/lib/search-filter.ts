@@ -1,10 +1,6 @@
 import { SearchFilterAxis } from '@bge/database';
-import {
-  type CoverageFilter,
-  toCoverageFilter,
-  toStoredContentType,
-  toStoredPlatformType,
-} from '@bge/gateway-registry';
+import type { CoverageFilter } from '@bge/gateway-registry';
+import { toCoverageFilter, toStoredContentType, toStoredPlatformType } from '@bge/gateway-registry';
 import type * as proto from '@boardgamesempire/proto-gateway';
 
 /**
@@ -13,9 +9,9 @@ import type * as proto from '@boardgamesempire/proto-gateway';
  * game with no known value matches it only when `includeUnknown`.
  */
 export interface RangeFilter {
-  readonly min?: number;
-  readonly max?: number;
   readonly includeUnknown: boolean;
+  readonly max?: number;
+  readonly min?: number;
 }
 
 /**
@@ -25,9 +21,9 @@ export interface RangeFilter {
  * that can't apply them (#869).
  */
 export interface ResultFilter extends CoverageFilter {
-  readonly publishYear?: RangeFilter;
   readonly playerCount?: RangeFilter;
   readonly playTime?: RangeFilter;
+  readonly publishYear?: RangeFilter;
 }
 
 /** A list's values, each once, in one order, so that a search reads the same however they were listed. */

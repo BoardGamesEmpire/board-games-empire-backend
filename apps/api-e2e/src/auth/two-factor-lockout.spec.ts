@@ -1,10 +1,12 @@
-import { createActors, SET_AUTH_TOKEN_HEADER, type Actors, type SessionActor } from '@bge/testing-e2e';
+import type { Actors, SessionActor } from '@bge/testing-e2e';
+import { createActors, SET_AUTH_TOKEN_HEADER } from '@bge/testing-e2e';
 import { createHmac } from 'node:crypto';
 import request from 'supertest';
 import { postToAuth } from '../support/auth-routes';
 import { requireBaseUrl } from '../support/e2e-env';
 import { cookiePairs, sessionCookieOf } from '../support/sign-in-provider';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 
 const ENABLE_PATH = '/api/auth/two-factor/enable';
 const VERIFY_TOTP_PATH = '/api/auth/two-factor/verify-totp';
@@ -189,6 +191,7 @@ describe('the two-factor lockout', () => {
     if (!totpSecret) {
       throw new Error(`the TOTP URI carries no secret: ${enabled.body.totpURI}`);
     }
+
     const secret = base32Decode(totpSecret);
 
     // Confirming the code is what turns two-factor on, and replaces the signup

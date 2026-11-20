@@ -15,16 +15,6 @@ import type { FeedbackCategory, FeedbackReport, FeedbackSubmission, Prisma } fro
  *  - throw on failure so BullMQ counts the attempt; never swallow-and-return
  */
 export interface FeedbackSink {
-  /** Stable identifier, e.g. 'local'. Persisted on `FeedbackSubmission.sinkSlug`. */
-  readonly slug: string;
-
-  /**
-   * True for in-tree sinks that ship with the server (currently only the local
-   * database sink). Informational — surfaced by discovery endpoints (#78) and a
-   * hint that the sink cannot be uninstalled.
-   */
-  readonly bundled?: boolean;
-
   /**
    * Category filter hook. When present, the dispatcher only routes reports whose
    * category this returns `true` for (e.g. bugs → GitHub, feature requests →
@@ -33,6 +23,16 @@ export interface FeedbackSink {
    * once it lands; until then it is a per-sink static filter.
    */
   acceptsCategory?(category: FeedbackCategory): boolean;
+
+  /**
+   * True for in-tree sinks that ship with the server (currently only the local
+   * database sink). Informational — surfaced by discovery endpoints (#78) and a
+   * hint that the sink cannot be uninstalled.
+   */
+  readonly bundled?: boolean;
+
+  /** Stable identifier, e.g. 'local'. Persisted on `FeedbackSubmission.sinkSlug`. */
+  readonly slug: string;
 
   /**
    * Forward one report to this sink. Resolves with the external identifiers to

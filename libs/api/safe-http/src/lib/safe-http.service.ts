@@ -1,5 +1,6 @@
 import { actorUserId, AuditContextService } from '@bge/actor-context';
-import { DatabaseService, type SafeHttpPolicy } from '@bge/database';
+import type { SafeHttpPolicy } from '@bge/database';
+import { DatabaseService } from '@bge/database';
 import { t } from '@bge/i18n';
 import { SafeHttpPolicyEventsService } from '@bge/secure-http';
 import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
@@ -26,6 +27,7 @@ export class SafeHttpService {
     if (rows.length === 0) {
       throw new NotFoundException(t('errors.safe_http.no_policy'));
     }
+
     if (rows.length > 1) {
       throw new ConflictException(t('errors.safe_http.multiple_policies'));
     }
@@ -99,22 +101,27 @@ export class SafeHttpService {
    *   - DTO supplies both strict=true and wildcards in the same payload.
    */
   private assertWildcardPolicyConsistent(effective: SafeHttpPolicy): void {
-    if (!effective.strictMode) return;
+    if (!effective.strictMode) {
+      return;
+    }
 
     const wildcardsIn = (list: readonly string[]): string[] => list.filter((entry) => entry.startsWith('*.'));
 
-    const offenders: { field: string; entries: string[] }[] = [];
+    const offenders: { entries: string[]; field: string }[] = [];
     const allowedWildcards = wildcardsIn(effective.allowedHosts);
     const blockedWildcards = wildcardsIn(effective.blockedHosts);
 
     if (allowedWildcards.length > 0) {
       offenders.push({ field: 'allowedHosts', entries: allowedWildcards });
     }
+
     if (blockedWildcards.length > 0) {
       offenders.push({ field: 'blockedHosts', entries: blockedWildcards });
     }
 
-    if (offenders.length === 0) return;
+    if (offenders.length === 0) {
+      return;
+    }
 
     const detail = offenders.map((o) => `${o.field}: [${o.entries.join(', ')}]`).join('; ');
 

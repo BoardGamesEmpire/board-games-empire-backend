@@ -34,9 +34,9 @@ const INSTALLED_AT = '2026-11-01T00:00:00Z';
 
 /** The plugin's row, with what an update's activation rewrites beside what a routing decision reads. */
 interface PluginRow extends RoutedPlugin {
-  version: string;
   installedSha256: string;
   restartRequired: boolean;
+  version: string;
 }
 
 /**

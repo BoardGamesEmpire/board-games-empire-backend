@@ -1,9 +1,12 @@
 import { ApiProperty } from '@nestjs/swagger';
 
 /**
- * One expansion link, seen from the game at one end (#1069): `gameId` names
- * the game at the other end. The value is the link's own, since an expansion
- * can be standalone for one base game and not another.
+ * One add-on link, seen from the game at one end (#1069): `gameId` names the
+ * game at the other end. `isStandalone` is the add-on's: it follows the
+ * add-on's content type, the platform game's own where one platform is in
+ * view (a collection or offered-game row), else the game's. So all of one
+ * add-on's links carry the same value, on a row and wherever no platform is in
+ * view (#1391).
  *
  * Shared because `GET /games` rows and collection rows both send it (#1070),
  * and Swagger keys a schema by class name, so a second class would collide.
@@ -16,6 +19,12 @@ export class ExpansionLinkDto {
   @ApiProperty({ description: 'ID of the game at the other end of the link' })
   gameId!: string;
 
-  @ApiProperty({ description: 'Whether the expansion plays without this base game' })
+  @ApiProperty({
+    description:
+      'Whether the add-on is a standalone expansion, which plays without a base game. It follows the add-on’s ' +
+      'content type: the platform game’s own where one platform is in view (a collection or offered-game row), ' +
+      'else the game’s. So all of one add-on’s links carry the same value, on a row and wherever no platform is ' +
+      'in view (#1391).',
+  })
   isStandalone!: boolean;
 }

@@ -1,3 +1,4 @@
+import type { FeedbackReport } from '@bge/database';
 import {
   Action,
   DeploymentRuntime,
@@ -6,14 +7,16 @@ import {
   FeedbackSeverity,
   FeedbackStatus,
   ResourceType,
-  type FeedbackReport,
 } from '@bge/database';
 import { t } from '@bge/i18n';
-import { AbilityService, AppAbility, CHECK_POLICIES_KEY, PoliciesGuard } from '@bge/permissions';
-import { createMockAbilityService, type MockAbilityService } from '@bge/testing';
-import { Test, TestingModule } from '@nestjs/testing';
+import type { AppAbility } from '@bge/permissions';
+import { AbilityService, CHECK_POLICIES_KEY, PoliciesGuard } from '@bge/permissions';
+import type { MockAbilityService } from '@bge/testing';
+import { createMockAbilityService } from '@bge/testing';
+import type { TestingModule } from '@nestjs/testing';
+import { Test } from '@nestjs/testing';
 import { firstValueFrom } from 'rxjs';
-import { CreateFeedbackReportDto } from './dto/create-feedback-report.dto';
+import type { CreateFeedbackReportDto } from './dto/create-feedback-report.dto';
 import { FeedbackReceiptDto } from './dto/feedback-receipt.dto';
 import { FeedbackController } from './feedback.controller';
 import { FeedbackService } from './feedback.service';

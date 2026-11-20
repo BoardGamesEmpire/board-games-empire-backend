@@ -12,40 +12,44 @@ import { Injectable, Logger } from '@nestjs/common';
 import { FlowProducer } from 'bullmq';
 import { FlowProducerNames } from '../constants/queue.constants';
 import { buildBaseFlow, buildExpansionFlow } from '../flows/import-flow.builder';
-import {
-  ImportJobOrigin,
-  type ExpansionImportJobPayload,
-  type GameImportJobPayload,
-} from '../interfaces/import-job.interface';
+import type { ExpansionImportJobPayload, GameImportJobPayload } from '../interfaces/import-job.interface';
+import { ImportJobOrigin } from '../interfaces/import-job.interface';
 import { idempotencyKeyFor } from '../utils/idempotency-key';
 
 export interface SpawnExpansionsInput {
   /** The base Job row id — becomes each expansion row's parentJobId. */
   baseJobId: string;
+
   batchId: string;
   correlationId: string;
+  expansionExternalIds: string[];
   gatewayId: string;
+  initiatorType: InitiatorType;
+  locale?: string;
+
   /**
    * External id of the requested game — recorded on each expansion, which
    * links to it when its DataGateway names no base game (#971).
    */
   requestedExternalId: string;
-  expansionExternalIds: string[];
-  locale?: string;
-  initiatorType: InitiatorType;
+
   userId: string | null;
 }
 
 export interface SpawnBaseGameInput {
-  /** The Job row id of the game that needs the base game — becomes its parentJobId. */
-  parentJobId: string;
   batchId: string;
   correlationId: string;
-  gatewayId: string;
+
   /** External id of the base game to add. */
   externalId: string;
-  locale?: string;
+
+  gatewayId: string;
   initiatorType: InitiatorType;
+  locale?: string;
+
+  /** The Job row id of the game that needs the base game — becomes its parentJobId. */
+  parentJobId: string;
+
   userId: string | null;
 }
 

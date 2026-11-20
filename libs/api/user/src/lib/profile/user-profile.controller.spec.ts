@@ -1,5 +1,6 @@
 import { Action, ResourceType } from '@bge/database';
-import { CHECK_POLICIES_KEY, PoliciesGuard, type AppAbility } from '@bge/permissions';
+import type { AppAbility } from '@bge/permissions';
+import { CHECK_POLICIES_KEY, PoliciesGuard } from '@bge/permissions';
 import { createTestingModuleWithDb } from '@bge/testing';
 import { firstValueFrom } from 'rxjs';
 import { UpdateUserProfileDto } from '../dto/update-user-profile.dto';

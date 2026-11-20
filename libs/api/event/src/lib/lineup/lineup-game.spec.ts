@@ -1,7 +1,9 @@
 import type { DatabaseService } from '@bge/database';
 import type { ScopeComposer } from '@bge/permissions';
-import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
-import { LINEUP_GAME_SELECT, toLineupGameRow, withSuppliers, type LineupGameRow } from './lineup-game';
+import type { MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService } from '@bge/testing';
+import type { LineupGameRow } from './lineup-game';
+import { LINEUP_GAME_SELECT, toLineupGameRow, withSuppliers } from './lineup-game';
 
 const CEILING = { id: { in: ['att-host'] }, AND: [{ id: 'sentinel-condition' }] };
 

@@ -1,7 +1,7 @@
+import type { Friendship } from '@bge/database';
 import {
   Action,
   DatabaseService,
-  type Friendship,
   FriendshipStatus,
   isPrismaDependentRecordNotFoundError,
   isPrismaUniqueConstraintError,
@@ -119,6 +119,7 @@ export class FriendshipService {
       if (isPrismaUniqueConstraintError(error)) {
         throw new ConflictException(t('errors.friendship.already_exists'));
       }
+
       throw error;
     }
   }
@@ -251,9 +252,11 @@ export class FriendshipService {
         if (!isAddressee) {
           throw new ForbiddenException(t('errors.friendship.only_recipient_responds'));
         }
+
         if (friendship.status !== FriendshipStatus.Pending) {
           throw new BadRequestException(t('errors.friendship.not_pending'));
         }
+
         fromPending = true;
         break;
 
@@ -261,9 +264,11 @@ export class FriendshipService {
         if (!isRequester) {
           throw new ForbiddenException(t('errors.friendship.only_sender_withdraws'));
         }
+
         if (friendship.status !== FriendshipStatus.Pending) {
           throw new BadRequestException(t('errors.friendship.not_pending'));
         }
+
         fromPending = true;
         break;
 
@@ -271,6 +276,7 @@ export class FriendshipService {
         if (friendship.status === FriendshipStatus.Blocked) {
           throw new BadRequestException(t('errors.friendship.already_blocked'));
         }
+
         // Reorient so the acting user (the blocker) is the requester.
         data.requester = { connect: { id: userId } };
         data.addressee = { connect: { id: isAddressee ? friendship.requesterId : friendship.addresseeId } };

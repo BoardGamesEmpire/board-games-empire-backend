@@ -3,11 +3,13 @@ import { Pool } from 'pg';
 import { PrismaClient } from './client';
 
 export interface StandaloneClient {
-  readonly prisma: PrismaClient;
-  /** The schema the URL's `?schema=` names; `undefined` leaves it to Postgres's search path (`public`). */
-  readonly schema: string | undefined;
   /** Disconnects the client and ends the pool: Prisma's `$disconnect()` does not close an app-owned pool. */
   close(): Promise<void>;
+
+  readonly prisma: PrismaClient;
+
+  /** The schema the URL's `?schema=` names; `undefined` leaves it to Postgres's search path (`public`). */
+  readonly schema: string | undefined;
 }
 
 /**

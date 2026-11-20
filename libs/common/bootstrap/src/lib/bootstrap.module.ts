@@ -1,10 +1,13 @@
 import { databaseConfig, databaseConfigValidationSchema, DatabaseModule } from '@bge/database';
 import { env } from '@bge/env';
-import { createRedisClient, RedisKeyFlush, type BgeRedisConnectionConfig } from '@bge/redis';
-import { Module, type DynamicModule, type Provider } from '@nestjs/common';
+import type { BgeRedisConnectionConfig } from '@bge/redis';
+import { createRedisClient, RedisKeyFlush } from '@bge/redis';
+import type { DynamicModule, Provider } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import Joi from 'joi';
-import { BOOTSTRAP_OPTIONS, CACHE_FLUSH, type BootstrapModuleOptions } from './bootstrap-options';
+import type { BootstrapModuleOptions } from './bootstrap-options';
+import { BOOTSTRAP_OPTIONS, CACHE_FLUSH } from './bootstrap-options';
 import { BootstrapService } from './bootstrap.service';
 
 /**

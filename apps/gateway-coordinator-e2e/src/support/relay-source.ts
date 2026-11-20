@@ -57,18 +57,18 @@ const gatewayRegistryStandIn: DynamicModule = {
 const ADDRESS_VARIABLES = ['GATEWAY_COORDINATOR_HOST', 'GATEWAY_COORDINATOR_PORT'] as const;
 
 export interface RelaySource {
-  /** Whether a running coordinator has this install of the plugin loaded, as its plugin load records say. */
-  isLoaded(plugin: RoutedPlugin): Promise<boolean>;
-
-  /** A driver for the plugin DataGateway, whose calls go to the coordinator. It is disposed when the spec file ends. */
-  build(gatewayId: string): Promise<DataGatewayDriver>;
-
   /**
    * Runs `work` with an actor in scope, as the queue's consumer runs a job.
    * Outside the server's entry points only a system actor can be put in
    * scope, so the job is the server's own, and `reason` names it.
    */
   asJob<T>(reason: string, work: () => T): T;
+
+  /** A driver for the plugin DataGateway, whose calls go to the coordinator. It is disposed when the spec file ends. */
+  build(gatewayId: string): Promise<DataGatewayDriver>;
+
+  /** Whether a running coordinator has this install of the plugin loaded, as its plugin load records say. */
+  isLoaded(plugin: RoutedPlugin): Promise<boolean>;
 }
 
 /** The plugin as a routing decision reads it from its row now. */

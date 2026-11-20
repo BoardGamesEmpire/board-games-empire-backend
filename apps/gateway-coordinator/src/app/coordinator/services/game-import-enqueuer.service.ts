@@ -106,15 +106,15 @@ export class GameImportEnqueuerService {
 
 export interface StartGameImportInput {
   correlationId: string;
-  gatewayId: string;
-  externalId: string;
   expansionExternalIds: readonly string[];
+  externalId: string;
+  gatewayId: string;
   locale?: string;
   userId: string | null;
 }
 
 export interface EnqueueResult {
-  batchId: string;
   baseJobId: string;
+  batchId: string;
   expansionJobIds: string[];
 }

@@ -55,7 +55,10 @@ function checkBundleExternals(bundles) {
       }
     }
 
-    if (found === 0) withoutExternals.push(bundle);
+    if (found === 0) {
+      withoutExternals.push(bundle);
+    }
+
     externals += found;
   }
 

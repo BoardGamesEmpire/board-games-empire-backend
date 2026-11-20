@@ -32,7 +32,7 @@ describe('VocabularySectionQueue', () => {
 
   /** The job ids and delays of the jobs queued, in order. */
   const queued = () =>
-    queue.add.mock.calls.map(([, , options]: [string, unknown, { jobId: string; delay: number }]) => [
+    queue.add.mock.calls.map(([, , options]: [string, unknown, { delay: number; jobId: string }]) => [
       options.jobId,
       options.delay,
     ]);
@@ -56,6 +56,7 @@ describe('VocabularySectionQueue', () => {
         },
       });
     }
+
     expect(queue.add.mock.calls.map(([, data]) => data.capability)).toEqual([
       ListLanguages,
       ListPlatforms,

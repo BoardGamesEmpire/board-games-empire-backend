@@ -1,7 +1,9 @@
 import { ManifestErrorCode, ManifestWarningCode, PluginManifestValidationError } from './errors.js';
-import { ManifestValidationOptions, validatePluginManifest } from './manifest-validator.js';
+import type { ManifestValidationOptions } from './manifest-validator.js';
+import { validatePluginManifest } from './manifest-validator.js';
 import type { PluginManifest } from './manifest.types.js';
-import { buildPluginManifest, PluginManifestOverrides } from './testing/manifest-fixture.js';
+import type { PluginManifestOverrides } from './testing/manifest-fixture.js';
+import { buildPluginManifest } from './testing/manifest-fixture.js';
 
 const options: ManifestValidationOptions = { bgeVersion: '0.3.0', defaultLocale: 'en' };
 

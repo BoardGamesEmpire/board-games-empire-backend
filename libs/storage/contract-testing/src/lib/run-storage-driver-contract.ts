@@ -1,4 +1,5 @@
-import { ObjectNotFoundError, type StorageDriver } from '@boardgamesempire/storage-contract';
+import type { StorageDriver } from '@boardgamesempire/storage-contract';
+import { ObjectNotFoundError } from '@boardgamesempire/storage-contract';
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import { Buffer } from 'node:buffer';
 import { createHash } from 'node:crypto';
@@ -20,6 +21,7 @@ async function drain(body: Readable): Promise<Buffer> {
   for await (const chunk of body) {
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   }
+
   return Buffer.concat(chunks);
 }
 

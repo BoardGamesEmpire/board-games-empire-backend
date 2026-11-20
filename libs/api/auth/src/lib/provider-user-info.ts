@@ -1,7 +1,8 @@
 import type { LoggerService } from '@nestjs/common';
 import { decodeJwt } from 'jose';
 import type { OidcProviderConfig } from './configuration/oidc-providers';
-import { mergeProviderClaims, type ProviderClaims, type ProviderProfile } from './provider-claims';
+import type { ProviderClaims, ProviderProfile } from './provider-claims';
+import { mergeProviderClaims } from './provider-claims';
 
 /** How long a request to a sign-in provider may take: its discovery document, or UserInfo (#993). */
 export const PROVIDER_REQUEST_TIMEOUT_MS = 10_000;
@@ -11,9 +12,10 @@ const DISCOVERY_FIELDS = ['issuer', 'authorization_endpoint'] as const;
 
 /** What {@link createProviderUserInfo} needs from outside (#993). */
 export interface ProviderUserInfoDeps {
-  readonly logger: Pick<LoggerService, 'warn'>;
   /** Defaults to the global fetch, looked up on each call. */
   readonly fetch?: typeof fetch;
+
+  readonly logger: Pick<LoggerService, 'warn'>;
 }
 
 /** A sign-in provider's `getUserInfo`: the profile to sign in with, or `null` to refuse (#993). */
@@ -166,6 +168,7 @@ export function createProviderUserInfo(
         if (userInfoFailed) {
           warn("UserInfo couldn't be read, and there's no ID token to sign in with instead");
         }
+
         return null;
       case 'profile':
         if (userInfoFailed) {
@@ -179,6 +182,7 @@ export function createProviderUserInfo(
           setAsideWarned = true;
           warn("UserInfo carries no subject that can be read, so its answers are set aside; this isn't logged again");
         }
+
         return merged.profile;
     }
   };

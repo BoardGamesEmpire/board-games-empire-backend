@@ -18,6 +18,7 @@ import { uniqueViolationWithoutMeta } from '@bge/database/testing';
 import { t } from '@bge/i18n';
 import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
 import { DefaultPaginationQueryDto } from '@bge/shared';
+import type { MockAbilityService, MockDatabaseService } from '@bge/testing';
 import {
   batchTransactionCall,
   createMockAbilityService,
@@ -30,8 +31,6 @@ import {
   MOCK_ACTING_USER_ID,
   rawQueryText,
   unwrapTransaction,
-  type MockAbilityService,
-  type MockDatabaseService,
 } from '@bge/testing';
 import { WebhookEventType } from '@bge/webhooks';
 import { BadRequestException, ForbiddenException, Logger, NotFoundException } from '@nestjs/common';
@@ -886,10 +885,19 @@ describe('EventService', () => {
           action: Action,
           field?: string,
         ) => {
-          if (type !== ResourceType.Event || action !== Action.update) return [COND];
+          if (type !== ResourceType.Event || action !== Action.update) {
+            return [COND];
+          }
+
           // An equal clause, but not the same object, as each read builds its own.
-          if (field === 'title' || field === 'description') return [{ ...TITLE_COND }];
-          if (field === 'location') return [LOCATION_COND];
+          if (field === 'title' || field === 'description') {
+            return [{ ...TITLE_COND }];
+          }
+
+          if (field === 'location') {
+            return [LOCATION_COND];
+          }
+
           return [{ OR: [] }];
         }) as never);
       });
@@ -1437,6 +1445,23 @@ describe('EventService', () => {
     expect(emitted.before).toBeNull();
     expect(emitted.after).toEqual(expect.objectContaining({ id: 'event-1', title: 'X', createdById: 'user-1' }));
     expect(emitted.invitedUserIds).toEqual(['user-2']);
+  });
+
+  it("createEvent dates the host's own attendance at the event's creation (#1027)", async () => {
+    db.$transaction.mockImplementation(async (cb: (tx: MockDatabaseService) => unknown) => cb(db));
+    db.event.create.mockResolvedValue(withDates(makeEvent({ id: 'event-1', createdById: 'user-1' })));
+    abilityService.getActingUserId.mockReturnValue('user-1');
+
+    await service.createEvent({ title: 'X', inviteUserIds: ['user-2'] } as CreateEventDto);
+
+    // The host has answered: they are Attending. An invited attendee has not.
+    // Typed as one row or a list; createEvent writes a list.
+    const [host, invited] = db.event.create.mock.calls[0][0].data.attendees?.create as object[];
+    expect(host).toEqual(
+      expect.objectContaining({ status: EventParticipationStatus.Attending, rsvpDate: expect.any(Date) }),
+    );
+    expect(invited).toEqual(expect.objectContaining({ status: EventParticipationStatus.Invited }));
+    expect(invited).not.toHaveProperty('rsvpDate');
   });
 
   describe('what createEvent writes', () => {

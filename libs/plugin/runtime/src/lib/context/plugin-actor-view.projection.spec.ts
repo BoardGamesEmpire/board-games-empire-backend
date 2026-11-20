@@ -1,11 +1,12 @@
-import { SERVER_PLUGIN_UNIT, type Actor, type UserActor } from '@bge/actor-context';
+import type { Actor, UserActor } from '@bge/actor-context';
+import { SERVER_PLUGIN_UNIT } from '@bge/actor-context';
 import { UnknownActorKindError } from './context.errors';
 import { toPluginActorView } from './plugin-actor-view.projection';
 
 /** A host variant that has gained a field the contract view does not declare. */
 interface FutureUserActor extends UserActor {
-  readonly sessionToken: string;
   readonly email: string;
+  readonly sessionToken: string;
 }
 
 describe('toPluginActorView', () => {
@@ -102,7 +103,7 @@ describe('toPluginActorView', () => {
     });
 
     it('projects the unit as a frozen copy carrying only the owned coordinate', () => {
-      const view = toPluginActorView(nested) as { unit: { scopeType: string; householdId: string } };
+      const view = toPluginActorView(nested) as { unit: { householdId: string; scopeType: string } };
 
       expect(view.unit).not.toBe(nested.kind === 'plugin' ? nested.unit : undefined);
       expect(Object.isFrozen(view.unit)).toBe(true);

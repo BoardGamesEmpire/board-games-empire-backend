@@ -1,12 +1,13 @@
-import { friendOfFriendOf, FriendshipStatus, InviteType, Prisma, Reach } from '@bge/database';
+import type { Prisma } from '@bge/database';
+import { friendOfFriendOf, FriendshipStatus, InviteType, Reach } from '@bge/database';
 import { t } from '@bge/i18n';
 import { ForbiddenException } from '@nestjs/common';
 import { normalizeInviteeEmail } from './invite.service';
 
 /** The invitee as the create stores them: an account by id, or an address alone. */
 export type StoredInvitee =
-  | { readonly inviteeId: string; readonly inviteeEmail: null }
-  | { readonly inviteeId: null; readonly inviteeEmail: string };
+  | { readonly inviteeEmail: null; readonly inviteeId: string }
+  | { readonly inviteeEmail: string; readonly inviteeId: null };
 
 /**
  * The account the gate asks about: by id, or as whichever account holds an
@@ -43,10 +44,10 @@ const GATE_SETTINGS = {
 } as const satisfies Record<
   GatedInviteType,
   {
+    friendsOfFriendsOnly: string;
+    friendsOnly: string;
     policy: keyof Prisma.SystemSettingSelect;
     preference: keyof Prisma.UserPreferencesSelect;
-    friendsOnly: string;
-    friendsOfFriendsOnly: string;
     refused: string;
   }
 >;

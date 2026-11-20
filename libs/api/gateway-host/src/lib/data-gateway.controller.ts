@@ -1,7 +1,8 @@
 import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
 import type * as proto from '@boardgamesempire/proto-gateway';
 import { GatewayServiceControllerMethods } from '@boardgamesempire/proto-gateway';
-import { Controller, Inject, Logger, type OnApplicationShutdown } from '@nestjs/common';
+import type { OnApplicationShutdown } from '@nestjs/common';
+import { Controller, Inject, Logger } from '@nestjs/common';
 import type { Observable } from 'rxjs';
 import { DATA_GATEWAY_DRIVER } from './data-gateway-driver.token';
 import { relayDriverAnswer } from './relay-driver-answer';

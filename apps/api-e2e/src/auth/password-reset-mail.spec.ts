@@ -1,15 +1,18 @@
 import { MAIL_QUEUE_NAME } from '@bge/queue-mail';
-import { createActors, type Actors } from '@bge/testing-e2e';
+import type { Actors } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { apiCacheTtlMs } from '../support/api-cache';
 import { postToAuth } from '../support/auth-routes';
 import { requireBaseUrl, requireMailpit } from '../support/e2e-env';
 import { MAILPIT_FROM_ADDRESS, useMailSettings } from '../support/mail-settings';
-import { mailpit, type MailpitMessage } from '../support/mailpit';
+import type { MailpitMessage } from '../support/mailpit';
+import { mailpit } from '../support/mailpit';
 import { drainQueue, markQueueEvents } from '../support/queues';
 import { useSettingSwitch } from '../support/setting-switch';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { useWorker } from '../support/worker';
 
 const REQUEST_RESET_PATH = '/api/auth/request-password-reset';
@@ -90,7 +93,7 @@ describe('password resets through outgoing mail', () => {
   }
 
   /** The one reset mail to `address`, the link in it, and the token in the link. */
-  async function resetMailTo(address: string): Promise<{ message: MailpitMessage; link: string; token: string }> {
+  async function resetMailTo(address: string): Promise<{ link: string; message: MailpitMessage; token: string }> {
     const messages = await mailbox().waitForMessagesTo(address, MAIL_WAIT_MS);
     expect(messages).toHaveLength(1);
 

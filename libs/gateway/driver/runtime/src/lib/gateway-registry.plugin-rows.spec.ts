@@ -5,7 +5,8 @@ import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contrac
 import { InMemoryGatewayDriver } from '@boardgamesempire/gateway-driver-contract-testing';
 import { Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { Test, type TestingModule } from '@nestjs/testing';
+import type { TestingModule } from '@nestjs/testing';
+import { Test } from '@nestjs/testing';
 import type { Redis } from 'iovalkey';
 import { setTimeout as delay } from 'node:timers/promises';
 import { concatMap, from, throwError } from 'rxjs';
@@ -19,7 +20,8 @@ import { GatewayInterviewService } from './gateway-interview.service';
 import { GatewayRegistryBootstrapService } from './gateway-registry.bootstrap.service';
 import { GatewayRegistryService } from './gateway-registry.service';
 import type { GatewayConfigEvent } from './interfaces';
-import { PLUGIN_DRIVER_SOURCE, type PluginDriverSource, type RoutedPlugin } from './plugin-driver-source';
+import type { PluginDriverSource, RoutedPlugin } from './plugin-driver-source';
+import { PLUGIN_DRIVER_SOURCE } from './plugin-driver-source';
 import { FakeDataGatewayTable } from './testing/fake-data-gateway-table';
 import { VocabularySectionQueue } from './vocabulary-section.queue';
 
@@ -875,6 +877,7 @@ describe("The gateway registry and a plugin DataGateway's row (#1083)", () => {
         table.seed({ id, plugin: servedPlugin({ id: pluginId }) });
         await service.resolve(id, Search);
       }
+
       await expect(service.routableGatewayIds(Search)).resolves.toEqual(['served', 'switched-off', 'reinstalled']);
 
       table.patch('switched-off', { plugin: servedPlugin({ id: 'p-off', enabled: false }) });

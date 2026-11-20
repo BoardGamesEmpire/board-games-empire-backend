@@ -1,3 +1,4 @@
+import type { SafeHttpRequestOptions, SafeHttpResponse, SecureHttpService } from '@bge/secure-http';
 import {
   HostNotAllowedError,
   InvalidRequestUrlError,
@@ -7,9 +8,6 @@ import {
   RequestTimeoutError,
   ResponseTooLargeError,
   SsrfRejectionError,
-  type SafeHttpRequestOptions,
-  type SafeHttpResponse,
-  type SecureHttpService,
 } from '@bge/secure-http';
 import type { UpstreamFetch } from '@boardgamesempire/gateway-driver-contract';
 import {
@@ -194,6 +192,7 @@ describe('buildPluginHttp', () => {
         expect(text).not.toContain('secret-path');
         expect(text).not.toContain('s3cret');
       }
+
       expect(request).not.toHaveBeenCalled();
     });
 
@@ -212,6 +211,7 @@ describe('buildPluginHttp', () => {
           expect(text).not.toContain('s3cret');
           expect(text).not.toContain("''");
         }
+
         expect(request).not.toHaveBeenCalled();
       },
     );

@@ -1,7 +1,9 @@
 import type { Redis } from '@bge/redis';
 import Keyv from 'keyv';
-import { createAuthStorage, createRedisAuthStorage, type CompleteAuthStorage } from './auth-storage';
-import { withStorageFailureRecord, type StorageFailureRecord } from './storage-failure-record';
+import type { CompleteAuthStorage } from './auth-storage';
+import { createAuthStorage, createRedisAuthStorage } from './auth-storage';
+import type { StorageFailureRecord } from './storage-failure-record';
+import { withStorageFailureRecord } from './storage-failure-record';
 
 /** An in-memory store that raises failures, as the api's Redis-backed one is built to. */
 const memoryStore = () => new Keyv({ throwOnErrors: true });
@@ -86,8 +88,8 @@ describe('createRedisAuthStorage', () => {
     setError,
     unlinkError,
   }: {
-    evalResult?: number;
     evalError?: Error;
+    evalResult?: number;
     getdelError?: Error;
     getError?: Error;
     setError?: Error;
@@ -103,6 +105,7 @@ describe('createRedisAuthStorage', () => {
         if (getError) {
           throw getError;
         }
+
         return values.get(key) ?? null;
       },
       async set(...args: unknown[]) {
@@ -110,6 +113,7 @@ describe('createRedisAuthStorage', () => {
         if (setError) {
           throw setError;
         }
+
         values.set(args[0], args[1]);
         return 'OK';
       },
@@ -118,6 +122,7 @@ describe('createRedisAuthStorage', () => {
         if (unlinkError) {
           throw unlinkError;
         }
+
         return values.delete(key) ? 1 : 0;
       },
       async eval(...args: unknown[]) {
@@ -125,6 +130,7 @@ describe('createRedisAuthStorage', () => {
         if (evalError) {
           throw evalError;
         }
+
         return evalResult;
       },
       async getdel(key: string) {
@@ -132,6 +138,7 @@ describe('createRedisAuthStorage', () => {
         if (getdelError) {
           throw getdelError;
         }
+
         const value = values.get(key) ?? null;
         values.delete(key);
         return value;

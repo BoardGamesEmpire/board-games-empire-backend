@@ -11,24 +11,20 @@ import {
   ResourceType,
   SystemRole,
 } from '@bge/database';
-import {
-  CONTEXT_INVITE_SELECT,
-  InviteService,
-  type InviteApproval,
-  type InviteContextView,
-  type InviteCreation,
-  type InvitePartyView,
-  type InviteRevocation,
+import type {
+  InviteApproval,
+  InviteContextView,
+  InviteCreation,
+  InvitePartyView,
+  InviteRevocation,
 } from '@bge/invites';
-import { AbilityService, ScopeComposer, type UserAbilityCheck } from '@bge/permissions';
-import { QuotaExceededException, QuotaService, type QuotaCheckResult, type QuotaSoftOverageEvent } from '@bge/quota';
-import {
-  batchTransactionCall,
-  createTestingModuleWithDb,
-  paginationQuery,
-  unwrapTransaction,
-  type MockDatabaseService,
-} from '@bge/testing';
+import { CONTEXT_INVITE_SELECT, InviteService } from '@bge/invites';
+import type { UserAbilityCheck } from '@bge/permissions';
+import { AbilityService, ScopeComposer } from '@bge/permissions';
+import type { QuotaCheckResult, QuotaSoftOverageEvent } from '@bge/quota';
+import { QuotaExceededException, QuotaService } from '@bge/quota';
+import type { MockDatabaseService } from '@bge/testing';
+import { batchTransactionCall, createTestingModuleWithDb, paginationQuery, unwrapTransaction } from '@bge/testing';
 import {
   BadRequestException,
   ConflictException,
@@ -46,7 +42,7 @@ const NOW = new Date('2026-10-13T12:00:00Z');
 const LATER = new Date('2026-10-20T12:00:00Z');
 const EARLIER = new Date('2026-10-10T12:00:00Z');
 
-type RosterRow = { userId: string; role: { role: { name: string } } | null };
+type RosterRow = { role: { role: { name: string } } | null; userId: string };
 
 const rosterRow = (userId: string, name: SystemRole): RosterRow => ({ userId, role: { role: { name } } });
 
@@ -511,7 +507,7 @@ describe('HouseholdInviteService', () => {
 
       /** Whether a user filter names the invitee: `user-2` by id, or as the holder of `sam@example.test`. */
       const namesInvitee = (filter: unknown) => {
-        const { id, email } = filter as { id?: string; email?: string };
+        const { id, email } = filter as { email?: string; id?: string };
 
         return id === 'user-2' || email === 'sam@example.test';
       };
@@ -723,6 +719,7 @@ describe('HouseholdInviteService', () => {
             expect(error).toBeInstanceOf(ForbiddenException);
             expect((error as ForbiddenException).message).toContain('errors.household.invitee_friends_only');
           }
+
           expect(db.user.count).not.toHaveBeenCalled();
           expect(invites.createWithin).not.toHaveBeenCalled();
         });
@@ -1605,8 +1602,8 @@ describe('HouseholdInviteService', () => {
      */
     const storedColumns = (stored: ReadonlyArray<{ readonly id: string } & Record<string, unknown>>) =>
       db.invite.findMany.mockImplementation(((args: {
-        where: { id: { in: string[] } };
         select: Record<string, unknown>;
+        where: { id: { in: string[] } };
       }) =>
         Promise.resolve(
           stored.filter((row) => args.where.id.in.includes(row.id)).map((row) => selected(row, args.select)),
@@ -1616,7 +1613,7 @@ describe('HouseholdInviteService', () => {
     const idsRead = (column: string) =>
       db.invite.findMany.mock.calls
         .slice(1)
-        .map(([args]) => args as unknown as { where: { id: { in: string[] } }; select: Record<string, unknown> })
+        .map(([args]) => args as unknown as { select: Record<string, unknown>; where: { id: { in: string[] } } })
         .filter((args) => args.select[column] === true)
         .flatMap((args) => args.where.id.in);
 

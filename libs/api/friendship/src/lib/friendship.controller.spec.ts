@@ -4,10 +4,11 @@ import { paginationQuery } from '@bge/testing';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { ClsServiceManager } from 'nestjs-cls';
-import { firstValueFrom, type Observable } from 'rxjs';
+import type { Observable } from 'rxjs';
+import { firstValueFrom } from 'rxjs';
 import { ListFriendshipsQueryDto } from './dto';
 import { FriendshipController } from './friendship.controller';
-import { FriendshipService } from './friendship.service';
+import type { FriendshipService } from './friendship.service';
 
 const PAGINATION = paginationQuery({ limit: 10 });
 

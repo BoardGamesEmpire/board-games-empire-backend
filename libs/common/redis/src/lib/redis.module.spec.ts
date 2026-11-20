@@ -1,6 +1,7 @@
 import { Logger } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { Test, TestingModule } from '@nestjs/testing';
+import type { TestingModule } from '@nestjs/testing';
+import { Test } from '@nestjs/testing';
 import type { Redis, RedisOptions } from 'iovalkey';
 import type { BgeRedisConnectionConfig, BgeRedisModuleAsyncOptions } from './redis-connection.config';
 import { RedisLifecycleManager } from './redis-lifecycle.service';
@@ -19,10 +20,10 @@ import { CACHE_REDIS_CLIENT, QUEUE_REDIS_CLIENT } from './redis.tokens';
 // ---------------------------------------------------------------------------
 
 interface FakeRedisClient {
-  options: RedisOptions;
-  status: 'ready' | 'end' | 'close' | 'connecting';
-  quit: jest.Mock<Promise<'OK'>, []>;
   disconnect: jest.Mock<void, []>;
+  options: RedisOptions;
+  quit: jest.Mock<Promise<'OK'>, []>;
+  status: 'ready' | 'end' | 'close' | 'connecting';
 }
 
 const constructorCalls: RedisOptions[] = [];

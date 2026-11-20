@@ -1,7 +1,9 @@
 import { DatabaseService } from '@bge/database';
-import { Cache, CACHE_MANAGER } from '@nestjs/cache-manager';
-import { CanActivate, ModuleMetadata, Type } from '@nestjs/common';
-import { Test, TestingModule } from '@nestjs/testing';
+import type { Cache } from '@nestjs/cache-manager';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import type { CanActivate, ModuleMetadata, Type } from '@nestjs/common';
+import type { TestingModule } from '@nestjs/testing';
+import { Test } from '@nestjs/testing';
 import * as jest from 'jest-mock';
 import { ClsService } from 'nestjs-cls';
 import type { MockDatabaseService } from './mocks/database.service.mock.js';
@@ -50,10 +52,10 @@ export function createMockCacheManager() {
 }
 
 export interface TestingModuleWithDb {
-  module: TestingModule;
-  db: MockDatabaseService;
-  cls: jest.Mocked<ClsService>;
   cache: CacheMock;
+  cls: jest.Mocked<ClsService>;
+  db: MockDatabaseService;
+  module: TestingModule;
 }
 
 /**

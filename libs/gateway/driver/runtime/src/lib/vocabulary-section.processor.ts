@@ -1,11 +1,13 @@
 import { DataGatewaySectionFailure } from '@bge/database';
-import { ActorAwareWorkerHost, type JobMetaEnvelope } from '@bge/queue-actor-context';
+import type { JobMetaEnvelope } from '@bge/queue-actor-context';
+import { ActorAwareWorkerHost } from '@bge/queue-actor-context';
 import { guardWorkerEvent } from '@bge/utils';
 import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
 import { OnWorkerEvent, Processor } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import type { Job } from 'bullmq';
-import { VOCABULARY_SECTION_QUEUE, type VocabularySectionJob } from './constants/vocabulary-section.constants';
+import type { VocabularySectionJob } from './constants/vocabulary-section.constants';
+import { VOCABULARY_SECTION_QUEUE } from './constants/vocabulary-section.constants';
 import { GatewayRoutingRefusedError } from './errors/gateway-routing-refused.error';
 import { VocabularySectionError } from './errors/vocabulary-section.error';
 import { GatewayInterviewService } from './gateway-interview.service';

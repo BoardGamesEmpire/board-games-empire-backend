@@ -1,4 +1,4 @@
-import { GatewayPingResponse, GatewayServiceClient } from '@boardgamesempire/proto-gateway';
+import type { GatewayPingResponse, GatewayServiceClient } from '@boardgamesempire/proto-gateway';
 import type { Logger } from '@nestjs/common';
 import assert from 'node:assert';
 import * as crypto from 'node:crypto';
@@ -26,6 +26,7 @@ export async function pingWithRetry(
     try {
       return await firstValueFrom(client.ping({ correlationId: crypto.randomUUID() }));
     } catch (error) {
+      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- assert's message takes `string | Error`, and a catch binding is `unknown`; this rethrows the client's rejection as it is (#1321)
       assert(attempt < maxAttempts && shouldRetry(error), error as Error);
 
       const delay = baseDelayMs * 2 ** (attempt - 1); // 1s, 2s, 4s, 8s

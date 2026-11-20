@@ -30,43 +30,47 @@ export type SsrfRejectionReason =
   | 'ipv4-mapped-evasion';
 
 export interface OutboundRequestEvent {
-  url: string;
-  method: SafeHttpMethod;
   attempt: number;
+  method: SafeHttpMethod;
+  url: string;
 }
 
 export interface OutboundResponseEvent {
-  url: string;
-  method: SafeHttpMethod;
-  status: number;
   durationMs: number;
+  method: SafeHttpMethod;
   redirectCount: number;
+  status: number;
+  url: string;
 }
 
 export interface OutboundErrorEvent {
-  url: string;
-  method: SafeHttpMethod;
-  error: SafeHttpError;
   durationMs: number;
+  error: SafeHttpError;
+  method: SafeHttpMethod;
+  url: string;
 }
 
 export interface SsrfRejectionEvent {
   host: string;
+
   /** Resolved IP, when DNS succeeded but the IP fell into a deny rule. */
   ip?: string;
+
   reason: SsrfRejectionReason;
 }
 
 export interface RedirectDeniedEvent {
   /** The URL that returned the redirect. */
   from: string;
-  /** The `Location` target that failed the gauntlet. */
-  to: string;
+
   /**
    * The gauntlet's reason, or `host-not-allowed` when the caller's own host
    * rule (`SafeHttpRequestOptions.allowHost`) refused the target (#1083).
    */
   reason: SsrfRejectionReason | 'host-not-allowed';
+
+  /** The `Location` target that failed the gauntlet. */
+  to: string;
 }
 
 /**
@@ -84,9 +88,9 @@ export interface RedirectDeniedEvent {
  * single-implementor avoids ordering and short-circuit ambiguities.
  */
 export interface OutboundHttpObserver {
+  onError?(event: OutboundErrorEvent): void | Promise<void>;
+  onRedirectDenied?(event: RedirectDeniedEvent): void | Promise<void>;
   onRequest?(event: OutboundRequestEvent): void | Promise<void>;
   onResponse?(event: OutboundResponseEvent): void | Promise<void>;
-  onError?(event: OutboundErrorEvent): void | Promise<void>;
   onSsrfRejection?(event: SsrfRejectionEvent): void | Promise<void>;
-  onRedirectDenied?(event: RedirectDeniedEvent): void | Promise<void>;
 }

@@ -38,7 +38,7 @@ export type PluginAbilityRejectionReason =
   | 'invalid-stored-manifest';
 
 const REASON_DETAIL: Readonly<
-  Record<PluginAbilityRejectionReason, (input: { variable?: string; tokenType?: string }) => string>
+  Record<PluginAbilityRejectionReason, (input: { tokenType?: string; variable?: string }) => string>
 > = {
   'out-of-context-variable': ({ variable }) =>
     `condition template references '${variable}', which is outside the unit-coordinate context`,
@@ -69,29 +69,33 @@ const REASON_DETAIL: Readonly<
  */
 export class PluginAbilityRenderRejectionError extends Error {
   override readonly name = 'PluginAbilityRenderRejectionError';
-
   readonly reason: PluginAbilityRejectionReason;
   readonly pluginId: string;
   readonly pluginSlug: string;
+
   /** Null only for `invalid-stored-manifest`, which refuses the whole ability rather than one grant. */
   readonly permissionSlug: string | null;
+
   /** What failed, for `invalid-stored-manifest`; absent otherwise. */
   readonly detail?: string;
+
   /** The offending template variable for `out-of-context-variable`; absent otherwise. */
   readonly variable?: string;
+
   /** The offending Mustache token type for `unsupported-token-type`; absent otherwise. */
   readonly tokenType?: string;
+
   readonly unit: PluginUnit;
 
   constructor(input: {
-    reason: PluginAbilityRejectionReason;
+    detail?: string;
+    permissionSlug: string | null;
     pluginId: string;
     pluginSlug: string;
-    permissionSlug: string | null;
-    detail?: string;
-    variable?: string;
+    reason: PluginAbilityRejectionReason;
     tokenType?: string;
     unit: PluginUnit;
+    variable?: string;
   }) {
     super(
       input.permissionSlug === null

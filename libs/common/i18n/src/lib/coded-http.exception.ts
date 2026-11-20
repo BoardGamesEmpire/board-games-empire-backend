@@ -1,12 +1,14 @@
 import type { I18nMessage } from '@bge/i18n-core';
 import { HttpException } from '@nestjs/common';
-import { errorEnvelope, type ErrorCode } from './error-envelope';
+import type { ErrorCode } from './error-envelope';
+import { errorEnvelope } from './error-envelope';
 
 export interface CodedHttpExceptionOptions {
-  /** Machine-readable detail beside the message: a quota's `limit`, a permission catalog refusal's `problems`. */
-  readonly fields?: Readonly<Record<string, unknown>>;
   /** Server-side context for logs. It never reaches the response body. */
   readonly cause?: unknown;
+
+  /** Machine-readable detail beside the message: a quota's `limit`, a permission catalog refusal's `problems`. */
+  readonly fields?: Readonly<Record<string, unknown>>;
 }
 
 /**
@@ -41,9 +43,10 @@ export class CodedHttpException extends HttpException {
    * log line and stack.
    */
   override initMessage(): void {
-    const marker = (this.getResponse() as { readonly message?: { readonly message?: unknown } }).message;
+    const response = this.getResponse();
+    const marker = typeof response === 'object' && 'message' in response ? response.message : undefined;
 
-    if (typeof marker?.message === 'string') {
+    if (typeof marker === 'object' && marker !== null && 'message' in marker && typeof marker.message === 'string') {
       this.message = marker.message;
       return;
     }

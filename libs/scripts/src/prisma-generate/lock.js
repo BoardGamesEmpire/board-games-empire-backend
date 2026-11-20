@@ -83,7 +83,9 @@ const STAGING_ATTEMPTS = 5;
  * lock it is waiting on can ever be reclaimed.
  */
 function assertReclaimIsReachable(staleMs, timeoutMs) {
-  if (staleMs < timeoutMs) return;
+  if (staleMs < timeoutMs) {
+    return;
+  }
 
   throw new Error(
     `prisma-generate lock is misconfigured: staleMs (${staleMs}) must be below timeoutMs (${timeoutMs}), ` +
@@ -108,7 +110,10 @@ function defaultSleep(ms) {
 }
 
 function sameHolder(a, b) {
-  if (a === null || b === null) return a === b;
+  if (a === null || b === null) {
+    return a === b;
+  }
+
   return a.pid === b.pid && a.acquiredAt === b.acquiredAt;
 }
 
@@ -158,7 +163,10 @@ function createLock({
         fs.closeSync(fd);
       }
     } catch (error) {
-      if (error.code === 'ENOENT') return null;
+      if (error.code === 'ENOENT') {
+        return null;
+      }
+
       throw error;
     }
 
@@ -204,7 +212,10 @@ function createLock({
       try {
         fd = fs.openSync(stagingPath, 'wx');
       } catch (error) {
-        if (error.code === 'EEXIST') continue;
+        if (error.code === 'EEXIST') {
+          continue;
+        }
+
         throw error;
       }
 
@@ -226,7 +237,10 @@ function createLock({
     try {
       fs.linkSync(stagingPath, lockPath);
     } catch (error) {
-      if (error.code === 'EEXIST') return false;
+      if (error.code === 'EEXIST') {
+        return false;
+      }
+
       throw error;
     } finally {
       fs.rmSync(stagingPath, { force: true });
@@ -238,7 +252,9 @@ function createLock({
   }
 
   function holderIsStale(observed) {
-    if (observed.owner === null) return now() - observed.mtimeMs > graceMs;
+    if (observed.owner === null) {
+      return now() - observed.mtimeMs > graceMs;
+    }
 
     return !processAlive(observed.owner.pid) || now() - observed.owner.acquiredAt > staleMs;
   }
@@ -252,10 +268,14 @@ function createLock({
    */
   function freeIfStale() {
     const observed = read();
-    if (observed === null || !holderIsStale(observed)) return false;
+    if (observed === null || !holderIsStale(observed)) {
+      return false;
+    }
 
     const confirmed = read();
-    if (confirmed === null || !sameHolder(confirmed.owner, observed.owner)) return false;
+    if (confirmed === null || !sameHolder(confirmed.owner, observed.owner)) {
+      return false;
+    }
 
     const quarantinePath = scratchPath('stale');
 
@@ -264,7 +284,10 @@ function createLock({
     } catch (error) {
       // Another waiter freed it first, or the holder released. Either way it is
       // not ours to move; re-poll.
-      if (error.code === 'ENOENT') return false;
+      if (error.code === 'ENOENT') {
+        return false;
+      }
+
       throw error;
     }
 
@@ -289,12 +312,16 @@ function createLock({
 
       // Freeing a stale lock does not grant it: go straight back to `tryAcquire`
       // and compete for it, rather than sleeping first.
-      if (!freeIfStale()) sleep(pollIntervalMs);
+      if (!freeIfStale()) {
+        sleep(pollIntervalMs);
+      }
     }
   }
 
   function release() {
-    if (held === null) return false;
+    if (held === null) {
+      return false;
+    }
 
     const record = held;
     held = null;
@@ -309,7 +336,9 @@ function createLock({
     // whole of a successor's runtime if the check were absent. Closing it needs a
     // compare-and-swap the filesystem does not offer.
     const current = read();
-    if (current === null || !sameHolder(current.owner, record)) return false;
+    if (current === null || !sameHolder(current.owner, record)) {
+      return false;
+    }
 
     fs.rmSync(lockPath, { force: true });
 

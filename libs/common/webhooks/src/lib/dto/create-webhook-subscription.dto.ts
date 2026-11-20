@@ -2,7 +2,8 @@ import { ResourceType } from '@bge/database';
 import { i18nValidationMessage } from '@bge/i18n';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ArrayNotEmpty, ArrayUnique, IsEnum, IsIn, IsOptional, IsString, IsUrl, MinLength } from 'class-validator';
-import { WEBHOOK_EVENT_TYPES, type WebhookEventType } from '../constants/webhook-event-types';
+import type { WebhookEventType } from '../constants/webhook-event-types';
+import { WEBHOOK_EVENT_TYPES } from '../constants/webhook-event-types';
 
 export class CreateWebhookSubscriptionDto {
   @ApiProperty({

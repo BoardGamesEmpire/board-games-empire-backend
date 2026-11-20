@@ -1,5 +1,6 @@
 import type { HouseholdPlugin, Prisma } from '@bge/database';
-import { buildPluginManifest, type PluginManifestValidationResult } from '@boardgamesempire/plugin-manifest';
+import type { PluginManifestValidationResult } from '@boardgamesempire/plugin-manifest';
+import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { PluginConfigSchemaUnusableError } from '../config/config-schema.errors';
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
 import { activeManifestOf } from '../manifest/active-manifest';
@@ -28,8 +29,8 @@ describe('household config gate', () => {
   });
 
   interface ActiveConfig {
-    readonly schema?: Record<string, unknown>;
     readonly requiresHouseholdConfig?: boolean;
+    readonly schema?: Record<string, unknown>;
   }
 
   /** The re-validated active manifest a consent act hands the gate. */

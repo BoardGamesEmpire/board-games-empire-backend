@@ -1,4 +1,6 @@
-import { SERVER_PLUGIN_UNIT, type AuditContextService } from '@bge/actor-context';
+import type { AuditContextService } from '@bge/actor-context';
+import { SERVER_PLUGIN_UNIT } from '@bge/actor-context';
+import type { Plugin, PluginGrant, Prisma } from '@bge/database';
 import {
   PluginCategory,
   PluginExecutionMode,
@@ -7,13 +9,12 @@ import {
   PluginScope,
   RiskLevel,
   SERVER_SCOPE_SENTINEL,
-  type Plugin,
-  type PluginGrant,
-  type Prisma,
 } from '@bge/database';
 import { deadlock } from '@bge/database/testing';
-import { createMockDatabaseService, rawQueryText, type MockDatabaseService } from '@bge/testing';
-import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
+import type { MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService, rawQueryText } from '@bge/testing';
+import type { PluginManifest } from '@boardgamesempire/plugin-manifest';
+import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { PluginGrantCreatedEvent, PluginGrantRejectedEvent } from '../events/plugin.events';
 import type { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
 import { PluginLifecycleAuthorityError } from '../lifecycle/lifecycle.errors';
@@ -27,7 +28,8 @@ import type { ConsentCheckClassification } from './consent-classification.types'
 import { PluginConsentActAnswerError, PluginConsentActStaleError } from './plugin-consent-act.errors';
 import type { ConsentActAnswer } from './plugin-consent-act.types';
 import type { PluginConsentCheckClassifier } from './plugin-consent-check-classifier.service';
-import { PluginServerConsentActService, type ServerConsentActInput } from './plugin-server-consent-act.service';
+import type { ServerConsentActInput } from './plugin-server-consent-act.service';
+import { PluginServerConsentActService } from './plugin-server-consent-act.service';
 
 describe('PluginServerConsentActService', () => {
   const options = buildPluginModuleOptions();
@@ -108,8 +110,8 @@ describe('PluginServerConsentActService', () => {
   });
 
   interface ClaimRow {
-    readonly uninstalled_at: Date | null;
     readonly installed_sha256: string;
+    readonly uninstalled_at: Date | null;
   }
 
   const serverRow = (permissionSlug: string, status: PluginGrantStatus, decidedRiskLevel: RiskLevel): PluginGrant => ({
@@ -323,8 +325,8 @@ describe('PluginServerConsentActService', () => {
     it('claims the plugin row, classifies, reads what stands, then writes one act and its decisions in permission order (#1336)', async () => {
       const result = await service.review(input({ answers: [granted(SECOND_OPTIONAL), granted(OPTIONAL)] }));
 
-      // No household row, no advisory key and no unit enablement: the Server
-      // unit has none of them.
+      // No household row and no unit enablement: the Server unit has
+      // neither.
       expect(order).toEqual([
         'plugin claim',
         'classify',
@@ -351,6 +353,8 @@ describe('PluginServerConsentActService', () => {
           kind: 'Review',
           manifestVersion: '1.2.0',
           manifestSha256: SHA,
+          // The Server unit's act is on the active manifest: no staging (#1152).
+          stagingId: null,
           decidedById: 'admin-1',
           correlationId: 'corr-1',
         }),
@@ -368,9 +372,9 @@ describe('PluginServerConsentActService', () => {
       });
 
       const upserts = db.pluginGrant.upsert.mock.calls.map(([args]) => args) as unknown as {
-        where: Record<string, unknown>;
         create: Record<string, unknown>;
         update: Record<string, unknown>;
+        where: Record<string, unknown>;
       }[];
       expect(upserts).toHaveLength(2);
 
@@ -471,8 +475,8 @@ describe('PluginServerConsentActService', () => {
 
     it('does not replay the transaction when Postgres picks it as a deadlock victim (#1336)', async () => {
       // The server act takes the plugin row and then the grant rows in
-      // permission order, the order activation takes them in, so it carries
-      // no deadlock retry: an aborted act reaches the caller as it is.
+      // permission order, the order activation takes them in, and an aborted
+      // act reaches the caller as it is (#1152).
       const victim = deadlock();
       db.$transaction.mockImplementationOnce(() => Promise.reject(victim));
 

@@ -1,4 +1,5 @@
-import { AuditContextService, type HouseholdPluginUnit } from '@bge/actor-context';
+import type { HouseholdPluginUnit } from '@bge/actor-context';
+import { AuditContextService } from '@bge/actor-context';
 import { Action, DatabaseService, ResourceType } from '@bge/database';
 import {
   alreadyTellsHouseholdsApart,
@@ -8,14 +9,13 @@ import {
 } from '@bge/household';
 import { SupportedLocalesService, t } from '@bge/i18n';
 import { AbilityService, CheckPolicies, PoliciesGuard, ScopeComposer } from '@bge/permissions';
+import type { ConsentActAnswer, ConsentActInput } from '@bge/plugin';
 import {
   PluginConsentActService,
   PluginConsentPresentationService,
   PluginFeatureStateService,
   PluginInventoryService,
   PluginUnitLifecycleService,
-  type ConsentActAnswer,
-  type ConsentActInput,
 } from '@bge/plugin';
 import { DefaultPaginationQueryDto, paginated, PaginatedResponseDto } from '@bge/shared';
 import {
@@ -493,7 +493,7 @@ export class HouseholdPluginsController {
   private actInput(
     householdId: string,
     slug: string,
-    body: { readonly manifestSha256: string; readonly locale?: string },
+    body: { readonly locale?: string; readonly manifestSha256: string },
     answers: readonly ConsentActAnswer[],
   ): ConsentActInput {
     return {

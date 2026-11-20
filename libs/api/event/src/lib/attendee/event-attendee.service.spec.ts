@@ -1,9 +1,11 @@
 import type { Event, EventAttendee, EventGame, GameCollection } from '@bge/database';
 import {
   Action,
+  ContentType,
   EventParticipationStatus,
   FriendshipStatus,
   HUMAN_USER_WHERE,
+  liveEventWhere,
   NominationStatus,
   Prisma,
   Reach,
@@ -13,6 +15,7 @@ import {
 import { t } from '@bge/i18n';
 import { LineupRemovalReason } from '@bge/notifications-service';
 import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
+import type { MockAbilityService, MockDatabaseService } from '@bge/testing';
 import {
   batchTransactionCall,
   createMockAbilityService,
@@ -23,8 +26,6 @@ import {
   paginationQuery,
   rawQueryText,
   unwrapTransaction,
-  type MockAbilityService,
-  type MockDatabaseService,
 } from '@bge/testing';
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -104,6 +105,8 @@ describe('EventAttendeeService', () => {
     // preference, and no friendship.
     db.user.findUnique.mockImplementation(((args: { where: { id: string } }) =>
       Promise.resolve({ id: args.where.id })) as never);
+    // The event is live, before each write's lock and under it (#1065).
+    db.event.count.mockResolvedValue(1);
   });
 
   /** The status write's row: an attendee of event-1 who has not been removed. */
@@ -231,6 +234,23 @@ describe('EventAttendeeService', () => {
       );
     });
 
+    it('dates an attendee added with an answer, and not one added as invited (#1027)', async () => {
+      db.event.findUnique.mockResolvedValue({ id: 'event-1', householdId: null } as Event);
+      abilityService.getActingUserId.mockReturnValue('user-host');
+      db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-host' } as EventAttendee);
+      db.eventAttendee.create.mockResolvedValue(
+        makeEventAttendee({ id: 'att-1', eventId: 'event-1', userId: 'user-2' }),
+      );
+
+      await service.addAttendee('event-1', { userId: 'user-2', status: EventParticipationStatus.Maybe });
+      await service.addAttendee('event-1', { userId: 'user-3' });
+
+      const [answered, invited] = db.eventAttendee.create.mock.calls.map(([args]) => args.data);
+      expect(answered.rsvpDate).toBeInstanceOf(Date);
+      expect(invited.status).toBe(EventParticipationStatus.Invited);
+      expect(invited.rsvpDate).toBeNull();
+    });
+
     // An organizer's or moderator's delete names the roles they may remove,
     // so this clause is what refuses them the host's row.
     describe('removeAttendee', () => {
@@ -247,12 +267,13 @@ describe('EventAttendeeService', () => {
       it('reads the row again under its lock, before the gated write (#1064)', async () => {
         await service.removeAttendee('event-1', 'att-1');
 
-        const [[attendeeLock]] = db.$queryRaw.mock.calls;
+        // After the event's row, which comes first (#1065).
+        const [, [attendeeLock]] = db.$queryRaw.mock.calls;
         expect(rawQueryText(attendeeLock)).toMatch(
           /^SELECT removed_at AS "removedAt" FROM event_attendees WHERE id = \? AND event_id = \? FOR NO KEY UPDATE$/,
         );
         expect((attendeeLock as unknown as Prisma.Sql).values).toEqual(['att-1', 'event-1']);
-        expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        expect(db.$queryRaw.mock.invocationCallOrder[1]).toBeLessThan(
           db.eventAttendee.update.mock.invocationCallOrder[0],
         );
       });
@@ -421,6 +442,7 @@ describe('EventAttendeeService', () => {
           }),
         );
       }
+
       expect(db.eventGame.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { suppliedBy: { is: { attendeeId: 'att-1' } }, ...lineupStillAhead(expect.any(Date)) },
@@ -474,8 +496,10 @@ describe('EventAttendeeService', () => {
 
     // A date write in flight finishes before the lineups are judged, and
     // the event's row is locked before any nomination: removing a date writes
-    // to the nominations that name it while holding that row.
-    it("updateStatus locks the event's dates after the RSVP write, before pausing a nomination", async () => {
+    // to the nominations that name it while holding that row. It comes first,
+    // before the attendee's own row, so a deleted event is refused before
+    // anything is locked for the write (#1065).
+    it("updateStatus locks the event's row first, before the RSVP write and any nomination it pauses", async () => {
       db.event.count.mockResolvedValue(1);
       db.eventAttendee.findUnique.mockResolvedValue({
         id: 'att-1',
@@ -486,14 +510,22 @@ describe('EventAttendeeService', () => {
 
       await service.updateStatus('event-1', 'att-1', { status: EventParticipationStatus.NotAttending });
 
-      // The first raw query is the attendee row's lock (#802).
-      const [, [datesLock]] = db.$queryRaw.mock.calls;
+      // The attendee row's lock (#802) comes after it, once. The supplier
+      // sync takes the event's row again, so it holds even for a caller that
+      // skipped it, before any nomination (#551).
+      const [[datesLock], [attendeeLock], [syncLock]] = db.$queryRaw.mock.calls;
+      expect(db.$queryRaw).toHaveBeenCalledTimes(3);
       expect(rawQueryText(datesLock)).toMatch(/^SELECT id FROM events WHERE id = \? FOR SHARE$/);
       expect((datesLock as unknown as Prisma.Sql).values).toEqual(['event-1']);
-      expect(db.$queryRaw.mock.invocationCallOrder[1]).toBeGreaterThan(
+      expect(rawQueryText(attendeeLock)).toMatch(/FROM event_attendees/);
+      expect(rawQueryText(syncLock)).toMatch(/^SELECT id FROM events WHERE id = \? FOR SHARE$/);
+      expect(db.$queryRaw.mock.invocationCallOrder[2]).toBeLessThan(
+        db.eventGameNomination.updateManyAndReturn.mock.invocationCallOrder[0],
+      );
+      expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
         db.eventAttendee.update.mock.invocationCallOrder[0],
       );
-      expect(db.$queryRaw.mock.invocationCallOrder[1]).toBeLessThan(
+      expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
         db.eventGameNomination.updateManyAndReturn.mock.invocationCallOrder[0],
       );
     });
@@ -526,6 +558,7 @@ describe('EventAttendeeService', () => {
           }),
         );
       }
+
       expect(db.eventGame.findMany).not.toHaveBeenCalled();
       expect(db.eventGame.deleteMany).not.toHaveBeenCalled();
 
@@ -576,12 +609,13 @@ describe('EventAttendeeService', () => {
 
       await service.updateStatus('event-1', 'att-1', { status: EventParticipationStatus.Attending });
 
-      const [[attendeeLock]] = db.$queryRaw.mock.calls;
+      // After the event's row, which comes first (#1065).
+      const [, [attendeeLock]] = db.$queryRaw.mock.calls;
       expect(rawQueryText(attendeeLock)).toMatch(
-        /^SELECT status, removed_at AS "removedAt" FROM event_attendees WHERE id = \? FOR NO KEY UPDATE$/,
+        /^SELECT status, notes, removed_at AS "removedAt" FROM event_attendees WHERE id = \? FOR NO KEY UPDATE$/,
       );
       expect((attendeeLock as unknown as Prisma.Sql).values).toEqual(['att-1']);
-      expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      expect(db.$queryRaw.mock.invocationCallOrder[1]).toBeLessThan(
         db.eventAttendee.update.mock.invocationCallOrder[0],
       );
 
@@ -629,6 +663,135 @@ describe('EventAttendeeService', () => {
 
       const [, emitted] = emitter.emit.mock.calls[0];
       expect(emitted.actingUserId).toBe(MOCK_ACTING_USER_ID);
+    });
+
+    // `rsvpDate` dates the current answer, and moves only when the answer
+    // does (#1027). A send that changes neither the status nor the notes
+    // emits nothing (#903); the update still runs, so its ceiling still
+    // refuses one the caller may not make.
+    describe('updateStatus (#1027, #903)', () => {
+      const send = (status: EventParticipationStatus, notes?: string) =>
+        service.updateStatus('event-1', 'att-1', notes === undefined ? { status } : { status, notes });
+
+      const written = () => db.eventAttendee.update.mock.calls[0][0].data;
+
+      const statusEvents = () =>
+        emitter.emit.mock.calls.filter(([name]) => name === AttendeeStatusUpdatedEvent.eventName).map(([, e]) => e);
+
+      beforeEach(() => {
+        db.event.count.mockResolvedValue(1);
+        db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1', userId: 'user-1' } as EventAttendee);
+        db.eventAttendee.update.mockResolvedValue(attendeeRow({ status: EventParticipationStatus.Attending }));
+      });
+
+      it('Invited → Maybe dates the answer', async () => {
+        lockedAttendee({ status: EventParticipationStatus.Invited, notes: null, removedAt: null });
+
+        await send(EventParticipationStatus.Maybe);
+
+        expect(written().rsvpDate).toBeInstanceOf(Date);
+      });
+
+      it('Attending → Maybe re-dates it', async () => {
+        lockedAttendee({ status: EventParticipationStatus.Attending, notes: null, removedAt: null });
+
+        await send(EventParticipationStatus.Maybe);
+
+        expect(written().rsvpDate).toBeInstanceOf(Date);
+      });
+
+      it('Maybe → Invited clears it', async () => {
+        lockedAttendee({ status: EventParticipationStatus.Maybe, notes: null, removedAt: null });
+
+        await send(EventParticipationStatus.Invited);
+
+        expect(written().rsvpDate).toBeNull();
+      });
+
+      it('the same status again leaves the date and emits nothing', async () => {
+        lockedAttendee({ status: EventParticipationStatus.Attending, notes: null, removedAt: null });
+
+        await send(EventParticipationStatus.Attending);
+
+        expect(written().rsvpDate).toBeUndefined();
+        expect(statusEvents()).toEqual([]);
+      });
+
+      // With no column to write, Prisma reads the row through the ceiling
+      // rather than writing it, so updatedAt does not move (#903).
+      it('a send that changes nothing writes no column', async () => {
+        lockedAttendee({ status: EventParticipationStatus.Attending, notes: 'a', removedAt: null });
+
+        await send(EventParticipationStatus.Attending, 'a');
+
+        expect(JSON.parse(JSON.stringify(written()))).toEqual({});
+      });
+
+      it('a notes-only edit writes the notes and not the status', async () => {
+        lockedAttendee({ status: EventParticipationStatus.Attending, notes: 'a', removedAt: null });
+
+        await send(EventParticipationStatus.Attending, 'b');
+
+        expect(written().status).toBeUndefined();
+        expect(written().notes).toBe('b');
+      });
+
+      it('a notes-only edit keeps the date and emits with notes in the snapshot', async () => {
+        lockedAttendee({ status: EventParticipationStatus.Attending, notes: 'a', removedAt: null });
+        db.eventAttendee.update.mockResolvedValue(
+          attendeeRow({ status: EventParticipationStatus.Attending, notes: 'b' }),
+        );
+
+        await send(EventParticipationStatus.Attending, 'b');
+
+        expect(written().rsvpDate).toBeUndefined();
+        const [emitted] = statusEvents();
+        expect(emitted.before).toEqual(
+          expect.objectContaining({ status: EventParticipationStatus.Attending, notes: 'a' }),
+        );
+        expect(emitted.after).toEqual(
+          expect.objectContaining({ status: EventParticipationStatus.Attending, notes: 'b' }),
+        );
+      });
+
+      it('a status change without a notes change carries no notes in the snapshot', async () => {
+        lockedAttendee({ status: EventParticipationStatus.Invited, notes: 'a', removedAt: null });
+
+        await send(EventParticipationStatus.Attending, 'a');
+
+        const [emitted] = statusEvents();
+        expect('notes' in emitted.before).toBe(false);
+        expect('notes' in emitted.after).toBe(false);
+      });
+
+      it('notes left out are unchanged, not cleared', async () => {
+        lockedAttendee({ status: EventParticipationStatus.Attending, notes: 'a', removedAt: null });
+
+        await send(EventParticipationStatus.Attending);
+
+        expect(written().notes).toBeUndefined();
+        expect(statusEvents()).toEqual([]);
+      });
+
+      it('compares against the row read under the lock, not the read before it', async () => {
+        db.eventAttendee.findUnique.mockResolvedValue({
+          id: 'att-1',
+          userId: 'user-1',
+          status: EventParticipationStatus.Maybe,
+        } as EventAttendee);
+        lockedAttendee({ status: EventParticipationStatus.Attending, notes: null, removedAt: null });
+
+        await send(EventParticipationStatus.Attending);
+
+        expect(statusEvents()).toEqual([]);
+      });
+
+      it('a same-status send outside the update ceiling still answers 403', async () => {
+        lockedAttendee({ status: EventParticipationStatus.Attending, notes: null, removedAt: null });
+        db.eventAttendee.update.mockRejectedValue(recordNotFound());
+
+        await expect(send(EventParticipationStatus.Attending)).rejects.toThrow(ForbiddenException);
+      });
     });
 
     it('throws NotFound when removing a non-existent attendee', async () => {
@@ -872,6 +1035,15 @@ describe('EventAttendeeService', () => {
       expect(removedGame.actingUserId).toBe('user-actor');
     });
 
+    it('a revived row takes the date of the status it is revived with (#1027)', async () => {
+      await service.addAttendee('event-1', { userId: 'user-2', status: EventParticipationStatus.Attending });
+      await service.addAttendee('event-1', { userId: 'user-2', status: EventParticipationStatus.Invited });
+
+      const [attending, invited] = db.eventAttendee.update.mock.calls.map(([args]) => args.data);
+      expect(attending.rsvpDate).toBeInstanceOf(Date);
+      expect(invited.rsvpDate).toBeNull();
+    });
+
     it("evicts the revived user's cached permission graph", async () => {
       await service.addAttendee('event-1', { userId: 'user-2' });
 
@@ -953,9 +1125,17 @@ describe('EventAttendeeService', () => {
       db.event.findUnique.mockResolvedValue({ id: 'event-1', householdId: null } as Event);
       db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1', userId: 'user-1' } as EventAttendee);
       db.gameCollection.findUnique.mockResolvedValue({ userId: 'user-1', deletedAt: null } as GameCollection);
-      db.eventAttendeeGameList.create.mockResolvedValue(makeOfferedGameEntry('gl-1', 'game-exp') as never);
+      db.eventAttendeeGameList.create.mockResolvedValue(
+        makeOfferedGameEntry('gl-1', 'game-exp', 'att-1', ContentType.Expansion) as never,
+      );
+      // The base game has a platform game on the offered one's platform, so the
+      // entry names it (#1391).
       db.gameExpansion.findMany.mockResolvedValue([
-        { expansionGameId: 'game-exp', baseGameId: 'game-base', isStandalone: false },
+        {
+          expansionGameId: 'game-exp',
+          baseGameId: 'game-base',
+          baseGame: { platformGames: [{ platformId: 'plat-1' }] },
+        },
       ] as never);
 
       const entry = await service.addGameToList('event-1', 'att-1', { collectionId: 'col-1' });
@@ -1077,11 +1257,13 @@ describe('EventAttendeeService', () => {
         expect(db.eventAttendeeGameList.delete).not.toHaveBeenCalled();
       });
 
-      it("counts what the entry supplies after locking it, and the event's dates", async () => {
+      it("counts what the entry supplies after locking the event's row, then the entry", async () => {
         await service.removeGameFromList('event-1', 'att-1', 'gl-1');
 
+        // The event's row comes first (#1065), then the entry's.
         expect(db.$queryRaw).toHaveBeenCalledTimes(2);
-        const [, [datesLock]] = db.$queryRaw.mock.calls;
+        const [[datesLock], [entryLock]] = db.$queryRaw.mock.calls;
+        expect(rawQueryText(entryLock)).toMatch(/FROM attendee_game_lists WHERE id = \? FOR UPDATE$/);
         expect(rawQueryText(datesLock)).toMatch(/^SELECT id FROM events WHERE id = \? FOR SHARE$/);
         expect((datesLock as unknown as Prisma.Sql).values).toEqual(['event-1']);
         expect(db.eventGameNomination.count).toHaveBeenCalledWith({
@@ -1304,17 +1486,153 @@ describe('EventAttendeeService', () => {
       expect(emitter.emit).toHaveBeenCalledWith(GameAddedToListEvent.eventName, expect.anything());
     });
   });
+
+  // Each answers the 404 the event's read gives, and writes nothing. The
+  // check runs under the event's row lock, so a delete that commits after the
+  // first read can't slip between the check and the write (#1065).
+  describe('a write on an event deleted since its first read, or whose household was (#1065)', () => {
+    const isEventShare = (query: unknown) =>
+      /^SELECT id FROM events WHERE id = \? FOR SHARE$/.test(rawQueryText(query));
+
+    /**
+     * The event reads live until the write has taken its row lock `locks`
+     * times, then reads deleted: a delete that committed in between. Every
+     * raw query answers as the test arranged it before this call.
+     */
+    const deletedAtLock = (locks = 1) => {
+      const raw = db.$queryRaw.getMockImplementation();
+      let taken = 0;
+      db.$queryRaw.mockImplementation(((query: unknown) => {
+        if (isEventShare(query)) {
+          taken += 1;
+        }
+
+        return raw ? raw(query as Prisma.Sql) : Promise.resolve([]);
+      }) as never);
+      db.event.count.mockImplementation((async () => (taken >= locks ? 0 : 1)) as never);
+    };
+
+    /** The event's share lock came before every other raw query, and before the liveness read under it. */
+    const expectLockedFirst = () => {
+      expect(isEventShare(db.$queryRaw.mock.calls[0][0])).toBe(true);
+      expect(db.event.count).toHaveBeenLastCalledWith({ where: { id: 'event-1', ...liveEventWhere() } });
+      expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        db.event.count.mock.invocationCallOrder.at(-1) ?? 0,
+      );
+    };
+
+    beforeEach(() => {
+      db.event.findUnique.mockResolvedValue({ id: 'event-1', householdId: null } as Event);
+      db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1', userId: 'user-1' } as EventAttendee);
+    });
+
+    it("addAttendee refuses it under the event's row lock (#1065)", async () => {
+      deletedAtLock();
+
+      await expect(service.addAttendee('event-1', { guestName: 'Sam' })).rejects.toBeInstanceOf(NotFoundException);
+
+      expectLockedFirst();
+      expect(db.eventAttendee.create).not.toHaveBeenCalled();
+      expect(db.eventAttendee.update).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+      expect(permissions.invalidateUser).not.toHaveBeenCalled();
+    });
+
+    it("removeAttendee refuses it under the event's row lock (#1065)", async () => {
+      lockedAttendee({ removedAt: null });
+      deletedAtLock();
+
+      await expect(service.removeAttendee('event-1', 'att-1')).rejects.toBeInstanceOf(NotFoundException);
+
+      expectLockedFirst();
+      expect(db.eventAttendee.update).not.toHaveBeenCalled();
+      expect(db.eventAttendeeRole.deleteMany).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it("updateStatus refuses it under the event's row lock (#1065)", async () => {
+      lockedStatus(EventParticipationStatus.Attending);
+      deletedAtLock();
+
+      await expect(
+        service.updateStatus('event-1', 'att-1', { status: EventParticipationStatus.NotAttending }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+
+      expectLockedFirst();
+      expect(db.eventAttendee.update).not.toHaveBeenCalled();
+      expect(db.eventGameNomination.updateManyAndReturn).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it("addGameToList refuses it under the event's row lock (#1065)", async () => {
+      db.gameCollection.findUnique.mockResolvedValue({ userId: 'user-1', deletedAt: null } as GameCollection);
+      db.eventAttendeeGameList.findFirst.mockResolvedValue(null);
+      deletedAtLock();
+
+      await expect(service.addGameToList('event-1', 'att-1', { collectionId: 'col-1' })).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+
+      expectLockedFirst();
+      expect(db.eventAttendeeGameList.create).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it("removeGameFromList refuses it under the event's row lock (#1065)", async () => {
+      db.eventAttendeeGameList.findUnique.mockResolvedValue(
+        makeEventAttendeeGameList('att-1', 'col-1', { id: 'gl-1' }),
+      );
+      db.$queryRaw.mockResolvedValue([{ removedAt: null }] as never);
+      db.eventAttendeeGameList.count.mockResolvedValue(1);
+      deletedAtLock();
+
+      await expect(service.removeGameFromList('event-1', 'att-1', 'gl-1')).rejects.toBeInstanceOf(NotFoundException);
+
+      expectLockedFirst();
+      expect(db.eventAttendeeGameList.update).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    // Each offer is its own transaction, so a delete can land between two of
+    // them. The rest of the batch then answers the event's 404, as a request
+    // sent after the delete would, not a refusal per item; the offers written
+    // before it stay, as they do when any other failure stops the batch.
+    it('offerGames fails the whole batch when the event is deleted mid-batch (#1065)', async () => {
+      db.gameCollection.findMany.mockResolvedValue([
+        { id: 'col-1', userId: 'user-1', deletedAt: null, platformGame: { gameId: 'g-1' } },
+        { id: 'col-2', userId: 'user-1', deletedAt: null, platformGame: { gameId: 'g-2' } },
+      ] as never);
+      db.eventAttendeeGameList.findMany.mockResolvedValue([]);
+      db.eventAttendeeGameList.create.mockResolvedValue(makeOfferedGameEntry('gl-1') as never);
+      deletedAtLock(2);
+
+      await expect(
+        service.offerGames('event-1', 'att-1', { items: [{ collectionId: 'col-1' }, { collectionId: 'col-2' }] }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+
+      expect(db.eventAttendeeGameList.create).toHaveBeenCalledTimes(1);
+      expect(emitter.emit).toHaveBeenCalledTimes(1);
+      expect(emitter.emit).toHaveBeenCalledWith(GameAddedToListEvent.eventName, expect.anything());
+    });
+  });
+
   // #1188: each id is judged as the single add judges one, a bad id loses
   // nothing else, and the answer says what happened to each.
   describe('offerGames (#1188)', () => {
     const removedAt = new Date('2026-10-15T12:00:00Z');
 
     /** A collection entry as the batch reads it: its owner, tombstone and game. */
-    const owned = (id: string, gameId: string, overrides: { userId?: string; deletedAt?: Date | null } = {}) => ({
+    const owned = (
+      id: string,
+      gameId: string,
+      overrides: { deletedAt?: Date | null; userId?: string } = {},
+      platformId = 'plat-tabletop',
+      contentType: ContentType | null = null,
+    ) => ({
       id,
       userId: 'user-1',
       deletedAt: null,
-      platformGame: { gameId },
+      platformGame: { gameId, platformId, contentType, game: { contentType: ContentType.Expansion } },
       ...overrides,
     });
 
@@ -1653,6 +1971,82 @@ describe('EventAttendeeService', () => {
         ['col-reverse', OfferRefusal.NotAnExpansionOfBase],
       ]);
       expect(results[1]).toEqual(expect.objectContaining({ message: t('errors.attendee.not_an_expansion_of_base') }));
+    });
+
+    // A game's add-on link says which games go together; a platform game's
+    // entry is one platform's copy, so the two entries must share one (#1391).
+    it('refuses a linked expansion whose entry is on another platform from its game as differentPlatform (#1391)', async () => {
+      arrange({
+        collections: [owned('col-base', 'game-base'), owned('col-exp', 'game-exp', {}, 'plat-pc')],
+        links: [{ baseGameId: 'game-base', expansionGameId: 'game-exp' }],
+      });
+
+      const results = await service.offerGames('event-1', 'att-1', {
+        items: [{ collectionId: 'col-base', expansionCollectionIds: ['col-exp'] }],
+      });
+
+      expect(outcomes(results)).toEqual([
+        ['col-base', 'added'],
+        ['col-exp', OfferRefusal.DifferentPlatform],
+      ]);
+      expect(results[1]).toEqual(expect.objectContaining({ message: t('errors.attendee.different_platform') }));
+    });
+
+    it("accepts a linked expansion whose entry is on its game's platform (#1391)", async () => {
+      arrange({
+        collections: [owned('col-base', 'game-base', {}, 'plat-pc'), owned('col-exp', 'game-exp', {}, 'plat-pc')],
+        links: [{ baseGameId: 'game-base', expansionGameId: 'game-exp' }],
+      });
+
+      const results = await service.offerGames('event-1', 'att-1', {
+        items: [{ collectionId: 'col-base', expansionCollectionIds: ['col-exp'] }],
+      });
+
+      expect(outcomes(results)).toEqual([
+        ['col-base', 'added'],
+        ['col-exp', 'added'],
+      ]);
+    });
+
+    // The offered-games filters count an entry whose platform game is a base
+    // game as one, so it can't also be offered as an expansion (#1391).
+    it('refuses a linked expansion whose platform game is a base game on its platform as notAnExpansionOfBase (#1391)', async () => {
+      arrange({
+        collections: [
+          owned('col-base', 'game-base', {}, 'plat-pc'),
+          owned('col-exp', 'game-exp', {}, 'plat-pc', ContentType.BaseGame),
+          owned('col-dlc', 'game-dlc', {}, 'plat-pc', ContentType.DLC),
+        ],
+        links: [
+          { baseGameId: 'game-base', expansionGameId: 'game-exp' },
+          { baseGameId: 'game-base', expansionGameId: 'game-dlc' },
+        ],
+      });
+
+      const results = await service.offerGames('event-1', 'att-1', {
+        items: [{ collectionId: 'col-base', expansionCollectionIds: ['col-exp', 'col-dlc'] }],
+      });
+
+      expect(outcomes(results)).toEqual([
+        ['col-base', 'added'],
+        ['col-exp', OfferRefusal.NotAnExpansionOfBase],
+        ['col-dlc', 'added'],
+      ]);
+    });
+
+    it('refuses an unlinked expansion on another platform as notAnExpansionOfBase, not differentPlatform (#1391)', async () => {
+      arrange({
+        collections: [owned('col-base', 'game-base'), owned('col-x', 'game-x', {}, 'plat-pc')],
+      });
+
+      const results = await service.offerGames('event-1', 'att-1', {
+        items: [{ collectionId: 'col-base', expansionCollectionIds: ['col-x'] }],
+      });
+
+      expect(outcomes(results)).toEqual([
+        ['col-base', 'added'],
+        ['col-x', OfferRefusal.NotAnExpansionOfBase],
+      ]);
     });
 
     it('refuses the expansions of a refused game as baseRefused, and lets those of an already-offered game through', async () => {

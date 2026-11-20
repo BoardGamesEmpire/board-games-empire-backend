@@ -49,6 +49,15 @@ function isUndefinedTable(error: unknown): boolean {
 }
 
 /**
+ * Any object, an array included, read as a record of unknown fields: the
+ * error graph's nodes are whatever the driver threw, and each field is
+ * checked where it is read.
+ */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+/**
  * The driver adapter surfaces the SQLSTATE in more than one position (see
  * `isDeadlockError` in `../utils` for the same problem with 40P01), so the
  * error graph is walked for it; a message is consulted only for Prisma's
@@ -61,14 +70,17 @@ function carriesSqlState(error: unknown, sqlState: string, messageSays?: (messag
   const stack: unknown[] = [error];
 
   while (stack.length > 0) {
-    const current = stack.pop();
-    if (current === null || typeof current !== 'object' || seen.has(current)) continue;
-    seen.add(current);
+    const record = stack.pop();
+    if (!isRecord(record) || seen.has(record)) {
+      continue;
+    }
 
-    const record = current as Record<string, unknown>;
+    seen.add(record);
+
     if (record['code'] === sqlState || record['sqlState'] === sqlState || record['originalCode'] === sqlState) {
       return true;
     }
+
     if (
       typeof record['message'] === 'string' &&
       (record['message'].includes(inMessage) || messageSays?.(record['message']))
@@ -77,7 +89,9 @@ function carriesSqlState(error: unknown, sqlState: string, messageSays?: (messag
     }
 
     for (const key of ['cause', 'meta', 'driverAdapterError', 'originalError']) {
-      if (key in record) stack.push(record[key]);
+      if (key in record) {
+        stack.push(record[key]);
+      }
     }
   }
 

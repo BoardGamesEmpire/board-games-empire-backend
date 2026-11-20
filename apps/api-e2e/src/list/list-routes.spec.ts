@@ -1,8 +1,10 @@
 import { ListKind, Reach, WishlistPriority } from '@bge/database';
-import { createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
+import type { Actors, AuthenticatedActor } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { arrangeGame, arrangeList, arrangePlatformGame, findWishlist } from './list-fixtures';
 import {
   listEntriesEnvelope,
@@ -102,6 +104,8 @@ describe('list routes (#1241)', () => {
     expect(byPlatformGame.platformGameId).toBe(platformGameId);
     expect(byPlatformGame.gameId).toBeNull();
     expect(byPlatformGame.platformGame?.game.id).toBe(gameId);
+    // Sent as null, not left out, when the platform game has no content type of its own (#1391).
+    expect(byPlatformGame.platformGame?.contentType).toBeNull();
     expect(byPlatformGame.position).toBe(byGame.position + 1);
 
     expect((await addEntry(user, list.id, { gameId }).expect(409)).body.code).toBe('LIST_ENTRY_EXISTS');
@@ -408,6 +412,7 @@ describe('list routes (#1241)', () => {
       );
       expect(read.id).toBe(strangersList.id);
     }
+
     await request(baseUrl).get(`/api/lists/${strangersList.id}`).set(plainUser.headers).expect(404);
 
     for (const [who, actor] of staff) {

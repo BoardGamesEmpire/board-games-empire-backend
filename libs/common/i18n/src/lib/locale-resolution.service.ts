@@ -5,15 +5,15 @@ import { FALLBACK_LOCALE } from './locale.constants';
 import { SupportedLocalesService } from './supported-locales.service';
 
 export interface LocaleResolutionInput {
+  /** Raw `Accept-Language` header value, when the transport has one. */
+  readonly acceptLanguage?: string | null;
+
   /**
    * The acting user whose stored preference takes precedence. Any
    * userId-bearing actor qualifies (`user`, `anonymous`, `apiKey` — anonymous
    * users are real User rows and API keys act for their owner).
    */
   readonly userId?: string | null;
-
-  /** Raw `Accept-Language` header value, when the transport has one. */
-  readonly acceptLanguage?: string | null;
 }
 
 /**
@@ -45,10 +45,8 @@ export class LocaleResolutionService {
   static readonly PREFERENCE_TTL_MS = 60_000;
 
   private static readonly PREFERENCE_CACHE_MAX_ENTRIES = 10_000;
-
   private readonly logger = new Logger(LocaleResolutionService.name);
-
-  private readonly preferenceCache = new Map<string, { tag: string | null; expiresAt: number }>();
+  private readonly preferenceCache = new Map<string, { expiresAt: number; tag: string | null }>();
 
   constructor(
     private readonly db: DatabaseService,
@@ -75,6 +73,17 @@ export class LocaleResolutionService {
       this.supportedLocales.getSupportedTags(),
       FALLBACK_LOCALE,
     );
+  }
+
+  /**
+   * The language tag a user stored as their preference, or null when they
+   * stored none or it can't be read. Unlike {@link resolve}, it isn't matched
+   * against the catalogs the server ships: a caller with languages of its
+   * own, such as the privacy policy (#934), matches it against those. Cached
+   * as {@link resolve}'s lookup is.
+   */
+  storedLanguage(userId: string): Promise<string | null> {
+    return this.preferredTag(userId);
   }
 
   private async preferredTag(userId: string): Promise<string | null> {

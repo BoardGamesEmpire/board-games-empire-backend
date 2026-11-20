@@ -1,4 +1,5 @@
-import { discardBody, type UpstreamFetch } from '@boardgamesempire/gateway-driver-contract';
+import type { UpstreamFetch } from '@boardgamesempire/gateway-driver-contract';
+import { discardBody } from '@boardgamesempire/gateway-driver-contract';
 import { setTimeout as wait } from 'node:timers/promises';
 import type { BggClientLike, BggSearchQueryParams, BggThingQueryParams } from './bgg-client.interface';
 import { BggHttpError } from './bgg-http.error';
@@ -7,18 +8,19 @@ import { parseSearch, parseThings } from './bgg-xml';
 export const BGG_BASE_URL = 'https://boardgamegeek.com/xmlapi2';
 
 export interface BggClientOptions {
-  /** How the client reaches BGG; it has no other way (#1082). */
-  fetch: UpstreamFetch;
+  /** How many times to ask again after a 202 before giving up. Defaults to 5. */
+  acceptedRetries?: number;
+
+  /** How long to wait before asking again after a 202. Defaults to 6 seconds. */
+  acceptedRetryMs?: number;
+
   apiKey: string;
 
   /** Defaults to {@link BGG_BASE_URL}. */
   baseUrl?: string;
 
-  /** How long to wait before asking again after a 202. Defaults to 6 seconds. */
-  acceptedRetryMs?: number;
-
-  /** How many times to ask again after a 202 before giving up. Defaults to 5. */
-  acceptedRetries?: number;
+  /** How the client reaches BGG; it has no other way (#1082). */
+  fetch: UpstreamFetch;
 }
 
 type QueryValue = string | number | readonly (string | number)[] | undefined;
@@ -35,7 +37,8 @@ const queryString = (params: Readonly<Record<string, QueryValue>>): string =>
         return [];
       }
 
-      const values: readonly (string | number)[] = Array.isArray(value) ? value : [value as string | number];
+      const values: readonly (string | number)[] =
+        typeof value === 'string' || typeof value === 'number' ? [value] : value;
       return [`${name}=${values.map((each) => encodeURIComponent(each)).join(',')}`];
     })
     .join('&');

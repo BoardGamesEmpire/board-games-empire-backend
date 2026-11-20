@@ -1,12 +1,15 @@
 import { Reach } from '@bge/database';
-import { WsErrorEvents, type WsErrorPayload } from '@bge/shared';
-import { befriend, createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
+import type { WsErrorPayload } from '@bge/shared';
+import { WsErrorEvents } from '@bge/shared';
+import type { Actors, AuthenticatedActor } from '@bge/testing-e2e';
+import { befriend, createActors } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import type { Socket } from 'socket.io-client';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { connect, openSocket } from '../support/socket';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 
 interface LocalHit {
   readonly gameId?: string;
@@ -14,8 +17,8 @@ interface LocalHit {
 
 interface SearchFrame {
   readonly correlationId: string;
-  readonly source?: string;
   readonly games?: readonly LocalHit[];
+  readonly source?: string;
 }
 
 /**
@@ -98,16 +101,19 @@ describe('game search over WebSocket', () => {
           ids.push(...(frame.games ?? []).map((hit) => hit.gameId ?? '<a local hit with no gameId>'));
         }
       };
+
       const onError = (frame: SearchFrame) => {
         if (ours(frame)) {
           fail(`search:error for the search: ${JSON.stringify(frame)}`);
         }
       };
+
       const onRefused = (payload: WsErrorPayload) => {
         if (ours(payload)) {
           fail(`Frame refused: ${JSON.stringify(payload)}`);
         }
       };
+
       const onConnectError = (error: Error) => fail(`Connection refused: ${error.message}`);
       const onDone = (frame: SearchFrame) => {
         if (ours(frame)) {
@@ -125,10 +131,12 @@ describe('game search over WebSocket', () => {
         socket.off('connect_error', onConnectError);
         socket.off('search:done', onDone);
       };
+
       const fail = (message: string) => {
         settle();
         reject(new Error(message));
       };
+
       const timer = setTimeout(
         () => fail(`No search:done within ${SEARCH_TIMEOUT_MS}ms; received [${received.join(', ')}]`),
         SEARCH_TIMEOUT_MS,

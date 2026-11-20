@@ -1,8 +1,10 @@
-import { DatabaseService, NotificationType, Prisma, SystemRole, type GameShareSnapshot } from '@bge/database';
+import type { GameShareSnapshot } from '@bge/database';
+import { DatabaseService, NotificationType, Prisma, SystemRole } from '@bge/database';
 import { NotificationsService } from '@bge/notifications-service';
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
-import { GameShareEvents, type GameShareCreatedEvent } from './game-share.events';
+import type { GameShareCreatedEvent } from './game-share.events';
+import { GameShareEvents } from './game-share.events';
 
 /**
  * What the sharer's name is read from. The household lib's `shownName` rule,
@@ -34,8 +36,9 @@ const HOUSEHOLD_AUTHORITY_ROLES: readonly SystemRole[] = [SystemRole.HouseholdOw
 
 /** A stored share whose game and sharer still exist, as a notification names it. */
 interface LiveShare {
+  readonly approvedAt: Date | null;
   readonly gameTitle: string;
-  readonly sharerName: string;
+
   /**
    * The household the share is into, while it is not deleted. Null means
    * either a share to a user or a household that is gone, so only
@@ -43,7 +46,8 @@ interface LiveShare {
    * it as gone.
    */
   readonly household: { readonly name: string } | null;
-  readonly approvedAt: Date | null;
+
+  readonly sharerName: string;
 }
 
 /**

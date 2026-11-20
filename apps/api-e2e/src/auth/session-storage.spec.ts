@@ -1,10 +1,12 @@
 import { AUTH_CLIENT_IP_HEADER } from '@bge/auth';
-import { createActors, SET_AUTH_TOKEN_HEADER, type Actors } from '@bge/testing-e2e';
+import type { Actors } from '@bge/testing-e2e';
+import { createActors, SET_AUTH_TOKEN_HEADER } from '@bge/testing-e2e';
 import request from 'supertest';
 import { apiCacheTtlMs } from '../support/api-cache';
 import { postToAuth } from '../support/auth-routes';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 
 const SIGN_IN_PATH = '/api/auth/sign-in/email';
 const GET_SESSION_PATH = '/api/auth/get-session';

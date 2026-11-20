@@ -1,18 +1,16 @@
 import { EventSchedulingMode, Reach, ResourceType, SystemRole } from '@bge/database';
-import {
-  createActors,
-  type Actors,
-  type AuthenticatedActor,
-  type HouseholdRosterEntry,
-  type SessionActor,
-} from '@bge/testing-e2e';
+import type { Actors, AuthenticatedActor, HouseholdRosterEntry, SessionActor } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
-import { mintApiKey, type Caller } from '../support/api-key';
+import type { Caller } from '../support/api-key';
+import { mintApiKey } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { createEventClient, EVENTS_PATH, householdEventsPath } from './event-request';
-import { listAttendeesEnvelope, listEventsEnvelope, type ListEventsEnvelope } from './event-wire';
+import type { ListEventsEnvelope } from './event-wire';
+import { listAttendeesEnvelope, listEventsEnvelope } from './event-wire';
 
 /**
  * `GET /api/households/:householdId/events` over the real route (#506): a

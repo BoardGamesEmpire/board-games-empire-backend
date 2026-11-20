@@ -9,7 +9,8 @@ import type { StorageEngine } from 'multer';
 import { createHash } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
 import { rm } from 'node:fs/promises';
-import { pipeline, Transform, type Readable, type TransformCallback } from 'node:stream';
+import type { Readable, TransformCallback } from 'node:stream';
+import { pipeline, Transform } from 'node:stream';
 import { promisify } from 'node:util';
 
 const pipelineAsync = promisify(pipeline);
@@ -103,6 +104,7 @@ class UploadGate extends Transform {
           callback(new PluginArchiveRefusedError('not-gzip'));
           return;
         }
+
         this.checked = true;
       }
     }

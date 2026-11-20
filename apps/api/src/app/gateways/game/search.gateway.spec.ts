@@ -12,38 +12,26 @@ import type {
   WsSourceUnfilterablePayload,
 } from '@bge/game-search';
 import { GameSearchService, SearchCancelDto, SearchEvents, SearchStartDto } from '@bge/game-search';
-import {
-  FALLBACK_LOCALE,
-  I18N_CATALOG_DIR,
-  type I18nTranslations,
-  isI18nMessage,
-  LocaleResolutionService,
-  t,
-} from '@bge/i18n';
+import type { I18nTranslations } from '@bge/i18n';
+import { FALLBACK_LOCALE, I18N_CATALOG_DIR, isI18nMessage, LocaleResolutionService, t } from '@bge/i18n';
 import { AbilityContextNotPrimedError, AbilityService, PoliciesGuard, ScopeComposer } from '@bge/permissions';
+import type { MockAbilityService, MockDatabaseService } from '@bge/testing';
 import {
   createMockAbilityService,
   createTestingModuleWithDb,
   makeGame,
   makeGameWithSource,
   MOCK_ACTING_USER_ID,
-  type MockAbilityService,
-  MockDatabaseService,
 } from '@bge/testing';
-import {
-  ContentType,
-  GameSearchData,
-  PlatformType as ProtoPlatformType,
-  ResultStatus,
-  SearchGameResult,
-  SearchGamesRequest,
-} from '@boardgamesempire/proto-gateway';
-import { BadRequestException, ConflictException, ForbiddenException, HttpException, Logger } from '@nestjs/common';
+import type { GameSearchData, SearchGameResult, SearchGamesRequest } from '@boardgamesempire/proto-gateway';
+import { ContentType, PlatformType as ProtoPlatformType, ResultStatus } from '@boardgamesempire/proto-gateway';
+import type { HttpException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Logger } from '@nestjs/common';
 import { I18nModule, I18nService } from 'nestjs-i18n';
 import * as crypto from 'node:crypto';
 import type { Subscription } from 'rxjs';
 import { NEVER, of, throwError } from 'rxjs';
-import { Server, Socket } from 'socket.io';
+import type { Server, Socket } from 'socket.io';
 import { WsFrameScope, WsFrameScopeGuard } from '../base/ws-frame-scope';
 import { WsSessionGuard } from '../base/ws-session';
 import { WsThrottlerGuard } from '../base/ws-throttler.guard';
@@ -1157,6 +1145,7 @@ function makeResultFrame(overrides: Partial<SearchGameResult> = {}): SearchGameR
     ...overrides,
   };
 }
+
 /**
  * A SOURCE_DONE sentinel that terminates a gateway stream
  */

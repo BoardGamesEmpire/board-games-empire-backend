@@ -1,7 +1,9 @@
 import type { Actor, AuditContextService } from '@bge/actor-context';
-import { JobStatus, NotificationType, type DatabaseService } from '@bge/database';
+import type { DatabaseService } from '@bge/database';
+import { JobStatus, NotificationType } from '@bge/database';
 import type { NotificationsService } from '@bge/notifications-service';
-import { ImportJobCompletedEvent, type ImportJobCompletedContext } from '../events/import.events';
+import type { ImportJobCompletedContext } from '../events/import.events';
+import { ImportJobCompletedEvent } from '../events/import.events';
 import { ImportJobOrigin } from '../interfaces/import-job.interface';
 import { GameWatchListener } from './game-watch.listener';
 
@@ -127,7 +129,7 @@ describe('GameWatchListener', () => {
     ]);
   });
 
-  it('skips a game that is not an expansion, a remaster linked to its original say (#971)', async () => {
+  it('skips a game that is not an add-on, though its DataGateway names base games (#971, #1391)', async () => {
     await listener.handle(makeExpansionCompleted({ isExpansion: false }));
     expect(db.gameWatch.findMany).not.toHaveBeenCalled();
   });

@@ -1,7 +1,8 @@
 import type { Nodes, Parents, Root, Text } from 'mdast';
 import { fromMarkdown } from 'mdast-util-from-markdown';
 import { gfmFromMarkdown, gfmToMarkdown } from 'mdast-util-gfm';
-import { type Handle, toMarkdown } from 'mdast-util-to-markdown';
+import type { Handle } from 'mdast-util-to-markdown';
+import { toMarkdown } from 'mdast-util-to-markdown';
 import { gfm } from 'micromark-extension-gfm';
 
 /**
@@ -80,10 +81,12 @@ export function isEmptyContainer(node: Nodes): boolean {
 
 /** Removes empty containers under `parent`, innermost first, so a list of empty items goes too. */
 function dropEmpty(parent: Parents): void {
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- `parent` is a union of mdast parents, so `filter` returns the union of their children, which TypeScript can't relate back to this parent's own (#1321)
   parent.children = parent.children.filter((child) => {
     if ('children' in child) {
       dropEmpty(child);
     }
+
     return !isEmptyContainer(child);
   }) as typeof parent.children;
 }

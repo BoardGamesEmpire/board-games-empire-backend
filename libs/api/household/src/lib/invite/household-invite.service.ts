@@ -1,5 +1,6 @@
 import { Action, DatabaseService, HUMAN_USER_WHERE, InviteType, Prisma, ResourceType, SystemRole } from '@bge/database';
 import { t } from '@bge/i18n';
+import type { InviteContextView, InviteDomainEvent, InvitePartyView, StoredInvitee } from '@bge/invites';
 import {
   CONTEXT_INVITE_SELECT,
   DEFAULT_INVITE_TTL_MS,
@@ -10,13 +11,10 @@ import {
   OUTSTANDING_INVITE_STATUSES,
   unexpiredInviteWhere,
   withEffectiveInviteStatus,
-  type InviteContextView,
-  type InviteDomainEvent,
-  type InvitePartyView,
-  type StoredInvitee,
 } from '@bge/invites';
 import { AbilityService, resolveActingUserIdOrNull, ScopeComposer } from '@bge/permissions';
-import { QuotaExceededException, QuotaService, type QuotaCheckContext, type QuotaSoftOverageEvent } from '@bge/quota';
+import type { QuotaCheckContext, QuotaSoftOverageEvent } from '@bge/quota';
+import { QuotaExceededException, QuotaService } from '@bge/quota';
 import { PaginatedRows } from '@bge/shared';
 import {
   BadRequestException,
@@ -26,9 +24,11 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { addressHolderBannedWithin, isBannedWithin } from '../ban/household-ban.helpers';
-import { CreateHouseholdInviteDto, ListHouseholdInvitesQueryDto, type AssignableHouseholdRole } from '../dto';
+import type { AssignableHouseholdRole } from '../dto';
+import { CreateHouseholdInviteDto, ListHouseholdInvitesQueryDto } from '../dto';
 import { assertHouseholdExists, lockExistingHousehold, resolveHouseholdRoleId } from '../household-access.helpers';
 import { SHOWN_NAME_SELECT, shownName } from '../shown-name';
+import type { RosterRow } from './household-authority';
 import {
   householdInviteSubject,
   isHouseholdAuthority,
@@ -36,7 +36,6 @@ import {
   readInviteAuthority,
   readRoster,
   senderCouldStillSend,
-  type RosterRow,
 } from './household-authority';
 
 /**
@@ -54,6 +53,7 @@ const APPROVE_FIELD = Prisma.InviteScalarFieldEnum.approvedById;
  */
 const PARTY_COLUMNS_SELECT = {
   id: true,
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Object.fromEntries types its result by value only; its keys are INVITE_SCALARS_PARTY_ONLY's own (#1321)
   ...(Object.fromEntries(Object.keys(INVITE_SCALARS_PARTY_ONLY).map((key) => [key, true])) as {
     readonly [Key in keyof typeof INVITE_SCALARS_PARTY_ONLY]: true;
   }),
@@ -318,8 +318,8 @@ export class HouseholdInviteService {
       tx: Prisma.TransactionClient,
       scope: { readonly householdId: string },
     ) => Promise<{
-      readonly invite: InviteContextView;
       readonly event: InviteDomainEvent;
+      readonly invite: InviteContextView;
       readonly softOverages?: readonly QuotaSoftOverageEvent[];
     }>,
   ): Promise<InviteContextView | InviteAuthorityView> {
@@ -581,8 +581,8 @@ export class HouseholdInviteService {
     householdId: string,
     action: typeof Action.read | typeof Action.update,
     existing?: {
-      readonly inviteId: string;
       readonly field: Prisma.InviteScalarFieldEnum;
+      readonly inviteId: string;
       readonly role: { readonly name: string };
     },
   ): Promise<RosterRow[]> {

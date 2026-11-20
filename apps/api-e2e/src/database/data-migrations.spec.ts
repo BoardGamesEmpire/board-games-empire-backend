@@ -1,6 +1,8 @@
-import { applyDataMigrations, DataMigrationRevisionError, type DataMigrationEntry } from '@bge/database';
+import type { DataMigrationEntry } from '@bge/database';
+import { applyDataMigrations, DataMigrationRevisionError } from '@bge/database';
 import type { Logger } from '@nestjs/common';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 
 /**
  * The data-migration ledger against a real database (#236): `applyDataMigrations`
@@ -53,6 +55,7 @@ describe('the data-migration ledger against Postgres', () => {
     const [row] = await db.client.$queryRawUnsafe<[{ n: number }]>(`SELECT count(*)::int AS n FROM "${PROBE}"`);
     return row.n;
   };
+
   /** Scoped to this spec's names: the harness ledger may one day hold the shipped registry's rows too. */
   const ledgerNames = async (): Promise<string[]> =>
     (

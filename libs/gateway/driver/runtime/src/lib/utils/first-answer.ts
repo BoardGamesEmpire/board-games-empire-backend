@@ -1,4 +1,5 @@
-import { firstValueFrom, fromEvent, takeUntil, type Observable } from 'rxjs';
+import type { Observable } from 'rxjs';
+import { firstValueFrom, fromEvent, takeUntil } from 'rxjs';
 
 /**
  * The call's first answer, unless `signal` aborts first: the call is then

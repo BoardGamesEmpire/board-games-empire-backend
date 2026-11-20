@@ -2,20 +2,8 @@ import { AuditContextService } from '@bge/actor-context';
 import { MODULE_OPTIONS_TOKEN, PluginGrantAuthorityService, PluginInstallAuthorityError } from '@bge/plugin';
 import { PluginArchiveRefusedError, PluginArtifactTooLargeError } from '@bge/plugin-artifacts';
 import { PLUGIN_ARCHIVE_MAX_COMPRESSED_BYTES } from '@boardgamesempire/plugin-manifest';
-import {
-  Body,
-  Catch,
-  Controller,
-  Logger,
-  Module,
-  Post,
-  Req,
-  UseFilters,
-  UseInterceptors,
-  type ArgumentsHost,
-  type ExceptionFilter,
-  type INestApplication,
-} from '@nestjs/common';
+import type { ArgumentsHost, ExceptionFilter, INestApplication } from '@nestjs/common';
+import { Body, Catch, Controller, Logger, Module, Post, Req, UseFilters, UseInterceptors } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { MulterError } from 'multer';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -28,7 +16,7 @@ import type { PluginArtifactUploadedFile } from './plugin-artifact-upload.storag
 
 const GZIP = Buffer.from([0x1f, 0x8b, 0x08, 0x00, 0x01, 0x02]);
 
-let seen: { file?: PluginArtifactUploadedFile; body?: unknown; existedInHandler?: boolean } = {};
+let seen: { body?: unknown; existedInHandler?: boolean; file?: PluginArtifactUploadedFile } = {};
 let handlerFails = false;
 let handlerReplacesFileWithDirectory = false;
 
@@ -44,13 +32,17 @@ Catch()(EchoFilter);
 class UploadController {
   take(req: { file?: PluginArtifactUploadedFile }, body: unknown) {
     seen = { file: req.file, body, existedInHandler: req.file ? existsSync(req.file.path) : undefined };
-    if (handlerFails) throw new Error('handler failed');
+    if (handlerFails) {
+      throw new Error('handler failed');
+    }
+
     if (handlerReplacesFileWithDirectory && req.file) {
       // A path the backstop cannot remove: rmSync refuses a directory, even as root.
       rmSync(req.file.path);
       mkdirSync(req.file.path);
       writeFileSync(join(req.file.path, 'child'), '');
     }
+
     return { ok: true };
   }
 }
@@ -75,7 +67,10 @@ describe('PluginArtifactUploadInterceptor (#1094)', () => {
   const post = (form: FormData) => fetch(url, { method: 'POST', body: form });
   const fileForm = (bytes: Buffer, extra: Record<string, string> = {}) => {
     const form = new FormData();
-    for (const [k, v] of Object.entries(extra)) form.append(k, v);
+    for (const [k, v] of Object.entries(extra)) {
+      form.append(k, v);
+    }
+
     form.append('file', new Blob([new Uint8Array(bytes)], { type: 'application/gzip' }), 'a.tgz');
     return form;
   };

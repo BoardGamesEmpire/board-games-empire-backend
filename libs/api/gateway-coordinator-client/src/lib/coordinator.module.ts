@@ -49,7 +49,7 @@ import { GatewayCoordinatorClientService } from './coordinator.service';
               // `@bge/actor-context`) before issuing gRPC calls.
               channelOptions: {
                 interceptors: [createOutboundActorMetadataInterceptor()],
-              } as ChannelOptions,
+              } satisfies ChannelOptions,
             },
           }),
         },

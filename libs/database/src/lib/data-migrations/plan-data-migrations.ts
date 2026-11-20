@@ -2,9 +2,9 @@ import type { DataMigrationEntry, DataMigrationLedgerRow } from './data-migratio
 
 /** An applied entry the ledger and the build hold at different revisions; which side is higher says what happened. */
 export interface RevisionMismatch {
-  readonly name: string;
   readonly codeRevision: number;
   readonly ledgerRevision: number;
+  readonly name: string;
 }
 
 /** One mismatch, worded the same in the refusal, the warning and `db:plan`. */
@@ -13,16 +13,6 @@ export function describeMismatch({ name, codeRevision, ledgerRevision }: Revisio
 }
 
 export interface DataMigrationsPlan {
-  /** Registry entries without a ledger row, in apply (name) order. */
-  readonly pending: readonly DataMigrationEntry[];
-  /** Registry entries the ledger records at the same revision. */
-  readonly applied: readonly string[];
-  /**
-   * Registry entries at a revision above the ledger's in this build. The
-   * ledger's revision is the one that ran, so the entry was edited after it
-   * ran, without a new entry; any one of them refuses boot.
-   */
-  readonly edited: readonly RevisionMismatch[];
   /**
    * Registry entries the ledger records at a revision above this build's: a
    * newer build ran them, and this build is a rollback across that edit. Left
@@ -30,6 +20,20 @@ export interface DataMigrationsPlan {
    * data.
    */
   readonly ahead: readonly RevisionMismatch[];
+
+  /** Registry entries the ledger records at the same revision. */
+  readonly applied: readonly string[];
+
+  /**
+   * Registry entries at a revision above the ledger's in this build. The
+   * ledger's revision is the one that ran, so the entry was edited after it
+   * ran, without a new entry; any one of them refuses boot.
+   */
+  readonly edited: readonly RevisionMismatch[];
+
+  /** Registry entries without a ledger row, in apply (name) order. */
+  readonly pending: readonly DataMigrationEntry[];
+
   /** Ledger rows the registry does not know: a newer build applied them, or an entry was removed. */
   readonly unknown: readonly string[];
 }
@@ -99,6 +103,7 @@ export function assertDataMigrationRegistry(entries: readonly DataMigrationEntry
     if (seen.has(entry.name)) {
       throw new Error(`The data-migration registry names '${entry.name}' twice; every entry needs a name of its own.`);
     }
+
     seen.add(entry.name);
 
     if (!ENTRY_NAME.test(entry.name)) {

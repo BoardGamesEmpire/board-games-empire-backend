@@ -104,6 +104,9 @@ The permanent, unique identifier a server gives itself when it is first set up, 
 What a server tells a client about itself. Before anyone signs in: its identity, its name and the ways to sign in. Once signed in, a fuller view adds which core areas the server offers, such as households and events, and the plugins running on it.
 _Avoid_: tier 1 and tier 2 discovery
 
+**Privacy policy**:
+What a server tells people about the data it keeps, why, and where it goes. The server ships a standard privacy policy, and in any language a server admin can replace it in the app, or the operator can mount their own files in its place. Either replacement is the operator's privacy policy: the operator answers for it, whoever writes it.
+
 ### People
 
 **User**:
@@ -617,6 +620,41 @@ _Avoid_: catalog on its own, catalogue, game library
 A game that stands on its own and that expansions, DLC and other add-ons attach to.
 _Avoid_: parent game, main game
 
+**Add-on**:
+A game that attaches to a base game: an expansion, standalone expansion, DLC, mod or accessory, as its content type says.
+_Avoid_: expansion (one kind of add-on), extension, child game
+
+**Expansion**:
+An add-on that extends a base game and needs it to be played, such as Catan: Seafarers.
+_Avoid_: expansion for add-ons in general; mini expansion (an expansion)
+
+**Standalone expansion**:
+An add-on that can also be played without its base game, such as Half-Life 2: Episode Two.
+
+**DLC**:
+A video game add-on delivered as downloadable content, such as Skyrim: Dawnguard. It is a full game in the game catalog.
+_Avoid_: DLC for a DLC item
+
+**DLC item**:
+Planned: a minor pack, such as a cosmetic pack, that its upstream marks as one. It is listed under its game without being a game itself.
+_Avoid_: DLC (a full game), pack on its own
+
+**Bundle**:
+A game made up of other games and sold as one product, such as Catan: Big Box or Mass Effect Trilogy.
+_Avoid_: compilation, big box (for bundles in general), collection (a user's owned games)
+
+**Add-on link**:
+The link from an add-on to a base game it attaches to. An add-on can have several. A link holds only on the platforms where both games have a platform game. Only an add-on has one: a remake, remaster, port, expanded edition or bundle that names its original is not linked to it.
+_Avoid_: expansion link, parent link
+
+**Works-with link**:
+Planned: a two-way link between two games that are played together, such as Horizons of Spirit Island and Spirit Island, naming neither one as the base game.
+_Avoid_: integration, compatibility
+
+**Contents link**:
+Planned: the link from a bundle to each game it contains.
+_Avoid_: compilation link
+
 **Imported game**:
 A game brought in from a DataGateway. It belongs to the server, and everyone can see it.
 
@@ -655,12 +693,12 @@ _Avoid_: platform incarnation, PG
 The broad class of platform a game is played on, such as tabletop, console, PC or mobile.
 
 **Content type**:
-What a game is in relation to other games, such as a base game, expansion, DLC, accessory or bundle.
-_Avoid_: game type; not to be confused with content format
+What a game is in relation to other games, such as a base game, expansion, DLC, accessory or bundle. A platform game can have its own, which overrides the game's on that platform, since Jagged Earth is an expansion on tabletop and DLC on PC.
+_Avoid_: game type, expansion type; not to be confused with content format
 
 **Override**:
 A value set at a narrower level that replaces the broader one: a release's over its platform game's, and a platform game's over its game's. A user's customization overrides for that user only.
-_Avoid_: override for an expansion's adjustments, which add rather than replace; override for a direct permission
+_Avoid_: override for an add-on link's player count and play time modifiers, which add rather than replace (its minimum and maximum player overrides do replace the game's range); override for a direct permission
 
 **Credit**:
 A person or company credited on a game: a designer, artist or publisher.
@@ -699,8 +737,15 @@ A label for what kind of game something is, such as a genre.
 _Avoid_: genre; category on its own for anything else (say plugin category, feedback category, document kind, house-rule area)
 
 **Family**:
-A named group of related games, such as a series.
-_Avoid_: collection (a user's owned games)
+A named group of related games: a series or a universe.
+_Avoid_: collection (a user's owned games); family for a topic such as a theme or a component
+
+**Series**:
+A family of games released as one line, such as Mario Kart or Uwe Rosenberg's Harvest games.
+
+**Universe**:
+A family of every game set in one world or built around one game, such as Catan or Warhammer 40,000.
+_Avoid_: franchise, setting
 
 **Tag**:
 A label users put on a game, which everyone sees. Who added it is recorded only as attribution.
@@ -902,7 +947,7 @@ _Avoid_: upsert; fetch (that is only the first half)
 Asking one DataGateway for a game's full data: the first half of an import, before the result is stored.
 
 **Import batch**:
-One import request, the game asked for plus any expansions chosen with it and any base game the server added because one of them needed it, tracked and reported as a group with one overall outcome.
+One import request, the game asked for plus any add-ons chosen with it and any base game the server added because one of them needed it, tracked and reported as a group with one overall outcome.
 _Avoid_: import flow, co-import
 
 **Re-import**:
@@ -926,7 +971,7 @@ Adding to, or replacing, the data of a record the server already has, using a Da
 _Avoid_: augmentation
 
 **Game watch**:
-Planned: a user's request to be told when a new expansion of a particular base game enters the game catalog, optionally importing it automatically.
+Planned: a user's request to be told when a new add-on of a particular base game enters the game catalog, optionally importing it automatically.
 _Avoid_: follow, subscription
 
 ### Languages
@@ -1189,7 +1234,7 @@ A grant given when the permission carried a lower risk level than it does now. I
 _Avoid_: stale risk, risk-stale grant
 
 **Revocation**:
-A consent decision undone without anyone choosing to undo it. An update removed the permission, stopped requesting it, or moved it to another consent scope, or the staged update a pre-consent was given to was rejected. A decision is never revoked because whoever gave it left or lost their role. The permission goes back to awaiting an answer, and the reason is kept.
+A consent decision undone without anyone choosing to undo it: the staged update a pre-consent was given to was rejected. An update never revokes a decision: one the active manifest does not request at its consent scope is kept and confers nothing, and confers again if a later manifest requests it there. A decision is never revoked because whoever gave it left or lost their role. The permission goes back to awaiting an answer, and the reason is kept.
 _Avoid_: invalidation; durable denial (a refusal someone chose)
 
 **Categorical exclusion**:
@@ -1235,7 +1280,7 @@ A change the server has recorded but will act on only after its next restart, su
 _Avoid_: pending restart, hot reload
 
 **Uninstalled plugin**:
-What remains when a plugin is uninstalled: every consent is discarded so a reinstall starts afresh, while unit settings are kept, unless purged, so a reinstall restores them.
+What remains when a plugin is uninstalled: every consent is discarded and every unit is switched off, so a reinstall starts afresh and each unit is switched on again by whoever decides for it, while unit settings are kept, unless purged, so a reinstall restores them.
 _Avoid_: tombstone, deleted, removed
 
 **Lifecycle event**:

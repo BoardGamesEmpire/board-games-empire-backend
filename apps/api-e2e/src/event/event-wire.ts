@@ -18,7 +18,8 @@ import type {
   User,
   UserProfile,
 } from '@bge/database';
-import { envelopeFailure, isRecord, type HttpResponseLike, type RequestDescription, type Wire } from '../support/wire';
+import type { HttpResponseLike, RequestDescription, Wire } from '../support/wire';
+import { envelopeFailure, isRecord } from '../support/wire';
 
 /**
  * Fail-loud parsers for the event envelopes, on the pattern
@@ -34,9 +35,9 @@ import { envelopeFailure, isRecord, type HttpResponseLike, type RequestDescripti
  */
 export interface EventAttendanceWire {
   readonly attendeeId: string;
-  readonly status: EventParticipationStatus;
   readonly role: string | null;
   readonly rsvpDate: string | null;
+  readonly status: EventParticipationStatus;
 }
 
 /**
@@ -67,9 +68,10 @@ export interface ListEventsEnvelope {
  * is `null` for a guest added by name only.
  */
 export interface AttendeeSummaryWire {
+  readonly guestName: string | null;
   readonly id: string;
   readonly status: EventParticipationStatus;
-  readonly guestName: string | null;
+
   readonly user:
     | (Pick<Wire<User>, 'id' | 'username'> & {
         readonly profile: Pick<Wire<UserProfile>, 'displayName' | 'avatarUrl'> | null;
@@ -97,14 +99,15 @@ export type LineupGameWire = Pick<
   | 'addedById'
 > & {
   readonly platformGame: {
-    readonly id: string;
     readonly game: Pick<Wire<Game>, 'id' | 'title' | 'subtitle' | 'thumbnail'>;
+    readonly id: string;
     readonly platform: Pick<Wire<Platform>, 'id' | 'name' | 'platformType'>;
   };
+
   readonly suppliedBy: {
-    readonly id: string;
-    readonly attendeeId: string;
     readonly attendee: AttendeeSummaryWire | null;
+    readonly attendeeId: string;
+    readonly id: string;
   };
 };
 
@@ -131,29 +134,33 @@ export type NominationVoteWire = Pick<Wire<EventGameVote>, 'id' | 'attendeeId' |
  * the game's date (#799); and its votes.
  */
 export type NominationWire = Wire<EventGameNomination> & {
-  readonly platformGame: LineupGameWire['platformGame'];
+  readonly elevatedTo: { readonly id: string; readonly occurrenceId: string | null } | null;
   readonly nominatedBy: AttendeeSummaryWire | null;
+  readonly platformGame: LineupGameWire['platformGame'];
+
   readonly suppliedFrom: {
-    readonly id: string;
-    readonly attendeeId: string;
     readonly attendee: AttendeeSummaryWire | null;
+    readonly attendeeId: string;
+
     readonly collection: {
       readonly platformGame: {
-        readonly id: string;
         readonly game: Pick<Wire<Game>, 'id' | 'title' | 'subtitle'>;
+        readonly id: string;
         readonly platform: Pick<Wire<Platform>, 'id' | 'name'>;
       };
     };
+
+    readonly id: string;
   };
-  readonly elevatedTo: { readonly id: string; readonly occurrenceId: string | null } | null;
+
   readonly votes: readonly NominationVoteWire[];
 };
 
 /** `POST /api/events/:eventId/nominations/:nominationId/resolve`'s outcome, restated to the fields a spec asserts on. */
 export interface ResolutionWire {
-  readonly status: string;
-  readonly tally: { readonly forCount: number; readonly againstCount: number; readonly totalVotes: number };
   readonly eligibleVoterCount: number;
+  readonly status: string;
+  readonly tally: { readonly againstCount: number; readonly forCount: number; readonly totalVotes: number };
 }
 
 /**
@@ -161,9 +168,9 @@ export interface ResolutionWire {
  * answer serves them: plain lists, sorted, rather than join rows (#1268).
  */
 export interface PolicyListsWire {
-  readonly allowedPlatformTypes: readonly PlatformType[];
-  readonly allowedPlatformIds: readonly string[];
   readonly allowedCategoryIds: readonly string[];
+  readonly allowedPlatformIds: readonly string[];
+  readonly allowedPlatformTypes: readonly PlatformType[];
 }
 
 /**
@@ -206,8 +213,8 @@ export type EventDetailWire = EventReadWire &
 
 /** The embeds a create's replay shares with the event read. */
 export interface EventEmbedsWire {
-  readonly occurrences: readonly Wire<EventOccurrence>[];
   readonly attendees: readonly EventAttendeeWire[];
+  readonly occurrences: readonly Wire<EventOccurrence>[];
   readonly policy: EventPolicyWire | null;
 }
 
@@ -231,17 +238,16 @@ export interface ListAttendeesEnvelope {
  * of the owner's row.
  */
 export interface OfferedGameWire {
-  readonly id: string;
   readonly attendeeId: string;
-  readonly createdAt: string;
+
   readonly collection: {
     readonly id: string;
     readonly medium: GameMedium;
+
     readonly platformGame: Pick<
       Wire<PlatformGame>,
-      'id' | 'image' | 'thumbnail' | 'minPlayers' | 'maxPlayers' | 'minPlayTime' | 'maxPlayTime'
+      'id' | 'image' | 'thumbnail' | 'minPlayers' | 'maxPlayers' | 'minPlayTime' | 'maxPlayTime' | 'contentType'
     > & {
-      readonly platform: Pick<Wire<Platform>, 'id' | 'name' | 'slug' | 'platformType'>;
       readonly game: Pick<
         Wire<Game>,
         | 'id'
@@ -257,11 +263,18 @@ export interface OfferedGameWire {
         | 'minPlayTime'
         | 'maxPlayTime'
       > & { readonly baseGames: readonly { readonly gameId: string; readonly isStandalone: boolean }[] };
+
+      readonly platform: Pick<Wire<Platform>, 'id' | 'name' | 'slug' | 'platformType'>;
     };
   };
-  readonly supplies: { readonly nominations: number | null; readonly lineup: number | null };
+
+  readonly createdAt: string;
+  readonly id: string;
+
   /** Whether the game is on the acting user's wishlist; null for an actor with no wishlist they can read (#1241). */
   readonly onWishlist: boolean | null;
+
+  readonly supplies: { readonly lineup: number | null; readonly nominations: number | null };
 }
 
 /** A row of `GET /api/events/:eventId/offered-games`: the offered game and its attendee, or null (#1187). */
@@ -291,22 +304,22 @@ export interface ListAttendeeGamesEnvelope {
 
 /** One result of `POST /api/events/:eventId/attendees/:attendeeId/games/batch` (#1188). */
 export type OfferResultWire =
-  | { readonly collectionId: string; readonly outcome: 'added' | 'alreadyOffered'; readonly entry: OfferedGameWire }
-  | { readonly collectionId: string; readonly outcome: 'refused'; readonly reason: string; readonly message: string };
+  | { readonly collectionId: string; readonly entry: OfferedGameWire; readonly outcome: 'added' | 'alreadyOffered' }
+  | { readonly collectionId: string; readonly message: string; readonly outcome: 'refused'; readonly reason: string };
 
 /**
  * One occurrence's entry in the availability summary, restated to the fields
  * a spec asserts on.
  */
 export interface AvailabilitySummaryEntryWire {
-  readonly occurrenceId: string;
   readonly available: number;
   readonly maybe: number;
-  readonly unavailable: number;
-  readonly totalVotes: number;
-  readonly pendingVotes: number;
+  readonly occurrenceId: string;
   readonly participationRate: number;
-  readonly voters: readonly { readonly attendeeId: string; readonly response: string; readonly eligible: boolean }[];
+  readonly pendingVotes: number;
+  readonly totalVotes: number;
+  readonly unavailable: number;
+  readonly voters: readonly { readonly attendeeId: string; readonly eligible: boolean; readonly response: string }[];
 }
 
 /**
@@ -315,16 +328,18 @@ export interface AvailabilitySummaryEntryWire {
  */
 export interface AvailabilitySummaryWire {
   readonly attendees: {
-    readonly total: number;
-    readonly registered: number;
-    readonly guests: number;
     readonly byStatus: {
       readonly attending: number;
       readonly invited: number;
       readonly maybe: number;
       readonly notAttending: number;
     };
+
+    readonly guests: number;
+    readonly registered: number;
+    readonly total: number;
   };
+
   readonly eligibleVoters: number;
   readonly occurrences: readonly AvailabilitySummaryEntryWire[];
 }

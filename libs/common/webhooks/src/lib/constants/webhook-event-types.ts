@@ -13,12 +13,11 @@ import { Action, ResourceType } from '@bge/database';
  * must stay in lockstep: adding an entry here without an emit site (or vice
  * versa) is a no-op, not a silent partial feature.
  *
- * v1 ships the Event domain (including the event policy's change), the
- * household ownership transfer and the game-import lifecycle. The Event and
- * household events fire in apps/api; the import events fire in the worker
- * processes (GameImported / ImportJobFailed / ImportBatchCompleted in
- * apps/worker; ImportJobStarted and fetch-side failures in
- * apps/gateway-worker). All three run the dispatcher.
+ * v1 ships the Event domain (including the event policy's change), the household ownership
+ * transfer, the household lifecycle and membership changes, and the game-import lifecycle. The
+ * Event and household events fire in apps/api; the import events fire in the worker processes
+ * (GameImported / ImportJobFailed / ImportBatchCompleted in apps/worker; ImportJobStarted and
+ * fetch-side failures in apps/gateway-worker). All three run the dispatcher.
  * `game.game.updated.v1` remains absent until enrichment adopts the
  * `WebhookEmittableEvent` envelope.
  */
@@ -42,6 +41,18 @@ export const WebhookEventType = {
   ImportBatchCompleted: 'game.import-batch.completed.v1',
   /** Household ownership changed hands (#158). */
   HouseholdOwnershipTransferred: 'household.ownership.transferred.v1',
+  /** A household's details changed; the names of what changed, never the values (#245). */
+  HouseholdUpdated: 'household.household.updated.v1',
+  /** A household was soft-deleted (#245). */
+  HouseholdDeleted: 'household.household.deleted.v1',
+  /** A soft-deleted household was restored (#245). */
+  HouseholdRestored: 'household.household.restored.v1',
+  /** A user was admitted to a household (#245). */
+  HouseholdMemberAdmitted: 'household.member.admitted.v1',
+  /** A member's role in a household changed (#245). */
+  HouseholdMemberRoleChanged: 'household.member.role-changed.v1',
+  /** A membership ended, for any cause (#245). */
+  HouseholdMemberRemoved: 'household.member.removed.v1',
 } as const;
 
 export type WebhookEventType = (typeof WebhookEventType)[keyof typeof WebhookEventType];
@@ -49,18 +60,20 @@ export type WebhookEventType = (typeof WebhookEventType)[keyof typeof WebhookEve
 /** The routing/authorization facts a descriptor carries, minus its own name. */
 export type WebhookEventMeta = {
   /**
-   * CASL subject the event concerns. Drives the coarse create-time
-   * `can(requiredAction, subject)` check and the per-instance
-   * `accessibleBy(ability, requiredAction)` check at creation and dispatch.
-   */
-  readonly subject: ResourceType;
-  /**
    * Action a subscriber must hold on the subject instance to receive it,
    * checked at creation and again at every dispatch. `read` by default:
    * visibility, not mutation, is the gate, so a read-only member still
    * receives `event.updated.v1`.
    */
   readonly requiredAction: Action;
+
+  /**
+   * CASL subject the event concerns. Drives the coarse create-time
+   * `can(requiredAction, subject)` check and the per-instance
+   * `accessibleBy(ability, requiredAction)` check at creation and dispatch.
+   */
+  readonly subject: ResourceType;
+
   /**
    * The event fires after its subject's soft delete has committed, so dispatch
    * checks the deleted row rather than refusing it: the audience is whoever can
@@ -116,6 +129,20 @@ export const WEBHOOK_EVENT_DESCRIPTORS: Record<WebhookEventType, WebhookEventMet
     subject: ResourceType.Household,
     requiredAction: Action.read,
   },
+  // The household lifecycle and membership types are `read` on the household
+  // for the reason given above (#247), and their payloads hold ids only (#245).
+  [WebhookEventType.HouseholdUpdated]: { subject: ResourceType.Household, requiredAction: Action.read },
+  // Emitted after the soft delete commits, so a live-row check would refuse
+  // every subscriber (#245).
+  [WebhookEventType.HouseholdDeleted]: {
+    subject: ResourceType.Household,
+    requiredAction: Action.read,
+    subjectDeleted: true,
+  },
+  [WebhookEventType.HouseholdRestored]: { subject: ResourceType.Household, requiredAction: Action.read },
+  [WebhookEventType.HouseholdMemberAdmitted]: { subject: ResourceType.Household, requiredAction: Action.read },
+  [WebhookEventType.HouseholdMemberRoleChanged]: { subject: ResourceType.Household, requiredAction: Action.read },
+  [WebhookEventType.HouseholdMemberRemoved]: { subject: ResourceType.Household, requiredAction: Action.read },
 };
 
 /** Frozen list of every webhook-eligible event name. */
@@ -123,5 +150,7 @@ export const WEBHOOK_EVENT_TYPES: readonly WebhookEventType[] = Object.freeze(Ob
 
 /** Runtime narrowing from an arbitrary emitted event name to the eligible union. */
 export function isWebhookEventType(name: string): name is WebhookEventType {
-  return (WEBHOOK_EVENT_TYPES as readonly string[]).includes(name);
+  const eventTypes: readonly string[] = WEBHOOK_EVENT_TYPES;
+
+  return eventTypes.includes(name);
 }

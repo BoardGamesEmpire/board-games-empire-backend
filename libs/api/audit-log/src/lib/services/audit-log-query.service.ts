@@ -1,4 +1,5 @@
-import { Action, DatabaseService, Prisma, ResourceType, type AuditLog } from '@bge/database';
+import type { AuditLog } from '@bge/database';
+import { Action, DatabaseService, Prisma, ResourceType } from '@bge/database';
 import { ScopeComposer, Unscoped } from '@bge/permissions';
 import type { PaginatedRows } from '@bge/shared';
 import { Injectable } from '@nestjs/common';

@@ -1,10 +1,13 @@
 import { QuotaScope, ResourceType } from '@bge/database';
-import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
+import type { Actors, SessionActor } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import { WebhookEventType } from '@bge/webhooks';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
-import { expectLockWaiter, withBarrier, type Barrier } from '../support/lock-barrier';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { Barrier } from '../support/lock-barrier';
+import { expectLockWaiter, withBarrier } from '../support/lock-barrier';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { SOFT_DELETE_HOUSEHOLD } from './lock-fixtures';
 
 /**
@@ -34,7 +37,12 @@ import { SOFT_DELETE_HOUSEHOLD } from './lock-fixtures';
 describe('household-bound writes racing a soft-delete (#552)', () => {
   const baseUrl = requireBaseUrl(process.env);
 
-  /** Generous for the reason `plugin-prerow-race.spec.ts` gives: a cold request clears several guards first. */
+  /**
+   * Generous on purpose: a request clears a session lookup and the route guards
+   * before it reaches the lock, and a cold start is seconds-scale. A request
+   * that answers is reported at once by `settledEarly`, so the long budget only
+   * costs time on a stuck run.
+   */
   const REQUEST_REACHES_LOCK_MS = 20_000;
 
   /** Never contacted: the API runs no webhook consumer. */
@@ -53,9 +61,9 @@ describe('household-bound writes racing a soft-delete (#552)', () => {
   });
 
   interface Arrangement {
+    readonly admin: SessionActor;
     readonly householdId: string;
     readonly owner: SessionActor;
-    readonly admin: SessionActor;
   }
 
   const arrange = async (): Promise<Arrangement> => {
@@ -105,8 +113,11 @@ describe('household-bound writes racing a soft-delete (#552)', () => {
   const barrierPids = (barrier: Barrier): number[] => [barrier.waiter.pid, barrier.observer.pid];
 
   /**
-   * Fires a request that is expected to BLOCK, and keeps hold of it safely. Same
-   * shape as the helper in `plugin-prerow-race.spec.ts`.
+   * Fires a request that is expected to BLOCK, and keeps hold of it safely: the
+   * pending response is pre-handled so an assertion failing before it is
+   * awaited cannot surface as an unhandled rejection, and its outcome is
+   * offered to `expectLockWaiter`, so a request that answers early is reported
+   * as answered rather than as a timeout.
    */
   const fire = (send: () => request.Test) => {
     let outcome: string | undefined;

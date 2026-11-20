@@ -1,6 +1,7 @@
 import { Action, RiskLevel, SystemRole } from '@bge/database';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 
 /**
  * The automated seed assertion deferred from #319: the four plugin admin

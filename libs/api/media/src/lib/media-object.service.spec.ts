@@ -34,7 +34,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Readable } from 'node:stream';
-import { UploadedMediaFile } from './dto';
+import type { UploadedMediaFile } from './dto';
 import { MediaLinkService } from './link/link.service';
 import { MediaContributionService } from './media-contribution.service';
 import { MediaObjectService } from './media-object.service';

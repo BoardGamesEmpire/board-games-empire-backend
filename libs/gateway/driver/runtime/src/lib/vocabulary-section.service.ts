@@ -6,13 +6,15 @@ import {
   PlatformType,
 } from '@bge/database';
 import { GatewayLanguageInput, LanguageLinkService } from '@bge/language';
-import { VocabularyLinkService, type PlatformEntry } from '@bge/vocabulary';
+import type { PlatformEntry } from '@bge/vocabulary';
+import { VocabularyLinkService } from '@bge/vocabulary';
 import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
 import type { GatewayLanguageEntry } from '@boardgamesempire/proto-gateway';
 import { status } from '@grpc/grpc-js';
 import { Injectable, Logger } from '@nestjs/common';
 import * as crypto from 'node:crypto';
-import { timeout, type Observable } from 'rxjs';
+import type { Observable } from 'rxjs';
+import { timeout } from 'rxjs';
 import { SECTION_LIST_TIMEOUT_MS } from './constants/vocabulary-section.constants';
 import { VocabularySectionError } from './errors/vocabulary-section.error';
 import { firstAnswer } from './utils/first-answer';
@@ -22,7 +24,7 @@ const errorMessage = (err: unknown): string => (err instanceof Error ? err.messa
 
 /** A list the DataGateway doesn't implement, or one that failed in some other way. */
 const listFailure = (err: unknown): DataGatewaySectionFailure =>
-  (err as { code?: unknown } | null)?.code === status.UNIMPLEMENTED
+  typeof err === 'object' && err !== null && 'code' in err && err.code === status.UNIMPLEMENTED
     ? DataGatewaySectionFailure.ListUnsupported
     : DataGatewaySectionFailure.ListFailed;
 
@@ -145,7 +147,7 @@ export class VocabularySectionService {
   private async record(
     gatewayId: string,
     capability: DataGatewayCapability,
-    data: { lastLoadedAt?: Date; lastFailedAt?: Date; lastFailure?: DataGatewaySectionFailure },
+    data: { lastFailedAt?: Date; lastFailure?: DataGatewaySectionFailure; lastLoadedAt?: Date },
   ): Promise<void> {
     const live = await this.db.dataGateway.findFirst({
       where: { id: gatewayId, enabled: true, deletedAt: null },

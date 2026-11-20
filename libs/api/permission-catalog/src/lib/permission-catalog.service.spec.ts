@@ -1,3 +1,11 @@
+import type {
+  CatalogSnapshot,
+  EntryProblem,
+  PermissionSnapshotRow,
+  Prisma,
+  RolePermissionSnapshotRow,
+  RoleSnapshotRow,
+} from '@bge/database';
 import {
   CATALOG_EDIT_LOCK_NAME,
   CATALOG_MANIFEST,
@@ -11,16 +19,11 @@ import {
   ResourceType,
   RiskLevel,
   SystemRole,
-  type CatalogSnapshot,
-  type EntryProblem,
-  type PermissionSnapshotRow,
-  type Prisma,
-  type RolePermissionSnapshotRow,
-  type RoleSnapshotRow,
 } from '@bge/database';
 import { PermissionsService } from '@bge/permissions';
 import { CacheFlushError } from '@bge/redis';
-import { createTestingModuleWithDb, rawQueryText, unwrapTransaction, type MockDatabaseService } from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { createTestingModuleWithDb, rawQueryText, unwrapTransaction } from '@bge/testing';
 import { HttpException, HttpStatus } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import {
@@ -85,6 +88,7 @@ const rowOf = (snapshot: CatalogSnapshot, slug: string): PermissionSnapshotRow =
   if (row === undefined) {
     throw new Error(`The snapshot has no '${slug}'`);
   }
+
   return row;
 };
 
@@ -105,6 +109,7 @@ const roleRowOf = (snapshot: CatalogSnapshot, name: string): RoleSnapshotRow => 
   if (row === undefined) {
     throw new Error(`The snapshot has no role '${name}'`);
   }
+
   return row;
 };
 
@@ -729,7 +734,7 @@ describe('PermissionCatalogService (#772)', () => {
       db.rolePermission.findUnique.mockImplementation((async ({
         where,
       }: {
-        where: { roleId_permissionId: { roleId: string; permissionId: string } };
+        where: { roleId_permissionId: { permissionId: string; roleId: string } };
       }) => {
         const { roleId: role, permissionId: permission } = where.roleId_permissionId;
         const row = snapshot.rolePermissions.find(

@@ -1,6 +1,8 @@
-import { Action, type DatabaseService, ResourceType } from '@bge/database';
+import type { DatabaseService } from '@bge/database';
+import { Action, ResourceType } from '@bge/database';
 import type { ScopeComposer } from '@bge/permissions';
-import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService } from '@bge/testing';
 import { readableLineupGamesByNomination, readableLineupWhere } from './lineup-scope';
 
 const CEILING = { eventId: 'event-1', AND: [{ id: 'sentinel-condition' }] };

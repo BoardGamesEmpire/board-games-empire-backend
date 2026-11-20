@@ -1,7 +1,8 @@
 import { NotificationType, Prisma, ResourceType } from '@bge/database';
 import { NotificationsService } from '@bge/notifications-service';
 import { StorageService } from '@bge/storage';
-import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { createTestingModuleWithDb } from '@bge/testing';
 import { DriverNotRegisteredError, ObjectNotFoundError } from '@boardgamesempire/storage-contract';
 import { MediaContributionPurgeService } from './purge.service';
 

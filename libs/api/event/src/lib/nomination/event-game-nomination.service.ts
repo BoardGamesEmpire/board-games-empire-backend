@@ -27,28 +27,21 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import assert from 'node:assert';
-import {
-  LINEUP_GAME_SNAPSHOT_SELECT,
-  lockEventDates,
-  lockSupplier,
-  type LineupGameSnapshot,
-  type LockedSupplier,
-} from '../attendee/attendance';
-import { readableAttendees, type AttendeeSummary } from '../attendee/attendee-summary';
+import type { LineupGameSnapshot, LockedSupplier } from '../attendee/attendance';
+import { LINEUP_GAME_SNAPSHOT_SELECT, lockSupplier } from '../attendee/attendance';
+import type { AttendeeSummary } from '../attendee/attendee-summary';
+import { readableAttendees } from '../attendee/attendee-summary';
 import { NOT_REMOVED } from '../constants/not-removed.constant';
 import { PLATFORM_GAME_SUMMARY_SELECT } from '../constants/platform-game-summary.constant';
 import { CastVoteDto } from '../dto/cast-vote.dto';
 import { assertEventExists, requireEvent, resolveActingAttendeeId } from '../event-access.helpers';
 import { ResolutionResult, VotingPolicy } from '../interfaces/vote.interface';
-import {
-  LINEUP_GAME_SELECT,
-  lineupGameSubject,
-  toLineupGameRow,
-  withSuppliers,
-  type LineupGame,
-} from '../lineup/lineup-game';
+import type { LineupGame } from '../lineup/lineup-game';
+import { LINEUP_GAME_SELECT, lineupGameSubject, toLineupGameRow, withSuppliers } from '../lineup/lineup-game';
 import { readableLineupGamesByNomination } from '../lineup/lineup-scope';
-import { foldPolicy, type EffectivePolicy } from '../policy/effective-policy';
+import type { EffectivePolicy } from '../policy/effective-policy';
+import { foldPolicy } from '../policy/effective-policy';
+import { shareLiveEvent } from '../utils/lock-live-event.util';
 import { GAME_VOTE_SLUG, voterGrantSelect } from '../vote/vote-grant';
 import { AttendeeStub, VoteResolver } from '../vote/vote-resolver';
 import { DirectAddGameDto } from './dto/direct-add-game.dto';
@@ -196,7 +189,11 @@ export class EventGameNominationService {
     // transaction, so the supplier the lock vouched for is the one the lineup
     // names.
     const { nomination, elevated, detail } = await this.db.$transaction(async (tx) => {
-      await this.assertCanSupply(tx, eventId, dto.suppliedFromId, dto.platformGameId);
+      // The event's 404 comes before the supplier's answer, so a request on
+      // an event deleted since answers as a deleted event's write (#1065).
+      const supplier = await lockSupplier(tx, dto.suppliedFromId);
+      await shareLiveEvent(tx, eventId);
+      this.assertSupplies(supplier, eventId, dto.suppliedFromId, dto.platformGameId);
 
       const nomination = await tx.eventGameNomination.create({
         data: {
@@ -256,9 +253,10 @@ export class EventGameNominationService {
    * paused since withdraws it from Paused, and its domain event says so
    * (#621).
    *
-   * It holds the nomination's row alone, and settle and the supplier sync
-   * each lock that row after everything else they hold, so it cannot wait in
-   * a cycle with either (#551).
+   * It takes the event's row first (`shareLiveEvent`), and refuses a deleted
+   * event there (#1065), then the nomination's. Settle and the supplier sync
+   * lock the nomination's row after everything else they hold, the event's
+   * included, so it cannot wait in a cycle with either (#551).
    */
   async withdraw(eventId: string, nominationId: string): Promise<NominationDetail> {
     const initiatedAt = new Date();
@@ -292,6 +290,8 @@ export class EventGameNominationService {
 
     try {
       const { before, updated, detail } = await this.db.$transaction(async (tx) => {
+        await shareLiveEvent(tx, eventId);
+
         const [current] = await tx.$queryRaw<{ status: NominationStatus }[]>(
           Prisma.sql`SELECT status FROM event_game_nominations WHERE id = ${nominationId} FOR NO KEY UPDATE`,
         );
@@ -337,6 +337,7 @@ export class EventGameNominationService {
       if (isPrismaDependentRecordNotFoundError(error)) {
         throw new ForbiddenException(t('errors.nomination.forbidden_withdraw'));
       }
+
       throw error;
     }
   }
@@ -368,6 +369,8 @@ export class EventGameNominationService {
 
     try {
       const { vote, existingVote } = await this.db.$transaction(async (tx) => {
+        await shareLiveEvent(tx, eventId);
+
         // A nomination pauses when its supplier leaves, in the leaving
         // transaction (#551), and a paused nomination takes no votes. The
         // check above can be overtaken; under the share lock, a vote waits for
@@ -448,8 +451,9 @@ export class EventGameNominationService {
 
       return vote;
     } catch (error: unknown) {
-      // The re-check's refusal, as the first check would have given it.
-      if (error instanceof BadRequestException) {
+      // The re-check's refusal, as the first check would have given it, and
+      // the 404 of an event deleted since (#1065).
+      if (error instanceof HttpException) {
         throw error;
       }
 
@@ -521,6 +525,7 @@ export class EventGameNominationService {
       if (isPrismaDependentRecordNotFoundError(error)) {
         throw new ForbiddenException(t('errors.nomination.forbidden_resolve'));
       }
+
       throw error;
     }
   }
@@ -588,6 +593,7 @@ export class EventGameNominationService {
       if (isPrismaDependentRecordNotFoundError(error)) {
         throw new ForbiddenException(t('errors.nomination.forbidden_decide'));
       }
+
       throw error;
     }
   }
@@ -623,7 +629,11 @@ export class EventGameNominationService {
     // failed read would report an add that happened as one that didn't, and
     // a retry would add the game twice.
     const { eventGame, lineupGame } = await this.db.$transaction(async (tx) => {
-      await this.assertCanSupply(tx, eventId, dto.suppliedById, dto.platformGameId);
+      // The event's 404 comes before the supplier's answer, as in a
+      // nomination (#1065).
+      const supplier = await lockSupplier(tx, dto.suppliedById);
+      await shareLiveEvent(tx, eventId);
+      this.assertSupplies(supplier, eventId, dto.suppliedById, dto.platformGameId);
 
       const created = await tx.eventGame.create({
         data: {
@@ -662,7 +672,7 @@ export class EventGameNominationService {
    * nomination grants the callers check; `directAddGame` is the create
    * request and carries the EventGame check itself. An occurrence named here
    * has already been resolved within this event by the caller, and the
-   * caller's transaction holds the supplier's lock (`assertCanSupply`).
+   * caller's transaction holds the supplier's lock (`lockSupplier`).
    *
    * The write's own clock, for {@link emitGameAdded}: adding the game to the
    * lineup is a step of its own, after the nomination's.
@@ -712,8 +722,9 @@ export class EventGameNominationService {
    * checked again. One that has since paused, or been withdrawn, answers as
    * the first check would have.
    *
-   * The event's dates are locked between the two (`lockEventDates`), as every
-   * write to them locks the event first. Removing a date clears it from the
+   * The event's row is locked between the two (`shareLiveEvent`), as every
+   * write to its dates locks it first, and a nomination of an event deleted
+   * since answers 404 there (#1065). Removing a date clears it from the
    * nominations that name it while holding the date's row, and adding the
    * game to that date's lineup waits on the same row: with only the
    * nomination locked, each could wait on the other. The date the nomination
@@ -734,15 +745,15 @@ export class EventGameNominationService {
     expected: NominationStatus,
     decide: (tx: Prisma.TransactionClient, occurrenceId: string | null) => Promise<Decision>,
   ): Promise<{
-    updated: NominationRow;
-    elevated: LineupAddition | null;
     decision: Decision;
     detail: NominationDetail;
+    elevated: LineupAddition | null;
+    updated: NominationRow;
   }> {
     return this.db.$transaction(async (tx) => {
       const supplier = await lockSupplier(tx, nomination.suppliedFromId);
-      await lockEventDates(tx, eventId);
-      const [current] = await tx.$queryRaw<{ status: NominationStatus; occurrenceId: string | null }[]>(Prisma.sql`
+      await shareLiveEvent(tx, eventId);
+      const [current] = await tx.$queryRaw<{ occurrenceId: string | null; status: NominationStatus }[]>(Prisma.sql`
         SELECT status, occurrence_id AS "occurrenceId" FROM event_game_nominations WHERE id = ${nomination.id} FOR UPDATE
       `);
 
@@ -822,19 +833,6 @@ export class EventGameNominationService {
 
     assert(occurrence, new NotFoundException(t('errors.occurrence.not_found', { occurrenceId, eventId })));
     return occurrence;
-  }
-
-  /**
-   * {@link assertSupplies}, on the entry as {@link lockSupplier} reads and
-   * locks it, so the answer holds until the caller's transaction commits.
-   */
-  private async assertCanSupply(
-    tx: Prisma.TransactionClient,
-    eventId: string,
-    gameListId: string,
-    platformGameId: string,
-  ): Promise<void> {
-    this.assertSupplies(await lockSupplier(tx, gameListId), eventId, gameListId, platformGameId);
   }
 
   /**
@@ -1093,8 +1091,8 @@ type NominationRow = Prisma.EventGameNominationGetPayload<{ include: typeof NOMI
  * there is none the actor can read (#799).
  */
 export type NominationDetail = Omit<NominationRow, 'votes' | 'suppliedFrom'> & {
-  votes: (Omit<NominationRow['votes'][number], 'attendee'> & { eligible: boolean })[];
+  elevatedTo: { id: string; occurrenceId: string | null } | null;
   nominatedBy: AttendeeSummary | null;
   suppliedFrom: NominationRow['suppliedFrom'] & { attendee: AttendeeSummary | null };
-  elevatedTo: { id: string; occurrenceId: string | null } | null;
+  votes: (Omit<NominationRow['votes'][number], 'attendee'> & { eligible: boolean })[];
 };

@@ -6,10 +6,16 @@ const path = require('node:path');
 function listFiles(dir, predicate) {
   const found = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true, recursive: true })) {
-    if (!entry.isFile()) continue;
+    if (!entry.isFile()) {
+      continue;
+    }
+
     const full = path.join(entry.parentPath ?? entry.path, entry.name);
-    if (predicate(full)) found.push(full);
+    if (predicate(full)) {
+      found.push(full);
+    }
   }
+
   return found.sort();
 }
 

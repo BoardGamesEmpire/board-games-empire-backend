@@ -46,13 +46,15 @@ const COLLISION_CODES: ReadonlySet<string> = new Set(['EEXIST', 'ENOTDIR', 'EISD
 /** A name the filesystem cannot hold is the archive's fault too. */
 const NAME_TOO_LONG = 'ENAMETOOLONG';
 
-const errorCode = (err: unknown): string | undefined => (err as NodeJS.ErrnoException | null)?.code;
+const errorCode = (err: unknown): string | undefined =>
+  typeof err === 'object' && err !== null && 'code' in err && typeof err.code === 'string' ? err.code : undefined;
 
 /**
  * A filesystem error carries the failed `syscall`; a zlib or tar error does
  * not. The first is not the archive's fault and must propagate as it is.
  */
-const isFilesystemError = (err: unknown): boolean => typeof (err as NodeJS.ErrnoException | null)?.syscall === 'string';
+const isFilesystemError = (err: unknown): boolean =>
+  typeof err === 'object' && err !== null && 'syscall' in err && typeof err.syscall === 'string';
 
 const readHead = async (path: string): Promise<Buffer> => {
   const file = await open(path, 'r');
@@ -174,10 +176,12 @@ const extractInto = async (
           if (COLLISION_CODES.has(code)) {
             throw new PluginArchiveRefusedError('corrupt', header.name);
           }
+
           if (code === NAME_TOO_LONG) {
             throw new PluginArchiveRefusedError('unsafe-path', header.name);
           }
         }
+
         throw err;
       }
     }

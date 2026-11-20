@@ -1,10 +1,5 @@
-import {
-  fetchAccessToken,
-  GAME_FETCH_FIELDS,
-  type IGDBClient,
-  IgdbQuery,
-  resolveLanguageIds,
-} from '@bge/gateway-driver-igdb';
+import type { IGDBClient } from '@bge/gateway-driver-igdb';
+import { fetchAccessToken, GAME_FETCH_FIELDS, IgdbQuery, resolveLanguageIds } from '@bge/gateway-driver-igdb';
 import process from 'node:process';
 
 // This script is for ad-hoc testing and exploration of the IGDB API and related codes
@@ -16,6 +11,7 @@ async function main() {
   if (!clientId || !clientSecret) {
     throw new Error('IGDB client ID and secret must be provided');
   }
+
   const accessToken = await fetchAccessToken(fetch, { client_id: clientId!, client_secret: clientSecret! });
   const client = new IgdbQuery({ fetch, clientId, accessToken: accessToken.access_token });
   // const gameData = await searchGamesRequest('catan', 10, 0, 'en-US')(client);

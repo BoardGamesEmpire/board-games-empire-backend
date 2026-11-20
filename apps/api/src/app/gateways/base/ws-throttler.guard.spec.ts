@@ -1,4 +1,5 @@
-import { type Actor, getActorSnapshotFromCls } from '@bge/actor-context';
+import type { Actor } from '@bge/actor-context';
+import { getActorSnapshotFromCls } from '@bge/actor-context';
 import { CodedHttpException } from '@bge/i18n';
 import type { ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';

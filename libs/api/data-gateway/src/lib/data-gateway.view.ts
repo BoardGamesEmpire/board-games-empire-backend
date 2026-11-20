@@ -1,10 +1,10 @@
-import {
-  type DataGateway,
-  type DataGatewayCapability,
-  type DataGatewayInterviewFailure,
-  type DataGatewaySection,
-  type DataGatewaySectionFailure,
-  type Prisma,
+import type {
+  DataGateway,
+  DataGatewayCapability,
+  DataGatewayInterviewFailure,
+  DataGatewaySection,
+  DataGatewaySectionFailure,
+  Prisma,
 } from '@bge/database';
 import { SECTION_ORDER } from '@bge/gateway-registry';
 
@@ -14,26 +14,31 @@ export const WITH_SECTIONS = { sections: true } satisfies Prisma.DataGatewayIncl
 export type DataGatewayWithSections = Prisma.DataGatewayGetPayload<{ include: typeof WITH_SECTIONS }>;
 
 export interface DataGatewayInterviewFailureView {
-  code: DataGatewayInterviewFailure;
   at: Date;
+  code: DataGatewayInterviewFailure;
 }
 
 /** Where a DataGateway's onboarding stands, with the server's rules already applied (#715). */
 export interface DataGatewayInterviewStatus {
-  /** Whether an interview has ever succeeded. The DataGateway isn't used until one has. */
-  interviewed: boolean;
-  firstInterviewedAt: Date | null;
-  lastInterviewedAt: Date | null;
   /** The last failure, only while it's current. */
   failure: DataGatewayInterviewFailureView | null;
+
+  firstInterviewedAt: Date | null;
+
+  /** Whether an interview has ever succeeded. The DataGateway isn't used until one has. */
+  interviewed: boolean;
+
+  lastInterviewedAt: Date | null;
 }
 
 /** Where one list job's section stands, with the interview's rule for a current failure applied (#718). */
 export interface DataGatewaySectionView {
   capability: DataGatewayCapability;
-  lastLoadedAt: Date | null;
+
   /** The last failure, only while it's current. */
-  failure: { code: DataGatewaySectionFailure; at: Date } | null;
+  failure: { at: Date; code: DataGatewaySectionFailure } | null;
+
+  lastLoadedAt: Date | null;
 }
 
 /**

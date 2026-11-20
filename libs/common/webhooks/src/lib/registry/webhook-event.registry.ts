@@ -3,6 +3,14 @@ import { Injectable } from '@nestjs/common';
 import { WEBHOOK_EVENT_DESCRIPTORS, WebhookEventType } from '../constants/webhook-event-types';
 import type { WebhookEventDescriptor } from '../interfaces/webhook-event-descriptor.interface';
 
+type DescriptorEntry = [WebhookEventType, (typeof WEBHOOK_EVENT_DESCRIPTORS)[WebhookEventType]];
+
+/** The webhook event descriptors, in the order WEBHOOK_EVENT_DESCRIPTORS lists them. */
+function descriptorEntries(): DescriptorEntry[] {
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Object.entries types its keys as string, so it can't return the WebhookEventType keys of this record (#1321)
+  return Object.entries(WEBHOOK_EVENT_DESCRIPTORS) as DescriptorEntry[];
+}
+
 /**
  * Injectable view over the code-defined event catalogue. The keystone of the
  * subsystem: it gates which emitted events the dispatcher acts on, supplies the
@@ -24,20 +32,15 @@ export class WebhookEventRegistry {
   private readonly descriptors: ReadonlyMap<WebhookEventType, WebhookEventDescriptor> = new Map<
     WebhookEventType,
     WebhookEventDescriptor
-  >(
-    (
-      Object.entries(WEBHOOK_EVENT_DESCRIPTORS) as [
-        WebhookEventType,
-        (typeof WEBHOOK_EVENT_DESCRIPTORS)[WebhookEventType],
-      ][]
-    ).map(([type, meta]) => [type, { type, ...meta }]),
-  );
+  >(descriptorEntries().map(([type, meta]) => [type, { type, ...meta }]));
 
   /**
    * True when `name` is a registered, deliverable event type.
    */
   has(name: string): name is WebhookEventType {
-    return this.descriptors.has(name as WebhookEventType);
+    const known: ReadonlyMap<string, WebhookEventDescriptor> = this.descriptors;
+
+    return known.has(name);
   }
 
   /** Descriptor for a known type, or `undefined`. */

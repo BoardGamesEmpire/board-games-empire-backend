@@ -1,4 +1,5 @@
-import { AuditContextInternalService, type EventSource } from '@bge/actor-context';
+import type { EventSource } from '@bge/actor-context';
+import { AuditContextInternalService } from '@bge/actor-context';
 import type { CallHandler, ExecutionContext, NestInterceptor } from '@nestjs/common';
 import { Logger } from '@nestjs/common';
 import type { Observable } from 'rxjs';
@@ -10,7 +11,6 @@ type Intercept = Parameters<ActorInterceptor['intercept']>;
 @SurrogateDelegate()
 export abstract class ActorInterceptor implements NestInterceptor {
   protected logger = new Logger(this.constructor.name);
-
   protected readonly auditSource?: EventSource;
   protected abstract readonly executionContextType: string;
 
@@ -19,6 +19,7 @@ export abstract class ActorInterceptor implements NestInterceptor {
   abstract intercept(executionContext: ExecutionContext, next: CallHandler): Observable<unknown>;
 
   get source(): EventSource {
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- the fallback is Nest's context type, an EventSource only for 'http' and 'ws'; both subclasses set auditSource, so 'rpc' never reaches it (#1321)
     return (this.auditSource || this.executionContextType) as EventSource;
   }
 

@@ -1,4 +1,4 @@
-import { DatabaseService, Prisma } from '@bge/database';
+import type { DatabaseService, Prisma } from '@bge/database';
 import { normalizeInviteeEmail } from '@bge/invites';
 
 /**

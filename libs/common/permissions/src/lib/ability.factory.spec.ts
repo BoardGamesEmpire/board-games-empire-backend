@@ -16,7 +16,8 @@ import {
 import { catalogPermission } from '@bge/testing';
 import { subject } from '@casl/ability';
 import { accessibleBy } from '@casl/prisma';
-import { Test, TestingModule } from '@nestjs/testing';
+import type { TestingModule } from '@nestjs/testing';
+import { Test } from '@nestjs/testing';
 import { AbilityFactory } from './ability.factory';
 import { PluginAbilityRenderRejectionError } from './errors/plugin-ability-render-rejection.error';
 import type {
@@ -1405,10 +1406,12 @@ describe('AbilityFactory', () => {
             expect(ability.can(Action.create, attendeeAs(role))).toBe(true);
             expect(ability.can(Action.delete, attendeeAs(role))).toBe(true);
           }
+
           for (const role of RUNNING_ROLES) {
             expect(ability.can(Action.create, attendeeAs(role))).toBe(false);
             expect(ability.can(Action.delete, attendeeAs(role))).toBe(false);
           }
+
           expect(ability.can(Action.create, attendeeAs(SystemRole.EventParticipant, 'ev-2'))).toBe(false);
         },
       );
@@ -1581,7 +1584,7 @@ describe('AbilityFactory', () => {
     const event = (
       id: string,
       createdById: string,
-      { householdId = null, attendees = [] }: { householdId?: string | null; attendees?: [string, SystemRole][] } = {},
+      { householdId = null, attendees = [] }: { attendees?: [string, SystemRole][]; householdId?: string | null } = {},
     ) =>
       subject(ResourceType.Event, {
         id,
@@ -1664,7 +1667,7 @@ describe('AbilityFactory', () => {
       );
     // Offering the member role, as the create route's instance always names
     // the role an invite offers; an admin is refused the admin offer (#168).
-    const inviteInto = (householdId: string, members: { userId: string; role: string }[]) =>
+    const inviteInto = (householdId: string, members: { role: string; userId: string }[]) =>
       subject(ResourceType.Invite, {
         householdId,
         role: { name: SystemRole.HouseholdMember },
@@ -1746,10 +1749,10 @@ describe('AbilityFactory', () => {
         offers = SystemRole.HouseholdMember,
         householdId = 'hh-1',
       }: {
-        policy: MemberInvitePolicy;
+        householdId?: string;
         needsApproval: boolean;
         offers?: SystemRole;
-        householdId?: string;
+        policy: MemberInvitePolicy;
       },
     ) =>
       subject(ResourceType.Invite, {

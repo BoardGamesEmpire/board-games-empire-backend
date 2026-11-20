@@ -1,10 +1,12 @@
 import { ContentType, PlatformType, Reach } from '@bge/database';
-import { createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
+import type { Actors, AuthenticatedActor } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { tabletopPlatform } from '../support/seeded-platforms';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { localSearchGameIds } from './game-wire';
 
 /**
@@ -84,7 +86,7 @@ describe('game search filter', () => {
   /** A public base game in the game catalog, with the player counts and play times it's given (#869). */
   const arrangeRanged = async (
     title: string,
-    values: { minPlayers?: number; maxPlayers?: number; minPlayTime?: number; maxPlayTime?: number },
+    values: { maxPlayers?: number; maxPlayTime?: number; minPlayers?: number; minPlayTime?: number },
     createdById: string,
   ) =>
     (

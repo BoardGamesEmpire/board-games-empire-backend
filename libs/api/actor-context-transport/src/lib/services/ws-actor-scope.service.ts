@@ -25,7 +25,7 @@ export class WsActorScope {
   constructor(private readonly auditContext: AuditContextInternalService) {}
 
   run<T>(client: Socket, fn: () => T): T {
-    const { actor, correlationId, locale } = client.data as BaseClientData;
+    const { actor, correlationId, locale }: BaseClientData = client.data;
 
     return this.auditContext.runWith({ actor, correlationId, source: 'ws', locale }, fn);
   }

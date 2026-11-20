@@ -1,12 +1,17 @@
-import { PluginGrantScope, PluginGrantStatus, PluginScope, RiskLevel, type Plugin } from '@bge/database';
-import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
+import type { Plugin } from '@bge/database';
+import { PluginGrantScope, PluginGrantStatus, PluginScope, RiskLevel } from '@bge/database';
+import type { Actors, SessionActor } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
-import request from 'supertest';
+import type request from 'supertest';
 import { SOFT_DELETE_HOUSEHOLD } from '../household/lock-fixtures';
 import type { Caller } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
-import { expectLockWaiter, withBarrier, type Barrier } from '../support/lock-barrier';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { Barrier } from '../support/lock-barrier';
+import { expectLockWaiter, withBarrier } from '../support/lock-barrier';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
+import type { ConsentSurface } from './consent-act-fixtures';
 import {
   readConsentSurface,
   reviewBody,
@@ -15,9 +20,9 @@ import {
   sendToggle,
   switchOnBody,
   toggleBody,
-  type ConsentSurface,
 } from './consent-act-fixtures';
-import { MANAGE_DIGEST_CHECK, type Check } from './manifest-checks';
+import type { Check } from './manifest-checks';
+import { MANAGE_DIGEST_CHECK } from './manifest-checks';
 import { householdPluginKey } from './plugin-api-key';
 import { pluginRowData } from './plugin-row-fixtures';
 
@@ -45,7 +50,12 @@ import { pluginRowData } from './plugin-row-fixtures';
 describe('household plugin writes racing a soft-delete (#548)', () => {
   const baseUrl = requireBaseUrl(process.env);
 
-  /** Generous for the reason `plugin-prerow-race.spec.ts` gives: a cold request clears several guards first. */
+  /**
+   * Generous on purpose: a request clears a session lookup, the route guards
+   * and a manifest revalidation before it reaches the lock, and a cold start is
+   * seconds-scale. A request that answers is reported at once by
+   * `settledEarly`, so the long budget only costs time on a stuck run.
+   */
   const REQUEST_REACHES_LOCK_MS = 20_000;
 
   /** An allowlisted public read, which a household-scope consent may hold (#591). */
@@ -96,6 +106,7 @@ describe('household plugin writes racing a soft-delete (#548)', () => {
     readonly householdId: string;
     readonly owner: SessionActor;
     readonly plugin: Plugin;
+
     /** The household's consent surface, read while the household was live; every act body is built from it (#1150). */
     readonly surface: ConsentSurface;
   }
@@ -138,12 +149,14 @@ describe('household plugin writes racing a soft-delete (#548)', () => {
    * their transaction with the same household share lock.
    */
   const WRITES: readonly {
-    readonly name: string;
     readonly code: string;
     readonly hiddenCode: string;
+    readonly name: string;
+    readonly send: (a: Arrangement, caller: Caller) => request.Test;
+
     /** Whether the household's unit enablement is arranged switched on first. */
     readonly switchedOn: boolean;
-    readonly send: (a: Arrangement, caller: Caller) => request.Test;
+
     readonly written: (a: Arrangement) => Promise<number>;
   }[] = [
     {
@@ -194,8 +207,11 @@ describe('household plugin writes racing a soft-delete (#548)', () => {
   const barrierPids = (barrier: Barrier): number[] => [barrier.waiter.pid, barrier.observer.pid];
 
   /**
-   * Fires a request that is expected to BLOCK, and keeps hold of it safely. Same
-   * shape as the helper in `plugin-prerow-race.spec.ts`.
+   * Fires a request that is expected to BLOCK, and keeps hold of it safely: the
+   * pending response is pre-handled so an assertion failing before it is
+   * awaited cannot surface as an unhandled rejection, and its outcome is
+   * offered to `expectLockWaiter`, so a request that answers early is reported
+   * as answered rather than as a timeout.
    */
   const fire = (send: () => request.Test) => {
     let outcome: string | undefined;

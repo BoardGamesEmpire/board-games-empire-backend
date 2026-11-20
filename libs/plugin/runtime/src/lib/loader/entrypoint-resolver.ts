@@ -8,9 +8,9 @@ import { isContained, realpathOrNull } from './path-containment';
  * pipeline's job (#84), not the boot path's.
  */
 export interface PluginPackageDescriptor {
-  readonly name?: string;
-  readonly main?: string;
   readonly exports?: PackageExportsField;
+  readonly main?: string;
+  readonly name?: string;
 }
 
 /**
@@ -98,6 +98,7 @@ function resolveExports(field: PackageExportsField | null): string | null {
     return null;
   }
 
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Array.isArray narrows to any[], so its false branch doesn't remove the ReadonlyArray member of the union (#1321)
   const record = field as { readonly [key: string]: PackageExportsField | null };
   const keys = Object.keys(record);
   const isSubpathMap = keys.some((key) => key.startsWith('.'));

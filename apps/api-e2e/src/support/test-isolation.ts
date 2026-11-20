@@ -1,7 +1,8 @@
 import { FEEDBACK_QUEUE_NAME } from '@bge/queue-feedback';
 import { resetDatabase } from './database-reset';
 import { checkLeftoverJobs } from './queue-isolation';
-import { createTestDatabase, type TestDatabase } from './test-db';
+import type { TestDatabase } from './test-db';
+import { createTestDatabase } from './test-db';
 
 /**
  * Wires the between-test isolation sweep (#255) into every spec file via

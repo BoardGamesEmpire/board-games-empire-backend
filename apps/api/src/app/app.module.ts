@@ -34,10 +34,11 @@ import { PluginsApiModule } from '@bge/plugins';
 import { FeedbackQueueProducerModule } from '@bge/queue-feedback';
 import { WebhookQueueProducerModule } from '@bge/queue-webhooks';
 import { QuotasModule } from '@bge/quotas';
-import { CACHE_REDIS_CLIENT, createCacheStore, QUEUE_REDIS_CLIENT, RedisModule, type Redis } from '@bge/redis';
+import type { Redis } from '@bge/redis';
+import { CACHE_REDIS_CLIENT, createCacheStore, QUEUE_REDIS_CLIENT, RedisModule } from '@bge/redis';
 import { SafeHttpModule } from '@bge/safe-http';
 import { SecureHttpModule } from '@bge/secure-http';
-import { SystemSettingsModule } from '@bge/system-settings';
+import { PrivacyPolicyModule, SystemSettingsModule } from '@bge/system-settings';
 import { UserModule } from '@bge/user';
 import { WebhookSubscriptionModule } from '@bge/webhook-subscription';
 import { WellKnownModule } from '@bge/well-known';
@@ -161,7 +162,11 @@ import { apiPluginModuleOptions } from './plugin-module.options';
       middleware: {
         mount: false,
         generateId: true,
-        idGenerator: (req: Request) => <string>req?.headers?.['x-request-id'] || crypto.randomUUID(),
+        idGenerator: (req: Request) => {
+          // Node joins a repeated header into one string; only set-cookie arrives as an array.
+          const requestId = req?.headers?.['x-request-id'];
+          return (typeof requestId === 'string' && requestId) || crypto.randomUUID();
+        },
       },
     }),
 
@@ -230,6 +235,7 @@ import { apiPluginModuleOptions } from './plugin-module.options';
     // the slices land.
     PluginsApiModule,
 
+    PrivacyPolicyModule,
     QuotasModule,
     SafeHttpModule,
     SystemSettingsModule,

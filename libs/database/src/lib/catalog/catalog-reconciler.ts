@@ -73,7 +73,6 @@ export interface ReconcileLogger {
 }
 
 export interface ReconcileCatalogOptions {
-  readonly logger?: ReconcileLogger;
   /**
    * Called exactly once with the applied plan when the apply wrote anything,
    * never when it wrote nothing. Who to evict is the caller's decision — the
@@ -81,14 +80,18 @@ export interface ReconcileCatalogOptions {
    * and passes nothing, and a warning says the caches were not touched.
    */
   readonly invalidate?: (plan: ReconcilePlan) => Promise<void>;
+
+  readonly logger?: ReconcileLogger;
 }
 
 export interface ReconcileResult {
-  readonly plan: ReconcilePlan;
-  /** Rows written; zero means the database already matched the manifest. */
-  readonly mutations: number;
   /** Whether the invalidation port was called and resolved. False when nothing was written, no port was given, or the port threw. */
   readonly invalidated: boolean;
+
+  /** Rows written; zero means the database already matched the manifest. */
+  readonly mutations: number;
+
+  readonly plan: ReconcilePlan;
 }
 
 /**
@@ -380,8 +383,8 @@ export async function findFailingEditedEntries(
 /** A grant judged at a start: one the Owner edited, or one the permission catalog ships (`shipped`). */
 interface GrantTarget {
   readonly roleName: string;
-  readonly slug: string;
   readonly shipped?: true;
+  readonly slug: string;
 }
 
 /**
@@ -511,6 +514,7 @@ function catalogAfterReconcile(manifest: CatalogManifest, snapshot: CatalogSnaps
       );
     }
   }
+
   rolePermissions.push(
     ...snapshot.rolePermissions.filter(
       (edge) => !listedEdges.has(edgeKey(edge.roleName, edge.permissionSlug)) && leftAsIs(edge),
@@ -527,6 +531,7 @@ function shippedRow(wanted: PermissionSeedDefinition): PermissionSnapshotRow {
     action: wanted.action,
     subject: wanted.subject,
     fields: [...(wanted.fields ?? [])],
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Prisma types JSON to write (InputJsonObject: optional members, readonly arrays) apart from JSON it reads (JsonValue) (#1321)
     conditions: (wanted.conditions ?? null) as Prisma.JsonValue,
     inverted: false,
     reason: wanted.reason,
@@ -660,7 +665,7 @@ export async function applyReconcilePlan(
       })
     ).map((permission) => [permission.slug, permission.id]),
   );
-  const resolve = (edge: RolePermissionEdge): { roleId: string; permissionId: string } => ({
+  const resolve = (edge: RolePermissionEdge): { permissionId: string; roleId: string } => ({
     roleId: requireDefined(roleIds.get(edge.roleName), 'role', edge.roleName),
     permissionId: requireDefined(permissionIds.get(edge.permissionSlug), 'permission', edge.permissionSlug),
   });
@@ -749,24 +754,31 @@ export function describeWrites(plan: ReconcilePlan): string[] {
   for (const { slug, changes } of plan.permissions.update) {
     lines.push(`permission '${slug}' updated: ${formatChanges(changes)}`);
   }
+
   for (const slug of plan.permissions.revive) {
     lines.push(`permission '${slug}' revived`);
   }
+
   for (const slug of plan.permissions.retire) {
     lines.push(`permission '${slug}' retired`);
   }
+
   for (const { slug, problems } of plan.permissions.retireEdited) {
     lines.push(`permission '${slug}' retired after its check: ${formatProblems(problems)}`);
   }
+
   for (const { name, changes } of plan.roles.update) {
     lines.push(`role '${name}' updated: ${formatChanges(changes)}`);
   }
+
   for (const { roleName, permissionSlug } of plan.rolePermissions.delete) {
     lines.push(`grant '${roleName} → ${permissionSlug}' removed`);
   }
+
   for (const { roleName, permissionSlug } of plan.rolePermissions.restore) {
     lines.push(`grant '${roleName} → ${permissionSlug}' restored`);
   }
+
   for (const { roleName, permissionSlug, problems } of plan.rolePermissions.revokeEdited) {
     lines.push(`grant '${roleName} → ${permissionSlug}' revoked after its check: ${formatProblems(problems)}`);
   }
@@ -802,19 +814,23 @@ export function describeDrift(plan: ReconcilePlan): string[] {
         'retired, the edit kept',
     );
   }
+
   for (const { slug, managedBy, drift } of plan.permissions.skipped) {
     const retired = retiredNow.has(slug) || drift.some(({ field }) => field === 'retiredAt');
     lines.push(
       `${managedBy}-owned permission '${slug}'${mark('retired', retired)} left alone${describeChanges(drift)}`,
     );
   }
+
   for (const { slug, managedBy, retiredAt } of plan.permissions.retained) {
     const retired = retiredNow.has(slug) || retiredAt !== null;
     lines.push(`${managedBy}-owned permission '${slug}'${mark('retired', retired)} is not in the manifest; retained`);
   }
+
   for (const { name, managedBy, drift } of plan.roles.skipped) {
     lines.push(`${managedBy}-owned role '${name}' left alone${describeChanges(drift)}`);
   }
+
   for (const name of plan.roles.orphans) {
     // The row is kept — that is what "never mutated" covers; its System grants
     // follow the RolePermission rule and are removed with the rest.
@@ -824,21 +840,25 @@ export function describeDrift(plan: ReconcilePlan): string[] {
         `${removed === 1 ? 'is' : 'are'} removed`,
     );
   }
+
   for (const { roleName, permissionSlug, problems } of plan.rolePermissions.revokeEdited) {
     lines.push(
       `${PermissionOwner.Admin}-owned grant '${roleName} → ${permissionSlug}' fails the entry check ` +
         `(${problemKinds(problems)}): revoked, the row kept`,
     );
   }
+
   for (const { roleName, permissionSlug, problems } of plan.rolePermissions.withheld) {
     lines.push(
       `System grant '${roleName} → ${permissionSlug}' fails the entry check against the Owner's edits: ` +
         `not given, and judged again at the next start: ${formatProblems(problems)}`,
     );
   }
+
   for (const { roleName, permissionSlug } of plan.rolePermissions.skipped) {
     lines.push(`grant '${roleName} → ${permissionSlug}' was revoked on this server`);
   }
+
   for (const { roleName, permissionSlug, managedBy, revokedAt } of plan.rolePermissions.retained) {
     const revoked = revokedNow.has(edgeKey(roleName, permissionSlug)) || revokedAt !== null;
     lines.push(
@@ -876,12 +896,12 @@ function formatChanges(changes: readonly FieldChange[]): string {
 /** The `Permission` columns the manifest owns, in the shape the write side takes. */
 interface PermissionColumns {
   readonly action: Action;
-  readonly subject: string;
-  readonly fields: string[];
   readonly conditions: Prisma.InputJsonObject;
+  readonly fields: string[];
   readonly inverted: false;
   readonly reason: string;
   readonly riskLevel: RiskLevel;
+  readonly subject: string;
 }
 
 /** The columns the manifest owns, in the form the column write has always taken them. */

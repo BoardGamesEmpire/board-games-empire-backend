@@ -1,11 +1,14 @@
-import { AuthType, PluginCategory, PluginScope, type Prisma } from '@bge/database';
-import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
+import type { Prisma } from '@bge/database';
+import { AuthType, PluginCategory, PluginScope } from '@bge/database';
+import type { Actors, SessionActor } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import request from 'supertest';
 import { pluginRowData } from '../plugin/plugin-row-fixtures';
 import { requireBaseUrl } from '../support/e2e-env';
 import { expectErrorEnvelope } from '../support/error-envelope';
 import { errorText } from '../support/error-text';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 
 /**
  * The two kinds of DataGateway row (#1083). A remote DataGateway has the

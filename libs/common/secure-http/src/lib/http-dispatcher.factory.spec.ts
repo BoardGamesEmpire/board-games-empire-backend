@@ -1,6 +1,8 @@
-import { createServer, type Server } from 'node:http';
+import type { Server } from 'node:http';
+import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { request, type Dispatcher } from 'undici';
+import type { Dispatcher } from 'undici';
+import { request } from 'undici';
 import { HttpDispatcherFactory } from './http-dispatcher.factory';
 
 describe('HttpDispatcherFactory', () => {
@@ -12,7 +14,10 @@ describe('HttpDispatcherFactory', () => {
     dispatcher = undefined;
 
     await new Promise<void>((resolve) => {
-      if (!server) return resolve();
+      if (!server) {
+        return resolve();
+      }
+
       server.close(() => resolve());
       server = undefined;
     });

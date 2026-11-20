@@ -9,6 +9,6 @@ import type { MailMessage } from '@bge/mail';
  * Actor and correlation ride in the `__meta` envelope (`wrapJobData`).
  */
 export interface MailDeliveryJob {
-  readonly recipientUserId: string;
   readonly message: MailMessage;
+  readonly recipientUserId: string;
 }

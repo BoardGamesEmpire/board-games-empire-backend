@@ -1,9 +1,6 @@
 import type { DriverLogger } from '@boardgamesempire/gateway-driver-contract';
-import {
-  createFakeFetch,
-  type FakeFetch,
-  type FakeFetchReply,
-} from '@boardgamesempire/gateway-driver-contract-testing';
+import type { FakeFetch, FakeFetchReply } from '@boardgamesempire/gateway-driver-contract-testing';
+import { createFakeFetch } from '@boardgamesempire/gateway-driver-contract-testing';
 import { firstValueFrom } from 'rxjs';
 import type { IGDBClient, IgdbRequest } from './client/igdb-client.interface';
 import { IgdbHttpError } from './client/igdb-http.error';

@@ -11,11 +11,11 @@
  * evaluator can't mutate them.
  */
 export interface SafeHttpPolicySnapshot {
-  defaultTimeoutMs: number;
-  defaultMaxRedirects: number;
-  strictMode: boolean;
-  readonly allowedHosts: readonly string[];
   readonly allowedCidrs: readonly string[];
-  readonly blockedHosts: readonly string[];
+  readonly allowedHosts: readonly string[];
   readonly blockedCidrs: readonly string[];
+  readonly blockedHosts: readonly string[];
+  defaultMaxRedirects: number;
+  defaultTimeoutMs: number;
+  strictMode: boolean;
 }

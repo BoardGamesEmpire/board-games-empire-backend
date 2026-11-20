@@ -1,4 +1,5 @@
-import { DatabaseService, type PluginArtifact } from '@bge/database';
+import type { PluginArtifact } from '@bge/database';
+import { DatabaseService } from '@bge/database';
 import type { PluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
 import { Injectable } from '@nestjs/common';
 
@@ -6,13 +7,13 @@ import { Injectable } from '@nestjs/common';
 export const PLUGIN_ARTIFACT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 export interface RecordReceivedArtifactInput {
+  readonly compressedBytes: number;
+  readonly receivedById: string;
+  readonly registrySlug: string | null;
   readonly sha256: PluginArtifactSha256;
   readonly slug: string;
-  readonly version: string;
-  readonly compressedBytes: number;
   readonly url: string | null;
-  readonly registrySlug: string | null;
-  readonly receivedById: string;
+  readonly version: string;
 }
 
 /** The `PluginArtifact` rows: one per distinct received archive, keyed by checksum (#1094). */

@@ -1,4 +1,4 @@
-import { Prisma } from '@bge/database';
+import type { Prisma } from '@bge/database';
 
 /**
  * How an event's attendees are ordered, everywhere they are listed: in the

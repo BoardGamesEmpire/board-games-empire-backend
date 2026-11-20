@@ -1,5 +1,7 @@
-import { DatabaseService, InviteType, QuotaScope, WebhookSubscriptionStatus } from '@bge/database';
-import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
+import type { DatabaseService } from '@bge/database';
+import { InviteType, QuotaScope, WebhookSubscriptionStatus } from '@bge/database';
+import type { MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService } from '@bge/testing';
 import { QuotaResourceRegistry } from './quota-resource.registry';
 
 describe('QuotaResourceRegistry', () => {

@@ -38,7 +38,7 @@ export function refusalTrailers(refusal: GatewayRoutingRefusedError): Metadata {
 }
 
 const isCapability = (value: unknown): value is DataGatewayCapability =>
-  (Object.values(DataGatewayCapability) as unknown[]).includes(value);
+  Object.values<unknown>(DataGatewayCapability).includes(value);
 
 /** The first value of `key` in `trailers`, when there is one. */
 const firstValue = (trailers: Metadata, key: string): unknown => trailers.get(key)[0];

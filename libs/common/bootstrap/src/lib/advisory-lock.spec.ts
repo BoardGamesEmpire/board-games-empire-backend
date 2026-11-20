@@ -1,4 +1,5 @@
-import { createServer, type AddressInfo, type Socket } from 'node:net';
+import type { AddressInfo, Socket } from 'node:net';
+import { createServer } from 'node:net';
 import { performance } from 'node:perf_hooks';
 import {
   attemptWithin,
@@ -48,8 +49,8 @@ const LOCK_TIMED_OUT = Buffer.concat([
 ]);
 
 interface Holder {
-  pid: number;
   application_name: string;
+  pid: number;
   state: string;
 }
 
@@ -66,11 +67,13 @@ function holdersAnswered(holders: readonly Holder[]): Buffer {
     meta.writeInt32BE(-1, 12);
     return Buffer.concat([Buffer.from(`${name}\0`), meta]);
   };
+
   const value = (text: string) => {
     const length = Buffer.alloc(4);
     length.writeInt32BE(Buffer.byteLength(text));
     return Buffer.concat([length, Buffer.from(text)]);
   };
+
   const INT4 = 23;
   const TEXT = 25;
 
@@ -105,11 +108,15 @@ function serve(socket: Socket, onMessage: (type: string, text: string) => void):
     pending = Buffer.concat([pending, chunk]);
     // The startup message has no type byte, only its length.
     if (!started) {
-      if (pending.length < 4 || pending.length < pending.readInt32BE(0)) return;
+      if (pending.length < 4 || pending.length < pending.readInt32BE(0)) {
+        return;
+      }
+
       pending = pending.subarray(pending.readInt32BE(0));
       started = true;
       socket.write(STARTUP_ANSWERED);
     }
+
     while (pending.length >= 5 && pending.length >= pending.readInt32BE(1) + 1) {
       const type = String.fromCharCode(pending[0]);
       const text = pending.subarray(5, pending.readInt32BE(1) + 1).toString();
@@ -131,11 +138,22 @@ function answersUntil(silentFrom: string, last?: Buffer) {
     serve(socket, (type, text) => {
       if (!silent && type === 'Q' && text.includes(silentFrom)) {
         silent = true;
-        if (last) socket.end(last);
+        if (last) {
+          socket.end(last);
+        }
       }
-      if (silent) return;
-      if (type === 'Q') socket.write(QUERY_ANSWERED);
-      if (type === 'S') socket.write(holdersAnswered([]));
+
+      if (silent) {
+        return;
+      }
+
+      if (type === 'Q') {
+        socket.write(QUERY_ANSWERED);
+      }
+
+      if (type === 'S') {
+        socket.write(holdersAnswered([]));
+      }
     });
   };
 }
@@ -153,12 +171,20 @@ function lockHeld(attempts: number, holders: readonly Holder[]) {
       if (type === 'Q' && lockTimeout && refused < attempts) {
         refused += 1;
         setTimeout(() => {
-          if (!socket.destroyed) socket.write(LOCK_TIMED_OUT);
+          if (!socket.destroyed) {
+            socket.write(LOCK_TIMED_OUT);
+          }
         }, Number(lockTimeout[1]));
         return;
       }
-      if (type === 'Q') socket.write(QUERY_ANSWERED);
-      if (type === 'S') socket.write(holdersAnswered(holders));
+
+      if (type === 'Q') {
+        socket.write(QUERY_ANSWERED);
+      }
+
+      if (type === 'S') {
+        socket.write(holdersAnswered(holders));
+      }
     });
 }
 
@@ -192,7 +218,10 @@ async function fakeDatabase(onConnection: (socket: Socket) => void) {
       );
     },
     close: async () => {
-      for (const socket of sockets) socket.destroy();
+      for (const socket of sockets) {
+        socket.destroy();
+      }
+
       await new Promise<void>((resolve) => server.close(() => resolve()));
     },
   };

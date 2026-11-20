@@ -1,4 +1,5 @@
-import { Action, type EventGame, type Prisma, ResourceType } from '@bge/database';
+import type { EventGame, Prisma } from '@bge/database';
+import { Action, ResourceType } from '@bge/database';
 import type { ScopeComposer } from '@bge/permissions';
 
 /**
@@ -51,7 +52,7 @@ export async function readableLineupGamesByNomination(
   db: Prisma.TransactionClient,
   scopeComposer: ScopeComposer,
   eventId: string,
-  nominations: { nominationIds: string[]; dateIds: string[] },
+  nominations: { dateIds: string[]; nominationIds: string[] },
 ): Promise<ReadonlyMap<string, Pick<EventGame, 'id' | 'occurrenceId'>>> {
   if (nominations.nominationIds.length === 0) {
     return new Map();

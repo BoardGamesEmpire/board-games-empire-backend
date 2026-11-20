@@ -1,5 +1,6 @@
 import type { Household, HouseholdMember, HouseholdSettings } from '@bge/database';
-import { envelopeFailure, isRecord, type HttpResponseLike, type RequestDescription, type Wire } from '../support/wire';
+import type { HttpResponseLike, RequestDescription, Wire } from '../support/wire';
+import { envelopeFailure, isRecord } from '../support/wire';
 
 /**
  * Wire-contract types and fail-loud response parsers shared by the household
@@ -81,8 +82,8 @@ export interface HouseholdMemberProjection extends HouseholdMemberWire {
  */
 export interface ActorProjection {
   readonly id: string;
+  readonly profile: { readonly avatarUrl: string | null; readonly displayName: string | null } | null;
   readonly username: string;
-  readonly profile: { readonly displayName: string | null; readonly avatarUrl: string | null } | null;
 }
 
 /** The `languageTag` select in `getHouseholdById` / `getHouseholdsForUser`. */
@@ -105,8 +106,8 @@ export interface HouseholdDetail extends HouseholdWire {
 }
 
 export interface CreateHouseholdEnvelope {
-  readonly message: string;
   readonly household: HouseholdWire;
+  readonly message: string;
 }
 
 export interface ReadHouseholdEnvelope {
@@ -114,11 +115,11 @@ export interface ReadHouseholdEnvelope {
 }
 
 export interface PaginationWire {
-  readonly page: number;
+  readonly hasMore: boolean;
   readonly limit: number;
+  readonly page: number;
   readonly total: number;
   readonly totalPages: number;
-  readonly hasMore: boolean;
 }
 
 export interface ListHouseholdsEnvelope {
@@ -238,6 +239,7 @@ export function readEnvelope(response: HttpResponseLike, request: RequestDescrip
     if (!isRecord(member)) {
       return fail('a roster entry is not an object', request, response);
     }
+
     if ('excludedFromHouseholds' in member) {
       return fail("a roster entry carried an 'excludedFromHouseholds' key", request, response);
     }
@@ -247,8 +249,8 @@ export function readEnvelope(response: HttpResponseLike, request: RequestDescrip
 }
 
 export interface MemberEnvelope {
-  readonly message: string;
   readonly member: HouseholdMemberProjection;
+  readonly message: string;
 }
 
 /**
@@ -434,6 +436,7 @@ export function listEnvelope(response: HttpResponseLike, request: RequestDescrip
 /** A row of `GET /api/households/restorable` (#542): the list row with its roster, and when the window ends. */
 export interface RestorableHouseholdWire extends HouseholdWire {
   readonly members: readonly HouseholdMemberProjection[];
+
   /** ISO timestamp the acting user's restore window ends at, or `null` when their grant has no end date. */
   readonly restorableUntil: string | null;
 }
@@ -476,9 +479,9 @@ export function restorableListEnvelope(
 
 /** A household owner as a row of `GET /api/admin/households` names them (#419). */
 export interface AdminHouseholdOwnerWire {
+  readonly displayName: string | null;
   readonly userId: string;
   readonly username: string;
-  readonly displayName: string | null;
 }
 
 /**

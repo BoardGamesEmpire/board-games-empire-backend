@@ -1,4 +1,5 @@
-import { envelopeFailure, isRecord, type HttpResponseLike, type RequestDescription } from '../support/wire';
+import type { HttpResponseLike, RequestDescription } from '../support/wire';
+import { envelopeFailure, isRecord } from '../support/wire';
 
 /**
  * Fail-loud parser for `GET /api/notifications/unread`, on the pattern
@@ -9,8 +10,8 @@ import { envelopeFailure, isRecord, type HttpResponseLike, type RequestDescripti
 
 export interface UnreadNotificationWire {
   readonly id: string;
-  readonly type: string;
   readonly payload: Record<string, unknown>;
+  readonly type: string;
 }
 
 const fail = envelopeFailure('apps/api-e2e/src/notification/notification-wire.ts');

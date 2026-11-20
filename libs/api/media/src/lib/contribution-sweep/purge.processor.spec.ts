@@ -5,7 +5,8 @@ import {
   StorageMisconfiguredError,
   StorageUnavailableError,
 } from '@boardgamesempire/storage-contract';
-import { Job, UnrecoverableError } from 'bullmq';
+import type { Job } from 'bullmq';
+import { UnrecoverableError } from 'bullmq';
 import type { PurgeContributionJob } from '../interfaces/purge-contribution-job.interface';
 import { MediaContributionPurgeProcessor } from './purge.processor';
 import type { MediaContributionPurgeService } from './purge.service';

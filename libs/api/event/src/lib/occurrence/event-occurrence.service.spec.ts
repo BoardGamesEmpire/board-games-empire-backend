@@ -1,9 +1,7 @@
+import type { EventAttendee, EventAvailabilityVote, EventOccurrence } from '@bge/database';
 import {
   Action,
   AvailabilityResponse,
-  EventAttendee,
-  EventAvailabilityVote,
-  EventOccurrence,
   EventParticipationStatus,
   EventSchedulingMode,
   liveEventWhere,
@@ -15,6 +13,7 @@ import {
 import { CodedHttpException, t } from '@bge/i18n';
 import { LineupRemovalReason } from '@bge/notifications-service';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
+import type { MockAbilityService, MockDatabaseService } from '@bge/testing';
 import {
   batchTransactionCall,
   createMockAbilityService,
@@ -27,8 +26,6 @@ import {
   paginationQuery,
   rawQueryText,
   unwrapTransaction,
-  type MockAbilityService,
-  type MockDatabaseService,
 } from '@bge/testing';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -60,9 +57,9 @@ const vote = (
   id: string,
   occurrenceId: string,
   attendee: {
-    status?: EventParticipationStatus;
     removedAt?: Date | null;
     role?: ReturnType<typeof makeVoterRole> | null;
+    status?: EventParticipationStatus;
   } = {},
 ) => ({
   id,
@@ -167,6 +164,10 @@ describe('EventOccurrenceService', () => {
     db.eventAvailabilityVote.findMany.mockResolvedValue([]);
     db.eventGame.findMany.mockResolvedValue([]);
     db.eventAttendee.findMany.mockResolvedValue([SUPPLIER] as never);
+    // The event is live under each write's lock (#1065).
+    db.event.count.mockResolvedValue(1);
+    // The scheduling mode a new date reads under that lock (#796).
+    db.event.findUniqueOrThrow.mockResolvedValue({ schedulingMode: EventSchedulingMode.MultiDay } as never);
     // The row locks find their row, and the event is not cancelled (#795).
     db.$queryRaw.mockImplementation(((query: unknown) =>
       Promise.resolve(isCancelRead(query) ? [{ cancelledAt: null }] : [])) as never);
@@ -788,22 +789,21 @@ describe('EventOccurrenceService', () => {
       }) as never);
       // The read before the lock finds MultiDay; the one under it finds the
       // switch that committed meanwhile.
-      db.event.findUnique
-        .mockImplementationOnce((() => {
-          order.push('mode-before-lock');
-          return Promise.resolve({ id: 'event-1', householdId: null });
-        }) as never)
-        .mockImplementationOnce((() => {
-          order.push('mode-under-lock');
-          return Promise.resolve({ schedulingMode: EventSchedulingMode.Fixed });
-        }) as never);
+      db.event.findUnique.mockImplementationOnce((() => {
+        order.push('mode-before-lock');
+        return Promise.resolve({ id: 'event-1', householdId: null });
+      }) as never);
+      db.event.findUniqueOrThrow.mockImplementationOnce((() => {
+        order.push('mode-under-lock');
+        return Promise.resolve({ schedulingMode: EventSchedulingMode.Fixed });
+      }) as never);
       db.eventOccurrence.count.mockResolvedValue(1);
 
       const rejection: unknown = await service.addOccurrence('event-1', { label: 'Day 2' }).catch((e: unknown) => e);
 
       expect(order.filter((label) => label !== 'other-raw')).toEqual(['mode-before-lock', 'lock', 'mode-under-lock']);
-      expect(db.event.findUnique).toHaveBeenLastCalledWith({
-        where: { id: 'event-1', ...liveEventWhere() },
+      expect(db.event.findUniqueOrThrow).toHaveBeenLastCalledWith({
+        where: { id: 'event-1' },
         select: { schedulingMode: true },
       });
       expect(rejection).toBeInstanceOf(CodedHttpException);
@@ -816,6 +816,7 @@ describe('EventOccurrenceService', () => {
 
     it("counts only live dates toward a Fixed event's one date, so a cancelled or declined one leaves room (#966)", async () => {
       db.event.findUnique.mockResolvedValue({ id: 'event-1', schedulingMode: EventSchedulingMode.Fixed } as never);
+      db.event.findUniqueOrThrow.mockResolvedValue({ schedulingMode: EventSchedulingMode.Fixed } as never);
       db.eventOccurrence.count.mockResolvedValue(0);
       db.eventOccurrence.create.mockResolvedValue(makeEventOccurrence({ id: 'occ-1', eventId: 'event-1' }));
 
@@ -1211,6 +1212,24 @@ describe('EventOccurrenceService', () => {
       expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(db.eventOccurrence[op].mock.invocationCallOrder[0]);
       expect(db.$transaction).toHaveBeenCalledTimes(1);
     });
+
+    // The event can be deleted, or its household, between the read before
+    // the lock and the write; the check under the lock is the one that holds
+    // (#1065).
+    it.each(dateWrites)(
+      '$name refuses a deleted event under its lock, and writes nothing (#1065)',
+      async ({ name, op }) => {
+        db.event.count.mockResolvedValue(0);
+
+        await expect(run(name)).rejects.toBeInstanceOf(NotFoundException);
+
+        expect(db.event.count).toHaveBeenCalledWith({ where: { id: 'event-1', ...liveEventWhere() } });
+        expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(db.event.count.mock.invocationCallOrder[0]);
+        expect(db.eventOccurrence[op]).not.toHaveBeenCalled();
+        expect(db.eventGame.deleteMany).not.toHaveBeenCalled();
+        expect(emitter.emit).not.toHaveBeenCalled();
+      },
+    );
 
     it.each(dateWrites)(
       '$name takes off each game still ahead whose supplier is out of the event, or whose entry came off their offered games',
@@ -1761,7 +1780,8 @@ describe('EventOccurrenceService', () => {
           .submitAvailability('event-1', 'occ-1', { response: AvailabilityResponse.Available })
           .catch((e: unknown) => e);
 
-        expect(rawQueryText(db.$queryRaw.mock.calls[0][0])).toMatch(/FROM event_occurrences WHERE id = \? FOR SHARE$/);
+        // After the event's share lock, which comes first (#1065).
+        expect(rawQueryText(db.$queryRaw.mock.calls[1][0])).toMatch(/FROM event_occurrences WHERE id = \? FOR SHARE$/);
         expect(rejection).toBeInstanceOf(CodedHttpException);
         expect((rejection as CodedHttpException).getResponse()).toMatchObject({ code: 'OCCURRENCE_DATE_PASSED' });
         expect(db.eventAvailabilityVote.upsert).not.toHaveBeenCalled();
@@ -2001,6 +2021,63 @@ describe('EventOccurrenceService', () => {
           select: expect.objectContaining(AVAILABILITY_GRANT_SELECT),
         }),
       );
+    });
+  });
+
+  // Each answers the 404 the event's read gives, and writes nothing (#1065).
+  describe('a write on a deleted event, or one whose household is deleted (#1065)', () => {
+    beforeEach(() => {
+      abilityService.getActingUserId.mockReturnValue('user-1');
+      db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1' } as never);
+      db.eventOccurrence.findUnique.mockResolvedValue({
+        id: 'occ-1',
+        eventId: 'event-1',
+        status: OccurrenceStatus.Proposed,
+        startDate: null,
+        endDate: null,
+      } as EventOccurrence);
+      db.event.count.mockResolvedValue(0);
+    });
+
+    // A transition already holds the event's row FOR NO KEY UPDATE, so it
+    // checks under that lock rather than taking a share first: two
+    // transitions each holding a share and waiting to raise it would wait on
+    // each other.
+    it.each([
+      { name: 'confirmOccurrence', from: OccurrenceStatus.Proposed },
+      { name: 'declineOccurrence', from: OccurrenceStatus.Proposed },
+      { name: 'cancelOccurrence', from: OccurrenceStatus.Confirmed },
+    ] as const)("$name refuses it under the event's row lock (#1065)", async ({ name, from }) => {
+      db.eventOccurrence.findUnique.mockResolvedValue({
+        id: 'occ-1',
+        eventId: 'event-1',
+        status: from,
+        startDate: null,
+        endDate: null,
+      } as EventOccurrence);
+
+      await expect(service[name]('event-1', 'occ-1')).rejects.toBeInstanceOf(NotFoundException);
+
+      const lock = db.$queryRaw.mock.calls.findIndex(([query]) =>
+        /^SELECT id FROM events WHERE id = \? FOR NO KEY UPDATE$/.test(rawQueryText(query)),
+      );
+      expect(lock).toBe(0);
+      expect(db.$queryRaw.mock.calls.some(([query]) => /FOR SHARE$/.test(rawQueryText(query)))).toBe(false);
+      expect(db.event.count).toHaveBeenCalledWith({ where: { id: 'event-1', ...liveEventWhere() } });
+      expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(db.event.count.mock.invocationCallOrder[0]);
+      expect(db.eventOccurrence.update).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it("submitAvailability refuses it under the event's row lock (#1065)", async () => {
+      await expect(
+        service.submitAvailability('event-1', 'occ-1', { response: AvailabilityResponse.Available }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+
+      expect(rawQueryText(db.$queryRaw.mock.calls[0][0])).toMatch(/^SELECT id FROM events WHERE id = \? FOR SHARE$/);
+      expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(db.event.count.mock.invocationCallOrder[0]);
+      expect(db.eventAvailabilityVote.upsert).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
     });
   });
 

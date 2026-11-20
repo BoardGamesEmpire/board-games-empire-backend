@@ -1,3 +1,4 @@
+import { changedKeys, pickSnapshot } from '@bge/actor-context';
 import {
   Action,
   AvailabilityResponse,
@@ -25,12 +26,15 @@ import { NOT_REMOVED } from '../constants/not-removed.constant';
 import { OCCURRENCE_ORDER } from '../constants/occurrence-order.constant';
 import { assertEventExists, resolveActingAttendeeId } from '../event-access.helpers';
 import { assertEventNotCancelled } from '../lifecycle/event-lifecycle.helpers';
-import { LINEUP_GAME_SELECT, withSuppliers, type LineupGame } from '../lineup/lineup-game';
+import type { LineupGame } from '../lineup/lineup-game';
+import { LINEUP_GAME_SELECT, withSuppliers } from '../lineup/lineup-game';
 import { canReadEventPolicy, eventPolicyReadArgs, serveOccurrencePolicy } from '../policy/policy-ceiling';
-import { POLICY_VIEW_INCLUDE, type OccurrencePolicyView } from '../policy/policy-view';
-import { hasDatePassed, type DateWindow } from '../utils/date-end.util';
+import type { OccurrencePolicyView } from '../policy/policy-view';
+import { POLICY_VIEW_INCLUDE } from '../policy/policy-view';
+import type { DateWindow } from '../utils/date-end.util';
+import { hasDatePassed } from '../utils/date-end.util';
 import { EVENT_STATUS_DATE_SELECT } from '../utils/event-status.util';
-import { changedKeys, pickSnapshot } from '../utils/pick-snapshot.util';
+import { lockLiveEventDates, shareLiveEvent } from '../utils/lock-live-event.util';
 import { AVAILABILITY_VOTE_SLUG, countsAsVoter, voterGrantSelect } from '../vote/vote-grant';
 import { OccurrenceEvents } from './constants';
 import { OCCURRENCE_EDIT_FIELDS } from './constants/occurrence-edit-fields.constant';
@@ -246,11 +250,11 @@ export class EventOccurrenceService {
         // permission check. A PATCH that switches the event to Fixed holds
         // the same lock, so the mode is read again here, or a date could be
         // added to an event that just became Fixed with one date already (#796).
-        const locked = await tx.event.findUnique({
-          where: { id: eventId, ...liveEventWhere() },
+        // The lock has already refused an event that isn't live (#1065).
+        const locked = await tx.event.findUniqueOrThrow({
+          where: { id: eventId },
           select: { schedulingMode: true },
         });
-        assert(locked, new NotFoundException(t('errors.event.not_found', { id: eventId })));
 
         if (locked.schedulingMode === EventSchedulingMode.Fixed) {
           // A cancelled or declined date no longer holds the event's one
@@ -383,6 +387,7 @@ export class EventOccurrenceService {
           new OccurrenceUpdatedEvent(pickSnapshot(existing, changed), pickSnapshot(updated, changed), initiatedAt),
         );
       }
+
       emitGamesNobodyBrings(this.eventEmitter, eventId, removedGames, actingUserId, initiatedAt);
 
       const removedIds = new Set(removedGames.map((game) => game.id));
@@ -397,6 +402,7 @@ export class EventOccurrenceService {
       if (isPrismaDependentRecordNotFoundError(error)) {
         throw new ForbiddenException(t('common.forbidden.update'));
       }
+
       throw error;
     }
   }
@@ -494,6 +500,7 @@ export class EventOccurrenceService {
       if (isPrismaDependentRecordNotFoundError(error)) {
         throw new ForbiddenException(t('common.forbidden.remove'));
       }
+
       throw error;
     }
   }
@@ -622,7 +629,11 @@ export class EventOccurrenceService {
 
     try {
       const { before, updated, canReadPolicy } = await this.db.$transaction(async (tx) => {
-        await tx.$queryRaw(Prisma.sql`SELECT id FROM events WHERE id = ${eventId} FOR NO KEY UPDATE`);
+        // The row lock a date write takes, so a transition takes its turn
+        // with them. A share first would not do: two transitions each holding
+        // one and waiting to raise it would wait on each other. One queued
+        // behind the event's delete answers 404 (#1065).
+        await lockLiveEventDates(tx, eventId);
 
         if (refuseOnCancelledEvent) {
           await assertEventNotCancelled(tx, eventId);
@@ -710,6 +721,8 @@ export class EventOccurrenceService {
     assertTakesVotes(occurrence, initiatedAt);
 
     const { vote, existingVote } = await this.db.$transaction(async (tx) => {
+      await shareLiveEvent(tx, eventId);
+
       // The checks above can be overtaken: a confirm, or an edit moving the
       // date into the past, commits between them and the write (#1005).
       // Under the share lock, which those writes' row locks conflict with,
@@ -975,9 +988,9 @@ const OCCURRENCE_GAME_ORDER = [
  * the shape it had when the votes and games were embedded in it.
  */
 export type OccurrenceDetail = EventOccurrence & {
-  policy: OccurrencePolicyView | null;
   availabilityVotes: OccurrenceVote[];
   games: LineupGame[];
+  policy: OccurrencePolicyView | null;
 };
 
 type VotesAndGames = Pick<OccurrenceDetail, 'availabilityVotes' | 'games'>;
@@ -1008,10 +1021,10 @@ type OccurrenceStatusField = 'confirmedAt' | 'declinedAt' | 'cancelledAt';
 
 /** A date status transition: the date, the statuses it may start from, and the one it moves to. */
 interface StatusTransition {
-  eventId: string;
-  occurrenceId: string;
   allowedFrom: OccurrenceStatus[];
+  eventId: string;
   newStatus: OccurrenceStatus;
+  occurrenceId: string;
 }
 
 /**

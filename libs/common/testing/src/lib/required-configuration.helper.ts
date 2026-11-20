@@ -1,8 +1,10 @@
-import { environments, type Environment } from '@bge/env';
+import type { Environment } from '@bge/env';
+import { environments } from '@bge/env';
 import { beforeAll, describe, expect, it } from '@jest/globals';
 import type { DynamicModule, FactoryProvider, ForwardReference, Type } from '@nestjs/common';
 import { MODULE_METADATA } from '@nestjs/common/constants.js';
-import { ConfigModule, type ConfigFactory, type ConfigModuleOptions } from '@nestjs/config';
+import type { ConfigFactory, ConfigModuleOptions } from '@nestjs/config';
+import { ConfigModule } from '@nestjs/config';
 import { parse } from 'dotenv';
 import { readFileSync } from 'node:fs';
 import * as path from 'node:path';
@@ -19,17 +21,17 @@ const TEMPLATE = path.join(WORKSPACE_ROOT, '.env.example');
 const IMPORT_ENVIRONMENT = { NODE_ENV: 'development', OTEL_SDK_DISABLED: 'true', LOG_LEVEL: 'silent' };
 
 export interface RequiredConfiguration {
+  /** Two or more variables set to values validation rejects. */
+  readonly malformed: Record<string, string>;
+
   /** The options the process role's root module passes to `ConfigModule.forRoot`. */
   readonly options: ConfigModuleOptions;
-
-  /** Imports the root module, whose imports are searched for every config the process role loads. */
-  readonly rootModule: () => Promise<Type>;
 
   /** The variables an operator must set, by environment. An environment left out requires none. */
   readonly required: Partial<Record<Environment, readonly string[]>>;
 
-  /** Two or more variables set to values validation rejects. */
-  readonly malformed: Record<string, string>;
+  /** Imports the root module, whose imports are searched for every config the process role loads. */
+  readonly rootModule: () => Promise<Type>;
 }
 
 interface LoadResult {
@@ -149,6 +151,7 @@ async function configFactories(root: Type): Promise<ConfigFactory[]> {
     if (visited.has(module)) {
       return;
     }
+
     visited.add(module);
 
     const dynamic = 'module' in module ? module : undefined;

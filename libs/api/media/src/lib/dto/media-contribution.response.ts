@@ -1,20 +1,21 @@
-import { ContributionOrigin, MediaContributionStatus, ResourceType, type MediaContribution } from '@bge/database';
+import type { MediaContribution } from '@bge/database';
+import { ContributionOrigin, MediaContributionStatus, ResourceType } from '@bge/database';
 import { ApiProperty } from '@nestjs/swagger';
 
 export interface MediaContributionResponse {
+  category: string | null;
+  contributedById: string;
+  createdAt: string;
   id: string;
   mediaObjectId: string;
-  subjectType: ResourceType;
-  subjectId: string;
-  category: string | null;
-  status: MediaContributionStatus;
   origin: ContributionOrigin;
-  contributedById: string;
-  reviewedById: string | null;
-  reviewedAt: string | null;
-  rejectionReason: string | null;
   reclaimDeadline: string | null;
-  createdAt: string;
+  rejectionReason: string | null;
+  reviewedAt: string | null;
+  reviewedById: string | null;
+  status: MediaContributionStatus;
+  subjectId: string;
+  subjectType: ResourceType;
   updatedAt: string;
 }
 

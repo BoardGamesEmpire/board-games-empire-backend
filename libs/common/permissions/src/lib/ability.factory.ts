@@ -52,14 +52,17 @@ type RuleApplier = (
  */
 const detectAppSubjectType = (object: unknown) => {
   const detected =
-    object !== null && typeof object === 'object' && (object as { constructor?: unknown }).constructor != null
-      ? detectSubjectType(object as Record<string, unknown>)
+    object !== null && typeof object === 'object' && object.constructor != null
+      ? // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- CASL's detector takes a record, and TypeScript has no narrowing from `object` to one (#1321)
+        detectSubjectType(object as Record<string, unknown>)
       : undefined;
 
   if (typeof detected === 'string' && detected.length > 0) {
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- CASL's detector returns a plain string, which names a Subjects member only by the app's model naming (#1321)
     return detected as ExtractSubjectType<Subjects>;
   }
 
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- the passthrough hands CASL a constructor name or the value itself, for CASL to refuse when it names no subject; neither is typed as a Subjects member (#1321)
   return ((object as { constructor?: { name?: string } })?.constructor?.name || object) as ExtractSubjectType<Subjects>;
 };
 
@@ -141,6 +144,7 @@ export class AbilityFactory {
       const fieldList = !inverted && fields?.length ? fields : undefined;
       const pin = scope.resourceId ? { id: scope.resourceId } : undefined;
 
+      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Prisma types a Permission's subject as a plain string; the Permission catalog keeps it to Subjects names (#1321)
       access.call(ability, action, subject as ExtractSubjectType<Subjects>, ...[fieldList, pin].filter(Boolean));
     }
 
@@ -253,6 +257,7 @@ export class AbilityFactory {
 
       // The verb set is pinned to the Action enum values (manifest constants
       // doc + drift spec), so the cast converts nominally, not lossily.
+      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- the manifest's verb union and Prisma's Action enum are separate types with the same values, and a plugin subject is a string CASL matches by name (#1321)
       ability.can(parsed.action as Action, pluginPermissionCaslSubject(parsed) as ExtractSubjectType<Subjects>);
     }
 
@@ -275,6 +280,7 @@ export class AbilityFactory {
     const conditions = [fields, parsedConditions].filter(Boolean);
 
     const access: RuleApplier = rule.inverted ? ability.cannot : ability.can;
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Prisma types a Permission's subject as a plain string; the Permission catalog keeps it to Subjects names (#1321)
     access.call(ability, rule.action, rule.subject as ExtractSubjectType<Subjects>, ...conditions);
   }
 
@@ -325,6 +331,8 @@ export class AbilityFactory {
         if (typeof value !== 'object' || value === null || !Object.prototype.hasOwnProperty.call(value, segment)) {
           return false;
         }
+
+        // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- TypeScript has no narrowing from `object` to an indexable record, and the own-property check above doesn't narrow a computed key (#1321)
         value = (value as Record<string, unknown>)[segment];
       }
 
@@ -335,7 +343,7 @@ export class AbilityFactory {
     // even parse (unclosed tag) can no more be rendered safely than one
     // referencing unknown variables, and must not escape as Mustache's raw
     // Error (a 500 instead of the typed rejection's 403).
-    let tokens: unknown[];
+    let tokens: Mustache.TemplateSpans;
     try {
       tokens = Mustache.parse(template);
     } catch {
@@ -354,8 +362,8 @@ export class AbilityFactory {
     // nest their body at index 4. Anything else — partials ('>') and
     // comments ('!') both render to empty string, delimiter changes ('=')
     // reshape parsing — is rejected outright rather than silently rendered.
-    const walk = (tokens: unknown[]): void => {
-      for (const token of tokens as [string, string, number, number, unknown[]?][]) {
+    const walk = (tokens: Mustache.TemplateSpans): void => {
+      for (const token of tokens) {
         const [type, name, , , subTokens] = token;
 
         if (type === 'text') {
@@ -445,6 +453,7 @@ export class AbilityFactory {
       if (up.expiresAt === null) {
         return true;
       }
+
       // The user graph round-trips through Redis (Keyv/Valkey), where Date values
       // deserialize to ISO strings on a cache hit; normalize before comparing.
       return new Date(up.expiresAt).getTime() > now;
@@ -497,6 +506,7 @@ export class AbilityFactory {
     }
 
     const rendered = Mustache.render(JSON.stringify(conditions), { user });
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- the server's own rendered condition template, not outside data (#1322)
     return JSON.parse(rendered) as Record<string, unknown>;
   }
 }

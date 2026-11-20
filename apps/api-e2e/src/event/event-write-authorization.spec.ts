@@ -9,12 +9,15 @@ import {
   SystemRole,
   VoteType,
 } from '@bge/database';
-import { createActors, type Actors, type AuthenticatedActor, type SessionActor } from '@bge/testing-e2e';
+import type { Actors, AuthenticatedActor, SessionActor } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
-import { mintApiKey, type Caller } from '../support/api-key';
+import type { Caller } from '../support/api-key';
+import { mintApiKey } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { arrangeListEntry, hoursFromNow } from './event-fixtures';
 import { createEventClient, EVENTS_PATH } from './event-request';
 import {
@@ -82,11 +85,19 @@ describe('event write authorization', () => {
       .set(actor.headers)
       .send({ response: AvailabilityResponse.Available });
 
-  const updateStatus = (actor: AuthenticatedActor, eventId: string, attendeeId: string) =>
+  // Maybe by default, which none of these rows starts as: the host's row is Attending
+  // from the event's creation, so a refused send that got through would
+  // show (#1027).
+  const updateStatus = (
+    actor: AuthenticatedActor,
+    eventId: string,
+    attendeeId: string,
+    status: EventParticipationStatus = EventParticipationStatus.Maybe,
+  ) =>
     request(baseUrl)
       .patch(`${EVENTS_PATH}/${eventId}/attendees/${attendeeId}/status`)
       .set(actor.headers)
-      .send({ status: EventParticipationStatus.Attending });
+      .send({ status });
 
   const withdraw = (actor: AuthenticatedActor, eventId: string, nominationId: string) =>
     request(baseUrl).patch(`${EVENTS_PATH}/${eventId}/nominations/${nominationId}/withdraw`).set(actor.headers);
@@ -333,6 +344,7 @@ describe('event write authorization', () => {
         for (const role of MANAGING_ROLES) {
           invitees.set(role, await actors.user());
         }
+
         const inviteeFor = (role: SystemRole) => invitees.get(role)?.user.id;
 
         const eventId = await createdEventId(host);
@@ -346,6 +358,7 @@ describe('event write authorization', () => {
         for (const role of MANAGING_ROLES) {
           await addAttendee(delegate, eventId, { userId: inviteeFor(role), role }).expect(403);
         }
+
         expect(await attendeeCount(eventId)).toBe(before);
 
         for (const role of MANAGING_ROLES) {
@@ -764,13 +777,19 @@ describe('event write authorization', () => {
       const { attendee, spectatedHost, spectatedId } = await arrangeAttendee();
       const spectatedRow = await attendeeRowId(spectatedId, attendee.user.id);
       const hostRow = await attendeeRowId(spectatedId, spectatedHost.user.id);
+      const hostAnswer = () =>
+        db.client.eventAttendee.findUniqueOrThrow({ where: { id: hostRow }, select: { status: true, rsvpDate: true } });
+      // The host answered by creating the event, so their row is dated (#1027).
+      const before = await hostAnswer();
 
       await updateStatus(attendee, spectatedId, spectatedRow).expect(200);
 
       await updateStatus(attendee, spectatedId, hostRow).expect(403);
-      expect(
-        await db.client.eventAttendee.findUniqueOrThrow({ where: { id: hostRow }, select: { rsvpDate: true } }),
-      ).toEqual({ rsvpDate: null });
+      // The host's own answer sent again changes nothing, and is still
+      // refused: the skip leaves the emit out, never the ceiling (#903).
+      await updateStatus(attendee, spectatedId, hostRow, EventParticipationStatus.Attending).expect(403);
+      expect(await hostAnswer()).toEqual(before);
+      expect(before.status).toBe(EventParticipationStatus.Attending);
     });
 
     it('refuses a spectator who participates in another event the withdrawal of their own nomination, and leaves it open', async () => {

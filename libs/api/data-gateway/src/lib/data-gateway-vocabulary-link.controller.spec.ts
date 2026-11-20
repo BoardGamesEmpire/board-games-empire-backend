@@ -2,15 +2,17 @@ import { Action, ResourceType, VocabularyLinkStatus } from '@bge/database';
 import { PoliciesGuard } from '@bge/permissions';
 import { createTestingModuleWithDb, paginationQuery, shippedReadReaches } from '@bge/testing';
 import { DEFAULT_VOCABULARY_REVIEW_STATUSES, VocabularyLinkReviewService } from '@bge/vocabulary';
-import { NotFoundException, RequestMethod, type Type } from '@nestjs/common';
+import type { Type } from '@nestjs/common';
+import { NotFoundException, RequestMethod } from '@nestjs/common';
 import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 import { ClsServiceManager } from 'nestjs-cls';
-import { firstValueFrom, type Observable } from 'rxjs';
+import type { Observable } from 'rxjs';
+import { firstValueFrom } from 'rxjs';
+import type { VocabularyLinkRoutes } from './data-gateway-vocabulary-link.controller';
 import {
   DataGatewayCategoryLinkController,
   DataGatewayMechanicLinkController,
   DataGatewayPlatformLinkController,
-  type VocabularyLinkRoutes,
 } from './data-gateway-vocabulary-link.controller';
 import { DataGatewayService } from './data-gateway.service';
 import type { VocabularyLinkQueryDto } from './dto';

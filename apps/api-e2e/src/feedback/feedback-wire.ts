@@ -1,5 +1,6 @@
 import type { FeedbackReport, FeedbackSubmission } from '@bge/database';
-import { envelopeFailure, isRecord, type HttpResponseLike, type RequestDescription, type Wire } from '../support/wire';
+import type { HttpResponseLike, RequestDescription, Wire } from '../support/wire';
+import { envelopeFailure, isRecord } from '../support/wire';
 
 /**
  * Wire-contract types and fail-loud response parsers for the feedback e2e
@@ -27,8 +28,8 @@ export type FeedbackSubmissionWire = Wire<FeedbackSubmission>;
 export type FeedbackReceiptWire = Wire<Pick<FeedbackReport, 'id' | 'createdAt'>>;
 
 export interface SubmitFeedbackEnvelope {
-  readonly message: string;
   readonly feedbackReport: FeedbackReceiptWire;
+  readonly message: string;
 }
 
 const fail = envelopeFailure('apps/api-e2e/src/feedback/feedback-wire.ts');

@@ -1,8 +1,11 @@
 import { env } from '@bge/env';
-import { Logger, type INestApplication } from '@nestjs/common';
+import type { INestApplication } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Test, TestingModule } from '@nestjs/testing';
-import { get, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import type { TestingModule } from '@nestjs/testing';
+import { Test } from '@nestjs/testing';
+import type { IncomingMessage, Server, ServerResponse } from 'node:http';
+import { get } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { DatabaseService } from './database.service';
 
@@ -48,11 +51,11 @@ jest.mock('pg', () => {
 });
 
 interface MockPoolInstance {
-  totalCount: number;
-  idleCount: number;
-  waitingCount: number;
-  options: { max: number };
   end: jest.Mock<Promise<void>, []>;
+  idleCount: number;
+  options: { max: number };
+  totalCount: number;
+  waitingCount: number;
 }
 
 const getPool = (service: DatabaseService): MockPoolInstance =>
@@ -158,6 +161,7 @@ describe('DatabaseService', () => {
       const call = (target.$on as jest.Mock).mock.calls.find(([name]) => name === level);
       return call?.[1] as (event: unknown) => void;
     };
+
     const event = (message: string) => ({ message, target: 'x', timestamp: new Date() });
 
     afterEach(() => jest.restoreAllMocks());
@@ -326,6 +330,7 @@ describe('DatabaseService', () => {
         // A failed assertion must still let close() finish, or Jest never exits.
         release();
       }
+
       await expect(response).resolves.toBe('done');
       await closing;
 

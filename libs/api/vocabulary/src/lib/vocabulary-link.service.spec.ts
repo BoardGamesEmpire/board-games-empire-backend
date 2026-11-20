@@ -1,5 +1,6 @@
 import { PlatformType, Prisma, VocabularyLinkOrigin, VocabularyLinkStatus } from '@bge/database';
-import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { createTestingModuleWithDb } from '@bge/testing';
 import { VocabularyLinkService } from './vocabulary-link.service';
 
 const uniqueViolation = () =>
@@ -44,6 +45,7 @@ describe('VocabularyLinkService', () => {
       table.findUnique.mockResolvedValue(null);
       table.updateMany.mockResolvedValue({ count: 1 } as never);
     }
+
     db.platformGatewayLink.upsert.mockImplementation(asWritten('platformId') as never);
     db.categoryGatewayLink.upsert.mockImplementation(asWritten('categoryId') as never);
     db.mechanicGatewayLink.upsert.mockImplementation(asWritten('mechanicId') as never);
@@ -52,6 +54,7 @@ describe('VocabularyLinkService', () => {
       table.findUnique.mockResolvedValue(null);
       table.create.mockResolvedValue({ id: 'record-new' } as never);
     }
+
     db.$queryRaw.mockResolvedValue([] as never);
   });
 
@@ -69,6 +72,7 @@ describe('VocabularyLinkService', () => {
       expect(table.update).not.toHaveBeenCalled();
       expect(table.updateMany).not.toHaveBeenCalled();
     }
+
     for (const table of [db.platform, db.category, db.mechanic, db.family]) {
       expect(table.create).not.toHaveBeenCalled();
     }

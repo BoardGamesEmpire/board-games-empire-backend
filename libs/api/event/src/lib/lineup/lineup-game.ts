@@ -1,6 +1,7 @@
 import type { Prisma } from '@bge/database';
 import type { ScopeComposer } from '@bge/permissions';
-import { readableAttendees, type AttendeeSummary } from '../attendee/attendee-summary';
+import type { AttendeeSummary } from '../attendee/attendee-summary';
+import { readableAttendees } from '../attendee/attendee-summary';
 import { PLATFORM_GAME_SUMMARY_SELECT } from '../constants/platform-game-summary.constant';
 
 /**
@@ -62,9 +63,8 @@ export async function withSuppliers(
  * passed on as read, so the write must read it with the select's.
  */
 export function toLineupGameRow(row: LineupGameRow & Record<string, unknown>): LineupGameRow {
-  return Object.fromEntries(
-    Object.keys(LINEUP_GAME_SELECT).map((key) => [key, row[key as keyof LineupGameRow]]),
-  ) as LineupGameRow;
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Object.fromEntries types its result by value only; its keys are LINEUP_GAME_SELECT's, the row's own (#1321)
+  return Object.fromEntries(Object.keys(LINEUP_GAME_SELECT).map((key) => [key, row[key]])) as LineupGameRow;
 }
 
 /**

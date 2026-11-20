@@ -3,17 +3,18 @@ import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contrac
 
 /** What a routing decision reads of the plugin behind a plugin DataGateway (#1083). */
 export interface RoutedPlugin {
-  readonly id: string;
-  readonly slug: string;
-
   /** An update can move a plugin out of the data-gateway category, and its row stays. */
   readonly category: PluginCategory;
+
   readonly enabled: boolean;
-  readonly uninstalledAt: Date | null;
-  readonly loadFailed: boolean;
+  readonly id: string;
 
   /** Names the install: a reinstall rewrites it, an update doesn't. */
   readonly installedAt: Date;
+
+  readonly loadFailed: boolean;
+  readonly slug: string;
+  readonly uninstalledAt: Date | null;
 }
 
 /**
@@ -37,11 +38,11 @@ export interface RoutedPlugin {
  * holds, since nothing says the plugin's copy is gone.
  */
 export interface PluginDriverSource {
-  /** Whether this process can reach a running copy of this install of the plugin. */
-  isLoaded(plugin: RoutedPlugin): Promise<boolean>;
-
   /** A new driver for the plugin DataGateway. Asked again after a driver is disposed or fails its first interview. */
   build(gatewayId: string, plugin: RoutedPlugin): Promise<DataGatewayDriver>;
+
+  /** Whether this process can reach a running copy of this install of the plugin. */
+  isLoaded(plugin: RoutedPlugin): Promise<boolean>;
 }
 
 export const PLUGIN_DRIVER_SOURCE = Symbol('PLUGIN_DRIVER_SOURCE');

@@ -50,18 +50,20 @@ export class UserNotificationsService {
     // The (type, payload) pairing is written together by `create()`, so it is
     // sound — but the compiler can't prove the correlation from a JSON column,
     // so assert the discriminated-union shape once here.
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- the (type, payload) pairing create() writes is a correlation a JSON column can't carry (#1321)
     return notifications.map((notification) => ({
       id: notification.id,
       type: notification.type,
       read: notification.read,
+      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Prisma types the column as JsonValue, which shares no shape with the payload interfaces, so the cast goes through unknown (#1321)
       payload: notification.payload as unknown as NotificationPayload,
       createdAt: notification.createdAt,
     })) as UnreadNotificationDto[];
   }
 
   /**
-   * Marks the named notifications read, of those that are the user's own and
-   * that the caller may update. Both writes AND the caller's `update` ceiling
+   * Marks the named unread notifications read, of those that are the user's
+   * own and that the caller may update. Both writes AND the caller's `update` ceiling
    * into their filter, as a read composes its own: without it an API key
    * scoped to one notification marked every notification of its owner's
    * (#649). An id outside the ceiling is skipped, not refused, as an id that
@@ -73,6 +75,8 @@ export class UserNotificationsService {
       where: {
         id: { in: notificationIds },
         userId,
+        // As markAllRead: one already read keeps the readAt it has (#903).
+        read: false,
         // eslint-disable-next-line no-restricted-syntax -- a write's filter by the caller's ids, not a collection read
         AND: this.abilityService.getCurrentResourceConditions(ResourceType.Notification, Action.update),
       },

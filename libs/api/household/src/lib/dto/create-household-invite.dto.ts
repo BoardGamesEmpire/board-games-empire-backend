@@ -7,7 +7,8 @@ import {
   HOUSEHOLD_INVITE_MAX_MESSAGE_LENGTH,
   HOUSEHOLD_INVITE_MAX_NAME_LENGTH,
 } from '../constants/household.constants';
-import { ASSIGNABLE_HOUSEHOLD_ROLES, type AssignableHouseholdRole } from './update-member-role.dto';
+import type { AssignableHouseholdRole } from './update-member-role.dto';
+import { ASSIGNABLE_HOUSEHOLD_ROLES } from './update-member-role.dto';
 
 /**
  * `POST /households/:householdId/invites` (#162).

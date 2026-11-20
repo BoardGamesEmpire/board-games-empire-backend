@@ -9,6 +9,30 @@ import { toGameData, toGameSearchData, toSearchNarrowing, utcYearStart } from '.
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 describe('game.mapper', () => {
+  describe('seasons and bundles (#1396)', () => {
+    const season: IgdbGame = { id: 7, name: 'Season One', game_type: GameType.Season, parent_game: 42 };
+
+    it('maps a season to DLC of the game it names as parent_game, on fetch', () => {
+      const data = toGameData(season);
+
+      expect(data.contentType).toBe(proto.ContentType.CONTENT_TYPE_DLC);
+      expect(data.baseGameExternalIds).toEqual(['42']);
+    });
+
+    it('maps a season to DLC of the game it names as parent_game, on search', () => {
+      const data = toGameSearchData(season);
+
+      expect(data.contentType).toBe(proto.ContentType.CONTENT_TYPE_DLC);
+      expect(data.baseGameExternalIds).toEqual(['42']);
+    });
+
+    it('keeps a bundle a bundle', () => {
+      const bundle: IgdbGame = { id: 8, name: 'Big Bundle', game_type: GameType.Bundle };
+
+      expect(toGameData(bundle).contentType).toBe(proto.ContentType.CONTENT_TYPE_BUNDLE);
+    });
+  });
+
   describe('release dates (proto ISO 8601 contract)', () => {
     it('emits a precise unix date as an ISO 8601 string', () => {
       const game: IgdbGame = {
@@ -102,7 +126,7 @@ describe('game.mapper', () => {
         gameTypes: [GameType.MainGame, GameType.Fork],
       });
       expect(toSearchNarrowing(filter({ contentTypes: [proto.ContentType.CONTENT_TYPE_DLC] }))).toEqual({
-        gameTypes: [GameType.DLC, GameType.Episode, GameType.PackAddon],
+        gameTypes: [GameType.DLC, GameType.Episode, GameType.Season, GameType.PackAddon],
       });
     });
 

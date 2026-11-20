@@ -1,3 +1,4 @@
+import type { EventOccurrencePolicy, EventPolicy } from '@bge/database';
 import {
   Action,
   GameAdditionMode,
@@ -6,11 +7,10 @@ import {
   Prisma,
   ResourceType,
   VoteThresholdType,
-  type EventOccurrencePolicy,
-  type EventPolicy,
 } from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService } from '@bge/permissions';
+import type { MockAbilityService, MockDatabaseService } from '@bge/testing';
 import {
   createMockAbilityService,
   createMockDatabaseService,
@@ -19,8 +19,6 @@ import {
   makeEventOccurrencePolicy,
   makeEventPolicy,
   rawQueryText,
-  type MockAbilityService,
-  type MockDatabaseService,
 } from '@bge/testing';
 import { WebhookEventType } from '@bge/webhooks';
 import { BadRequestException, ForbiddenException, Logger, NotFoundException } from '@nestjs/common';
@@ -29,7 +27,8 @@ import type { UpdateEventPolicyDto } from './dto/update-event-policy.dto';
 import type { UpdateOccurrencePolicyDto } from './dto/update-occurrence-policy.dto';
 import { EventPolicyService } from './event-policy.service';
 import { EventPolicyUpdatedEvent, OccurrencePolicyUpdatedEvent } from './events/event-policy.events';
-import { POLICY_VIEW_INCLUDE, type OccurrencePolicyView } from './policy-view';
+import type { OccurrencePolicyView } from './policy-view';
+import { POLICY_VIEW_INCLUDE } from './policy-view';
 
 /** A ceiling of its own for each type and action, so a test can tell which one a query was given. */
 const ceiling = (resourceType: string, action: string) => [{ ceiling: `${action}:${resourceType}` }];
@@ -40,9 +39,9 @@ const underUpdateCeiling = (args: { where: { AND?: unknown } }) =>
 
 /** The lists stored on the policy, as the ids and types they hold. */
 interface StoredLists {
-  types: PlatformType[];
-  platformIds: string[];
   categoryIds: string[];
+  platformIds: string[];
+  types: PlatformType[];
 }
 
 /** A policy row as a read with the view's embed returns it: the lists as join rows. */

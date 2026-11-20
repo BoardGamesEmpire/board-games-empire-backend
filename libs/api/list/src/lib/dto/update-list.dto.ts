@@ -3,7 +3,8 @@ import { TransformTrim } from '@bge/shared';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
 import { LIST_MAX_DESCRIPTION_LENGTH, LIST_MAX_NAME_LENGTH } from '../list.constants';
-import { ListReachProperty, type ListReach } from './create-list.dto';
+import type { ListReach } from './create-list.dto';
+import { ListReachProperty } from './create-list.dto';
 
 /**
  * Standard REST PATCH semantics: omitted fields are preserved, an explicit

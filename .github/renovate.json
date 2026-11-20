@@ -37,7 +37,7 @@
       "minimumReleaseAge": "5 days"
     },
     {
-      "description": "The bug agent's shared workflow is called at BoardGamesEmpire/automation's master, unpinned (#1192). It reads its prompts and scripts from master whatever ref the caller names, so a pin would freeze nothing, and the federation rule it may return to trusts job_workflow_ref on master only, so a commit pin would turn every Claude API token exchange down.",
+      "description": "The bug agent's shared workflow is called at BoardGamesEmpire/automation's master, unpinned (#1192). A pin would freeze the workflow's jobs, permissions and which steps receive the secrets, but not its prompts and scripts, which it reads from master whatever ref the caller names (#1220). The federation rule it may return to trusts job_workflow_ref on master only, so a commit pin would turn every Claude API token exchange down.",
       "matchManagers": ["github-actions"],
       "matchDepNames": ["BoardGamesEmpire/automation"],
       "enabled": false

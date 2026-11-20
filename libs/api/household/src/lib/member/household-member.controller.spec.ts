@@ -6,7 +6,7 @@ import { ClsServiceManager } from 'nestjs-cls';
 import 'reflect-metadata';
 import { firstValueFrom } from 'rxjs';
 import { HouseholdMemberController } from './household-member.controller';
-import { HouseholdMemberService, type HouseholdMemberWithRelations } from './household-member.service';
+import type { HouseholdMemberService, HouseholdMemberWithRelations } from './household-member.service';
 
 const PAGINATION = paginationQuery({ limit: 10 });
 

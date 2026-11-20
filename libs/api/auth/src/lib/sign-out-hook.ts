@@ -18,14 +18,15 @@ export interface SignOutHookDeps {
 
 /** The slice of better-auth's endpoint context the hook reads. */
 export interface SignOutHookContext {
-  readonly path?: string;
-  readonly headers?: Headers;
-  getSignedCookie(name: string, secret: string): Promise<string | null | false>;
   readonly context: {
-    readonly secret: string;
     readonly authCookies: { readonly sessionToken: { readonly name: string } };
     readonly internalAdapter: { deleteSession(token: string): Promise<void> };
+    readonly secret: string;
   };
+
+  getSignedCookie(name: string, secret: string): Promise<string | null | false>;
+  readonly headers?: Headers;
+  readonly path?: string;
 }
 
 export interface SignOutHook {

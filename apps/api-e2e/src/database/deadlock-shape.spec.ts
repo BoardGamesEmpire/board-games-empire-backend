@@ -1,6 +1,7 @@
 import { DEADLOCK_SQLSTATE, isDeadlockError, Prisma } from '@bge/database';
 import { inspect } from 'node:util';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 
 /**
  * Pins the payload a real deadlock produces, against a real database.
@@ -42,7 +43,7 @@ import { createTestDatabase, type TestDatabase } from '../support/test-db';
 const describePayload = (error: unknown): string => inspect(error, { depth: null, showHidden: true, getters: true });
 
 /** A promise resolved by name, so each transaction can wait for the other's first lock. */
-const gate = (): { promise: Promise<void>; open: () => void } => {
+const gate = (): { open: () => void; promise: Promise<void> } => {
   let open!: () => void;
   const promise = new Promise<void>((resolve) => {
     open = resolve;
@@ -122,7 +123,7 @@ describe('the shape of a Postgres deadlock', () => {
       expect((victim as Prisma.PrismaClientKnownRequestError).code).toBe('P2034');
 
       const meta = (victim as Prisma.PrismaClientKnownRequestError).meta as {
-        driverAdapterError?: { cause?: { originalCode?: unknown; kind?: unknown } };
+        driverAdapterError?: { cause?: { kind?: unknown; originalCode?: unknown } };
       };
 
       expect(meta.driverAdapterError?.cause?.originalCode).toBe(DEADLOCK_SQLSTATE);
@@ -147,7 +148,7 @@ describe('the shape of a Postgres deadlock', () => {
       expect((victim as Prisma.PrismaClientKnownRequestError).code).toBe('P2010');
 
       const meta = (victim as Prisma.PrismaClientKnownRequestError).meta as {
-        driverAdapterError?: { cause?: { originalCode?: unknown; kind?: unknown } };
+        driverAdapterError?: { cause?: { kind?: unknown; originalCode?: unknown } };
       };
 
       expect(meta.driverAdapterError?.cause?.originalCode).toBe(DEADLOCK_SQLSTATE);

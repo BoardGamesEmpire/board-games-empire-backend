@@ -1,8 +1,11 @@
-import { AuthType, PlatformType, VocabularyLinkOrigin, VocabularyLinkStatus, type DataGateway } from '@bge/database';
-import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
+import type { DataGateway } from '@bge/database';
+import { AuthType, PlatformType, VocabularyLinkOrigin, VocabularyLinkStatus } from '@bge/database';
+import type { Actors, SessionActor } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 
 /** Every record and supplied name this spec makes starts so, so `afterEach` can find the platforms it added. */
 const PREFIX = 'E2E Vocab';
@@ -12,9 +15,9 @@ type Kind = 'platform' | 'category' | 'mechanic';
 
 interface LinkSeed {
   externalId?: string;
+  recordId?: string | null;
   status?: VocabularyLinkStatus;
   suppliedName?: string;
-  recordId?: string | null;
 }
 
 /**
@@ -116,16 +119,18 @@ describe.each(['platform', 'category', 'mechanic'] as const)('DataGateway %s lin
   };
 
   /** The link as stored: its status and record. */
-  const storedLink = async (linkId: string): Promise<{ status: VocabularyLinkStatus; recordId: string | null }> => {
+  const storedLink = async (linkId: string): Promise<{ recordId: string | null; status: VocabularyLinkStatus }> => {
     switch (kind) {
       case 'platform': {
         const row = await db.client.platformGatewayLink.findUniqueOrThrow({ where: { id: linkId } });
         return { status: row.status, recordId: row.platformId };
       }
+
       case 'category': {
         const row = await db.client.categoryGatewayLink.findUniqueOrThrow({ where: { id: linkId } });
         return { status: row.status, recordId: row.categoryId };
       }
+
       case 'mechanic': {
         const row = await db.client.mechanicGatewayLink.findUniqueOrThrow({ where: { id: linkId } });
         return { status: row.status, recordId: row.mechanicId };

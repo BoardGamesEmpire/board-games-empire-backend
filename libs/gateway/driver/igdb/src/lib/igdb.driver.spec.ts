@@ -168,6 +168,7 @@ describe('IgdbDriver', () => {
                   if (key === 'offset') {
                     offset(...args);
                   }
+
                   return client;
                 },
         },
@@ -427,12 +428,13 @@ describe('IgdbDriver', () => {
       expect(response.correlationId).toBe('c');
     });
 
-    it('returns ERROR status when no game is found', async () => {
+    it('answers an empty fetch, as for an update, with the no-game ERROR frame (#1396)', async () => {
       igdbService.call.mockReturnValue(of([]));
 
       const response = await firstValueFrom(driver.fetchGame({ correlationId: 'c', externalId: '9999' }));
 
       expect(response.status).toBe(proto.ResultStatus.RESULT_STATUS_ERROR);
+      expect(response.message).toBe("No game found for externalId '9999'");
     });
 
     it('returns ERROR status when IGDBService throws', async () => {

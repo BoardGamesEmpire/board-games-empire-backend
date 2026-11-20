@@ -1,10 +1,6 @@
 import { Prisma } from '../client';
-import {
-  constraintIdentity,
-  identifiesConstraint,
-  isIdentifiedConstraint,
-  type ConstraintIdentity,
-} from './constraint-identity';
+import type { ConstraintIdentity } from './constraint-identity';
+import { constraintIdentity, identifiesConstraint, isIdentifiedConstraint } from './constraint-identity';
 import { uniqueViolation, uniqueViolationWithoutMeta } from './prisma-error.fixtures';
 
 /**

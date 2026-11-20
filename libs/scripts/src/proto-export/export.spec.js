@@ -34,10 +34,14 @@ function readFiles(dir) {
   const walk = (current) => {
     for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
       const full = path.join(current, entry.name);
-      if (entry.isDirectory()) walk(full);
-      else files[path.relative(dir, full)] = fs.readFileSync(full, 'utf8');
+      if (entry.isDirectory()) {
+        walk(full);
+      } else {
+        files[path.relative(dir, full)] = fs.readFileSync(full, 'utf8');
+      }
     }
   };
+
   walk(dir);
   return files;
 }
@@ -121,6 +125,7 @@ describe('exportProtos (#313)', () => {
     const notFound = () => {
       throw Object.assign(new Error('spawnSync buf ENOENT'), { code: 'ENOENT' });
     };
+
     expect(() => run(notFound)).toThrow('spawnSync buf ENOENT');
     expect(fs.readdirSync(stagingRoot)).toEqual([]);
 

@@ -32,7 +32,7 @@ export function retainedServerConfig(
     return { config: {}, reset: true };
   }
 
-  const config = retained as Record<string, unknown>;
+  const config: Record<string, unknown> = retained;
 
   try {
     const issues = configSchema.validate({

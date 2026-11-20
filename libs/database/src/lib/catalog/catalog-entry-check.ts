@@ -4,6 +4,7 @@ import { stripVTControlCharacters } from 'node:util';
 import { PluginGrantScope, Prisma, SystemRole } from '../client';
 import { sqlStateOf } from '../utils/deadlock';
 import { hasBoundingConditions } from '../utils/permission-conditions';
+import type { TemplateDefect } from './catalog-guards';
 import {
   findEventSpanningGrants,
   findShorthandRelationConditions,
@@ -13,9 +14,9 @@ import {
   findUnconditionedScopedGrants,
   findUnrenderableTemplateGrants,
   parseTemplate,
-  type TemplateDefect,
 } from './catalog-guards';
-import { findReadsIgnoringReach, modelsWithField, type ReadIgnoringReach } from './catalog-read-ceilings';
+import type { ReadIgnoringReach } from './catalog-read-ceilings';
+import { findReadsIgnoringReach, modelsWithField } from './catalog-read-ceilings';
 import type { CatalogManifest, CatalogSnapshot, PermissionSnapshotRow } from './catalog-reconcile-plan';
 import { PAIRED_GRANTS } from './role-permission.catalog';
 import { KNOWN_TEMPLATE_VARIABLES, RENDER_CONTEXT_VARIABLES, ROLE_SCOPE } from './role.catalog';
@@ -42,44 +43,49 @@ export interface CatalogView {
 
 /** Why an entry is refused. */
 export type EntryProblem =
-  | { readonly kind: 'template'; readonly slug: string; readonly detail: string }
-  | { readonly kind: 'shorthand-relation'; readonly slug: string; readonly path: string }
-  | { readonly kind: 'fails-open'; readonly slug: string; readonly role: string }
+  | { readonly detail: string; readonly kind: 'template'; readonly slug: string }
+  | { readonly kind: 'shorthand-relation'; readonly path: string; readonly slug: string }
+  | { readonly kind: 'fails-open'; readonly role: string; readonly slug: string }
   | {
       readonly kind: 'cannot-render';
-      readonly slug: string;
       readonly role: string;
+      readonly slug: string;
       readonly variables: readonly string[];
     }
-  | { readonly kind: 'unbounded-on-floor-role'; readonly slug: string; readonly role: string }
+  | { readonly kind: 'unbounded-on-floor-role'; readonly role: string; readonly slug: string }
   | {
       readonly kind: 'reads-past-reach';
-      readonly slug: string;
-      readonly role: string;
-      readonly subject: string;
+
       /** How much of the resource type the read reaches: every row, or every row a fixed filter admits. */
       readonly reads: ReadIgnoringReach['reads'];
+
+      readonly role: string;
+      readonly slug: string;
+      readonly subject: string;
     }
-  | { readonly kind: 'event-spanning'; readonly slug: string; readonly role: string }
+  | { readonly kind: 'event-spanning'; readonly role: string; readonly slug: string }
   | {
       readonly kind: 'names-other-roles';
-      readonly slug: string;
-      readonly role: string;
       readonly named: readonly string[];
+      readonly role: string;
+      readonly slug: string;
     }
   | { readonly kind: 'subject-has-no-model'; readonly slug: string; readonly subject: string }
-  | { readonly kind: 'query-rejected'; readonly slug: string; readonly message: string };
+  | { readonly kind: 'query-rejected'; readonly message: string; readonly slug: string };
 
 /** What an entry is allowed with, but reported. */
 export type EntryWarning =
-  | { readonly kind: 'unconditioned-global'; readonly slug: string; readonly role: string }
+  | { readonly kind: 'unconditioned-global'; readonly role: string; readonly slug: string }
   | {
       readonly kind: 'unpaired';
-      /** The slug the role holds. */
-      readonly slug: string;
-      readonly role: string;
+
       /** The slugs that would pair it, none of which the role holds. */
       readonly partners: readonly string[];
+
+      readonly role: string;
+
+      /** The slug the role holds. */
+      readonly slug: string;
     };
 
 /** A target is a permission (every holder is judged) or one grant. */
@@ -195,6 +201,7 @@ export function namedRoles(conditions: unknown): readonly string[] {
       if (SYSTEM_ROLES.has(value)) {
         named.add(value);
       }
+
       return;
     }
 
@@ -220,6 +227,7 @@ export function namedRoles(conditions: unknown): readonly string[] {
       if (key === 'name' && underRole) {
         collect(value);
       }
+
       walk(value, underRole || key === 'role');
     }
   };
@@ -285,6 +293,8 @@ export async function probeConditions(
     return [{ kind: 'template', slug, detail: `render-failed: ${describeError(error)}` }];
   }
 
+  // The subject names its delegate at runtime, and PRISMA_MODELS checked it above.
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- the client has a property per model and no index signature, and its $-methods aren't count delegates, so a direct cast is refused and the record view goes through unknown (#1321)
   const models = client as unknown as Readonly<Record<string, CountDelegate>>;
 
   await client.$executeRawUnsafe(`SAVEPOINT ${PROBE_SAVEPOINT}`);
@@ -296,16 +306,18 @@ export async function probeConditions(
     if (isVerdictOnCondition(error)) {
       return [{ kind: 'query-rejected', slug, message: reasonFor(error) }];
     }
+
     throw error;
   }
+
   await client.$executeRawUnsafe(`RELEASE SAVEPOINT ${PROBE_SAVEPOINT}`);
 
   return [];
 }
 
 interface CountArgs {
-  readonly where: unknown;
   readonly take?: number;
+  readonly where: unknown;
 }
 
 interface CountDelegate {
@@ -350,6 +362,7 @@ function isVerdictOnCondition(error: unknown): error is Error {
     if (error.code === UNMAPPED_DATABASE_ERROR) {
       return isDataException(wrappedDriverCause(error));
     }
+
     return !isInfrastructureCode(error.code);
   }
 
@@ -452,11 +465,17 @@ function sampleContext(variables: readonly string[]): Record<string, unknown> {
 
   for (const variable of variables) {
     const keys = variable.split('.');
-    const leaf = keys.pop() as string;
+    const leaf = keys[keys.length - 1];
     let node = context;
-    for (const key of keys) {
-      node = (node[key] ??= {}) as Record<string, unknown>;
+    for (const key of keys.slice(0, -1)) {
+      const child = (node[key] ??= {});
+      if (!isObject(child)) {
+        throw new TypeError(`Template variable '${variable}' runs through '${key}', which holds a sample value`);
+      }
+
+      node = child;
     }
+
     node[leaf] = PROBE_SAMPLE_VALUES[variable] ?? PROBE_SAMPLE_ID;
   }
 
@@ -623,6 +642,7 @@ function findUnpairedGrants(rolePermissions: Readonly<Record<string, readonly st
         PAIRED_GRANTS.filter(([slug]) => slug === first).map(([, second]) => second),
       );
     }
+
     for (const second of seconds) {
       unpaired(
         second,
@@ -677,10 +697,12 @@ function describeTemplateDefect(defect: TemplateDefect): string {
 function asDefinition(row: PermissionSnapshotRow): PermissionSeedDefinition {
   return {
     action: row.action,
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Permission.subject is a plain string column, wider than the Permission catalog's ResourceType | 'all' (#1321)
     subject: row.subject as PermissionSeedDefinition['subject'],
     slug: row.slug,
     riskLevel: row.riskLevel,
     reason: row.reason ?? '',
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Prisma reads a Json column as JsonValue, which can't say a stored condition is an object, and writes one as InputJsonObject (#1321)
     ...(row.conditions === null ? {} : { conditions: row.conditions as Prisma.InputJsonObject }),
     ...(row.fields.length === 0 ? {} : { fields: row.fields }),
   };

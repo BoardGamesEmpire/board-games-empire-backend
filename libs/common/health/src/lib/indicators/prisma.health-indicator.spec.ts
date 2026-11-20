@@ -1,5 +1,5 @@
 import { DatabaseService } from '@bge/database';
-import { Provider } from '@nestjs/common';
+import type { Provider } from '@nestjs/common';
 import { TerminusModule } from '@nestjs/terminus';
 import { Test } from '@nestjs/testing';
 import { PrismaHealthIndicator } from './prisma.health-indicator';

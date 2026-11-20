@@ -1,20 +1,10 @@
-import { AuditContextService, type Actor } from '@bge/actor-context';
+import type { Actor } from '@bge/actor-context';
+import { AuditContextService } from '@bge/actor-context';
 import { DatabaseService, Prisma, ResourceType, WebhookSubscriptionStatus } from '@bge/database';
-import {
-  AbilityFactory,
-  PermissionsService,
-  type ApikeyWithScopes,
-  type AppAbility,
-  type UserWithRoles,
-} from '@bge/permissions';
-import {
-  WebhookEventRegistry,
-  WebhookVisibilityService,
-  isWebhookEmittableEvent,
-  type WebhookEmittableEvent,
-  type WebhookEventDescriptor,
-  type WebhookEventType,
-} from '@bge/webhooks';
+import type { ApikeyWithScopes, AppAbility, UserWithRoles } from '@bge/permissions';
+import { AbilityFactory, PermissionsService } from '@bge/permissions';
+import type { WebhookEmittableEvent, WebhookEventDescriptor, WebhookEventType } from '@bge/webhooks';
+import { WebhookEventRegistry, WebhookVisibilityService, isWebhookEmittableEvent } from '@bge/webhooks';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Injectable, Logger, OnApplicationShutdown, OnModuleInit } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -32,8 +22,8 @@ import type { WebhookDeliveryJob } from '../interfaces/webhook-delivery-job.inte
 
 /** One matching webhook subscription, and the API key it was made through. */
 interface CandidateSubscription {
-  readonly id: string;
   readonly apiKeyId: string | null;
+  readonly id: string;
 }
 
 /**
@@ -42,8 +32,8 @@ interface CandidateSubscription {
  * they made webhook subscriptions through.
  */
 interface Subscriber {
-  readonly graph: UserWithRoles;
   ability?: AppAbility;
+  readonly graph: UserWithRoles;
 }
 
 /**
@@ -109,6 +99,7 @@ export class WebhookDispatcherService implements OnModuleInit, OnApplicationShut
     if (!this.registry.has(eventName)) {
       return;
     }
+
     if (!isWebhookEmittableEvent(payload)) {
       return this.logger.warn(
         `Registered webhook event "${eventName}" emitted a payload missing the WebhookEmittableEvent shape; skipping`,
@@ -148,6 +139,7 @@ export class WebhookDispatcherService implements OnModuleInit, OnApplicationShut
         subscriptionsByOwner.set(createdById, [{ id, apiKeyId }]);
       }
     }
+
     const owners = [...subscriptionsByOwner.entries()];
     let failures = 0;
 
@@ -204,6 +196,7 @@ export class WebhookDispatcherService implements OnModuleInit, OnApplicationShut
               failures += 1;
               continue;
             }
+
             keyGraph = keyGraphs.get(apiKeyId);
           }
 

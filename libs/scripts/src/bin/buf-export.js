@@ -29,7 +29,9 @@ function runBufExport(into) {
     stdio: 'inherit',
   });
 
-  if (result.error) throw result.error;
+  if (result.error) {
+    throw result.error;
+  }
 
   return result.status ?? 1;
 }
@@ -44,7 +46,10 @@ try {
     lock: createLock({ lockPath: path.join(cacheRoot, 'proto-export.lock.json'), task: 'proto export' }),
   });
 
-  if (status === 0) console.log(written ? 'buf export: wrote proto-export' : 'buf export: proto-export is up to date');
+  if (status === 0) {
+    console.log(written ? 'buf export: wrote proto-export' : 'buf export: proto-export is up to date');
+  }
+
   process.exitCode = status;
 } catch (error) {
   console.error(`buf export: ${error.message}`);

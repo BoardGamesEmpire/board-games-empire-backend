@@ -1,5 +1,7 @@
-import { ResourceType, SystemRole } from '../client';
-import { deriveReadCeilings, type ReadReach } from './catalog-read-ceilings';
+import type { SystemRole } from '../client';
+import { ResourceType } from '../client';
+import type { ReadReach } from './catalog-read-ceilings';
+import { deriveReadCeilings } from './catalog-read-ceilings';
 import type { PermissionSlug } from './permission.catalog';
 import { PERMISSION_CATALOG } from './permission.catalog';
 import { ROLE_PERMISSION_CATALOG } from './role-permission.catalog';
@@ -65,6 +67,9 @@ const KNOWN_READ_CEILINGS: PinnedReadCeilings = {
   SafeHttpPolicy: {
     Admin: { 'read:safe_http_policy': 'every row', 'manage:safe_http_policy': 'every row' },
     Moderator: { 'read:safe_http_policy': 'every row' },
+  },
+  PrivacyPolicy: {
+    Admin: { 'manage:privacy_policy': 'every row' },
   },
   Media: {},
   MediaObject: {

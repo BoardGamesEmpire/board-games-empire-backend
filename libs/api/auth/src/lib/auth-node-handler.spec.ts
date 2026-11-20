@@ -1,8 +1,10 @@
 import { Logger } from '@nestjs/common';
-import { createServer, request as httpRequest, type IncomingHttpHeaders, type Server } from 'node:http';
+import type { IncomingHttpHeaders, Server } from 'node:http';
+import { createServer, request as httpRequest } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { createAuthNodeHandler } from './auth-node-handler';
-import { createAuthRequestHandler, type AuthRequestHandler } from './auth-request-handler';
+import type { AuthRequestHandler } from './auth-request-handler';
+import { createAuthRequestHandler } from './auth-request-handler';
 
 /** The limit the adapter is built with here, small enough to cross in a few chunks. */
 const LIMIT = 1024;
@@ -16,9 +18,9 @@ const tooLarge = {
 };
 
 interface Answer {
-  readonly status: number;
-  readonly headers: IncomingHttpHeaders;
   readonly body: string;
+  readonly headers: IncomingHttpHeaders;
+  readonly status: number;
 }
 
 /**
@@ -143,6 +145,7 @@ describe('createAuthNodeHandler', () => {
         failedRead();
         return Response.json({ code: 'BAD_REQUEST' }, { status: 400 });
       }
+
       return new Response('read');
     });
 

@@ -128,6 +128,7 @@ describe('invite read shapes', () => {
       for (const key of Object.keys(PARTY_INVITE_SELECT)) {
         expect(transitionKeys).toContain(key);
       }
+
       for (const key of Object.keys(CONTEXT_INVITE_SELECT)) {
         expect(transitionKeys).toContain(key);
       }

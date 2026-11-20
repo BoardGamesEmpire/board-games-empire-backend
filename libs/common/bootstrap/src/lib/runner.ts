@@ -1,55 +1,59 @@
 import type { MigrationState, MigrationStateKind } from '@bge/database';
 import { classifyMigrationState, DEVELOPMENT_DATABASE_RESET_LINE, divergedFixLines } from '@bge/database';
-import { SpanStatusCode, trace, type Span, type Tracer } from '@opentelemetry/api';
-import { DATABASE_URL_VARIABLE, MIGRATION_URL_VARIABLE, type MigrationCredential } from './migration-credential';
-import {
-  DEFAULT_WAIT_MS,
-  systemClock,
-  type BootstrapLock,
-  type BootstrapLogger,
-  type Clock,
-  type DataMigrationsPhase,
-  type DataMigrationsSummary,
-  type Migrator,
-  type ReconcileSummary,
-  type SchemaLedger,
-  type SeedsPhase,
+import type { Span, Tracer } from '@opentelemetry/api';
+import { SpanStatusCode, trace } from '@opentelemetry/api';
+import type { MigrationCredential } from './migration-credential';
+import { DATABASE_URL_VARIABLE, MIGRATION_URL_VARIABLE } from './migration-credential';
+import type {
+  BootstrapLock,
+  BootstrapLogger,
+  Clock,
+  DataMigrationsPhase,
+  DataMigrationsSummary,
+  Migrator,
+  ReconcileSummary,
+  SchemaLedger,
+  SeedsPhase,
 } from './ports';
+import { DEFAULT_WAIT_MS, systemClock } from './ports';
 
 /** How often a waiting process re-reads the ledger. */
 export const DEFAULT_SCHEMA_POLL_MS = 5_000;
 
 export interface BootstrapSequenceOptions {
-  /** The migrations this build was generated from, in apply order. */
-  readonly expected: readonly string[];
-  readonly ledger: SchemaLedger;
-  readonly lock: BootstrapLock;
-  readonly seeder: SeedsPhase;
+  readonly clock?: Clock;
+
   /** Runs after the seeds, in the process that ran them. See {@link DataMigrationsPhase}. */
   readonly dataMigrations: DataMigrationsPhase;
+
+  /** The migrations this build was generated from, in apply order. */
+  readonly expected: readonly string[];
+
+  readonly ledger: SchemaLedger;
+  readonly lock: BootstrapLock;
   readonly logger: BootstrapLogger;
-  /** Present only in the api build. See {@link Migrator}. */
-  readonly migrator?: Migrator;
+
   /** Where the migrator's URL came from; named in the summary and in the refusals after migrating. */
   readonly migrationCredential?: MigrationCredential;
-  readonly clock?: Clock;
+
+  /** Present only in the api build. See {@link Migrator}. */
+  readonly migrator?: Migrator;
+
+  readonly schemaPollMs?: number;
+  readonly seeder: SeedsPhase;
   readonly tracer?: Tracer;
+
   /** See {@link DEFAULT_WAIT_MS}. */
   readonly waitMs?: number;
-  readonly schemaPollMs?: number;
 }
 
 export interface BootstrapSummary {
-  /** What the first read of the ledger found. */
-  readonly state: MigrationStateKind;
-  readonly migrationsApplied: readonly string[];
   /**
-   * The credential that applied {@link migrationsApplied}: whether migrations
-   * reached Postgres directly or through the connection pooler is in its host.
-   * Absent when none were applied.
+   * What the data-migrations phase applied, in order, the ledger rows this
+   * build does not know, and whether the caches were flushed after it. Absent
+   * when the seeds did not run.
    */
-  readonly migrationCredential?: MigrationCredential;
-  readonly unknownMigrations: readonly string[];
+  readonly dataMigrations: DataMigrationsSummary | undefined;
 
   /**
    * The unknown migrations applied by a run before the last run that applied
@@ -57,26 +61,37 @@ export interface BootstrapSummary {
    * the history was rewritten (#1148). A subset of {@link unknownMigrations}.
    */
   readonly divergedMigrations: readonly string[];
-  /** False for every process without a migrator, and for the api over a database that is ahead of it. */
-  readonly seedsRun: boolean;
+
+  /**
+   * The credential that applied {@link migrationsApplied}: whether migrations
+   * reached Postgres directly or through the connection pooler is in its host.
+   * Absent when none were applied.
+   */
+  readonly migrationCredential?: MigrationCredential;
+
+  readonly migrationsApplied: readonly string[];
+  readonly phaseDurationsMs: Readonly<Record<string, number>>;
+
   /**
    * What the catalog reconcile wrote, by table, and whether the caches were
    * flushed after it. Absent when the seeds did not run.
    */
   readonly reconcile: ReconcileSummary | undefined;
-  /**
-   * What the data-migrations phase applied, in order, the ledger rows this
-   * build does not know, and whether the caches were flushed after it. Absent
-   * when the seeds did not run.
-   */
-  readonly dataMigrations: DataMigrationsSummary | undefined;
+
+  /** False for every process without a migrator, and for the api over a database that is ahead of it. */
+  readonly seedsRun: boolean;
+
+  /** What the first read of the ledger found. */
+  readonly state: MigrationStateKind;
+
+  readonly unknownMigrations: readonly string[];
+
   /**
    * Time from the start of the sequence until the read that found the schema up
    * had answered, time blocked on the lock included; 0 when the first read found
    * it up.
    */
   readonly waitedMs: number;
-  readonly phaseDurationsMs: Readonly<Record<string, number>>;
 }
 
 /**
@@ -215,8 +230,14 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
     // What the boot does next, said where the fix is: deleting a diverged row
     // does not run the seeds while a newer migration is also present.
     const divergedOutcome = (state: MigrationState): string => {
-      if (!migrator) return 'Booting anyway.';
-      if (state.kind === 'diverged') return 'Running the seeds and the data migrations, as over a database in sync.';
+      if (!migrator) {
+        return 'Booting anyway.';
+      }
+
+      if (state.kind === 'diverged') {
+        return 'Running the seeds and the data migrations, as over a database in sync.';
+      }
+
       return (
         'Booting anyway, with the seeds and the data migrations skipped while the database is also ahead of this ' +
         'build; deleting these rows does not change that.'
@@ -229,7 +250,10 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
     // No DELETE here: while the pending migration stays failed, deleting the
     // old row recovers nothing, and the failure may have another cause.
     const warnAboutUnknownAfterFailedMigrate = (state: MigrationState): void => {
-      if (state.unknown.length === 0) return;
+      if (state.unknown.length === 0) {
+        return;
+      }
+
       logger.warn(
         `Applying this build's migrations failed over a database holding ${state.unknown.length} migration(s) it ` +
           `does not know (${state.unknown.join(', ')}). A migration renamed or deleted after the database applied ` +
@@ -267,7 +291,10 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
           warnAboutUnknown(state);
           settledState = state.kind;
           // The wait ends with the read that found the schema up, not when the lock came back.
-          if (waiting) waitedMs = clock.now() - started;
+          if (waiting) {
+            waitedMs = clock.now() - started;
+          }
+
           break;
         }
 
@@ -283,7 +310,10 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
             await phase('schema.migrate', () => migrator.apply(state.pending));
 
             after = await phase('schema.read', readState);
-            if (after.kind === 'failed') throw new FailedMigrationError(after.failed);
+            if (after.kind === 'failed') {
+              throw new FailedMigrationError(after.failed);
+            }
+
             if (after.pending.length > 0) {
               throw new MigrationsStillPendingError(after.pending, options.migrationCredential);
             }
@@ -372,6 +402,7 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
           root.recordException(releaseError instanceof Error ? releaseError : messageOf(releaseError));
         }
       }
+
       throw error;
     } finally {
       root.end();

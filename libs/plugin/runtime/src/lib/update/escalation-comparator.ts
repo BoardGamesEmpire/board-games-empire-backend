@@ -1,4 +1,6 @@
-import { PluginGrantScope, PluginGrantStatus, riskCovers, type RiskLevel } from '@bge/database';
+import type { RiskLevel } from '@bge/database';
+import { PluginGrantScope, PluginGrantStatus, requestedByManifest, riskCovers } from '@bge/database';
+import { requestedPermissionsOf } from '../manifest/active-manifest';
 import type {
   GrantComparisonView,
   ManifestComparisonView,
@@ -8,14 +10,17 @@ import type {
 
 export interface EscalationComparatorInput {
   readonly active: ManifestComparisonView;
-  readonly next: ManifestComparisonView;
-  /** Every existing `PluginGrant` row for the plugin, all scopes. */
-  readonly grants: readonly GrantComparisonView[];
+
   /**
    * TODAY's catalog risk per canonical slug in the NEXT manifest — core
    * slugs from `Permission`, plugin-declared slugs locked `Low`.
    */
   readonly currentRiskBySlug: ReadonlyMap<string, RiskLevel>;
+
+  /** Every existing `PluginGrant` row for the plugin, all scopes. */
+  readonly grants: readonly GrantComparisonView[];
+
+  readonly next: ManifestComparisonView;
 }
 
 /**
@@ -39,7 +44,6 @@ export interface EscalationComparatorInput {
 export const compareForEscalations = (input: EscalationComparatorInput): UpdateEscalationComparison => {
   const escalations: UpdateEscalation[] = [];
   const activeChecks = new Map(input.active.checks.map((check) => [check.canonicalSlug, check]));
-  const scopeChangedSlugs = new Set<string>();
 
   for (const check of input.next.checks) {
     const previous = activeChecks.get(check.canonicalSlug);
@@ -55,7 +59,6 @@ export const compareForEscalations = (input: EscalationComparatorInput): UpdateE
     }
 
     if (check.consentScope !== previous.consentScope) {
-      scopeChangedSlugs.add(check.canonicalSlug);
       escalations.push({
         kind: 'consent-scope-changed',
         slug: check.canonicalSlug,
@@ -63,9 +66,12 @@ export const compareForEscalations = (input: EscalationComparatorInput): UpdateE
         to: check.consentScope,
         required: check.required,
       });
-      // A scope change subsumes a simultaneous required promotion: the
-      // permission has to be consented from scratch at the new scope, so
-      // reporting the promotion too would double-count one decision.
+      // A scope change subsumes a simultaneous required promotion: the move
+      // carries `required` itself, and a required move already routes the
+      // new scope's re-consent, so reporting the promotion too would
+      // double-count one decision. A decision kept at the new scope from an
+      // earlier manifest that requested it there counts again, with no act
+      // (#1152).
       continue;
     }
 
@@ -78,27 +84,30 @@ export const compareForEscalations = (input: EscalationComparatorInput): UpdateE
     }
   }
 
-  // Risk escalation: only decisions that EXIST can be escalated
-  // against, and only for permissions the next manifest still requests.
-  // Activation deletes a decision on a permission the next manifest stops
-  // requesting (#577), so it has nothing to escalate.
-  const nextSlugs = new Set(input.next.checks.map((check) => check.canonicalSlug));
+  // Risk escalation: only decisions that EXIST can be escalated against, and
+  // only where the next manifest requests the permission at the decision's
+  // own scope, by the manifest bound the ability read applies
+  // (`requestedByManifest`, #577). Activation keeps every consent decision
+  // (#1152), so a decision on a permission the next manifest does not
+  // request, or requests at another scope, is kept, confers nothing while
+  // that holds, and escalates nothing: routing it would ask re-consent of
+  // units that do not decide it and cannot come to decide it, since a consent
+  // act answers only the permissions its unit's consent scope owns (#1150,
+  // #1336), and a Server decision there would gate approval on a permission
+  // approval does not write.
+  //
+  // A permission that moved scope is bound the same way at its new scope: a
+  // decision there, kept from an earlier manifest that requested it there or
+  // given as a pre-consent, counts again on activation, so a stale one
+  // escalates here. A move asks the new scope's units only when the
+  // permission is required, so an optional move leaves this the only thing
+  // that tells a unit holding the stale decision (#1152); a required move
+  // names the permission in its re-consent list once, however many
+  // escalations it raises.
+  const requestedByNext = requestedByManifest(requestedPermissionsOf(input.next.checks));
 
   for (const grant of input.grants) {
-    if (!nextSlugs.has(grant.permissionSlug)) {
-      continue;
-    }
-
-    // A scope change subsumes a simultaneous risk escalation, exactly as it
-    // subsumes a required promotion above. The grant whose risk went stale
-    // belongs to the OLD scope's principal, and activation deletes it
-    // (delete-to-pending) — routing it would ask re-consent of units that are
-    // no longer the deciding principal and CANNOT become one: a consent act
-    // answers only the permissions its unit's consent scope owns (#1150,
-    // #1336), so a unit asked this way has no action available to answer it.
-    // The scope change already forces consent from scratch at the new scope,
-    // where it is stamped at today's risk.
-    if (scopeChangedSlugs.has(grant.permissionSlug)) {
+    if (!requestedByNext(grant)) {
       continue;
     }
 
@@ -194,13 +203,17 @@ export const compareForEscalations = (input: EscalationComparatorInput): UpdateE
     }
   }
 
+  // One permission can raise more than one escalation: a re-requested one is
+  // new and its kept decision's risk escalated (#1152), a promoted one can
+  // have escalated too, and every unit holding a stale decision on it
+  // escalates. Each list names a permission once, where it first appeared.
   return {
     escalations,
     serverGating,
     deniedRequiredSlugs,
-    householdReconsentSlugs,
-    serverRiskEscalatedSlugs,
-    userReconsentSlugs,
+    householdReconsentSlugs: [...new Set(householdReconsentSlugs)],
+    serverRiskEscalatedSlugs: [...new Set(serverRiskEscalatedSlugs)],
+    userReconsentSlugs: [...new Set(userReconsentSlugs)],
   };
 };
 

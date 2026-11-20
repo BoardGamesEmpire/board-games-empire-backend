@@ -7,7 +7,8 @@ import {
   ROLE_PERMISSION_CATALOG,
   SystemRole,
 } from '@bge/database';
-import { AbilityFactory, type AppAbility, type RoleWithPermissions } from '@bge/permissions';
+import type { AppAbility, RoleWithPermissions } from '@bge/permissions';
+import { AbilityFactory } from '@bge/permissions';
 import { catalogPermission } from '@bge/testing';
 import { subject } from '@casl/ability';
 import { readFileSync } from 'node:fs';
@@ -34,10 +35,12 @@ type HouseholdRoleName =
 interface TableRow {
   /** The row's text in the README, exactly. */
   readonly action: string;
-  readonly grantedBy: 'Household role' | 'User';
-  readonly cells: Readonly<Record<HouseholdRoleName, Cell>>;
+
   /** Asks the actor's ability, holding `actor` in `hh-1`, the question the route asks. */
   readonly ask: (ability: AppAbility, actor: HouseholdRoleName) => string;
+
+  readonly cells: Readonly<Record<HouseholdRoleName, Cell>>;
+  readonly grantedBy: 'Household role' | 'User';
 }
 
 const HOUSEHOLD_ROLES: readonly HouseholdRoleName[] = [

@@ -1,4 +1,4 @@
-import { AgeRatingOrganization, PlatformType } from '../constants';
+import type { AgeRatingOrganization, PlatformType } from '../constants';
 
 /**
  * Shapes returned by the IGDB API
@@ -12,6 +12,13 @@ import { AgeRatingOrganization, PlatformType } from '../constants';
  * left unset doesn't narrow, and a list set is never empty.
  */
 export interface IgdbSearchNarrowing {
+  /**
+   * Only games with a first release date: every bound the range a search
+   * asks for holds for every date IGDB has, but the range leaves unknown
+   * ones out (#1082).
+   */
+  datedOnly?: true;
+
   /** The game types to ask for. */
   gameTypes?: readonly IgdbGameType[];
 
@@ -23,20 +30,13 @@ export interface IgdbSearchNarrowing {
    * before `before`. A game with no first release date is asked for too when
    * `orUnknown` (#719).
    */
-  releasedBetween?: { readonly from?: number; readonly before?: number; readonly orUnknown: boolean };
+  releasedBetween?: { readonly before?: number; readonly from?: number; readonly orUnknown: boolean };
 
   /**
    * Only games with no first release date: the range a search asks for
    * holds no date IGDB has, though it includes unknown ones (#1082).
    */
   undatedOnly?: true;
-
-  /**
-   * Only games with a first release date: every bound the range a search
-   * asks for holds for every date IGDB has, but the range leaves unknown
-   * ones out (#1082).
-   */
-  datedOnly?: true;
 }
 
 export interface IgdbCover {
@@ -71,9 +71,9 @@ export interface IgdbCompany {
 }
 
 export interface IgdbInvolvedCompany {
-  id: number;
   company: IgdbCompany;
   developer: boolean;
+  id: number;
   publisher: boolean;
 }
 
@@ -88,9 +88,9 @@ export interface IgdbInvolvedCompany {
 export type IgdbPlatformType = PlatformType;
 
 export interface IgdbPlatform {
+  abbreviation?: string;
   id: number;
   name: string;
-  abbreviation?: string;
 
   /**
    * See IgdbPlatformType for values.
@@ -115,9 +115,6 @@ export enum PlatformFamily {
 export type IgdbRegion = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | number;
 
 export interface IgdbReleaseDate {
-  id: number;
-  platform: IgdbPlatform;
-
   /**
    * Unix timestamp (seconds). Present when IGDB has a precise date.
    */
@@ -128,6 +125,8 @@ export interface IgdbReleaseDate {
    */
   human?: string;
 
+  id: number;
+  platform: IgdbPlatform;
   region?: IgdbRegion;
 }
 
@@ -137,9 +136,9 @@ export interface IgdbReleaseDate {
  */
 export interface IgdbLanguageEntry {
   id: number;
+  locale?: string;
   name: string;
   native_name?: string;
-  locale?: string;
 }
 
 /**
@@ -226,47 +225,45 @@ export type IgdbGameStatus = 0 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | number;
  * (#926).
  */
 export interface IgdbExternalGame {
+  external_game_source?: number;
   id: number;
 
   /** The game's id at that service, such as a Steam app id. */
   uid?: string;
-  external_game_source?: number;
 }
 
 export interface IgdbGame {
-  id: number;
-  name: string;
-
-  game_type?: IgdbGameType;
-  game_status?: IgdbGameStatus;
+  age_ratings?: IgdbAgeRating[];
+  collections?: IgdbNamedEntity[];
+  cover?: IgdbCover;
+  external_games?: IgdbExternalGame[];
 
   /**
    * Unix timestamp
    */
   first_release_date?: number;
 
-  age_ratings?: IgdbAgeRating[];
-  collections?: IgdbNamedEntity[];
-  cover?: IgdbCover;
-  expansions?: number[];
-  external_games?: IgdbExternalGame[];
   franchises?: IgdbNamedEntity[];
+  game_status?: IgdbGameStatus;
+  game_type?: IgdbGameType;
   genres?: IgdbNamedEntity[];
+  id: number;
   involved_companies?: IgdbInvolvedCompany[];
   language_supports?: IgdbLanguageSupport[];
-  platforms?: IgdbPlatform[];
-  release_dates?: IgdbReleaseDate[];
-  standalone_expansions?: number[];
-  summary?: string;
-  themes?: IgdbNamedEntity[];
-  total_rating_count?: number;
-  total_rating?: number;
-  url?: string;
+  name: string;
 
   /**
    * Populated on DLC (category 1) and expansion (category 2).
    */
   parent_game?: number;
+
+  platforms?: IgdbPlatform[];
+  release_dates?: IgdbReleaseDate[];
+  summary?: string;
+  themes?: IgdbNamedEntity[];
+  total_rating?: number;
+  total_rating_count?: number;
+  url?: string;
 
   /**
    * Populated on standalone expansion (category 4) and version entries.

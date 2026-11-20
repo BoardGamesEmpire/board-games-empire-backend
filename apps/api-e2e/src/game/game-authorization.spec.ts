@@ -1,18 +1,14 @@
-import { FriendshipStatus, Reach, type DatabaseService } from '@bge/database';
+import type { DatabaseService } from '@bge/database';
+import { FriendshipStatus, Reach } from '@bge/database';
 import { ServiceAccountService } from '@bge/services';
-import {
-  arrangeExtendedNetwork,
-  arrangeFriendship,
-  befriend,
-  createActors,
-  type Actors,
-  type AuthenticatedActor,
-} from '@bge/testing-e2e';
+import type { Actors, AuthenticatedActor } from '@bge/testing-e2e';
+import { arrangeExtendedNetwork, arrangeFriendship, befriend, createActors } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { tabletopPlatform } from '../support/seeded-platforms';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { gameEnvelope, gamePlatformGames, listGamesEnvelope, localSearchGameIds } from './game-wire';
 
 /**
@@ -135,6 +131,7 @@ describe('game authorization', () => {
         const read = await readGame(actor, privateGame.id).expect(200);
         expect(gameEnvelope(read, `GET /api/games/:id as ${who}`).game.id).toBe(privateGame.id);
       }
+
       await readGame(plainUser, privateGame.id).expect(403);
 
       // The list is the Public games and the caller's own, whoever asks
@@ -312,6 +309,7 @@ describe('game authorization', () => {
         await befriend(db.client, sharedFriend, creator);
         await arrangeFriendship(db.client, viewer, sharedFriend, status);
       }
+
       const game = await arrangeGame(creator.user.id, Reach.FriendsOfFriends);
 
       await readGame(control, game.id).expect(200);

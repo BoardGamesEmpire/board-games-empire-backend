@@ -1,4 +1,4 @@
-import { Prisma } from '@bge/database';
+import type { Prisma } from '@bge/database';
 
 /**
  * An attendee's user, by name and avatar, and their role on the event, as

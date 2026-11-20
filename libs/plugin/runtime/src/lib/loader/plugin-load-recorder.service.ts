@@ -20,15 +20,15 @@ export const PLUGIN_LOAD_SHUTDOWN_WAIT_MS = 5_000;
 
 /** A plugin artifact this process recorded loading, which install it is, when, and whether the load completed. */
 interface LoadRecord {
-  readonly sha256: PluginArtifactSha256;
-
   /** The plugin row's `installedAt` the loader read (#1083). */
   readonly installedAt: Date;
+
+  readonly loadedAt: Date;
 
   /** Whether the plugin's product is registered in this process (#1083). */
   readonly ready: boolean;
 
-  readonly loadedAt: Date;
+  readonly sha256: PluginArtifactSha256;
 }
 
 /**

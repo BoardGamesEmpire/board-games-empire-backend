@@ -1,13 +1,15 @@
-import { Action, DatabaseService, gameSummaryReader, Prisma, ResourceType, type GameSummary } from '@bge/database';
+import type { GameSummary } from '@bge/database';
+import { Action, DatabaseService, gameSummaryReader, Prisma, ResourceType } from '@bge/database';
 import { AbilityService, resolveScopeSubjectId, ScopeComposer } from '@bge/permissions';
-import { sampleByOffsets, type RandomSampleQueryDto } from '@bge/shared';
+import type { RandomSampleQueryDto } from '@bge/shared';
+import { sampleByOffsets } from '@bge/shared';
 import { Injectable } from '@nestjs/common';
 import { gamePoolEntryScope } from './game-pool-scope';
 
 /** A random sample of the game pool, and how many distinct games it holds (#960). */
 export interface GamePoolSample {
-  games: GameSummary[];
   gameCount: number;
+  games: GameSummary[];
 }
 
 @Injectable()

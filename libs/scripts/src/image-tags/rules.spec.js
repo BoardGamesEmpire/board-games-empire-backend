@@ -133,9 +133,17 @@ describe('edgeDecision', () => {
    */
   function repository({ line, beside = [] }) {
     return async (base, head) => {
-      if (![base, head].every((sha) => line.includes(sha) || beside.includes(sha))) return 'missing';
-      if (base === head) return 'identical';
-      if (beside.includes(base) || beside.includes(head)) return 'diverged';
+      if (![base, head].every((sha) => line.includes(sha) || beside.includes(sha))) {
+        return 'missing';
+      }
+
+      if (base === head) {
+        return 'identical';
+      }
+
+      if (beside.includes(base) || beside.includes(head)) {
+        return 'diverged';
+      }
 
       return line.indexOf(head) > line.indexOf(base) ? 'ahead' : 'behind';
     };

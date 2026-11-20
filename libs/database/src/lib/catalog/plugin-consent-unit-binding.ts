@@ -4,7 +4,8 @@ import { PluginGrantScope } from '../client';
 import { UNIT_ID_COLUMNS } from '../generated/unit-id-columns';
 import { riskCovers } from '../utils/risk-ordering';
 import { parseTemplate } from './catalog-guards';
-import { matchesCatalogRule, type PermissionRuleColumns } from './catalog-reconcile-plan';
+import type { PermissionRuleColumns } from './catalog-reconcile-plan';
+import { matchesCatalogRule } from './catalog-reconcile-plan';
 import { PERMISSION_CATALOG } from './permission.catalog';
 import type { PermissionSeedDefinition } from './seed-definitions';
 
@@ -41,8 +42,8 @@ const PUBLIC_READ_RULES = new Map<string, PermissionSeedDefinition>(
 
 /** The scope's own id: the variable a unit-scope template must name, and the model it is the id of. */
 interface UnitId {
-  readonly variable: string;
   readonly model: 'Household' | 'User';
+  readonly variable: string;
 }
 
 const UNIT_ID: Readonly<Record<PluginUnitGrantScope, UnitId>> = {
@@ -178,8 +179,8 @@ export type ConsentDecisionVerdict = 'confers' | 'wildcard-subject' | 'unit-unbo
  * the permission, and the permission is not retired.
  */
 export function judgeConsentDecision(
-  permission: PermissionRuleColumns & { readonly slug: string; readonly riskLevel: RiskLevel },
-  decision: { readonly scopeType: PluginGrantScope; readonly decidedRiskLevel: RiskLevel },
+  permission: PermissionRuleColumns & { readonly riskLevel: RiskLevel; readonly slug: string },
+  decision: { readonly decidedRiskLevel: RiskLevel; readonly scopeType: PluginGrantScope },
 ): ConsentDecisionVerdict {
   if (isWildcardSubject(permission)) {
     return 'wildcard-subject';

@@ -2,13 +2,12 @@ import { Action, GAME_SUMMARY_SELECT, Prisma, ResourceType } from '@bge/database
 import { t } from '@bge/i18n';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
 import { RandomSampleQueryDto } from '@bge/shared';
+import type { MockAbilityService, MockDatabaseService } from '@bge/testing';
 import {
   createMockAbilityService,
   createMockDatabaseService,
   createTestingModuleWithDb,
   MOCK_ACTING_USER_ID,
-  type MockAbilityService,
-  type MockDatabaseService,
 } from '@bge/testing';
 import { ForbiddenException } from '@nestjs/common';
 import { gamePoolEntryScope } from './game-pool-scope';
@@ -64,7 +63,7 @@ describe('HouseholdGamePoolService', () => {
     tx.game.count.mockResolvedValue(POOL.length);
     // Reads as Prisma's cursor does: `skip` games on from the cursor's game,
     // or from the first game without one.
-    tx.game.findFirst.mockImplementation((async (args: { skip: number; cursor?: { id: string } }) => {
+    tx.game.findFirst.mockImplementation((async (args: { cursor?: { id: string }; skip: number }) => {
       const id = POOL[(args.cursor ? POOL.indexOf(args.cursor.id) : 0) + args.skip];
 
       return id === undefined ? null : { id };

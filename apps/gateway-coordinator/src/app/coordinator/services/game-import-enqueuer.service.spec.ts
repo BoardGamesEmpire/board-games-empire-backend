@@ -1,7 +1,8 @@
 import type { DatabaseService } from '@bge/database';
 import { extractJobMeta } from '@bge/queue-actor-context';
-import { FlowJob, FlowProducer } from 'bullmq';
-import { GameImportEnqueuerService, type StartGameImportInput } from './game-import-enqueuer.service';
+import type { FlowJob, FlowProducer } from 'bullmq';
+import type { StartGameImportInput } from './game-import-enqueuer.service';
+import { GameImportEnqueuerService } from './game-import-enqueuer.service';
 
 describe('GameImportEnqueuerService', () => {
   let service: GameImportEnqueuerService;

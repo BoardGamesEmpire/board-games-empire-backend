@@ -1,5 +1,6 @@
 import { MutationEvent } from '@bge/actor-context';
-import { ResourceType, type Event } from '@bge/database';
+import type { Event } from '@bge/database';
+import { ResourceType } from '@bge/database';
 import { EventEvents } from '../constants/event-events.constant';
 
 /**
@@ -16,10 +17,8 @@ type EventCreatedSnapshot = Readonly<Pick<Event, 'id' | 'title' | 'schedulingMod
 
 export class EventCreatedEvent extends MutationEvent<Event> {
   static readonly eventName = EventEvents.EventCreated;
-
   declare readonly before: null;
   declare readonly after: EventCreatedSnapshot;
-
   readonly subject = ResourceType.Event;
   readonly subjectId: string;
 
@@ -39,10 +38,8 @@ type EventUpdatedSnapshot = Readonly<Partial<Event> & Pick<Event, 'id'>>;
 /** before/after carry the changed subset only (plus `id`). */
 export class EventUpdatedEvent extends MutationEvent<Event> {
   static readonly eventName = EventEvents.EventUpdated;
-
   declare readonly before: EventUpdatedSnapshot;
   declare readonly after: EventUpdatedSnapshot;
-
   readonly subject = ResourceType.Event;
   readonly subjectId: string;
 
@@ -57,10 +54,8 @@ type EventDeletedSnapshot = Readonly<Pick<Event, 'id' | 'title' | 'createdById' 
 /** Soft delete (deletedAt stamp) modeled as a domain delete: before-only. */
 export class EventDeletedEvent extends MutationEvent<Event> {
   static readonly eventName = EventEvents.EventDeleted;
-
   declare readonly before: EventDeletedSnapshot;
   declare readonly after: null;
-
   readonly subject = ResourceType.Event;
   readonly subjectId: string;
 

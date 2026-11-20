@@ -1,9 +1,11 @@
 import { FriendshipStatus, Reach } from '@bge/database';
-import { createActors, type Actors, type AuthenticatedActor, type SessionActor } from '@bge/testing-e2e';
+import type { Actors, AuthenticatedActor, SessionActor } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { createEventClient, EVENTS_PATH } from './event-request';
 
 /** The server policy's refusal. */
@@ -131,6 +133,7 @@ describe('placing a user on an event', () => {
       for (const id of await nonPersonIds()) {
         await createEvent(host, { inviteUserIds: [id] }).expect(404);
       }
+
       expect(await eventsCreatedBy(host)).toBe(before);
     });
 
@@ -143,6 +146,7 @@ describe('placing a user on an event', () => {
       for (const id of await nonPersonIds()) {
         await addAttendee(host, eventId, id).expect(404);
       }
+
       expect(await attendeeCount(eventId)).toBe(before);
     });
   });

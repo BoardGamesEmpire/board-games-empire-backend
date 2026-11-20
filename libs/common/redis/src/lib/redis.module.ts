@@ -54,8 +54,13 @@ export class RedisModule {
     providers.push(RedisLifecycleManager);
 
     const exports_: Array<symbol> = [];
-    if (options.cache) exports_.push(CACHE_REDIS_CLIENT);
-    if (options.queue) exports_.push(QUEUE_REDIS_CLIENT);
+    if (options.cache) {
+      exports_.push(CACHE_REDIS_CLIENT);
+    }
+
+    if (options.queue) {
+      exports_.push(QUEUE_REDIS_CLIENT);
+    }
 
     return {
       module: RedisModule,
@@ -85,7 +90,7 @@ export class RedisModule {
       // The DI container passes the resolved `inject` dependencies positionally;
       // we forward them to the consumer's factory and wrap the returned config
       // in an iovalkey client.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- passes the caller's injected values through to its own factory (#1321)
       useFactory: async (...args: any[]): Promise<Redis> => {
         const config: BgeRedisConnectionConfig = await asyncOptions.useFactory(...args);
         return createRedisClient(config, overrides);

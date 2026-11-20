@@ -1,4 +1,5 @@
-import { createFakeFetch, readFixture, type FakeFetch } from '@boardgamesempire/gateway-driver-contract-testing';
+import type { FakeFetch } from '@boardgamesempire/gateway-driver-contract-testing';
+import { createFakeFetch, readFixture } from '@boardgamesempire/gateway-driver-contract-testing';
 import { IGDB_BASE_URL } from '../client/igdb-query';
 import { igdbFixtureKey } from './igdb-fixture-key';
 

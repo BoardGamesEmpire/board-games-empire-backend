@@ -1,3 +1,4 @@
+import type { GameShare } from '@bge/database';
 import {
   Action,
   blockWith,
@@ -6,17 +7,11 @@ import {
   Prisma,
   ResourceType,
   SystemRole,
-  type GameShare,
 } from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
-import {
-  batchTransactionCall,
-  createTestingModuleWithDb,
-  paginationQuery,
-  unwrapTransaction,
-  type MockDatabaseService,
-} from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { batchTransactionCall, createTestingModuleWithDb, paginationQuery, unwrapTransaction } from '@bge/testing';
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { CreateGameShareDto } from './dto';
@@ -26,7 +21,7 @@ import { GameShareService } from './game-share.service';
 const COND = { id: 'sentinel-condition' };
 const NOW = new Date('2026-10-22T12:00:00Z');
 
-type RosterRow = { userId: string; role: { role: { name: string } } | null };
+type RosterRow = { role: { role: { name: string } } | null; userId: string };
 
 const rosterRow = (userId: string, name: SystemRole): RosterRow => ({ userId, role: { role: { name } } });
 

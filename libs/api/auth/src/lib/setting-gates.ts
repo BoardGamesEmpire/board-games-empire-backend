@@ -1,5 +1,6 @@
 import type { PrismaClient, SystemSetting } from '@bge/database';
-import { FALLBACK_LOCALE, type I18nPath, type I18nTranslations } from '@bge/i18n';
+import type { I18nPath, I18nTranslations } from '@bge/i18n';
+import { FALLBACK_LOCALE } from '@bge/i18n';
 import { Logger } from '@nestjs/common';
 import { APIError } from 'better-auth/api';
 import type { I18nService } from 'nestjs-i18n';
@@ -17,16 +18,18 @@ export type SettingSwitches = Pick<
 export interface SettingGateDeps {
   /** The row's switches, or `null` when the row is missing. A missing row refuses everything gated. */
   readonly readSwitches: () => Promise<SettingSwitches | null>;
+
   /** A user's username as stored, or `null` when there is no such user. */
   readonly readUsername: (userId: string) => Promise<string | null>;
+
   /** Renders a refusal's catalog key. */
   readonly render: (key: I18nPath) => string;
 }
 
 interface Gate {
-  readonly switch: keyof SettingSwitches;
   readonly code: string;
   readonly message: I18nPath;
+  readonly switch: keyof SettingSwitches;
 }
 
 const REGISTRATION: Gate = {
@@ -86,14 +89,18 @@ const UNCHANGED_NAME = { data: { name: undefined } } as const;
 
 /** The slice of better-auth's endpoint context the gates read. It is `null` outside an endpoint. */
 export interface SettingGateContext {
-  readonly path?: string;
   readonly context?: {
     /** Set by the route's session middleware. */
     readonly session?: { readonly user: { readonly id: string } } | null;
   };
+
+  readonly path?: string;
 }
 
 export interface SettingGates {
+  /** `hooks.before`, wrapped in `createAuthMiddleware`. */
+  beforeRoute(context: SettingGateContext): Promise<void>;
+
   /**
    * `databaseHooks.user.create.before`. Every account better-auth creates
    * passes through it: email sign-up, anonymous sign-in, a first OIDC login
@@ -103,6 +110,7 @@ export interface SettingGates {
    * on a callback.
    */
   beforeUserCreate(user: unknown, context: SettingGateContext | null): Promise<void>;
+
   /**
    * `databaseHooks.user.update.before`. Refuses `/update-user` only when it
    * would change the username, so a client that resends the whole profile
@@ -113,8 +121,6 @@ export interface SettingGates {
     data: { readonly name?: unknown; readonly [field: string]: unknown },
     context: SettingGateContext | null,
   ): Promise<typeof UNCHANGED_NAME | undefined>;
-  /** `hooks.before`, wrapped in `createAuthMiddleware`. */
-  beforeRoute(context: SettingGateContext): Promise<void>;
 }
 
 /**

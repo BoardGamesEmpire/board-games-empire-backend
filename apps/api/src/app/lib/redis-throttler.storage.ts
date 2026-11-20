@@ -204,6 +204,7 @@ export class RedisThrottlerStorage implements ThrottlerStorage {
 
   /** Fail-open bookkeeping, so an outage is one log line and not one per request. */
   private failuresSinceLastLog = 0;
+
   private lastFailureLogAt = 0;
 
   constructor(private readonly redis: Redis) {}
@@ -331,7 +332,7 @@ export class RedisThrottlerStorage implements ThrottlerStorage {
    * cache reads — and it is deliberately not attempted here, because it changes
    * behaviour under outage and wants reviewing on its own.
    */
-  private withDeadline<T>(work: Promise<T>, deadline: Deadline): Promise<T> {
+  private withDeadline<T>(work: Promise<T>, deadline: Deadline): Promise<Awaited<T>> {
     let timer: NodeJS.Timeout;
 
     const expiry = new Promise<never>((_resolve, reject) => {
@@ -341,7 +342,7 @@ export class RedisThrottlerStorage implements ThrottlerStorage {
       }, COMMAND_DEADLINE_MS);
     });
 
-    return Promise.race([work, expiry]).finally(() => clearTimeout(timer)) as Promise<T>;
+    return Promise.race([work, expiry]).finally(() => clearTimeout(timer));
   }
 
   /**
@@ -356,11 +357,15 @@ export class RedisThrottlerStorage implements ThrottlerStorage {
    * rather than a placeholder.
    */
   private toRecord(reply: unknown): ThrottlerStorageRecord {
-    if (!Array.isArray(reply) || reply.length !== 4 || reply.some((field) => typeof field !== 'number')) {
+    if (
+      !Array.isArray(reply) ||
+      reply.length !== 4 ||
+      !reply.every((field): field is number => typeof field === 'number')
+    ) {
       throw new Error(`Rate-limit script returned an unreadable record: ${JSON.stringify(reply)}`);
     }
 
-    const [totalHits, timeToExpire, isBlocked, timeToBlockExpire] = reply as number[];
+    const [totalHits, timeToExpire, isBlocked, timeToBlockExpire] = reply;
 
     return {
       totalHits,

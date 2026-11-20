@@ -1,6 +1,8 @@
-import { errorEnvelope, type I18nPath } from '@bge/i18n';
+import type { I18nPath } from '@bge/i18n';
+import { errorEnvelope } from '@bge/i18n';
 import { Logger } from '@nestjs/common';
-import { withStorageFailureRecord, type StorageFailureRecord } from './storage-failure-record';
+import type { StorageFailureRecord } from './storage-failure-record';
+import { withStorageFailureRecord } from './storage-failure-record';
 
 /** better-auth's fetch handler: a request in, a response out. */
 export type AuthRequestHandler = (request: Request) => Promise<Response>;
@@ -117,7 +119,7 @@ async function carriesCode(response: Response): Promise<boolean> {
   try {
     const body: unknown = await response.clone().json();
 
-    return typeof (body as { code?: unknown } | null)?.code === 'string';
+    return typeof body === 'object' && body !== null && 'code' in body && typeof body.code === 'string';
   } catch {
     return false;
   }

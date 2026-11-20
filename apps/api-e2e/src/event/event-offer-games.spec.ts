@@ -1,12 +1,15 @@
 import { ContentType, GameMedium, PlatformType, Reach, SystemRole } from '@bge/database';
-import { createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
+import type { Actors, AuthenticatedActor } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import request from 'supertest';
 import { arrangeCollectionEntry } from '../game-collection/game-collection-fixtures';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { arrangeOfferedGame, platformOfType } from './event-fixtures';
 import { attendeesPath, createEventClient, offerGamesPath } from './event-request';
-import { attendeeEnvelope, listOfferedGamesEnvelope, offerResultsEnvelope, type OfferResultWire } from './event-wire';
+import type { OfferResultWire } from './event-wire';
+import { attendeeEnvelope, listOfferedGamesEnvelope, offerResultsEnvelope } from './event-wire';
 
 /**
  * Offering several games at once, each a game with a choice of its
@@ -43,10 +46,15 @@ describe('POST /api/events/:eventId/attendees/:attendeeId/games/batch (#1188)', 
   };
 
   /** A collection entry of `owner`'s, on a fresh game with `title` and `contentType`. */
-  const owned = async (owner: AuthenticatedActor, title: string, contentType: ContentType = ContentType.BaseGame) => {
+  const owned = async (
+    owner: AuthenticatedActor,
+    title: string,
+    contentType: ContentType = ContentType.BaseGame,
+    platformType: PlatformType = PlatformType.Tabletop,
+  ) => {
     const game = await db.client.game.create({ data: { title, contentType }, select: { id: true } });
     const platformGame = await db.client.platformGame.create({
-      data: { gameId: game.id, platformId: await platformOfType(db.client, PlatformType.Tabletop) },
+      data: { gameId: game.id, platformId: await platformOfType(db.client, platformType) },
       select: { id: true },
     });
     const collection = await db.client.gameCollection.create({
@@ -97,6 +105,7 @@ describe('POST /api/events/:eventId/attendees/:attendeeId/games/batch (#1188)', 
       ]);
       expect(Object.keys(entry?.collection ?? {}).sort()).toEqual(['id', 'medium', 'platformGame']);
     }
+
     const listed = listOfferedGamesEnvelope(
       await listOfferedGames(host, eventId, { limit: 100 }).expect(200),
       'GET /api/events/:eventId/offered-games as the host',
@@ -140,6 +149,25 @@ describe('POST /api/events/:eventId/attendees/:attendeeId/games/batch (#1188)', 
       [base.collectionId]: [],
       [seafarers.collectionId]: [base.gameId],
       [cities.collectionId]: [base.gameId],
+    });
+  });
+
+  it('refuses a linked expansion whose entry is on another platform from its game as differentPlatform (#1391)', async () => {
+    const { host, eventId, hostAttendeeId } = await arrangeEvent();
+    const base = await owned(host, 'Civilization (tabletop)');
+    const onPc = await owned(host, 'Civilization: Gods & Kings (PC)', ContentType.Expansion, PlatformType.PC);
+    await db.client.gameExpansion.create({ data: { baseGameId: base.gameId, expansionGameId: onPc.gameId } });
+
+    const results = await offered(host, eventId, hostAttendeeId, [
+      { collectionId: base.collectionId, expansionCollectionIds: [onPc.collectionId] },
+    ]);
+
+    expect(results[0]).toEqual(expect.objectContaining({ collectionId: base.collectionId, outcome: 'added' }));
+    expect(results[1]).toEqual({
+      collectionId: onPc.collectionId,
+      outcome: 'refused',
+      reason: 'differentPlatform',
+      message: 'This expansion is on a different platform from the game it was offered with.',
     });
   });
 

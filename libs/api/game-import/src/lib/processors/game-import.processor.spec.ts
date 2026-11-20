@@ -1,14 +1,17 @@
-import { ContentFormat, DatabaseService, InitiatorType, JobStatus, ResourceType } from '@bge/database';
-import { wrapJobData, type JobActorMeta } from '@bge/queue-actor-context';
+import type { DatabaseService } from '@bge/database';
+import { ContentFormat, InitiatorType, JobStatus, ResourceType } from '@bge/database';
+import type { JobActorMeta } from '@bge/queue-actor-context';
+import { wrapJobData } from '@bge/queue-actor-context';
 import { WebhookEventType } from '@bge/webhooks';
-import { EventEmitter2 } from '@nestjs/event-emitter';
-import { Job } from 'bullmq';
+import type { EventEmitter2 } from '@nestjs/event-emitter';
+import type { Job } from 'bullmq';
 import { JobNames } from '../constants/queue.constants';
 import { ImportJobCompletedEvent, ImportJobFailedEvent } from '../events/import.events';
-import { ImportJobOrigin, type GameImportJobPayload, type ImportJobResult } from '../interfaces/import-job.interface';
-import { ImportBatchCompletionService } from '../services/batch-completion.service';
-import { ExpansionSpawnerService } from '../services/expansion-spawner.service';
-import { GameUpsertService } from '../services/game.service';
+import type { GameImportJobPayload, ImportJobResult } from '../interfaces/import-job.interface';
+import { ImportJobOrigin } from '../interfaces/import-job.interface';
+import type { ImportBatchCompletionService } from '../services/batch-completion.service';
+import type { ExpansionSpawnerService } from '../services/expansion-spawner.service';
+import type { GameUpsertService } from '../services/game.service';
 import { extractGameDataFromChildren } from '../utils/extract-game-data';
 import { GameImportProcessor } from './game-import.processor';
 
@@ -17,7 +20,7 @@ const extractMock = extractGameDataFromChildren as jest.MockedFunction<typeof ex
 
 describe('GameImportProcessor', () => {
   let processor: GameImportProcessor;
-  let db: { job: { update: jest.Mock; updateMany: jest.Mock }; dataGateway: { findUnique: jest.Mock } };
+  let db: { dataGateway: { findUnique: jest.Mock }; job: { update: jest.Mock; updateMany: jest.Mock } };
   let gameUpsert: jest.Mocked<Pick<GameUpsertService, 'upsert'>>;
   let events: { emit: jest.Mock };
   let batchCompletion: { checkAndEmit: jest.Mock };
@@ -36,7 +39,7 @@ describe('GameImportProcessor', () => {
     origin: ImportJobOrigin.Requested,
   };
 
-  const makeJob = (name: string, payload: object, over: { attemptsMade?: number; attempts?: number } = {}): Job =>
+  const makeJob = (name: string, payload: object, over: { attempts?: number; attemptsMade?: number } = {}): Job =>
     ({
       name,
       id: '1',
@@ -346,7 +349,7 @@ describe('GameImportProcessor', () => {
       );
     });
 
-    it('reports a game linked to its original but not an add-on, a remaster say, as not an expansion', async () => {
+    it('reports a game that is not an add-on, though its DataGateway names base games, as not an expansion (#1391)', async () => {
       gameUpsert.upsert.mockResolvedValue(linkedTo(['g-13'], false));
 
       await processor.process(makeJob(JobNames.GameImport, basePayload));

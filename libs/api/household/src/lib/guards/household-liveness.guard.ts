@@ -1,5 +1,6 @@
 import { Action, DatabaseService, ResourceType } from '@bge/database';
-import { AbilityService, type AppAbility, everyAbilityCan } from '@bge/permissions';
+import type { AppAbility } from '@bge/permissions';
+import { AbilityService, everyAbilityCan } from '@bge/permissions';
 import { CanActivate, ExecutionContext, Injectable, SetMetadata } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { assertHouseholdExists } from '../household-access.helpers';

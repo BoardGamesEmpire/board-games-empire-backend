@@ -1,7 +1,8 @@
 import { JobStatus } from '@bge/database';
 import { WebhookEventType, webhookEnvelope } from '@bge/webhooks';
 import type { EventEmitter2 } from '@nestjs/event-emitter';
-import { ImportJobFailedEvent, type ImportJobEventContext } from '../events/import.events';
+import type { ImportJobEventContext } from '../events/import.events';
+import { ImportJobFailedEvent } from '../events/import.events';
 import type { SanitizedImportError } from './sanitize-import-error';
 
 /** Identifies the failed Job row plus the listener-facing context fields. */

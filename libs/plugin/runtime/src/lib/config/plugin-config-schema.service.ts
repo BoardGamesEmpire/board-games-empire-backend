@@ -1,16 +1,21 @@
 import { Injectable } from '@nestjs/common';
 import addFormats from 'ajv-formats';
-import Ajv2020, { type AsyncValidateFunction, type ValidateFunction } from 'ajv/dist/2020';
+import type { AsyncValidateFunction, ValidateFunction } from 'ajv/dist/2020';
+import Ajv2020 from 'ajv/dist/2020';
 import { createHash } from 'node:crypto';
-import { PluginConfigSchemaUnusableError, type PluginConfigIssue } from './config-schema.errors';
+import type { PluginConfigIssue } from './config-schema.errors';
+import { PluginConfigSchemaUnusableError } from './config-schema.errors';
 
 export interface PluginConfigValidationInput {
-  readonly slug: string;
-  /** The ACTIVE manifest version — the cache key half that makes recompiles follow updates. */
-  readonly version: string;
+  readonly config: Record<string, unknown>;
+
   /** The manifest's `config.schema` document, opaque until here. */
   readonly schema: Record<string, unknown>;
-  readonly config: Record<string, unknown>;
+
+  readonly slug: string;
+
+  /** The ACTIVE manifest version — the cache key half that makes recompiles follow updates. */
+  readonly version: string;
 }
 
 /**
@@ -46,6 +51,7 @@ export interface PluginConfigValidationInput {
 @Injectable()
 export class PluginConfigSchemaService {
   private readonly validators = new Map<string, ValidateFunction>();
+
   /** Why each schema that cannot be used was refused, by the validators' key. */
   private readonly unusable = new Map<string, string>();
 
@@ -188,7 +194,9 @@ function compile(schema: Record<string, unknown>): ValidateFunction {
 
 /** ajv types the async form as a separate interface, so the flag needs the widened view. */
 function isAsync(validator: ValidateFunction): boolean {
-  return (validator as Partial<AsyncValidateFunction>).$async === true;
+  const widened: Partial<AsyncValidateFunction> = validator;
+
+  return widened.$async === true;
 }
 
 /**

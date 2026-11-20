@@ -56,6 +56,7 @@ async function instance(freshAge = FRESH_AGE) {
     if (!row) {
       throw new Error('the memory adapter holds no row for the new session');
     }
+
     row['createdAt'] = new Date(NOW - ageMs);
     row['expiresAt'] = new Date(Date.now() + FRESH_AGE_MS * 7);
 
@@ -164,6 +165,7 @@ describe('createProviderLinkFreshness', () => {
           return { fresh: token, signature: signatureOf(token) };
         }
       }
+
       throw new Error('no signature with two of standard base64’s own characters in 100 sessions');
     })();
     const at = signature.search(/[+/]/);

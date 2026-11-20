@@ -1,14 +1,18 @@
 import { ResourceType, SystemRole } from '@bge/database';
-import { WEBHOOK_QUEUE_NAME, type WebhookDeliveryJob } from '@bge/queue-webhooks';
-import { createActors, type Actors, type AuthenticatedActor, type SessionActor } from '@bge/testing-e2e';
+import type { WebhookDeliveryJob } from '@bge/queue-webhooks';
+import { WEBHOOK_QUEUE_NAME } from '@bge/queue-webhooks';
+import type { Actors, AuthenticatedActor, SessionActor } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import { WebhookEventType } from '@bge/webhooks';
 import request from 'supertest';
 import { createMemberClient } from '../household/household-request';
-import { mintApiKey, type ApiKeyScope, type Caller } from '../support/api-key';
+import type { ApiKeyScope, Caller } from '../support/api-key';
+import { mintApiKey } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import { isolateQueue } from '../support/queue-isolation';
 import { waitForStableJobCount } from '../support/queues';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { subscriptionEnvelope } from './webhook-wire';
 
 const SUBSCRIPTIONS_PATH = '/api/webhooks/subscriptions';
@@ -166,10 +170,10 @@ describe('webhook subscriptions made through an API key (#723)', () => {
     };
 
     interface Household {
-      readonly id: string;
-      readonly owner: AuthenticatedActor;
       readonly heir: AuthenticatedActor;
       readonly heirMemberId: string;
+      readonly id: string;
+      readonly owner: AuthenticatedActor;
     }
 
     /**
@@ -193,6 +197,7 @@ describe('webhook subscriptions made through an API key (#723)', () => {
 
         return { id: fixture.household.id, owner, heir, heirMemberId: fixture.members[0].member.id };
       };
+
       const reached = await household();
       const unreached = await household();
 

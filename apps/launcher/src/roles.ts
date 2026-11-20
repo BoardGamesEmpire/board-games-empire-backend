@@ -29,25 +29,31 @@ export function parseRoles(value: string | undefined): Role[] {
   if (value === undefined) {
     throw new RoleSelectionError(`BGE_ROLES is not set. Set it to the role this process runs. ${ACCEPTED}`);
   }
+
   if (value.trim() === '') {
     throw new RoleSelectionError(`BGE_ROLES is empty. Set it to the role this process runs. ${ACCEPTED}`);
   }
+
   const entries = value.split(',').map((entry) => entry.trim());
   if (entries.includes('')) {
     throw new RoleSelectionError(`BGE_ROLES has an empty entry, "${value}". ${ACCEPTED}`);
   }
+
   const roles: Role[] = [];
   for (const entry of entries) {
     if (!isRole(entry)) {
       throw new RoleSelectionError(`BGE_ROLES names an unknown role, "${entry}". ${ACCEPTED}`);
     }
+
     roles.push(entry);
   }
+
   if (roles.length > 1) {
     throw new RoleSelectionError(
       `BGE_ROLES names ${roles.length} roles, "${value}", but a process runs one role. Start one process per role. ${ACCEPTED}`,
     );
   }
+
   return roles;
 }
 

@@ -22,21 +22,21 @@ const HOUSEHOLDS_PATH = '/api/households';
 export const membersPath = (householdId: string): string => `${HOUSEHOLDS_PATH}/${householdId}/members`;
 
 export interface MemberClient {
-  /** `DELETE …/members/:memberId` as `actor`. */
-  removeMember(actor: AuthenticatedActor, householdId: string, memberId: string): request.Test;
-
-  /** `DELETE …/members/me` as `actor`: the actor leaves the household. */
-  leave(actor: AuthenticatedActor, householdId: string): request.Test;
-
-  /** `POST …/members/:memberId/transfer-ownership` as `actor`. */
-  transferOwnership(actor: AuthenticatedActor, householdId: string, memberId: string): request.Test;
-
   /**
    * `PATCH …/members/:memberId/role` as `actor`, asking for `role`. It takes
    * any `SystemRole`, the household owner role included, so a test can send
    * one the route refuses.
    */
   changeRole(actor: AuthenticatedActor, householdId: string, memberId: string, role: SystemRole): request.Test;
+
+  /** `DELETE …/members/me` as `actor`: the actor leaves the household. */
+  leave(actor: AuthenticatedActor, householdId: string): request.Test;
+
+  /** `DELETE …/members/:memberId` as `actor`. */
+  removeMember(actor: AuthenticatedActor, householdId: string, memberId: string): request.Test;
+
+  /** `POST …/members/:memberId/transfer-ownership` as `actor`. */
+  transferOwnership(actor: AuthenticatedActor, householdId: string, memberId: string): request.Test;
 }
 
 export function createMemberClient(baseUrl: string): MemberClient {

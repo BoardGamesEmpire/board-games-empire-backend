@@ -72,6 +72,7 @@ import {
   PluginUpdateUnknownCorePermissionError,
   PluginUpdateVersionConflictError,
 } from '@bge/plugin';
+import type { PluginArtifactDownloadFailure, PluginArtifactLinkRefusal } from '@bge/plugin-artifacts';
 import {
   PluginArchiveRefusedError,
   PluginArtifactBelongsToAnotherPluginError,
@@ -80,8 +81,6 @@ import {
   PluginArtifactLinkRefusedError,
   PluginArtifactNotFoundError,
   PluginArtifactTooLargeError,
-  type PluginArtifactDownloadFailure,
-  type PluginArtifactLinkRefusal,
 } from '@bge/plugin-artifacts';
 import type { PluginArchiveRule } from '@boardgamesempire/plugin-manifest';
 import { ArgumentsHost, Catch, Logger } from '@nestjs/common';
@@ -110,10 +109,10 @@ import { PluginArtifactUploadInvalidError } from '../upload/plugin-artifact-uplo
  * level.
  */
 interface PluginErrorRendering {
-  status: Http;
-  message: I18nMessage;
   fields?: Record<string, unknown>;
+  message: I18nMessage;
   operatorActionable?: boolean;
+  status: Http;
 }
 
 type ErrorCtor<E extends Error> = new (...args: never[]) => E;
@@ -165,6 +164,7 @@ function buildRenderers(): RendererMap {
   const map = new Map<ErrorCtor<Error>, (exception: Error) => PluginErrorRendering>();
 
   function renders<E extends Error>(ctor: ErrorCtor<E>, render: (exception: E) => PluginErrorRendering): void {
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- a renderer is stored under its own class and only receives that class's instances, a pairing a Map's types can't hold (#1321)
     map.set(ctor as ErrorCtor<Error>, render as (exception: Error) => PluginErrorRendering);
   }
 
@@ -858,10 +858,12 @@ export class PluginExceptionFilter extends BaseExceptionFilter {
     let ctor: unknown = exception.constructor;
 
     while (typeof ctor === 'function') {
+      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- a lookup only compares the key, and a constructor that isn't an Error's simply misses (#1321)
       const render = renderers.get(ctor as ErrorCtor<Error>);
       if (render) {
         return render;
       }
+
       ctor = Object.getPrototypeOf(ctor);
     }
 

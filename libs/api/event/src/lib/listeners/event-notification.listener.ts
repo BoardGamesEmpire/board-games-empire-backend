@@ -130,8 +130,9 @@ export class EventNotificationListener {
     const { eventId, userId, status } = event.after;
     const { actingUserId } = event;
 
-    // The status is required on every write, so editing only an attendee's
-    // notes sends the RSVP again unchanged. That is no news to anyone (#802).
+    // An edit of only the attendee's notes arrives with the status unchanged
+    // (a send that changes nothing arrives not at all, #903). Neither is news
+    // to anyone (#802).
     if (event.before.status === status) {
       return this.logger.debug(`RSVP unchanged for AttendeeStatusUpdated eventId=${eventId}, userId=${userId}`);
     }
@@ -467,7 +468,7 @@ export class EventNotificationListener {
     domainEvent: 'GameAddedToEvent' | 'GameRemovedFromEvent',
     eventId: string,
     platformGameId: string,
-  ): Promise<{ eventTitle: string; gameTitle: string; gameSubtitle: string | null } | null> {
+  ): Promise<{ eventTitle: string; gameSubtitle: string | null; gameTitle: string } | null> {
     const [eventRecord, platformGame] = await Promise.all([
       this.db.event.findUnique({
         where: { id: eventId },

@@ -10,17 +10,17 @@
  */
 
 export interface ParsedTag {
-  /** Full canonical tag: "zh-Hant", "en-US". */
-  tag: string;
-
   /** Primary language subtag, lowercase: "zh", "en", "cmn". */
   language: string;
+
+  /** ISO 3166-1 alpha-2 / UN M49 region subtag, when present: "US", "419". */
+  region?: string;
 
   /** ISO 15924 script subtag in title case, when present: "Hant". */
   script?: string;
 
-  /** ISO 3166-1 alpha-2 / UN M49 region subtag, when present: "US", "419". */
-  region?: string;
+  /** Full canonical tag: "zh-Hant", "en-US". */
+  tag: string;
 }
 
 /**
@@ -45,6 +45,7 @@ export function canonicalizeTag(value: string | null | undefined): string | null
     if (!first) {
       return null;
     }
+
     canonical = first;
   } catch {
     return null;

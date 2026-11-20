@@ -1,6 +1,7 @@
 import type { I18nPath } from '@bge/i18n';
 import { APIError } from 'better-auth/api';
-import { idsAllowingUnverifiedEmail, type OidcProviderConfig } from './configuration/oidc-providers';
+import type { OidcProviderConfig } from './configuration/oidc-providers';
+import { idsAllowingUnverifiedEmail } from './configuration/oidc-providers';
 import { isProviderSignInPath } from './provider-picture';
 
 export const SIGN_IN_PROVIDER_EMAIL_UNVERIFIED = 'SIGN_IN_PROVIDER_EMAIL_UNVERIFIED';
@@ -9,9 +10,10 @@ const MESSAGE: I18nPath = 'errors.auth.sign_in_provider_email_unverified';
 
 /** The slice of better-auth's endpoint context the gate reads. It is `null` outside an endpoint. */
 export interface ProviderEmailGateContext {
-  readonly path?: string;
   /** The callback's path parameters: `id`, the sign-in provider's id, on `/callback/:id` (#1016). */
   readonly params?: { readonly id?: string };
+
+  readonly path?: string;
 }
 
 /**

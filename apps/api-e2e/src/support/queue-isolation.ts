@@ -1,5 +1,6 @@
 import type { Queue } from 'bullmq';
-import { countPendingJobs, createTestQueue, obliterateQueue, waitForStableJobCount, type TestQueue } from './queues';
+import type { TestQueue } from './queues';
+import { countPendingJobs, createTestQueue, obliterateQueue, waitForStableJobCount } from './queues';
 import { requireDisposableRedis } from './redis-reset';
 
 /** Rounds of obliterate-then-hold before giving up on a queue that keeps filling. */

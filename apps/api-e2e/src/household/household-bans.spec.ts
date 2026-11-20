@@ -8,22 +8,18 @@ import {
   ResourceType,
   SystemRole,
 } from '@bge/database';
-import {
-  arrangeFriendship,
-  arrangeInvite,
-  createActors,
-  type Actors,
-  type AuthenticatedActor,
-  type SessionActor,
-} from '@bge/testing-e2e';
+import type { Actors, AuthenticatedActor, SessionActor } from '@bge/testing-e2e';
+import { arrangeFriendship, arrangeInvite, createActors } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { gameShareEnvelope } from '../game/game-share-wire';
 import { unreadWhen } from '../notification/unread-poll';
-import { mintApiKey, type Caller } from '../support/api-key';
+import type { Caller } from '../support/api-key';
+import { mintApiKey } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import { expectBackendsQueuedBehind, withBarrier } from '../support/lock-barrier';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import {
   acceptEnvelope,
   banEnvelope,
@@ -305,6 +301,7 @@ describe('household bans (#782)', () => {
     for (const target of [h.member, h.guest, stranger]) {
       await banUser(h.admin, h.householdId, { userId: target.user.id }).expect(201);
     }
+
     await expect(membership(h.householdId, h.member.user.id)).resolves.toBeNull();
     await expect(membership(h.householdId, h.guest.user.id)).resolves.toBeNull();
 

@@ -52,6 +52,7 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
   private readonly server!: Server;
 
   protected readonly logger = new Logger(GameSearchGateway.name);
+
   private readonly userQueryMap = wrapDefaults<WeakMap<Socket, WsClientData>, Pick<WsClientData, 'activeSearches'>>({
     wrap: new WeakMap(),
     defaultValue: (): Pick<WsClientData, 'activeSearches'> => ({
@@ -353,13 +354,16 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
   }
 
   private cancelAllSearches(client: Socket): void {
-    const data = this.userQueryMap.get(client) as WsClientData | undefined;
-    if (!data) return;
+    const data = this.userQueryMap.get(client);
+    if (!data) {
+      return;
+    }
 
     for (const [correlationId, sub] of data.activeSearches) {
       sub.unsubscribe();
       client.leave(this.searchRoom(client, correlationId));
     }
+
     data.activeSearches.clear();
   }
 

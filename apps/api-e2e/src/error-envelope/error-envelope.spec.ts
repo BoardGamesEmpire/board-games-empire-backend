@@ -1,9 +1,11 @@
-import { createActors, type Actors } from '@bge/testing-e2e';
+import type { Actors } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import { request as httpRequest } from 'node:http';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { expectErrorEnvelope } from '../support/error-envelope';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 
 /**
  * One error envelope from every producer (#1260): the global filter's markers,
@@ -108,7 +110,7 @@ describe('every HTTP error leaves in one envelope (#1260)', () => {
 
     // A body declaring more than the 64 KiB limit is refused before it is
     // read, so only the headers are sent.
-    const response = await new Promise<{ status: number; body: unknown }>((resolve, reject) => {
+    const response = await new Promise<{ body: unknown; status: number }>((resolve, reject) => {
       const sent = httpRequest({
         hostname,
         port,

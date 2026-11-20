@@ -71,7 +71,7 @@ export class StorageUnavailableError extends StorageError {
   readonly code = 'STORAGE_UNAVAILABLE';
   readonly retryable: boolean;
 
-  constructor(message: string, options: { retryable: boolean; cause?: unknown }) {
+  constructor(message: string, options: { cause?: unknown; retryable: boolean }) {
     super(message, { cause: options.cause });
     this.retryable = options.retryable;
   }

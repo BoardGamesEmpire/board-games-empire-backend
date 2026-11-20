@@ -1,10 +1,12 @@
 import { CACHE_REDIS_CLIENT, QUEUE_REDIS_CLIENT } from '@bge/redis';
 import { StorageService } from '@bge/storage';
-import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { createTestingModuleWithDb } from '@bge/testing';
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { HealthCheckResult, HttpHealthIndicator, TerminusModule } from '@nestjs/terminus';
-import { TestingModule } from '@nestjs/testing';
+import type { HealthCheckResult } from '@nestjs/terminus';
+import { HttpHealthIndicator, TerminusModule } from '@nestjs/terminus';
+import type { TestingModule } from '@nestjs/testing';
 import { HealthController } from './health.controller';
 import { CacheRedisHealthIndicator } from './indicators/cache-redis.health-indicator';
 import { PrismaHealthIndicator } from './indicators/prisma.health-indicator';
@@ -84,13 +86,13 @@ function makeHttpIndicator(): MockHttpHealthIndicator {
 }
 
 interface BuildResult {
-  controller: HealthController;
-  module: TestingModule;
-  db: MockDatabaseService;
-  configService: jest.Mocked<Pick<ConfigService, 'get'>>;
   cacheRedis: MockRedis | null;
-  queueRedis: MockRedis | null;
+  configService: jest.Mocked<Pick<ConfigService, 'get'>>;
+  controller: HealthController;
+  db: MockDatabaseService;
   http: MockHttpHealthIndicator;
+  module: TestingModule;
+  queueRedis: MockRedis | null;
 }
 
 async function buildController(options: BuildOptions = {}): Promise<BuildResult> {
@@ -169,7 +171,10 @@ describe('HealthController', () => {
 
         const result = await controller.ready();
 
-        if (!isHealthCheckResult(result)) throw new Error('expected HealthCheckResult, got disabled response');
+        if (!isHealthCheckResult(result)) {
+          throw new Error('expected HealthCheckResult, got disabled response');
+        }
+
         expect(result.status).toBe('ok');
         expect(result.info).toMatchObject({
           database: { status: 'up' },
@@ -183,7 +188,10 @@ describe('HealthController', () => {
 
         const result = await controller.ready();
 
-        if (!isHealthCheckResult(result)) throw new Error('expected HealthCheckResult, got disabled response');
+        if (!isHealthCheckResult(result)) {
+          throw new Error('expected HealthCheckResult, got disabled response');
+        }
+
         expect(result.status).toBe('ok');
         expect(result.info?.cache).toEqual({ status: 'up', message: 'not configured' });
       });
@@ -193,7 +201,10 @@ describe('HealthController', () => {
 
         const result = await controller.ready();
 
-        if (!isHealthCheckResult(result)) throw new Error('expected HealthCheckResult, got disabled response');
+        if (!isHealthCheckResult(result)) {
+          throw new Error('expected HealthCheckResult, got disabled response');
+        }
+
         expect(result.info?.queue).toEqual({ status: 'up', message: 'not configured' });
       });
 
@@ -202,7 +213,10 @@ describe('HealthController', () => {
 
         const result = await controller.ready();
 
-        if (!isHealthCheckResult(result)) throw new Error('expected HealthCheckResult, got disabled response');
+        if (!isHealthCheckResult(result)) {
+          throw new Error('expected HealthCheckResult, got disabled response');
+        }
+
         expect(result.status).toBe('ok');
         expect(result.info?.database).toEqual({ status: 'up' });
         expect(result.info?.cache).toEqual({ status: 'up', message: 'not configured' });
@@ -214,7 +228,10 @@ describe('HealthController', () => {
 
         const result = await controller.ready();
 
-        if (!isHealthCheckResult(result)) throw new Error('expected HealthCheckResult, got disabled response');
+        if (!isHealthCheckResult(result)) {
+          throw new Error('expected HealthCheckResult, got disabled response');
+        }
+
         expect(result.info?.storage).toEqual({ status: 'up', message: 'not configured' });
       });
 
@@ -223,7 +240,10 @@ describe('HealthController', () => {
 
         const result = await controller.ready();
 
-        if (!isHealthCheckResult(result)) throw new Error('expected HealthCheckResult, got disabled response');
+        if (!isHealthCheckResult(result)) {
+          throw new Error('expected HealthCheckResult, got disabled response');
+        }
+
         expect(result.info?.storage).toEqual({ status: 'up' });
       });
     });
@@ -325,7 +345,10 @@ describe('HealthController', () => {
 
       const result = await controller.detail();
 
-      if (!isHealthCheckResult(result)) throw new Error('expected HealthCheckResult, got disabled response');
+      if (!isHealthCheckResult(result)) {
+        throw new Error('expected HealthCheckResult, got disabled response');
+      }
+
       expect(result.status).toBe('ok');
       expect(Object.keys(result.info ?? {})).toHaveLength(0);
     });

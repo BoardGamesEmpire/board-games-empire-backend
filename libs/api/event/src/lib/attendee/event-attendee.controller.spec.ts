@@ -1,4 +1,5 @@
-import { EventAttendee, EventAttendeeGameList, EventParticipationStatus, ResourceType } from '@bge/database';
+import type { EventAttendee, EventAttendeeGameList } from '@bge/database';
+import { EventParticipationStatus, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { PoliciesGuard } from '@bge/permissions';
 import { ListScopeNotComposedError } from '@bge/shared';
@@ -10,11 +11,13 @@ import { Http } from '@status/codes';
 import { ClsServiceManager } from 'nestjs-cls';
 import { firstValueFrom } from 'rxjs';
 import type { OfferedGame } from '../offered-game/offered-game.types';
-import { AddAttendeeDto } from './dto/add-attendee.dto';
-import { UpdateAttendeeStatusDto } from './dto/update-attendee-status.dto';
+import type { AddAttendeeDto } from './dto/add-attendee.dto';
+import type { UpdateAttendeeStatusDto } from './dto/update-attendee-status.dto';
 import { EventAttendeeController } from './event-attendee.controller';
-import { EventAttendeeService, type AttendeeWithGames } from './event-attendee.service';
-import { OFFER_REFUSALS, OfferRefusal, type OfferResult } from './offer-outcome';
+import type { AttendeeWithGames } from './event-attendee.service';
+import { EventAttendeeService } from './event-attendee.service';
+import type { OfferResult } from './offer-outcome';
+import { OFFER_REFUSALS, OfferRefusal } from './offer-outcome';
 
 describe('EventAttendeeController', () => {
   let controller: EventAttendeeController;
@@ -250,6 +253,7 @@ describe('EventAttendeeController', () => {
         'notInAttendeesCollection',
         'removedFromCollection',
         'notAnExpansionOfBase',
+        'differentPlatform',
         'baseRefused',
       ]);
     });

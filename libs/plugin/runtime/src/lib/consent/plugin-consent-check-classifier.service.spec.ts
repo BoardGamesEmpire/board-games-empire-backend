@@ -1,19 +1,15 @@
 import type { PluginUnit } from '@bge/actor-context';
+import type { DatabaseService } from '@bge/database';
 import {
   CONSENT_UNIT_BINDING_REFUSAL,
-  DatabaseService,
   grantScopeCoordinatesForUnit,
   PERMISSION_CATALOG,
   PluginGrantScope,
   PluginGrantStatus,
   RiskLevel,
 } from '@bge/database';
-import {
-  createMockDatabaseService,
-  UNIT_BOUND_RULES,
-  UNIT_ID_OFF_ID_COLUMN_RULES,
-  type MockDatabaseService,
-} from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService, UNIT_BOUND_RULES, UNIT_ID_OFF_ID_COLUMN_RULES } from '@bge/testing';
 import type { NormalizedPermissionRequest } from '@boardgamesempire/plugin-manifest';
 import { Logger } from '@nestjs/common';
 import { unitConsumesConsentScope, unitOwnsConsentScope } from './consent-classification.types';

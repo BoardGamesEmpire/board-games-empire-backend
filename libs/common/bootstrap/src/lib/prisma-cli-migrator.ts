@@ -70,8 +70,8 @@ export function defaultProjectRootCandidates(): string[] {
 }
 
 interface ResolvedCli {
-  readonly projectRoot: string;
   readonly cli: string;
+  readonly projectRoot: string;
 }
 
 function resolveCli(projectRoot: string | undefined): ResolvedCli {
@@ -82,9 +82,10 @@ function resolveCli(projectRoot: string | undefined): ResolvedCli {
 }
 
 export interface LineForwarder {
-  write(chunk: Buffer): void;
   /** Emits whatever the last chunk left unterminated. */
   end(): void;
+
+  write(chunk: Buffer): void;
 }
 
 /**
@@ -95,7 +96,9 @@ export function createLineForwarder(emit: (line: string) => void): LineForwarder
   const decoder = new StringDecoder('utf8');
   let pending = '';
   const flush = (text: string): void => {
-    if (text.trim().length > 0) emit(text);
+    if (text.trim().length > 0) {
+      emit(text);
+    }
   };
 
   return {
@@ -103,7 +106,9 @@ export function createLineForwarder(emit: (line: string) => void): LineForwarder
       pending += decoder.write(chunk);
       const lines = pending.split('\n');
       pending = lines.pop() ?? '';
-      for (const line of lines) flush(line);
+      for (const line of lines) {
+        flush(line);
+      }
     },
     end() {
       flush(pending + decoder.end());
@@ -135,6 +140,7 @@ export function createPrismaCliMigrator(options: PrismaCliMigratorOptions): Migr
           reject(resolved);
           return;
         }
+
         const { projectRoot, cli } = resolved;
 
         options.logger.log(`Running \`prisma migrate deploy\` in ${projectRoot} for ${pending.length} migration(s).`);
@@ -160,8 +166,11 @@ export function createPrismaCliMigrator(options: PrismaCliMigratorOptions): Migr
         child.once('close', (code, signal) => {
           stdout.end();
           stderr.end();
-          if (code === 0) resolve();
-          else reject(new MigrateDeployFailedError(code, signal));
+          if (code === 0) {
+            resolve();
+          } else {
+            reject(new MigrateDeployFailedError(code, signal));
+          }
         });
       }),
   };

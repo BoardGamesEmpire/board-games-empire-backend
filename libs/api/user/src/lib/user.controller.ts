@@ -1,17 +1,14 @@
-import { AuthService, type AuthUser } from '@bge/auth';
+import type { AuthUser } from '@bge/auth';
+import { AuthService } from '@bge/auth';
 import { Action, ResourceType } from '@bge/database';
-import {
-  AbilityService,
-  type ActorAccess,
-  CheckPolicies,
-  PoliciesGuard,
-  resolveScopeSubjectId,
-} from '@bge/permissions';
+import type { ActorAccess } from '@bge/permissions';
+import { AbilityService, CheckPolicies, PoliciesGuard, resolveScopeSubjectId } from '@bge/permissions';
 import { paginated, PaginatedResponseDto } from '@bge/shared';
 import { Controller, Get, Header, Query, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
-import { from, type Observable } from 'rxjs';
+import type { Observable } from 'rxjs';
+import { from } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { UserAccessEnvelopeDto, UserAccessQueryDto, UserSearchQueryDto, UserSearchResultDto } from './dto';
 import { UserService } from './user.service';

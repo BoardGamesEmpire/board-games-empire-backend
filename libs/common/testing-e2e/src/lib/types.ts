@@ -1,4 +1,5 @@
-import { SystemRole, type PrismaClient, type User } from '@bge/database';
+import type { PrismaClient, User } from '@bge/database';
+import { SystemRole } from '@bge/database';
 
 /**
  * Dependencies the factories receive by injection from the consuming e2e
@@ -16,6 +17,9 @@ export interface ActorDeps {
    */
   readonly baseUrl: string;
 
+  /** Injectable for unit tests; defaults to the global `fetch`. */
+  readonly fetchFn?: typeof fetch;
+
   /**
    * Test-owned Prisma client bound to the ephemeral database. Used for
    * PLUMBING only: waiting out asynchronous provisioning, arranging roster
@@ -23,18 +27,15 @@ export interface ActorDeps {
    * server's behavior.
    */
   readonly prisma: PrismaClient;
-
-  /** Injectable for unit tests; defaults to the global `fetch`. */
-  readonly fetchFn?: typeof fetch;
 }
 
 /** The wire credential a factory-minted actor authenticates with. */
 export interface SessionCredentials {
-  /** The raw session token (bearer() plugin transport). */
-  readonly token: string;
-
   /** Ready for supertest's `.set(actor.headers)`. */
   readonly headers: { readonly Authorization: string };
+
+  /** The raw session token (bearer() plugin transport). */
+  readonly token: string;
 }
 
 /**
@@ -43,13 +44,13 @@ export interface SessionCredentials {
  * helper needs.
  */
 export interface AuthenticatedActor {
-  /** The persisted row, loaded after provisioning completed. */
-  readonly user: User;
-
   readonly credentials: SessionCredentials;
 
   /** Convenience alias for `credentials.headers`. */
   readonly headers: SessionCredentials['headers'];
+
+  /** The persisted row, loaded after provisioning completed. */
+  readonly user: User;
 }
 
 /**

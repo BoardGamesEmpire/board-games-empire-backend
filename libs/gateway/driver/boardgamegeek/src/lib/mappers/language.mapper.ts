@@ -17,8 +17,8 @@ import { decodeText } from './decode-text';
  * Unresolved link for review (#717).
  */
 interface BggLanguage {
-  readonly iso6393: string;
   readonly iso6391?: string;
+  readonly iso6393: string;
   readonly name: string;
 }
 

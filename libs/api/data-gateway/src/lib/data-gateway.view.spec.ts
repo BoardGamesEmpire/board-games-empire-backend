@@ -1,11 +1,7 @@
-import {
-  AuthType,
-  DataGatewayCapability,
-  DataGatewayInterviewFailure,
-  DataGatewaySectionFailure,
-  type DataGatewaySection,
-} from '@bge/database';
-import { interviewStatus, sectionStatus, toDataGatewayView, type DataGatewayWithSections } from './data-gateway.view';
+import type { DataGatewaySection } from '@bge/database';
+import { AuthType, DataGatewayCapability, DataGatewayInterviewFailure, DataGatewaySectionFailure } from '@bge/database';
+import type { DataGatewayWithSections } from './data-gateway.view';
+import { interviewStatus, sectionStatus, toDataGatewayView } from './data-gateway.view';
 
 const T1 = new Date('2026-10-01T12:00:00.000Z');
 const T2 = new Date('2026-10-02T12:00:00.000Z');

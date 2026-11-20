@@ -1,4 +1,5 @@
 import { environments } from '@bge/env';
+import type { RedisEndpoint } from './e2e-env';
 import {
   API_CONFIGURED_SERVER_NAME,
   API_NODE_ENV,
@@ -23,7 +24,6 @@ import {
   requireMailpit,
   schemaFromDatabaseUrl,
   workerEnvOverrides,
-  type RedisEndpoint,
 } from './e2e-env';
 
 describe('e2e-env (pure logic)', () => {

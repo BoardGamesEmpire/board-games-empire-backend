@@ -1,7 +1,8 @@
 import { FeedbackCategory, FeedbackContext, FeedbackSeverity } from '@bge/database';
 import { MAX_CLIENT_REQUEST_ID_LENGTH } from '@bge/shared';
 import { plainToInstance } from 'class-transformer';
-import { validate, ValidationError } from 'class-validator';
+import type { ValidationError } from 'class-validator';
+import { validate } from 'class-validator';
 import { FEEDBACK_BREADCRUMBS_MAX_BYTES, FEEDBACK_MAX_STACK_TRACE_LENGTH } from '../constants/feedback.constants';
 import {
   FEEDBACK_MAX_MESSAGE_LENGTH,
@@ -31,11 +32,11 @@ type PlainPayload = Record<string, unknown>;
 
 /** Convenience type for assembling valid-shaped fixtures. */
 interface BreadcrumbInput {
-  timestamp: string;
   level: BreadcrumbLogLevel;
   loggerName: string;
   message: string;
   sanitizedContext?: Record<string, unknown> | null;
+  timestamp: string;
 }
 
 function breadcrumb(overrides: Partial<BreadcrumbInput> = {}): BreadcrumbInput {
@@ -47,6 +48,7 @@ function breadcrumb(overrides: Partial<BreadcrumbInput> = {}): BreadcrumbInput {
     ...overrides,
   };
 }
+
 /** Loose-typed helper for invalid-payload cases (deliberately Record). */
 function rawBreadcrumb(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return { ...breadcrumb(), ...overrides };
@@ -587,10 +589,15 @@ describe('CreateFeedbackReportDto', () => {
           const serialized = JSON.stringify(candidate);
           const byteSize = Buffer.byteLength(serialized, 'utf8');
 
-          if (serialized.length >= FEEDBACK_BREADCRUMBS_MAX_BYTES) break; // safety
+          if (serialized.length >= FEEDBACK_BREADCRUMBS_MAX_BYTES) {
+            break; // safety
+          }
+
           entries.push(candidate[candidate.length - 1]!);
 
-          if (byteSize > FEEDBACK_BREADCRUMBS_MAX_BYTES + 4_096) break; // far enough over
+          if (byteSize > FEEDBACK_BREADCRUMBS_MAX_BYTES + 4_096) {
+            break; // far enough over
+          }
         }
 
         const serialized = JSON.stringify(entries);

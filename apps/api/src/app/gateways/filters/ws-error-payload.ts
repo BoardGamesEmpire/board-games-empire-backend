@@ -1,5 +1,7 @@
-import { ENVELOPE_FIELDS, errorEnvelope, type ErrorEnvelope } from '@bge/i18n';
-import { WsErrorEvents, type WsErrorPayload, type WsStructuredErrorPayload } from '@bge/shared';
+import type { ErrorEnvelope } from '@bge/i18n';
+import { ENVELOPE_FIELDS, errorEnvelope } from '@bge/i18n';
+import type { WsErrorPayload, WsStructuredErrorPayload } from '@bge/shared';
+import { WsErrorEvents } from '@bge/shared';
 import { setTimeout } from 'node:timers/promises';
 import type { Socket } from 'socket.io';
 
@@ -13,8 +15,8 @@ const AUTH_ERROR_FLUSH_MS = 100;
 
 /** The frame an error answers, as the exception host reports it. */
 export interface WsFrame {
-  readonly pattern: string;
   readonly data: unknown;
+  readonly pattern: string;
 }
 
 /**
@@ -86,6 +88,6 @@ function correlationIdOf(data: unknown): string | undefined {
     return undefined;
   }
 
-  const { correlationId } = data as { correlationId?: unknown };
+  const correlationId = 'correlationId' in data ? data.correlationId : undefined;
   return typeof correlationId === 'string' ? correlationId : undefined;
 }

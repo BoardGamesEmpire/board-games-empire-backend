@@ -34,13 +34,8 @@
  * inherit. `next.handle().subscribe(subscriber)` runs inside `runWith`
  * so AsyncLocalStorage propagates to async emissions downstream.
  */
-import {
-  type Actor,
-  type ActorContextInit,
-  AuditContextInternalService,
-  clonePluginUnit,
-  isPluginUnit,
-} from '@bge/actor-context';
+import type { Actor, ActorContextInit } from '@bge/actor-context';
+import { AuditContextInternalService, clonePluginUnit, isPluginUnit } from '@bge/actor-context';
 import { BGE_ACTOR_HEADER, CORRELATION_ID_HEADER, TRACEPARENT_HEADER } from '@bge/shared';
 import { resolveCorrelationId } from '@bge/utils';
 import type { Metadata } from '@grpc/grpc-js';
@@ -146,7 +141,8 @@ export class GrpcInternalActorInterceptor extends ActorInterceptor {
     try {
       parsed = JSON.parse(decoded);
     } catch (error) {
-      throw new BadRequestException(`'${BGE_ACTOR_HEADER}' is not valid JSON: ${(error as Error).message}`);
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new BadRequestException(`'${BGE_ACTOR_HEADER}' is not valid JSON: ${reason}`);
     }
 
     return validateActorShape(parsed);
@@ -156,12 +152,15 @@ export class GrpcInternalActorInterceptor extends ActorInterceptor {
     if (!value) {
       return null;
     }
+
     if ('metadata' in value && value.metadata) {
       return value.metadata;
     }
+
     if ('get' in value && typeof value.get === 'function') {
-      return value as Metadata;
+      return value;
     }
+
     return null;
   }
 
@@ -172,9 +171,11 @@ export class GrpcInternalActorInterceptor extends ActorInterceptor {
     if (typeof first === 'string') {
       return first;
     }
+
     if (first instanceof Buffer) {
       return first.toString('utf-8');
     }
+
     return undefined;
   }
 }
@@ -195,6 +196,7 @@ export const validateActorShape = (value: unknown): Actor => {
     throw new BadRequestException('actor payload is not an object');
   }
 
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- data from outside the process; parse it through a schema (#1322)
   const obj = value as Record<string, unknown>;
   if (typeof obj?.kind !== 'string') {
     throw new BadRequestException('actor payload missing string "kind"');
@@ -206,6 +208,7 @@ export const validateActorShape = (value: unknown): Actor => {
       if (typeof userId !== 'string') {
         throw new BadRequestException('user actor: userId must be a string');
       }
+
       return { kind: 'user', userId };
     }
 
@@ -215,7 +218,7 @@ export const validateActorShape = (value: unknown): Actor => {
         throw new BadRequestException('anonymous actor: userId must be a string');
       }
 
-      return { kind: 'anonymous', userId } as Actor;
+      return { kind: 'anonymous', userId };
     }
 
     case 'apiKey': {

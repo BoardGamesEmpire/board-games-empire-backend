@@ -4,7 +4,7 @@ import {
   isPrismaDependentRecordNotFoundError,
   ListKind,
   Prisma,
-  readBaseGameLinks,
+  readBaseGameLinksOnPlatform,
   readWishlistedPlatformGames,
   ResourceType,
 } from '@bge/database';
@@ -13,12 +13,8 @@ import { AbilityService, resolveActingUserIdOrNull, resolveScopeSubjectId, Scope
 import { PaginatedRows, PaginationQueryDto, pickDefined } from '@bge/shared';
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Http } from '@status/codes';
-import {
-  changedSince,
-  COLLECTION_INCLUDE,
-  type GameCollectionRow,
-  type GameCollectionWithRelations,
-} from './collection-row';
+import type { GameCollectionRow, GameCollectionWithRelations } from './collection-row';
+import { changedSince, COLLECTION_INCLUDE } from './collection-row';
 import {
   CreateGameCollectionDto,
   GameCollectionDto,
@@ -331,21 +327,25 @@ export class GameCollectionService {
 
   /**
    * Each row with its game's base games (#1070): the links whose base game is
-   * live and the viewer could open by id, the rule `GET /games/:id` uses. A
-   * game held more than once on the page is read once.
+   * live and the viewer could open by id, the rule `GET /games/:id` uses, and
+   * that has a platform game on the row's platform (#1391). A game held more
+   * than once on the page is read once.
    *
    * - A link read of its own, with the filter in its `where`: in
    *   `COLLECTION_INCLUDE` Prisma would drop a deny-all ceiling and name every
    *   base game (`docs/agents/gotchas.md`).
    * - The link's direction, not the game's content type, says which game is
    *   the base, so a row whose game is no expansion gets `[]`.
+   * - The links are keyed by platform game: one add-on held on two platforms
+   *   can list different base games on each row, and its `isStandalone`
+   *   follows the platform game's own content type where it has one (#1391).
    * - The ceiling needs no user, so an anonymous viewer of another user's
    *   collection gets the base games it could open, the Public ones.
    */
   private async rowsWithBaseGames(rows: readonly GameCollectionWithRelations[]): Promise<GameCollectionRow[]> {
-    const links = await readBaseGameLinks(
+    const links = await readBaseGameLinksOnPlatform(
       this.db,
-      [...new Set(rows.map((row) => row.platformGame.game.id))],
+      rows.map(({ platformGame }) => platformGame),
       this.scopeComposer.compose(ResourceType.Game, Action.read, { deletedAt: null }),
     );
 
@@ -353,7 +353,7 @@ export class GameCollectionService {
       ...row,
       platformGame: {
         ...platformGame,
-        game: { ...platformGame.game, baseGames: links.get(platformGame.game.id) ?? [] },
+        game: { ...platformGame.game, baseGames: links.get(platformGame.id) ?? [] },
       },
     }));
   }

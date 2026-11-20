@@ -2,11 +2,13 @@ import type { I18nPath } from '@bge/i18n';
 import { Logger } from '@nestjs/common';
 import { getRequest, setResponse } from 'better-call/node';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { coded, markBodyCutOff, type AuthRequestHandler } from './auth-request-handler';
+import type { AuthRequestHandler } from './auth-request-handler';
+import { coded, markBodyCutOff } from './auth-request-handler';
 
 export interface AuthNodeHandlerOptions {
   /** The most bytes of a request body read, beyond which the request is refused. */
   readonly maxBodyBytes: number;
+
   /** Renders a refusal's catalog key. */
   readonly render: (key: I18nPath) => string;
 }

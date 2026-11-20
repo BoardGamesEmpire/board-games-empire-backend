@@ -9,19 +9,21 @@ import {
   VoteThresholdType,
   VoteType,
 } from '@bge/database';
-import { createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
+import type { Actors, AuthenticatedActor } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { arrangeListEntry } from './event-fixtures';
 import { createEventClient, EVENTS_PATH } from './event-request';
+import type { NominationWire } from './event-wire';
 import {
   attendeeEnvelope,
   availabilitySummaryEnvelope,
   nominationEnvelope,
   occurrenceEnvelope,
   resolutionEnvelope,
-  type NominationWire,
 } from './event-wire';
 
 /**

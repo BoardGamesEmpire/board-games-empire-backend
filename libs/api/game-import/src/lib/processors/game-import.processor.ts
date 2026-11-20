@@ -1,4 +1,5 @@
-import { DatabaseService, JobStatus, Prisma, type ContentFormat } from '@bge/database';
+import type { ContentFormat } from '@bge/database';
+import { DatabaseService, JobStatus, Prisma } from '@bge/database';
 import { ActorAwareWorkerHost, extractJobMeta } from '@bge/queue-actor-context';
 import { guardWorkerEvent } from '@bge/utils';
 import { WebhookEventType, webhookEnvelope } from '@bge/webhooks';
@@ -8,14 +9,14 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Job } from 'bullmq';
 import { JobNames, QueueNames } from '../constants/queue.constants';
 import { ImportJobCompletedEvent } from '../events/import.events';
-import {
-  ImportJobOrigin,
-  type ExpansionImportJobPayload,
-  type GameImportJobPayload,
-  type ImportJobResult,
-  type PersistedJobFailure,
-  type PersistedJobResult,
+import type {
+  ExpansionImportJobPayload,
+  GameImportJobPayload,
+  ImportJobResult,
+  PersistedJobFailure,
+  PersistedJobResult,
 } from '../interfaces/import-job.interface';
+import { ImportJobOrigin } from '../interfaces/import-job.interface';
 import { ImportBatchCompletionService } from '../services/batch-completion.service';
 import { ExpansionSpawnerService } from '../services/expansion-spawner.service';
 import { GameUpsertService } from '../services/game.service';
@@ -88,8 +89,8 @@ export class GameImportProcessor extends ActorAwareWorkerHost<
       gameData,
       gatewayId,
       contentFormat,
-      origin === ImportJobOrigin.ChosenExpansion
-        ? (job.data as ExpansionImportJobPayload).requestedExternalId
+      origin === ImportJobOrigin.ChosenExpansion && 'requestedExternalId' in job.data
+        ? job.data.requestedExternalId
         : undefined,
     );
 
@@ -100,7 +101,7 @@ export class GameImportProcessor extends ActorAwareWorkerHost<
     // Idempotent, so a retry after a mid-spawn crash converges rather than
     // duplicating work.
     if (origin === ImportJobOrigin.Requested) {
-      await this.spawnExpansions(job as Job<GameImportJobPayload>);
+      await this.spawnExpansions(job);
     }
 
     // A game that needs a base game the game catalog lacks adds it to the
@@ -276,6 +277,7 @@ export class GameImportProcessor extends ActorAwareWorkerHost<
           data: {
             status: JobStatus.Failed,
             error: error.message,
+            // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Prisma's InputJsonValue needs an index signature, which an interface lacks, so the types aren't comparable and the cast goes through unknown (#1321)
             result: persistedFailure as unknown as Prisma.InputJsonValue,
           },
         });
@@ -305,6 +307,7 @@ export class GameImportProcessor extends ActorAwareWorkerHost<
         };
         await this.db.job.updateMany({
           where: { parentJobId: jobId, status: JobStatus.Pending },
+          // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Prisma's InputJsonValue needs an index signature, which an interface lacks, so the types aren't comparable and the cast goes through unknown (#1321)
           data: { status: JobStatus.Cancelled, result: cancellation as unknown as Prisma.InputJsonValue },
         });
 
@@ -385,6 +388,7 @@ export class GameImportProcessor extends ActorAwareWorkerHost<
       data: {
         status: JobStatus.Completed,
         completedAt: new Date(),
+        // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Prisma's InputJsonValue needs an index signature, which an interface lacks, so the types aren't comparable and the cast goes through unknown (#1321)
         result: result as unknown as Prisma.InputJsonValue,
         gameId: result.gameId,
       },

@@ -1,6 +1,8 @@
 import { EventEmitter } from 'node:events';
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { connect, type AddressInfo, type Socket } from 'node:net';
+import type { IncomingMessage, Server, ServerResponse } from 'node:http';
+import { createServer } from 'node:http';
+import type { AddressInfo, Socket } from 'node:net';
+import { connect } from 'node:net';
 import {
   API_REQUEST_TIMEOUT_MS,
   installRequestBodyRateGuard,
@@ -61,7 +63,7 @@ describe('request body rate guard (#1094)', () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   });
 
-  function client(): { socket: Socket; received: () => string; closed: Promise<void> } {
+  function client(): { closed: Promise<void>; received: () => string; socket: Socket } {
     const socket = connect(port, '127.0.0.1');
     sockets.add(socket);
     let text = '';
@@ -99,6 +101,7 @@ describe('request body rate guard (#1094)', () => {
         if (socket.destroyed) {
           return resolve();
         }
+
         socket.write(CHUNK);
         if (++sent === chunks) {
           stopTimers();
@@ -114,6 +117,7 @@ describe('request body rate guard (#1094)', () => {
       if (received().split('HTTP/1.1 200').length - 1 >= count) {
         return;
       }
+
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
   }

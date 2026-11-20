@@ -1,4 +1,5 @@
-import { Action, type ResourceType } from '@bge/database';
+import type { ResourceType } from '@bge/database';
+import { Action } from '@bge/database';
 import { accessibleBy } from '@casl/prisma';
 import { abilityOfRules } from '../ability-of-rules';
 import type { AppAbility, ModelResourceType } from '../interfaces';
@@ -84,6 +85,7 @@ export function resourceTypeAccess(
   resourceType: ResourceType,
   onUnreadable: (action: Action, error: unknown) => void,
 ): ResourceTypeAccess {
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Object.fromEntries types its keys as string, so it can't return a record keyed by every Action (#1321)
   return Object.fromEntries(
     Object.values(Action).map((action) => {
       try {
@@ -137,5 +139,6 @@ function extentFor(ability: AppAbility, action: Action, resourceType: ResourceTy
 
 /** Whether `ability`'s clause for `action` on `resourceType` admits every row (#757). */
 function reachesEveryRecord(ability: AppAbility, action: Action, resourceType: ResourceType): boolean {
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- `ofType` is typed for Prisma model names only, but reads the ability's rules for any subject type, which a ResourceType without a model has too (#1321)
   return Object.keys(accessibleBy(ability, action).ofType(resourceType as ModelResourceType)).length === 0;
 }

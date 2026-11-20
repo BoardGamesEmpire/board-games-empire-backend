@@ -31,7 +31,7 @@ export type QuotaUsageProvider = (scope: QuotaScope, scopeId: string, db?: Quota
  * throws, rather than silently passing.
  */
 export interface QuotaResourceDefinition {
-  readonly key: QuotaResource;
   readonly applicableScopes: readonly QuotaScope[];
+  readonly key: QuotaResource;
   readonly usage?: QuotaUsageProvider;
 }

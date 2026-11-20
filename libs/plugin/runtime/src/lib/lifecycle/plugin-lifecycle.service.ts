@@ -5,6 +5,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PluginConfigValidationError } from '../config/config-schema.errors';
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
+import { isSameConfigDocument } from '../config/same-config-document';
 import {
   PluginConfigUpdatedEvent,
   PluginDisabledEvent,
@@ -14,9 +15,11 @@ import {
 import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
 import { disablePluginDataGatewayRow } from '../install/plugin-data-gateway-row';
 import { PluginInstanceRegistry } from '../loader/plugin-instance-registry';
-import { bindManifest, classifyManifestMove, type ClaimedPluginRow } from '../manifest/manifest-move';
+import type { ClaimedPluginRow } from '../manifest/manifest-move';
+import { bindManifest, classifyManifestMove } from '../manifest/manifest-move';
 import { revalidateStoredManifest } from '../manifest/stored-manifest';
-import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
+import type { PluginModuleOptions } from '../plugin-module.options';
+import { MODULE_OPTIONS_TOKEN } from '../plugin-module.options';
 import { CLEARED_STAGED_UPDATE } from '../update/staged-update.columns';
 import {
   PluginLifecycleAuthorityError,
@@ -27,12 +30,12 @@ import {
 } from './lifecycle.errors';
 
 export interface PluginLifecycleActionInput {
-  readonly slug: string;
-
   /**
    *  The acting admin — resolved from CLS at the API edge, verified here, never taken from a request body.
    */
   readonly actorId: string;
+
+  readonly slug: string;
 }
 
 export interface PluginConfigWriteInput extends PluginLifecycleActionInput {
@@ -45,9 +48,10 @@ export interface PluginUninstallInput extends PluginLifecycleActionInput {
 }
 
 export interface PluginUninstallResult {
-  readonly plugin: Plugin;
   /** Household/user units that had the plugin enabled at uninstall time — the announcement seam (#324). */
   readonly affectedUnits: readonly PluginUnit[];
+
+  readonly plugin: Plugin;
 }
 
 /**
@@ -69,8 +73,10 @@ export interface PluginUninstallResult {
  *
  * Uninstall (tombstone, not delete): purges every `PluginGrant` (durable
  * denials included — reinstall is fresh consent) and the `PluginPermission`
- * catalog, retains the row and, by default, unit config rows; clears any
- * staged update (once cleared, no row names the staged artifact's directory,
+ * catalog, retains the row and, by default, unit config rows; switches every
+ * household and user unit enablement off, so a reinstall finds each unit off
+ * and switching one on again is a consent act (#1328); clears any staged
+ * update (once cleared, no row names the staged artifact's directory,
  * so the plugin artifact sweep, #1094, removes it); force-disables in
  * the same write — the
  * loader's boot query treats that as an invariant — and sets
@@ -143,7 +149,7 @@ export class PluginLifecycleService {
     // the document this write replaced, not the one the pre-transaction read
     // saw: a PATCH queued behind another reports the change from that one's
     // document.
-    const { before, updated } = await this.db.$transaction(async (tx) => {
+    const { before, updated, changed } = await this.db.$transaction(async (tx) => {
       const rows = await tx.$queryRaw<
         (ClaimedPluginRow & { config: Prisma.JsonValue })[]
       >`SELECT uninstalled_at, version, installed_at, config, manifest_json = ${bindManifest(plugin.manifestJson)}::jsonb AS manifest_matches
@@ -164,24 +170,37 @@ export class PluginLifecycleService {
         throw new PluginLifecyclePluginChangedError(plugin.slug, moved, plugin.version, row.version);
       }
 
+      // The document the claim found, sent again, changes nothing: no write,
+      // no event, and the row as it stands (#903).
+      if (isSameConfigDocument(row.config, input.config)) {
+        return {
+          before: row.config,
+          updated: await tx.plugin.findUniqueOrThrow({ where: { id: plugin.id } }),
+          changed: false,
+        };
+      }
+
       const written = await tx.plugin.update({
         where: { id: plugin.id },
+        // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Prisma's InputJsonValue can't take Record<string, unknown>; the document is JSON the plugin's config schema has checked (#1321)
         data: { config: input.config as Prisma.InputJsonValue },
       });
 
-      return { before: row.config, updated: written };
+      return { before: row.config, updated: written, changed: true };
     });
 
     // The reload needs no direct publish: the lifecycle listener is the
     // single publish site for the config channel and reacts to this event.
-    this.emitter.emit(
-      PluginConfigUpdatedEvent.eventName,
-      new PluginConfigUpdatedEvent(
-        { id: plugin.id, slug: plugin.slug, config: before },
-        { id: updated.id, slug: updated.slug, config: updated.config },
-        initiatedAt,
-      ),
-    );
+    if (changed) {
+      this.emitter.emit(
+        PluginConfigUpdatedEvent.eventName,
+        new PluginConfigUpdatedEvent(
+          { id: plugin.id, slug: plugin.slug, config: before },
+          { id: updated.id, slug: updated.slug, config: updated.config },
+          initiatedAt,
+        ),
+      );
+    }
 
     return updated;
   }
@@ -206,18 +225,20 @@ export class PluginLifecycleService {
         throw new PluginLifecycleTombstonedError(plugin.slug, await this.readTombstone(tx, plugin.slug, initiatedAt));
       }
 
-      // Captured AFTER the claim and BEFORE the purge, and both halves are
-      // load-bearing. Before the purge because under `purgeData` these rows
-      // are gone by commit time, and the event payload is the only durable
-      // record of who the removal affected. After the claim because a unit
-      // writer racing this transaction is ordered by the claim's row lock,
-      // not by anything earlier: the unit paths read the plugin row
-      // `FOR SHARE` (#323), so one that got its share lock first blocks the
-      // claim until it commits — and is then visible to this read — while
-      // one arriving later blocks on the claim and refuses over the
-      // tombstone it sees. Read before the claim, a first enable committing
-      // in that window is purged without ever being announced, and the
-      // household is never told the plugin it just turned on is gone.
+      // Captured AFTER the claim and BEFORE the switch-off and the purge, and
+      // both halves are load-bearing. Before them because each takes away
+      // what this reads: the switch-off leaves no unit enablement on (#1328),
+      // and under `purgeData` the rows are gone by commit time, so the event
+      // payload is the only durable record of who the removal affected.
+      // After the claim because a unit writer racing this transaction is
+      // ordered by the claim's row lock, not by anything earlier: the unit
+      // paths read the plugin row `FOR SHARE` (#323), so one that got its
+      // share lock first blocks the claim until it commits — and is then
+      // visible to this read — while one arriving later blocks on the claim
+      // and refuses over the tombstone it sees. Read before the claim, a
+      // first enable committing in that window is purged without ever being
+      // announced, and the household is never told the plugin it just turned
+      // on is gone.
       const affectedHouseholds = await tx.householdPlugin.findMany({
         where: { pluginId: plugin.id, enabled: true },
         select: { householdId: true },
@@ -234,9 +255,25 @@ export class PluginLifecycleService {
       // a reinstall enables it again (#1083). Other categories have no row.
       await disablePluginDataGatewayRow(tx, plugin.id);
 
+      // Every unit enablement has one of two fates. Under `purgeData` it is
+      // deleted with its configuration. Otherwise it is kept and switched off,
+      // its configuration kept, so nothing reads as on for a plugin that is
+      // not installed and a reinstall finds every unit off: a unit that wants
+      // the plugin back switches it on, a consent act under the sha then
+      // installed (#1328). Either way no unit is announced on its own: the
+      // uninstall event names the units the reads above found on.
       if (input.purgeData === true) {
         await tx.householdPlugin.deleteMany({ where: { pluginId: plugin.id } });
         await tx.userPlugin.deleteMany({ where: { pluginId: plugin.id } });
+      } else {
+        await tx.householdPlugin.updateMany({
+          where: { pluginId: plugin.id, enabled: true },
+          data: { enabled: false },
+        });
+        await tx.userPlugin.updateMany({
+          where: { pluginId: plugin.id, enabled: true },
+          data: { enabled: false },
+        });
       }
 
       const row = await tx.plugin.findUniqueOrThrow({ where: { id: plugin.id } });

@@ -1,5 +1,6 @@
 import type { AuditContextService } from '@bge/actor-context';
-import { CodedHttpException, translateException, type I18nTranslations } from '@bge/i18n';
+import type { I18nTranslations } from '@bge/i18n';
+import { CodedHttpException, translateException } from '@bge/i18n';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
 import { betterAuth } from 'better-auth';
 import { memoryAdapter } from 'better-auth/adapters/memory';
@@ -16,7 +17,7 @@ const UNTRUSTED = 'https://evil.example';
 const SESSION_COOKIE = `${AUTH_COOKIE_PREFIX}.session_token=the-token.signature`;
 
 /** A real better-auth instance, so the origins are matched as better-auth matches them over HTTP. */
-const serviceWith = (advanced: { disableOriginCheck: boolean; disableCSRFCheck?: boolean }) =>
+const serviceWith = (advanced: { disableCSRFCheck?: boolean; disableOriginCheck: boolean }) =>
   new AuthService(
     betterAuth({
       telemetry: { enabled: false },

@@ -1,4 +1,5 @@
-import { Logger, type ExecutionContext } from '@nestjs/common';
+import type { ExecutionContext } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import { createIpTracker } from './ip-tracker';
 
 /**
@@ -7,7 +8,7 @@ import { createIpTracker } from './ip-tracker';
  */
 
 /** A request stand-in carrying the two things the tracker reads. */
-function request(options: { peer?: string; forwardedFor?: string | string[] } = {}) {
+function request(options: { forwardedFor?: string | string[]; peer?: string } = {}) {
   const headers: Record<string, string | string[]> = {};
   if (options.forwardedFor !== undefined) {
     headers['x-forwarded-for'] = options.forwardedFor;

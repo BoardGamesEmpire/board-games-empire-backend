@@ -1,4 +1,5 @@
-import { SystemRole, type PrismaClient, type User } from '@bge/database';
+import type { PrismaClient, User } from '@bge/database';
+import { SystemRole } from '@bge/database';
 import { makeUser } from '@bge/testing';
 import { createActors } from './actors.js';
 import { SET_AUTH_TOKEN_HEADER, SIGN_IN_ANONYMOUS_PATH } from './signup.js';
@@ -16,11 +17,11 @@ import { SET_AUTH_TOKEN_HEADER, SIGN_IN_ANONYMOUS_PATH } from './signup.js';
  * rather than against itself.
  */
 interface FakeWorld {
-  readonly prisma: PrismaClient;
-  readonly fetchFn: typeof fetch;
-  signupCount(): number;
-  ownerCount(): number;
   clearUsers(): void;
+  readonly fetchFn: typeof fetch;
+  ownerCount(): number;
+  readonly prisma: PrismaClient;
+  signupCount(): number;
 }
 
 /** Prisma's "at least one related row" filter, `{ some: {} }`, and nothing narrower. */
@@ -65,17 +66,19 @@ function matchesWhere(row: object, where: Readonly<Record<string, unknown>>): bo
 
 function createFakeWorld(
   options: {
+    anonymousRoles?: readonly SystemRole[];
+    firstHumanRoles?: readonly SystemRole[];
+    laterHumanRoles?: readonly SystemRole[];
     preexistingHumans?: number;
+
     // Rows already in the database, for the cases a plain human cannot
     // arrange: a leftover guest, a NULL anonymous flag. Like the humans above,
     // they have been provisioned and hold a role.
     preexistingRows?: readonly Partial<User>[];
+
     // Human rows that exist but that provisioning has not reached yet: a
     // signup whose row committed and whose handler has not run (#430).
     unprovisionedHumans?: number;
-    firstHumanRoles?: readonly SystemRole[];
-    laterHumanRoles?: readonly SystemRole[];
-    anonymousRoles?: readonly SystemRole[];
   } = {},
 ): FakeWorld {
   // What "provisioning" grants. Both branches are overridable so a spec can
@@ -140,7 +143,7 @@ function createFakeWorld(
       });
     }
 
-    const body = JSON.parse(String(init?.body)) as { name: string; email: string };
+    const body = JSON.parse(String(init?.body)) as { email: string; name: string };
     signups += 1;
 
     const user = makeUser({ id: `usr_${signups}`, username: body.name, email: body.email });
@@ -150,6 +153,7 @@ function createFakeWorld(
     if (provisionedHumanCount() === 0) {
       ownerIds.add(user.id);
     }
+
     users.set(user.id, user);
     provisionedIds.add(user.id);
 
@@ -167,6 +171,7 @@ function createFakeWorld(
         if (user === undefined) {
           throw new Error(`fake: no user '${args.where.id}'`);
         }
+
         return user;
       },
       count: async (args: { where: Readonly<Record<string, unknown>> }) =>

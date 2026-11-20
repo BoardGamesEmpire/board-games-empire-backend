@@ -18,7 +18,7 @@ const buildMockAuditContext = (): MockAuditContext => ({
 
 const buildScope = (
   audit: MockAuditContext = buildMockAuditContext(),
-): { scope: SystemActorScope; audit: MockAuditContext } => ({
+): { audit: MockAuditContext; scope: SystemActorScope } => ({
   scope: new SystemActorScope(audit as unknown as AuditContextInternalService),
   audit,
 });

@@ -4,7 +4,13 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import assert from 'node:assert';
 import type { BgeIdentityConfig } from './configuration/bge-identity.config';
-import { AUTH_BASE_PATH, authPath, SERVER_DISCOVERY_PATH, WELL_KNOWN_SCHEMA_VERSION } from './constants';
+import {
+  AUTH_BASE_PATH,
+  authPath,
+  PRIVACY_POLICY_PATH,
+  SERVER_DISCOVERY_PATH,
+  WELL_KNOWN_SCHEMA_VERSION,
+} from './constants';
 import { AuthStrategyDto, BgeDiscoveryDto } from './dto/bge-discovery.dto';
 import { EmailAndPasswordStrategyDto } from './dto/email-and-password-strategy.dto';
 import { OidcStrategyDto } from './dto/oidc-strategy.dto';
@@ -15,15 +21,16 @@ import { OidcStrategyDto } from './dto/oidc-strategy.dto';
  * The client id and secret are not part of it, so they are never in reach.
  */
 interface ListedSignInProvider {
-  readonly id: string;
-  readonly displayName: string;
   readonly discoveryUrl: string;
+  readonly displayName: string;
+  readonly id: string;
 }
 
 /** The two settings that decide what discovery says about password resets (#654). */
 interface PasswordResetSettings {
   /** The settings switch, `allowPasswordResets`. */
   readonly allowed: boolean;
+
   /** Whether the server can send the reset email. */
   readonly mailConfigured: boolean;
 }
@@ -78,6 +85,10 @@ export class StrategyService {
     // Where a signed-in client learns the rest (#78). The same constant a
     // controller test pins the route to; an e2e test follows the pointer.
     dto.bgeServerDiscoveryEndpoint = SERVER_DISCOVERY_PATH;
+
+    // Where anyone, signed in or not, reads the privacy policy (#934). An e2e
+    // test follows the pointer to the route.
+    dto.bgePrivacyPolicyEndpoint = PRIVACY_POLICY_PATH;
 
     // capability flags — always-on plugins (see auth-factory.ts)
     dto.bgePasskeySupported = true;

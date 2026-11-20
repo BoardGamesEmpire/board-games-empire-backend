@@ -1,27 +1,22 @@
 import { AuditContextService } from '@bge/actor-context';
-import {
-  MODULE_OPTIONS_TOKEN,
-  PluginGrantAuthorityService,
-  PluginInstallAuthorityError,
-  type PluginModuleOptions,
-} from '@bge/plugin';
+import type { PluginModuleOptions } from '@bge/plugin';
+import { MODULE_OPTIONS_TOKEN, PluginGrantAuthorityService, PluginInstallAuthorityError } from '@bge/plugin';
 import { PluginArtifactTooLargeError } from '@bge/plugin-artifacts';
 import { PLUGIN_ARCHIVE_MAX_COMPRESSED_BYTES } from '@boardgamesempire/plugin-manifest';
-import {
-  Inject,
-  Injectable,
-  Logger,
-  type CallHandler,
-  type ExecutionContext,
-  type NestInterceptor,
-} from '@nestjs/common';
+import type { CallHandler, ExecutionContext, NestInterceptor } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import multer, { MulterError } from 'multer';
 import { rmSync } from 'node:fs';
-import { finalize, type Observable } from 'rxjs';
+import type { Observable } from 'rxjs';
+import { finalize } from 'rxjs';
 import { PluginArtifactUploadInvalidError } from './plugin-artifact-upload-invalid.error';
-import { PluginArtifactUploadStorage, type PluginArtifactUploadedFile } from './plugin-artifact-upload.storage';
+import type { PluginArtifactUploadedFile } from './plugin-artifact-upload.storage';
+import { PluginArtifactUploadStorage } from './plugin-artifact-upload.storage';
 
 const UPLOAD_FIELD = 'file';
+
+/** Multer's single-file middleware, an Express handler. */
+type UploadHandler = ReturnType<ReturnType<typeof multer>['single']>;
 
 /**
  * Multer's own size limit can fire before the storage's counter does (the
@@ -63,7 +58,7 @@ export const transformUploadError = (error: unknown): unknown => {
 @Injectable()
 export class PluginArtifactUploadInterceptor implements NestInterceptor {
   private readonly logger = new Logger(PluginArtifactUploadInterceptor.name);
-  private readonly upload: ReturnType<ReturnType<typeof multer>['single']>;
+  private readonly upload: UploadHandler;
 
   constructor(
     @Inject(MODULE_OPTIONS_TOKEN) options: PluginModuleOptions,
@@ -83,10 +78,10 @@ export class PluginArtifactUploadInterceptor implements NestInterceptor {
     }
 
     const http = context.switchToHttp();
-    const request = http.getRequest<{ file?: PluginArtifactUploadedFile }>();
+    const request = http.getRequest<Parameters<UploadHandler>[0] & { file?: PluginArtifactUploadedFile }>();
 
     await new Promise<void>((resolve, reject) =>
-      this.upload(request as never, http.getResponse(), (error: unknown) =>
+      this.upload(request, http.getResponse(), (error: unknown) =>
         error ? reject(transformUploadError(error)) : resolve(),
       ),
     );

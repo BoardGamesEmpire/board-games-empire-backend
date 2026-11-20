@@ -1,4 +1,5 @@
-import { FALLBACK_LOCALE, type I18nMessage, type I18nTranslations, LocaleResolutionService } from '@bge/i18n';
+import type { I18nMessage, I18nTranslations } from '@bge/i18n';
+import { FALLBACK_LOCALE, LocaleResolutionService } from '@bge/i18n';
 import type { BaseClientData } from '@bge/shared';
 import { Injectable, Logger } from '@nestjs/common';
 import { I18nService } from 'nestjs-i18n';
@@ -65,7 +66,7 @@ export class WsTranslator {
    * callback that runs outside the frame, as a coordinator stream's do.
    */
   forClient(client: Socket, marker: I18nMessage): string {
-    const { locale } = client.data as Partial<BaseClientData>;
+    const { locale }: Partial<BaseClientData> = client.data;
 
     return this.translate(locale ?? FALLBACK_LOCALE, marker);
   }

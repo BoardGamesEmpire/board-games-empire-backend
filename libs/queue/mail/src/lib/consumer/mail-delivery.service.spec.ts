@@ -1,9 +1,11 @@
 import { NotificationType, SmtpSecurity } from '@bge/database';
 import { LocaleResolutionService } from '@bge/i18n';
-import { MAIL_SETTINGS_SELECT, MailFailureCode, mailFrom, smtpTransportOptions, type MailSettings } from '@bge/mail';
+import type { MailSettings } from '@bge/mail';
+import { MAIL_SETTINGS_SELECT, MailFailureCode, mailFrom, smtpTransportOptions } from '@bge/mail';
 import { NotificationsService } from '@bge/notifications-service';
 import { EncryptionService } from '@bge/services';
-import { createTestingModuleWithDb, MockDatabaseService } from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { createTestingModuleWithDb } from '@bge/testing';
 import { Logger } from '@nestjs/common';
 import { UnrecoverableError } from 'bullmq';
 import { I18nService } from 'nestjs-i18n';
@@ -391,9 +393,11 @@ describe('MailDeliveryService', () => {
     for (const wanted of ['MAIL_AUTH_FAILED', 'EAUTH', '535', 'AUTH PLAIN', job.message.kind]) {
       expect(line).toContain(wanted);
     }
+
     for (const forbidden of ['secret-ish', 'tok', 'c.example', 'sam@example.test']) {
       expect(line).not.toContain(forbidden);
     }
+
     warn.mockRestore();
   });
 

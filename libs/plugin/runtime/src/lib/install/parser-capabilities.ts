@@ -19,9 +19,11 @@ export type ParserParseOptions = typeof MODULE_PARSE_OPTIONS | typeof SCRIPT_PAR
 export interface ParserCapabilityProbe {
   /** Stable identifier, carried on `PluginStaticAnalysisUnavailableError.failedCapabilities`. */
   readonly capability: string;
+
+  readonly options: ParserParseOptions;
+
   /** Minimal source exercising exactly this capability — parseable, never executed. */
   readonly source: string;
-  readonly options: ParserParseOptions;
 }
 
 /**

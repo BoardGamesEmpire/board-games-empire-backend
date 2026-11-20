@@ -1,5 +1,6 @@
 import { MutationEvent } from '@bge/actor-context';
-import { ResourceType, type Job } from '@bge/database';
+import type { Job } from '@bge/database';
+import { ResourceType } from '@bge/database';
 import { ImportEvents } from '../constants/queue.constants';
 import type { ImportJobOrigin, PlatformGameRef } from '../interfaces/import-job.interface';
 import type { ImportErrorCode } from '../utils/sanitize-import-error';
@@ -35,21 +36,18 @@ type ImportJobStatusSnapshot = Readonly<Pick<Job, 'id' | 'status'>>;
  */
 export interface ImportJobEventContext {
   batchId: string;
-  gatewayId: string;
   externalId: string;
+  gatewayId: string;
   origin: ImportJobOrigin;
 }
 
 /** First Pending → Running transition of a fetch job's backing Job row. */
 export class ImportJobStartedEvent extends MutationEvent<Job> {
   static readonly eventName = ImportEvents.JobStarted;
-
   declare readonly before: ImportJobStatusSnapshot;
   declare readonly after: ImportJobStatusSnapshot;
-
   readonly subject = ResourceType.Job;
   readonly subjectId: string;
-
   readonly batchId: string;
   readonly gatewayId: string;
   readonly externalId: string;
@@ -77,39 +75,44 @@ export class ImportJobStartedEvent extends MutationEvent<Job> {
 type ImportJobCompletedSnapshot = Readonly<Pick<Job, 'id' | 'status'> & { gameId: string }>;
 
 export interface ImportJobCompletedContext extends ImportJobEventContext {
-  gameTitle: string;
-  thumbnail: string | null;
-  /** True when the Game row was created for the first time (not a re-import). */
-  gameCreated: boolean;
-  /** True when this specific gatewayId+externalId GameSource was new. */
-  sourceCreated: boolean;
-  platformGames: PlatformGameRef[];
   /** The base games the import linked the game to, in the order its DataGateway named them (#971). */
   baseGameIds: string[];
+
+  /** True when the Game row was created for the first time (not a re-import). */
+  gameCreated: boolean;
+
+  gameTitle: string;
+
   /**
    * True when the game is an add-on with a base game: linked to one, or
-   * adding the one it needs to the batch (#971). A remake or edition linked
-   * to its original is not.
+   * adding the one it needs to the batch (#971). A game of any other content
+   * type is not an expansion and gets no add-on link (#971, #1391).
    */
   isExpansion: boolean;
+
+  platformGames: PlatformGameRef[];
+
+  /** True when this specific gatewayId+externalId GameSource was new. */
+  sourceCreated: boolean;
+
+  thumbnail: string | null;
 }
 
 /** Running → Completed transition of an import job's Job row. */
 export class ImportJobCompletedEvent extends MutationEvent<Job> {
   static readonly eventName = ImportEvents.JobCompleted;
-
   declare readonly before: ImportJobStatusSnapshot;
   declare readonly after: ImportJobCompletedSnapshot;
-
   readonly subject = ResourceType.Job;
   readonly subjectId: string;
-
   readonly batchId: string;
   readonly gatewayId: string;
   readonly externalId: string;
   readonly origin: ImportJobOrigin;
+
   /** True when the game is an add-on with a base game, whatever its origin (#971). */
   readonly isExpansion: boolean;
+
   readonly gameTitle: string;
   readonly thumbnail: string | null;
   readonly gameCreated: boolean;
@@ -147,7 +150,7 @@ export class ImportJobCompletedEvent extends MutationEvent<Job> {
  * hostnames, Prisma text) lives only in the `Job.error` DB column and
  * operator logs; it must never appear on this event.
  */
-type FailedJobResult = { errorCode: ImportErrorCode; error: string };
+type FailedJobResult = { error: string; errorCode: ImportErrorCode };
 
 type ImportJobFailedSnapshot = Readonly<Pick<Job, 'id' | 'status'> & { result: FailedJobResult }>;
 
@@ -161,13 +164,10 @@ type ImportJobFailedBeforeSnapshot = Readonly<Pick<Job, 'id'>>;
 /** Terminal → Failed transition of a job's Job row. */
 export class ImportJobFailedEvent extends MutationEvent<Job> {
   static readonly eventName = ImportEvents.JobFailed;
-
   declare readonly before: ImportJobFailedBeforeSnapshot;
   declare readonly after: ImportJobFailedSnapshot;
-
   readonly subject = ResourceType.Job;
   readonly subjectId: string;
-
   readonly batchId: string;
   readonly gatewayId: string;
   readonly externalId: string;

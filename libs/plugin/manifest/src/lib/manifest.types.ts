@@ -1,7 +1,7 @@
-import { z } from 'zod';
+import type { z } from 'zod';
 import type { PluginConsentScopeValue } from './constants.js';
 import type { ManifestWarning } from './errors.js';
-import {
+import type {
   pluginFeatureDeclarationSchema,
   pluginManifestSchema,
   pluginPermissionRequestSchema,
@@ -29,9 +29,9 @@ export type PermissionCheckOrigin = 'plugin' | 'core';
  * `PluginPermission` rows, and lifecycle payloads carry `canonicalSlug`.
  */
 export type NormalizedPermissionRequest = Omit<PluginPermissionRequest, 'consentScope'> & {
+  readonly canonicalSlug: string;
   readonly consentScope: PluginConsentScopeValue;
   readonly origin: PermissionCheckOrigin;
-  readonly canonicalSlug: string;
 };
 
 /** One `declares[]` entry with its generated canonical form. */
@@ -48,10 +48,11 @@ export interface DeclaredPluginPermission {
  * the partition to the pipeline keeps this lib database-free.
  */
 export interface PluginManifestValidationResult {
-  readonly manifest: PluginManifest;
-  readonly permissionChecks: readonly NormalizedPermissionRequest[];
   /** Every `declares[]` entry expanded to canonical form — the install pipeline's `PluginPermission` seed input. */
   readonly declaredPermissions: readonly DeclaredPluginPermission[];
+
   readonly externalPermissionChecks: readonly string[];
+  readonly manifest: PluginManifest;
+  readonly permissionChecks: readonly NormalizedPermissionRequest[];
   readonly warnings: readonly ManifestWarning[];
 }

@@ -1,8 +1,10 @@
 import { Reach } from '@bge/database';
-import { createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
+import type { Actors, AuthenticatedActor } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { arrangeCollectionEntry } from './game-collection-fixtures';
 import { listCollectionsEnvelope, readCollectionEnvelope } from './game-collection-wire';
 
@@ -75,6 +77,7 @@ describe('game collection read scope', () => {
         );
         expect(read.collection.id).toBe(strangersEntry);
       }
+
       await readEntry(plainUser, strangersEntry).expect(404);
 
       for (const [who, actor, ownId] of staff) {

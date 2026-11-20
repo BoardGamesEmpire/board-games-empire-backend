@@ -1,13 +1,13 @@
 import { Action, ListKind, Prisma, Reach, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
+import type { MockDatabaseService } from '@bge/testing';
 import {
   batchTransactionCall,
   createTestingModuleWithDb,
   paginationQuery,
   rawQueryText,
   unwrapTransaction,
-  type MockDatabaseService,
 } from '@bge/testing';
 import { ForbiddenException, Logger } from '@nestjs/common';
 import { LISTS_MAX_PER_USER } from './list.constants';

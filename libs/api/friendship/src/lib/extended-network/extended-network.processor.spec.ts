@@ -1,6 +1,8 @@
 import type { JobMetaEnvelope } from '@bge/queue-actor-context';
-import { DelayedError, type Job, UnrecoverableError } from 'bullmq';
-import { type ExtendedNetworkJob, ExtendedNetworkJobNames } from './extended-network-queue.constants';
+import type { Job } from 'bullmq';
+import { DelayedError, UnrecoverableError } from 'bullmq';
+import type { ExtendedNetworkJob } from './extended-network-queue.constants';
+import { ExtendedNetworkJobNames } from './extended-network-queue.constants';
 import { ExtendedNetworkProcessor } from './extended-network.processor';
 import type { ExtendedNetworkService } from './extended-network.service';
 
@@ -15,7 +17,7 @@ describe('ExtendedNetworkProcessor (#497)', () => {
   const processor = new ExtendedNetworkProcessor(extendedNetwork as unknown as ExtendedNetworkService);
 
   const meta = { actor: { kind: 'system', reason: 'extended-network-rebuild' }, correlationId: 'c-1' };
-  let job: { updateData: jest.Mock; moveToDelayed: jest.Mock };
+  let job: { moveToDelayed: jest.Mock; updateData: jest.Mock };
 
   const run = (name: string, data: ExtendedNetworkJob) =>
     (processor as unknown as { processJob: (job: Job<JobData>, token?: string) => Promise<unknown> }).processJob(

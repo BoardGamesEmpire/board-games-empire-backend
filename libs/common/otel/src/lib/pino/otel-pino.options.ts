@@ -1,4 +1,5 @@
-import { buildBasePinoOptions, resolvePinoLevel, type LogDestination } from '@bge/logger';
+import type { LogDestination } from '@bge/logger';
+import { buildBasePinoOptions, resolvePinoLevel } from '@bge/logger';
 import { context, trace } from '@opentelemetry/api';
 import type { LoggerOptions, TransportTargetOptions } from 'pino';
 

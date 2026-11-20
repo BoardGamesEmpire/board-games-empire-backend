@@ -3,7 +3,7 @@ import { ListScopeNotComposedError } from '@bge/shared';
 import { paginationQuery } from '@bge/testing';
 import { ClsServiceManager } from 'nestjs-cls';
 import { firstValueFrom } from 'rxjs';
-import { GameCollectionService } from './game-collection.service';
+import type { GameCollectionService } from './game-collection.service';
 import { UserGameCollectionsController } from './user-game-collections.controller';
 
 const PAGINATION = paginationQuery({ limit: 20 });

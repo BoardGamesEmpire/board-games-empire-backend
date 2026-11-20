@@ -1,17 +1,20 @@
-import { discardBody, type UpstreamFetch } from '@boardgamesempire/gateway-driver-contract';
+import type { UpstreamFetch } from '@boardgamesempire/gateway-driver-contract';
+import { discardBody } from '@boardgamesempire/gateway-driver-contract';
 import type { IGDBClient } from './igdb-client.interface';
 import { IgdbHttpError } from './igdb-http.error';
 
 export const IGDB_BASE_URL = 'https://api.igdb.com/v4';
 
 export interface IgdbQueryOptions {
-  /** How the query reaches IGDB; it has no other way (#1082). */
-  fetch: UpstreamFetch;
-  clientId: string;
   accessToken: string;
 
   /** Defaults to {@link IGDB_BASE_URL}. */
   baseUrl?: string;
+
+  clientId: string;
+
+  /** How the query reaches IGDB; it has no other way (#1082). */
+  fetch: UpstreamFetch;
 }
 
 /** The clauses a query can set once, by name. */
@@ -105,6 +108,7 @@ export class IgdbQuery implements IGDBClient {
       throw new IgdbHttpError(response.status, endpoint);
     }
 
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- data from outside the process; parse it through a schema (#1322)
     return { data: (await response.json()) as T[] };
   }
 }

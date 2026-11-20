@@ -1,12 +1,6 @@
-import {
-  Action,
-  DatabaseService,
-  isPrismaDependentRecordNotFoundError,
-  ResourceType,
-  type EventOccurrencePolicy,
-  type EventPolicy,
-  type Prisma,
-} from '@bge/database';
+import { changedKeys } from '@bge/actor-context';
+import type { EventOccurrencePolicy, EventPolicy, Prisma } from '@bge/database';
+import { Action, DatabaseService, isPrismaDependentRecordNotFoundError, ResourceType } from '@bge/database';
 import { CodedHttpException, t } from '@bge/i18n';
 import { AbilityService } from '@bge/permissions';
 import { webhookEnvelope, WebhookEventType } from '@bge/webhooks';
@@ -16,7 +10,6 @@ import { Http } from '@status/codes';
 import assert from 'node:assert';
 import { eventWebhookIds } from '../event.service';
 import { lockLiveEvent } from '../utils/lock-live-event.util';
-import { changedKeys } from '../utils/pick-snapshot.util';
 import type { UpdateEventPolicyDto } from './dto/update-event-policy.dto';
 import type { UpdateOccurrencePolicyDto } from './dto/update-occurrence-policy.dto';
 import { assertValidVotingPolicy, foldPolicy } from './effective-policy';
@@ -31,14 +24,8 @@ import {
   replaceOccurrencePolicyLists,
   splitPolicyPatch,
 } from './policy-lists';
-import {
-  POLICY_VIEW_INCLUDE,
-  toEventPolicyView,
-  toOccurrencePolicyView,
-  type EventPolicyView,
-  type OccurrencePolicyView,
-  type PolicyListsView,
-} from './policy-view';
+import type { EventPolicyView, OccurrencePolicyView, PolicyListsView } from './policy-view';
+import { POLICY_VIEW_INCLUDE, toEventPolicyView, toOccurrencePolicyView } from './policy-view';
 
 /** The columns of a date's own policy, without the row's identity and timestamps. */
 type OccurrencePolicyColumns = Omit<EventOccurrencePolicy, 'id' | 'occurrenceId' | 'createdAt' | 'updatedAt'>;
@@ -179,6 +166,7 @@ export class EventPolicyService {
       const { changed, before, after } = policyChange<EventPolicy>(
         existing,
         updated,
+        // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Object.keys returns string[]; columns is the policy write's data, so its keys are EventPolicy columns (#1321)
         Object.keys(columns) as (keyof EventPolicy)[],
         lists,
       );
@@ -289,6 +277,7 @@ export class EventPolicyService {
             changedKeys<OccurrencePolicyColumns>(
               existing,
               { ...existing, ...columns },
+              // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Object.keys returns string[]; columns is the policy write's data, so its keys are policy columns (#1321)
               Object.keys(columns) as (keyof OccurrencePolicyColumns)[],
             ).length > 0;
           if (!row && !changesSomething) {
@@ -326,6 +315,7 @@ export class EventPolicyService {
       const { changed, before, after } = policyChange<OccurrencePolicyColumns>(
         { ...existing, id: updated.id },
         updated,
+        // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Object.keys returns string[]; columns is the policy write's data, so its keys are policy columns (#1321)
         Object.keys(columns) as (keyof OccurrencePolicyColumns)[],
         lists,
       );

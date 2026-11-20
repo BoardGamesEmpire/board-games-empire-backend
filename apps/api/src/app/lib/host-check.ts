@@ -1,4 +1,5 @@
-import { errorEnvelope, type I18nPath } from '@bge/i18n';
+import type { I18nPath } from '@bge/i18n';
+import { errorEnvelope } from '@bge/i18n';
 import { Logger } from '@nestjs/common';
 import { Http } from '@status/codes';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -13,20 +14,23 @@ const MAX_LOGGED_NAMES = 100;
 const LOG_WINDOW_MS = 60 * 60 * 1000;
 
 export interface HostCheckDeps {
-  readonly rule: HostRule;
+  readonly logger?: Pick<Logger, 'warn'>;
+
   /** Renders a catalog key. This runs ahead of Nest's i18n, so no request locale exists. */
   readonly render: (key: I18nPath) => string;
-  readonly logger?: Pick<Logger, 'warn'>;
+
+  readonly rule: HostRule;
 }
 
 export interface HostCheck {
-  /** For the Express app: REST, `/api/auth/*`, the OpenAPI routes and the web client. */
-  readonly handler: (req: IncomingMessage, res: ServerResponse, next: () => void) => void;
   /** For engine.io, which answers `/socket.io/` ahead of Express. */
   readonly allowRequest: (
     req: IncomingMessage,
     callback: (message: string | undefined, success: boolean) => void,
   ) => void;
+
+  /** For the Express app: REST, `/api/auth/*`, the OpenAPI routes and the web client. */
+  readonly handler: (req: IncomingMessage, res: ServerResponse, next: () => void) => void;
 }
 
 /**

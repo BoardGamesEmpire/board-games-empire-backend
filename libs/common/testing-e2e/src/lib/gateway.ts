@@ -42,62 +42,67 @@ export interface GatewayLaunch {
   /** The gateway's directory under `apps/`, which is also its Nx project name without the scope. */
   readonly app: string;
 
-  /** How the gateway is named in log lines and failure messages. */
-  readonly label: string;
-
-  /** The variables the gateway's address config reads its host and port from. */
-  readonly hostEnv: string;
-  readonly portEnv: string;
-
   /**
    * The child's environment, read when the launch starts, so it can name
    * something an earlier `beforeAll` started. The bind address and `NODE_ENV`
    * are added to it.
    */
   env(): NodeJS.ProcessEnv;
+
+  /** The variables the gateway's address config reads its host and port from. */
+  readonly hostEnv: string;
+
+  /** How the gateway is named in log lines and failure messages. */
+  readonly label: string;
+
+  readonly portEnv: string;
 }
 
 interface LaunchedGateway {
-  readonly child: ChildProcess;
-
   /** `host:port`, ready for {@link connectGateway}. */
   readonly address: string;
+
+  readonly child: ChildProcess;
 }
 
 /** Ping's reply as the client decodes it: int64 as a decimal string. */
 export interface GatewayPingReply {
   readonly correlationId: string;
-  readonly timestampMs: string;
   readonly gatewayName: string;
   readonly gatewayVersion: string;
+  readonly timestampMs: string;
 }
 
 /** Describe's reply as the client decodes it: enums by name, an unset message as null. */
 export interface GatewayDescribeReply {
-  readonly correlationId: string;
   readonly capabilities: readonly string[];
+  readonly contentFormat: string;
+  readonly correlationId: string;
+
   readonly coverage: {
-    readonly platformTypes: readonly string[];
     readonly contentTypes: readonly string[];
+    readonly platformTypes: readonly string[];
   } | null;
+
   readonly filterableAxes: readonly string[];
+
   readonly languageCodeFormats: {
     readonly acceptedRequestFormats: readonly string[];
-    readonly responseFormat: string;
     readonly passthroughSearchLanguage: boolean;
+    readonly responseFormat: string;
   } | null;
-  readonly contentFormat: string;
+
   readonly upstream: string;
 }
 
 export interface GatewayLanguage {
-  readonly value: string;
   readonly format: string;
   readonly ietfTag?: string;
-  readonly iso6393?: string;
   readonly iso6391?: string;
+  readonly iso6393?: string;
   readonly name?: string;
   readonly nativeName?: string;
+  readonly value: string;
 }
 
 export interface GatewayLanguagesReply {
@@ -106,9 +111,9 @@ export interface GatewayLanguagesReply {
 }
 
 export interface GatewayPlatform {
+  readonly abbreviation?: string;
   readonly externalId: string;
   readonly name: string;
-  readonly abbreviation?: string;
   readonly platformType: string;
 }
 
@@ -124,8 +129,8 @@ export interface GatewayNamedEntry {
 }
 
 export interface GatewayCategoriesReply {
-  readonly correlationId: string;
   readonly categories: readonly GatewayNamedEntry[];
+  readonly correlationId: string;
 }
 
 export interface GatewayMechanicsReply {
@@ -143,14 +148,14 @@ export interface GatewayHealthReply {
  * (#718).
  */
 export interface GatewayClient {
-  ping(correlationId: string): Promise<GatewayPingReply>;
   check(): Promise<GatewayHealthReply>;
-  describe(correlationId: string): Promise<GatewayDescribeReply>;
-  listLanguages(correlationId: string): Promise<GatewayLanguagesReply>;
-  listPlatforms(correlationId: string): Promise<GatewayPlatformsReply>;
-  listCategories(correlationId: string): Promise<GatewayCategoriesReply>;
-  listMechanics(correlationId: string): Promise<GatewayMechanicsReply>;
   close(): void;
+  describe(correlationId: string): Promise<GatewayDescribeReply>;
+  listCategories(correlationId: string): Promise<GatewayCategoriesReply>;
+  listLanguages(correlationId: string): Promise<GatewayLanguagesReply>;
+  listMechanics(correlationId: string): Promise<GatewayMechanicsReply>;
+  listPlatforms(correlationId: string): Promise<GatewayPlatformsReply>;
+  ping(correlationId: string): Promise<GatewayPingReply>;
 }
 
 type UnaryMethod = (

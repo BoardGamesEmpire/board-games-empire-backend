@@ -15,10 +15,6 @@ import { Prisma } from '../client';
  */
 
 interface DriverAdapterCause {
-  readonly originalCode?: string;
-  readonly originalMessage: string;
-  readonly kind: string;
-  readonly constraint?: { readonly fields?: readonly string[]; readonly index?: string };
   /**
    * The postgres passthrough fields, present when the adapter has no mapped
    * `kind` for the error — measured on a real 40P01 under 7.8 (#398), which 7.10
@@ -26,10 +22,15 @@ interface DriverAdapterCause {
    * than required.
    */
   readonly code?: string;
-  readonly severity?: string;
-  readonly message?: string;
+
+  readonly constraint?: { readonly fields?: readonly string[]; readonly index?: string };
   readonly detail?: string;
   readonly hint?: string;
+  readonly kind: string;
+  readonly message?: string;
+  readonly originalCode?: string;
+  readonly originalMessage: string;
+  readonly severity?: string;
 }
 
 /**
@@ -63,6 +64,9 @@ class DriverAdapterError extends Error {
 }
 
 export interface UniqueViolationOptions {
+  /** Name quoted into `cause.originalMessage`, as Postgres phrases it. */
+  readonly constraintName?: string;
+
   /**
    * Raw DB column names under `cause.constraint.fields`, which
    * `@prisma/adapter-pg` reported up to 7.8 and reports since 7.10 only when
@@ -76,21 +80,8 @@ export interface UniqueViolationOptions {
    */
   readonly index?: string;
 
-  /**
-   * Legacy `meta.target`. Absent on `@prisma/client@7.8.0` through 7.10 with
-   * `@prisma/adapter-pg` (prisma/prisma#28953); supply it only to exercise the
-   * restored-`target` path.
-   */
-  readonly target?: string | readonly string[];
-
   /** Prisma's own `meta.modelName`. Nothing should read it — see #302. */
   readonly modelName?: string;
-
-  /** Name quoted into `cause.originalMessage`, as Postgres phrases it. */
-  readonly constraintName?: string;
-
-  /** SQLSTATE. `23505` is unique_violation. */
-  readonly sqlState?: string;
 
   /**
    * Omit `driverAdapterError` entirely, leaving `meta` with only `modelName`.
@@ -104,6 +95,16 @@ export interface UniqueViolationOptions {
    * `unknown` fallback.
    */
   readonly omitMeta?: boolean;
+
+  /** SQLSTATE. `23505` is unique_violation. */
+  readonly sqlState?: string;
+
+  /**
+   * Legacy `meta.target`. Absent on `@prisma/client@7.8.0` through 7.10 with
+   * `@prisma/adapter-pg` (prisma/prisma#28953); supply it only to exercise the
+   * restored-`target` path.
+   */
+  readonly target?: string | readonly string[];
 }
 
 /**
@@ -165,6 +166,13 @@ export function uniqueViolationWithoutMeta(): Prisma.PrismaClientKnownRequestErr
 
 export interface DeadlockOptions {
   /**
+   * Drop `cause.originalCode`. On the `bare` shape that leaves only the
+   * postgres-passthrough `code`, modelling a driver release that renames the
+   * field the reader prefers.
+   */
+  readonly omitOriginalCode?: boolean;
+
+  /**
    * Which statement lost, which decides the class around the driver error:
    *
    * - `model-write` (the default): an ordinary model write. Since
@@ -182,13 +190,6 @@ export interface DeadlockOptions {
 
   /** SQLSTATE on the driver error. `40P01` is deadlock_detected. */
   readonly sqlState?: string;
-
-  /**
-   * Drop `cause.originalCode`. On the `bare` shape that leaves only the
-   * postgres-passthrough `code`, modelling a driver release that renames the
-   * field the reader prefers.
-   */
-  readonly omitOriginalCode?: boolean;
 }
 
 /**
@@ -250,7 +251,7 @@ export function deadlock(options: DeadlockOptions = {}): Error {
 /**
  * Prisma's OWN spelling for a deadlock — P2034, documented as "write conflict or
  * deadlock" — with nothing under `meta`. The predicate accepts the code alone:
- * it means, by definition, the thing the retry answers.
+ * it means, by definition, the thing a client's retry answers.
  */
 export function transactionWriteConflict(): Prisma.PrismaClientKnownRequestError {
   return new Prisma.PrismaClientKnownRequestError(

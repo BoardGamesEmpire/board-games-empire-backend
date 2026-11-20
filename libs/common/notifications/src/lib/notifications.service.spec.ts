@@ -1,6 +1,7 @@
 import { JobType, NotificationType } from '@bge/database';
 import { t } from '@bge/i18n';
-import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { createTestingModuleWithDb } from '@bge/testing';
 import { NotificationsService } from './notifications.service';
 
 describe('NotificationsService', () => {

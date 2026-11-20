@@ -1,4 +1,5 @@
-import { APP_SIGN_IN_FLOW_INVALID, APP_SIGN_IN_UNAVAILABLE, type AppSignInErrorCode } from './app-sign-in-codes';
+import type { AppSignInErrorCode } from './app-sign-in-codes';
+import { APP_SIGN_IN_FLOW_INVALID, APP_SIGN_IN_UNAVAILABLE } from './app-sign-in-codes';
 import { appSignInReturnPage } from './app-sign-in-paths';
 import type { AppSignInStore } from './app-sign-in-store';
 import { appReturnUrl } from './return-address';
@@ -14,41 +15,52 @@ export const APP_SIGN_IN_FLOW_KEY = 'appSignInFlow';
 /** What the hand-off reads of the callback request, and what it acts through. */
 export interface AppSignInHandOff {
   /**
-   * better-auth's parsed OAuth state on the callback (`getOAuthState()`), or
-   * `null`. Only `serverContext` is read: the other fields, `callbackURL`
-   * among them, are the client's to choose.
-   */
-  readonly oauthState: {
-    readonly serverContext?: Readonly<Record<string, unknown>>;
-    readonly [field: string]: unknown;
-  } | null;
-  /** The session the callback created, or `null` when it created none, as on an error redirect. */
-  readonly created: { readonly session: { readonly token: string }; readonly user: { readonly id: string } } | null;
-  /**
    * Where the callback's response sends the browser, when it is a redirect.
    * A sign-in that went through is sent to its flow's return page; anything
    * else is a refusal, from the callback or a hook before this one.
    */
   readonly callbackLocation: string | undefined;
-  /** The callback response's headers, as the callback and every earlier hook left them. */
-  readonly responseHeaders: Headers | undefined;
+
+  /** The session the callback created, or `null` when it created none, as on an error redirect. */
+  readonly created: { readonly session: { readonly token: string }; readonly user: { readonly id: string } } | null;
+
+  /** The names this server gives its session cookies. */
+  readonly credentialCookies: readonly string[];
+
+  readonly deleteSession: (token: string) => Promise<void>;
+
+  /** The server's error page, showing `code` and its message. */
+  readonly errorPage: (code: AppSignInErrorCode) => string;
+
   /**
    * Tells the hooks after this one that the request created no session, so
    * none of them acts on one: a plugin that hands a new session a credential
    * of its own reads it there.
    */
   readonly forgetNewSession: () => void;
-  /** The names this server gives its session cookies. */
-  readonly credentialCookies: readonly string[];
-  readonly store: AppSignInStore;
-  readonly deleteSession: (token: string) => Promise<void>;
-  readonly logger: { error(message: string, ...args: unknown[]): void };
+
   /** This server's issuer, the one discovery publishes, sent to the app as `iss`. */
   readonly issuer: string;
-  /** The server's error page, showing `code` and its message. */
-  readonly errorPage: (code: AppSignInErrorCode) => string;
+
+  readonly logger: { error(message: string, ...args: unknown[]): void };
+
   /** `code`'s plain-language message, sent to the app as `error_description`. */
   readonly message: (code: AppSignInErrorCode) => string;
+
+  /**
+   * better-auth's parsed OAuth state on the callback (`getOAuthState()`), or
+   * `null`. Only `serverContext` is read: the other fields, `callbackURL`
+   * among them, are the client's to choose.
+   */
+  readonly oauthState: {
+    readonly [field: string]: unknown;
+    readonly serverContext?: Readonly<Record<string, unknown>>;
+  } | null;
+
+  /** The callback response's headers, as the callback and every earlier hook left them. */
+  readonly responseHeaders: Headers | undefined;
+
+  readonly store: AppSignInStore;
 }
 
 /**
@@ -88,6 +100,7 @@ export async function handOffAppSignIn(handOff: AppSignInHandOff): Promise<strin
   if (handOff.responseHeaders !== undefined) {
     withoutSessionCredentials(handOff.responseHeaders, handOff.credentialCookies);
   }
+
   handOff.forgetNewSession();
 
   try {
@@ -104,6 +117,7 @@ export async function handOffAppSignIn(handOff: AppSignInHandOff): Promise<strin
       handOff.logger.error('Could not read the flow of an app sign-in', error);
       return handOff.errorPage(APP_SIGN_IN_UNAVAILABLE);
     }
+
     if (flow === null) {
       return handOff.errorPage(APP_SIGN_IN_FLOW_INVALID);
     }

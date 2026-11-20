@@ -2,9 +2,11 @@ import type { PluginActiveManifestReader, PluginActiveManifestReading } from '@b
 import type { ManifestIssue } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable } from '@nestjs/common';
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
-import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
+import type { PluginModuleOptions } from '../plugin-module.options';
+import { MODULE_OPTIONS_TOKEN } from '../plugin-module.options';
 import { activeManifestOf } from './active-manifest';
-import { revalidateStoredManifest, type StoredManifestRow } from './stored-manifest';
+import type { StoredManifestRow } from './stored-manifest';
+import { revalidateStoredManifest } from './stored-manifest';
 
 /** What this reader's `invalid` factory throws, so the catch below takes only its own failure. */
 class StoredManifestInvalidError extends Error {

@@ -11,9 +11,9 @@ import type { QuotaSoftOverageEvent } from './quota-events.interface';
  * user.
  */
 export interface QuotaCheckContext {
-  readonly userId?: string;
   readonly householdId?: string;
   readonly householdMemberId?: string;
+  readonly userId?: string;
 }
 
 /**
@@ -21,12 +21,12 @@ export interface QuotaCheckContext {
  * limit resolved against. `exceeded` is `usage + amount > limit`.
  */
 export interface QuotaConstraint {
+  readonly currentUsage: bigint;
+  readonly exceeded: boolean;
+  readonly limit: bigint;
   readonly scope: QuotaScope;
   readonly scopeId: string;
-  readonly limit: bigint;
-  readonly currentUsage: bigint;
   readonly softOverage: boolean;
-  readonly exceeded: boolean;
 }
 
 /**
@@ -45,10 +45,10 @@ export interface QuotaConstraint {
  */
 export interface QuotaCheckResult {
   readonly allowed: boolean;
-  readonly scope: QuotaScope | null;
+  readonly constraints: readonly QuotaConstraint[];
   readonly currentUsage: bigint | null;
   readonly limit: bigint | null;
+  readonly scope: QuotaScope | null;
   readonly softOverage: boolean;
-  readonly constraints: readonly QuotaConstraint[];
   readonly softOverages: readonly QuotaSoftOverageEvent[];
 }

@@ -16,6 +16,7 @@ class FakeDnsResolver implements DnsResolver {
     if (!entry) {
       throw new DnsResolutionError(hostname, new Error('NXDOMAIN (fake)'));
     }
+
     return entry;
   }
 

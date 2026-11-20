@@ -1,6 +1,7 @@
 import { DEFAULT_THROTTLER_NAME, USER_THROTTLER_NAME } from '@bge/feedback';
 import type { ExecutionContext } from '@nestjs/common';
-import { seconds, type ThrottlerOptions } from '@nestjs/throttler';
+import type { ThrottlerOptions } from '@nestjs/throttler';
+import { seconds } from '@nestjs/throttler';
 import Joi from 'joi';
 import throttleConfig, { throttleConfigValidationSchema } from '../configuration/throttle.config';
 import { createThrottlers } from './throttlers';
@@ -134,7 +135,7 @@ describe('createThrottlers', () => {
 });
 
 describe('throttle configuration', () => {
-  type ThrottleNamespace = { ttlMs: number; limit: number; trustedProxyHops: number };
+  type ThrottleNamespace = { limit: number; trustedProxyHops: number; ttlMs: number };
 
   const read = (env: NodeJS.ProcessEnv): ThrottleNamespace => {
     const previous = process.env;

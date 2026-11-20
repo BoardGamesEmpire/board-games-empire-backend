@@ -7,20 +7,17 @@ import {
   ResourceType,
   SystemRole,
 } from '@bge/database';
-import {
-  arrangeExtendedNetwork,
-  arrangeFriendship,
-  befriend,
-  createActors,
-  type Actors,
-  type AuthenticatedActor,
-} from '@bge/testing-e2e';
+import type { Actors, AuthenticatedActor } from '@bge/testing-e2e';
+import { arrangeExtendedNetwork, arrangeFriendship, befriend, createActors } from '@bge/testing-e2e';
 import request from 'supertest';
-import { mintApiKey, type Caller } from '../support/api-key';
+import type { Caller } from '../support/api-key';
+import { mintApiKey } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { BROWSE_PATH, createEventClient, EVENTS_PATH } from './event-request';
-import { attendeeEnvelope, listEventsEnvelope, type ListEventsEnvelope } from './event-wire';
+import type { ListEventsEnvelope } from './event-wire';
+import { attendeeEnvelope, listEventsEnvelope } from './event-wire';
 
 /**
  * `GET /api/events/browse` over the real route (#962): the upcoming events

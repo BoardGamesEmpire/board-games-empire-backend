@@ -1,4 +1,11 @@
 import type { PluginUnit } from '@bge/actor-context';
+import type {
+  ConsentDecisionVerdict,
+  PluginActiveManifest,
+  PluginActiveManifestReader,
+  PluginUnitEnablement,
+  RiskLevel,
+} from '@bge/database';
 import {
   CONSENT_UNIT_BINDING_REFUSAL,
   DatabaseService,
@@ -15,13 +22,9 @@ import {
   Prisma,
   requestedByManifest,
   riskCovers,
-  type ConsentDecisionVerdict,
-  type PluginActiveManifest,
-  type PluginActiveManifestReader,
-  type PluginUnitEnablement,
-  type RiskLevel,
 } from '@bge/database';
-import { CACHE_REDIS_CLIENT, RedisKeyFlush, type Redis } from '@bge/redis';
+import type { Redis } from '@bge/redis';
+import { CACHE_REDIS_CLIENT, RedisKeyFlush } from '@bge/redis';
 import { isPluginPermissionSlug, parsePluginPermissionSlug } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import type { Cache } from 'cache-manager';
@@ -36,14 +39,13 @@ import { PERMISSIONS_CACHE } from './permissions-cache';
  * with the version token its key held before the load began.
  */
 interface VersionedEntry<T> {
-  version: string;
   value: T;
+  version: string;
 }
 
 @Injectable()
 export class PermissionsService {
   private readonly logger = new Logger(PermissionsService.name);
-
   static readonly CACHE_TTL_IN_MILLISECONDS = 5 * 60 * 1000;
 
   /**
@@ -144,7 +146,7 @@ export class PermissionsService {
       (graph) => graph.roles.length > 0,
     );
 
-    return userGraph as UserWithRoles | null;
+    return userGraph;
   }
 
   /**
@@ -161,7 +163,7 @@ export class PermissionsService {
    * applies per request: banned with no expiry, or with one still to come.
    */
   async loadUserRoleGraphWithin(tx: Prisma.TransactionClient, userId: string): Promise<UserWithRoles | null> {
-    return (await this.loadUserGraph(tx, userId, PermissionsService.notBannedNow())) as UserWithRoles | null;
+    return this.loadUserGraph(tx, userId, PermissionsService.notBannedNow());
   }
 
   /**
@@ -177,10 +179,10 @@ export class PermissionsService {
       return new Map();
     }
 
-    const graphs = (await this.db.user.findMany({
+    const graphs: UserWithRoles[] = await this.db.user.findMany({
       where: { id: { in: [...userIds] }, AND: PermissionsService.notBannedNow() },
       select: PermissionsService.userGraphSelect(),
-    })) as UserWithRoles[];
+    });
 
     return new Map(graphs.map((graph) => [graph.id, graph]));
   }
@@ -322,7 +324,7 @@ export class PermissionsService {
       () => this.loadApiKeyGraph(apiKeyId),
     );
 
-    return apiKey as ApikeyWithScopes | null;
+    return apiKey;
   }
 
   /**
@@ -383,6 +385,7 @@ export class PermissionsService {
     ttlFor: (value: T) => number = () => PermissionsService.CACHE_TTL_IN_MILLISECONDS,
     cacheable: (value: T) => boolean = () => true,
   ): Promise<T | null> {
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- data from outside the process; parse it through a schema (#1322)
     const [cached, currentVersion] = (await this.cache.mget([
       cacheKey,
       PermissionsService.cacheVersionKey(cacheKey),
@@ -816,7 +819,7 @@ export class PermissionsService {
    * `null` when this process registers no reader.
    */
   private readActiveManifest(
-    plugin: { id: string; slug: string; version: string; manifestJson: unknown },
+    plugin: { id: string; manifestJson: unknown; slug: string; version: string },
     unit: PluginUnit,
   ): PluginActiveManifest | null {
     if (!this.activeManifestReader) {

@@ -1,10 +1,9 @@
+import type { SafeHttpResponse, SecureHttpService } from '@bge/secure-http';
 import {
   canonicalHostname,
   HostNotAllowedError,
   RedirectToDisallowedTargetError,
   SafeHttpError,
-  type SafeHttpResponse,
-  type SecureHttpService,
 } from '@bge/secure-http';
 import type { PluginHttp, PluginHttpRequest } from '@boardgamesempire/plugin-contract';
 import {
@@ -147,10 +146,10 @@ function refusedHostname(err: unknown): string | undefined {
 
 /** What fetch reports of an answer and the Response constructor can't be given. */
 interface FetchedFields {
+  readonly redirected: boolean;
   readonly status: number;
   readonly statusText: string;
   readonly url: string;
-  readonly redirected: boolean;
 }
 
 function toResponse(answer: SafeHttpResponse<ArrayBuffer>): Response {

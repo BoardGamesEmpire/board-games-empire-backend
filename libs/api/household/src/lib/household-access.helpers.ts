@@ -1,4 +1,5 @@
-import { lockLiveHousehold, Prisma, type DatabaseService, type SystemRole } from '@bge/database';
+import type { DatabaseService, SystemRole } from '@bge/database';
+import { lockLiveHousehold, Prisma } from '@bge/database';
 import { t } from '@bge/i18n';
 import { InternalServerErrorException, NotFoundException } from '@nestjs/common';
 
@@ -13,7 +14,7 @@ import { InternalServerErrorException, NotFoundException } from '@nestjs/common'
  * that follows a permission-scoped miss stays with each service, because the
  * "what does an empty result mean" question is resource-specific.
  */
-export async function householdExists(db: DatabaseService, householdId: string): Promise<boolean> {
+export async function householdExists(db: LockFreeReadClient, householdId: string): Promise<boolean> {
   const count = await db.household.count({ where: { id: householdId, deletedAt: null } });
   return count > 0;
 }
@@ -109,6 +110,9 @@ export async function lockExistingHousehold(tx: Prisma.TransactionClient, househ
  * That is still correct: the household was deleted when the transition asked,
  * and the same request succeeds once the restore commits.
  *
+ * The household edit takes this lock too, so the before-state its domain event
+ * records is the state the write replaces (#245).
+ *
  * All four transitions refuse, leaving included. Restore is an undo and brings
  * back exactly what was deleted, so a deleted household's roster stays frozen
  * until then; a member who wants out leaves once it is live again.
@@ -133,10 +137,15 @@ export async function lockHouseholdForRoleTransition(tx: Prisma.TransactionClien
 }
 
 /**
- * A client for reads that take NO locks and whose result cannot vary with
- * transaction state. Today that is exactly one lookup, {@link resolveHouseholdRoleId},
- * which reads static seed data, so either client is correct there and the
- * caller may pick whichever avoids extending a lock window.
+ * A client for reads that take NO locks, where either client gives an answer
+ * the caller can act on. Today that is two lookups:
+ *
+ * - {@link resolveHouseholdRoleId} reads static seed data, so the caller may
+ *   pick whichever client avoids extending a lock window.
+ * - {@link householdExists} is a probe that only chooses between a 403 and a
+ *   404. Inside a transaction it runs on that transaction's connection, so a
+ *   refusal never takes a second one from the pool (#245); outside one it runs
+ *   on the base client.
  *
  * This is NOT a general-purpose "any client will do". It is the exception, and
  * it is named for the property that makes it safe rather than for the clients
@@ -148,6 +157,38 @@ export async function lockHouseholdForRoleTransition(tx: Prisma.TransactionClien
  * its neighbors.
  */
 export type LockFreeReadClient = DatabaseService | Prisma.TransactionClient;
+
+/**
+ * Locks a soft-deleted household's row for the rest of the caller's
+ * transaction and returns when it was deleted, or `null` when the household
+ * is live or unknown (#245). For the restore, whose domain event records the
+ * deletion it undoes.
+ *
+ * Read without the lock, the tombstone could come from an earlier delete than
+ * the one the restore clears: a concurrent restore commits, the household is
+ * deleted again, and the restore's update then matches the new tombstone
+ * while the event reports the old one. With the lock, the restore's update
+ * clears the tombstone returned here.
+ *
+ * `FOR NO KEY UPDATE`, the mode the restore's own update takes, so a second
+ * restore waits here. When the first one commits, this re-checks the row
+ * (EvalPlanQual), finds it live, and returns `null`. A delete never waits on
+ * it: a deleted household cannot be deleted again, and role transitions skip a
+ * deleted row without waiting ({@link lockHouseholdForRoleTransition}).
+ *
+ * NOTE: raw SQL because Prisma exposes no row-locking clause.
+ */
+export async function lockDeletedHousehold(tx: Prisma.TransactionClient, householdId: string): Promise<Date | null> {
+  const rows = await tx.$queryRaw<Array<{ deleted_at: Date }>>(Prisma.sql`
+    SELECT h.deleted_at
+    FROM households h
+    WHERE h.id = ${householdId}
+      AND h.deleted_at IS NOT NULL
+    FOR NO KEY UPDATE
+  `);
+
+  return rows[0]?.deleted_at ?? null;
+}
 
 /**
  * Resolves a `SystemRole` to its `roles` row id, failing loud when the row is

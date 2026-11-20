@@ -43,8 +43,10 @@ const SWEEP_BATCH_SIZE = 500;
 @Injectable()
 export class InviteExpirySweepService implements BeforeApplicationShutdown {
   private readonly logger = new Logger(InviteExpirySweepService.name);
+
   /** Set once shutdown begins; no batch starts after it. */
   private stopping = false;
+
   /** The runs in flight, which shutdown waits for. */
   private readonly running = new Set<Promise<unknown>>();
 

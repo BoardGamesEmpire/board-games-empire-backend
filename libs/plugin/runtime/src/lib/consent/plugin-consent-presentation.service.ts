@@ -1,14 +1,16 @@
-import { assertPluginUnit, type PluginUnit } from '@bge/actor-context';
+import type { PluginUnit } from '@bge/actor-context';
+import { assertPluginUnit } from '@bge/actor-context';
 import { DatabaseService, Prisma } from '@bge/database';
-import {
-  resolveLocalizedStringDetailed,
-  type LocalizedString,
-  type PluginManifestValidationResult,
-  type ResolvedLocalizedString,
+import type {
+  LocalizedString,
+  PluginManifestValidationResult,
+  ResolvedLocalizedString,
 } from '@boardgamesempire/plugin-manifest';
+import { resolveLocalizedStringDetailed } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable } from '@nestjs/common';
 import { revalidateStoredManifest } from '../manifest/stored-manifest';
-import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
+import type { PluginModuleOptions } from '../plugin-module.options';
+import { MODULE_OPTIONS_TOKEN } from '../plugin-module.options';
 import { unitOwnsConsentScope } from './consent-classification.types';
 import {
   PluginConsentPresentationManifestError,
@@ -26,17 +28,14 @@ import { presentedRiskLevel } from './presented-risk-level';
  * entry point without a cast.
  */
 export interface PresentablePluginRow {
-  readonly id: string;
-  readonly slug: string;
-  readonly version: string;
   readonly enabled: boolean;
-  readonly uninstalledAt: Date | null;
-  readonly manifestJson: unknown;
+  readonly id: string;
+
   /** The installed artifact's sha, which the active consent surface names (#1150). */
   readonly installedSha256: string;
-  readonly pendingVersion: string | null;
-  /** The staged artifact's sha, which the staged consent surface names; `null` when nothing is staged (#1150). */
-  readonly pendingSha256: string | null;
+
+  readonly manifestJson: unknown;
+
   /**
    * Nullable column — `null` means no staged update. Typed `unknown` like
    * `manifestJson` because stored manifests are distrusted (re-validated on
@@ -44,6 +43,14 @@ export interface PresentablePluginRow {
    * shape would claim structure this service deliberately does not trust.
    */
   readonly pendingManifestJson: unknown;
+
+  /** The staged artifact's sha, which the staged consent surface names; `null` when nothing is staged (#1150). */
+  readonly pendingSha256: string | null;
+
+  readonly pendingVersion: string | null;
+  readonly slug: string;
+  readonly uninstalledAt: Date | null;
+  readonly version: string;
 }
 
 const PRESENTABLE_PLUGIN_SELECT = {
@@ -176,9 +183,12 @@ export class PluginConsentPresentationService {
    * checks classified against today's decisions, which is exactly what an
    * approval screen needs: which checks approval will seed (`pending` at
    * server scope), which are already covered, and which a durable denial
-   * blocks. Checks that moved consent scope read `pending` at their NEW
-   * scope: the old scope's row is not theirs anymore (activation deletes
-   * it), and consent starts fresh with the principal that now owns it.
+   * blocks. Checks that moved consent scope are classified at their NEW
+   * scope, with the consent unit that now owns them: the decision at the old
+   * scope is kept and confers nothing once the move is activated (#1152), so
+   * a moved check reads `pending` unless that unit holds a decision at
+   * the new scope: a pre-consent it gave on this staged consent surface, or
+   * a decision kept from an earlier manifest that requested it there.
    */
   async presentPendingForUnit(
     pluginId: string,
@@ -241,7 +251,7 @@ export class PluginConsentPresentationService {
 
   private revalidate(
     plugin: PresentablePluginRow,
-    source: { readonly version: string; readonly manifestJson: unknown },
+    source: { readonly manifestJson: unknown; readonly version: string },
   ): PluginManifestValidationResult {
     return revalidateStoredManifest(
       {

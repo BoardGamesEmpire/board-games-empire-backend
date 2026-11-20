@@ -1,25 +1,26 @@
-import { SignatureExpiredError, SignatureInvalidError, type StorageOp } from '@boardgamesempire/storage-contract';
+import type { StorageOp } from '@boardgamesempire/storage-contract';
+import { SignatureExpiredError, SignatureInvalidError } from '@boardgamesempire/storage-contract';
 import { Injectable } from '@nestjs/common';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { SigningKeyService } from './signing-key.service.js';
 
 /** Everything bound into a signed URL's HMAC. Values are recovered server-side at verify time. */
 export interface SignaturePayload {
-  /**
-   * Driver slug the URL routes to. Bound into the signature so a captured URL can't be repointed at another backend.
-   */
-  readonly slug: string;
-
-  readonly key: string;
-  readonly op: StorageOp;
+  readonly bindings?: Readonly<Record<string, string>>;
+  readonly contentType?: string;
 
   /**
    * Expiry as epoch seconds.
    */
   readonly expiresAt: number;
 
-  readonly contentType?: string;
-  readonly bindings?: Readonly<Record<string, string>>;
+  readonly key: string;
+  readonly op: StorageOp;
+
+  /**
+   * Driver slug the URL routes to. Bound into the signature so a captured URL can't be repointed at another backend.
+   */
+  readonly slug: string;
 }
 /**
  * Computes and verifies HMAC-SHA256 signatures over signed-URL payloads. Used by
@@ -78,6 +79,7 @@ export class MediaUrlSigner {
     if (actual.length !== expected.length || !/^[0-9a-f]+$/.test(actual)) {
       return false;
     }
+
     return timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(actual, 'hex'));
   }
 }

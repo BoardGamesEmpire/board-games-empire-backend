@@ -1,11 +1,10 @@
 import { PluginActorScope, SERVER_PLUGIN_UNIT, SystemActorScope } from '@bge/actor-context';
-import { DatabaseService, isPrismaDependentRecordNotFoundError, type Plugin } from '@bge/database';
-import {
-  parsePluginArtifactSha256,
-  type PluginArtifactSha256,
-  type PluginFactory,
-} from '@boardgamesempire/plugin-contract';
-import { validatePluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
+import type { Plugin } from '@bge/database';
+import { DatabaseService, isPrismaDependentRecordNotFoundError } from '@bge/database';
+import type { PluginArtifactSha256, PluginFactory } from '@boardgamesempire/plugin-contract';
+import { parsePluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
+import type { PluginManifest } from '@boardgamesempire/plugin-manifest';
+import { validatePluginManifest } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { readFile } from 'node:fs/promises';
@@ -26,7 +25,8 @@ import {
 import { PluginDirectoryResolverService } from './plugin-directory-resolver.service';
 import { PluginInstanceRegistry } from './plugin-instance-registry';
 import { PluginLoadRecorder } from './plugin-load-recorder.service';
-import { PLUGIN_MODULE_IMPORTER, type PluginModuleImporter } from './plugin-module-importer';
+import type { PluginModuleImporter } from './plugin-module-importer';
+import { PLUGIN_MODULE_IMPORTER } from './plugin-module-importer';
 
 /**
  * The boot path (#59 Phase B): loads every ENABLED plugin row of the
@@ -250,7 +250,7 @@ export class PluginLoaderService implements OnApplicationBootstrap {
   private async readDiskVersion(manifestPath: string): Promise<string | null> {
     try {
       const parsed: unknown = JSON.parse(await readFile(manifestPath, 'utf8'));
-      const version = typeof parsed === 'object' && parsed !== null ? (parsed as { version?: unknown }).version : null;
+      const version = typeof parsed === 'object' && parsed !== null && 'version' in parsed ? parsed.version : null;
 
       return typeof version === 'string' ? version : null;
     } catch {
@@ -275,6 +275,7 @@ export class PluginLoaderService implements OnApplicationBootstrap {
       throw new PluginEntrypointError(slug, 'package.json is not a JSON object');
     }
 
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- data from outside the process; parse it through a schema (#1322)
     return parsed as PluginPackageDescriptor;
   }
 
@@ -285,6 +286,7 @@ export class PluginLoaderService implements OnApplicationBootstrap {
       throw new PluginModuleShapeError(slug, `default export must be a factory function, got ${typeof candidate}`);
     }
 
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- typeof narrows a plugin's default export only to Function, and no runtime check can confirm a function's parameter and return types (#1321)
     return candidate as PluginFactory;
   }
 

@@ -6,33 +6,33 @@ import type { FeedbackCategory, FeedbackContext, FeedbackSeverity, FeedbackStatu
  */
 
 export interface FeedbackReportSubmittedEvent {
-  readonly feedbackReportId: string;
-  readonly submittedById: string;
   readonly category: FeedbackCategory;
   readonly context: FeedbackContext;
+  readonly feedbackReportId: string;
   readonly severity: FeedbackSeverity | null;
+  readonly submittedById: string;
 }
 
 export interface FeedbackReportTriagedEvent {
   readonly feedbackReportId: string;
-  readonly triagedById: string;
-  readonly previousStatus: FeedbackStatus;
   readonly newStatus: FeedbackStatus;
+  readonly previousStatus: FeedbackStatus;
+  readonly triagedById: string;
 }
 
 export interface FeedbackReportPurgedEvent {
-  readonly purgedCount: number;
   readonly olderThan: Date;
+  readonly purgedCount: number;
 }
 
 export interface UserFeedbackBannedEvent {
-  readonly userId: string;
   readonly bannedById: string;
-  readonly reason: string | null;
   readonly expiresAt: Date | null;
+  readonly reason: string | null;
+  readonly userId: string;
 }
 
 export interface UserFeedbackUnbannedEvent {
-  readonly userId: string;
   readonly unbannedById: string;
+  readonly userId: string;
 }

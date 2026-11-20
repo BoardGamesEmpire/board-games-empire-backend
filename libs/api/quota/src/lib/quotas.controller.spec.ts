@@ -1,8 +1,10 @@
 import { QuotaScope } from '@bge/database';
 import { t } from '@bge/i18n';
 import { PoliciesGuard } from '@bge/permissions';
-import { QuotaService, type QuotaView } from '@bge/quota';
-import { createTestingModuleWithDb, type TestingModuleWithDb } from '@bge/testing';
+import type { QuotaView } from '@bge/quota';
+import { QuotaService } from '@bge/quota';
+import type { TestingModuleWithDb } from '@bge/testing';
+import { createTestingModuleWithDb } from '@bge/testing';
 import { BadRequestException } from '@nestjs/common';
 import { firstValueFrom } from 'rxjs';
 import { QuotasController } from './quotas.controller';

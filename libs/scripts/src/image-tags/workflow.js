@@ -11,8 +11,11 @@ function annotate(level, message) {
   const data = message.replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
   const line = `::${level}::${data}`;
 
-  if (level === 'error') console.error(line);
-  else console.log(line);
+  if (level === 'error') {
+    console.error(line);
+  } else {
+    console.log(line);
+  }
 }
 
 /** Sets the step's outputs. */
@@ -21,19 +24,27 @@ function setOutputs(outputs) {
     .map(([name, value]) => `${name}=${value}\n`)
     .join('');
 
-  if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, lines);
-  else process.stdout.write(lines);
+  if (process.env.GITHUB_OUTPUT) {
+    fs.appendFileSync(process.env.GITHUB_OUTPUT, lines);
+  } else {
+    process.stdout.write(lines);
+  }
 }
 
 /** Adds Markdown to the job's summary. */
 function appendSummary(markdown) {
-  if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, markdown);
-  else process.stdout.write(markdown);
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, markdown);
+  } else {
+    process.stdout.write(markdown);
+  }
 }
 
 function requiredEnv(name) {
   const value = process.env[name];
-  if (!value) throw new Error(`${name} is unset`);
+  if (!value) {
+    throw new Error(`${name} is unset`);
+  }
 
   return value;
 }

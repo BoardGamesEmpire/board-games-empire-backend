@@ -5,7 +5,8 @@ import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundEx
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { createHash } from 'node:crypto';
 import { QuotaEvents } from './constants/quota-events.constant';
-import { DEFAULT_SCOPE_ID, type QuotaResource } from './constants/quota-resource';
+import type { QuotaResource } from './constants/quota-resource';
+import { DEFAULT_SCOPE_ID } from './constants/quota-resource';
 import type { QuotaView } from './dto/quota-response.dto';
 import type { SetQuotaDto } from './dto/set-quota.dto';
 import type {
@@ -39,7 +40,7 @@ const QUOTA_ORDER = [
 ] satisfies Prisma.QuotaOrderByWithRelationInput[];
 
 /** The subset of a quota row the resolver reads. */
-type QuotaRow = { scope: QuotaScope; scopeId: string; limit: bigint; softOverage: boolean; enforced: boolean };
+type QuotaRow = { enforced: boolean; limit: bigint; scope: QuotaScope; scopeId: string; softOverage: boolean };
 
 @Injectable()
 export class QuotaService {
@@ -134,7 +135,7 @@ export class QuotaService {
     executor: QuotaExecutor,
     resource: QuotaResource,
     targets: ResolvedTarget[],
-  ): Promise<{ scope: QuotaScope; scopeId: string; row: QuotaRow }[]> {
+  ): Promise<{ row: QuotaRow; scope: QuotaScope; scopeId: string }[]> {
     const rows = await executor.quota.findMany({
       where: {
         resource,
@@ -149,13 +150,14 @@ export class QuotaService {
       },
     });
 
-    const applicable: { scope: QuotaScope; scopeId: string; row: QuotaRow }[] = [];
+    const applicable: { row: QuotaRow; scope: QuotaScope; scopeId: string }[] = [];
     for (const { scope, scopeId } of targets) {
       const row = this.mostSpecific(rows, scope, scopeId);
       if (row && row.enforced) {
         applicable.push({ scope, scopeId, row });
       }
     }
+
     return applicable;
   }
 
@@ -169,7 +171,7 @@ export class QuotaService {
     executor: QuotaExecutor,
     resource: QuotaResource,
     usage: QuotaUsageProvider,
-    applicable: { scope: QuotaScope; scopeId: string; row: QuotaRow }[],
+    applicable: { row: QuotaRow; scope: QuotaScope; scopeId: string }[],
     amount: bigint,
   ): Promise<QuotaCheckResult> {
     const usages = await Promise.all(applicable.map(({ scope, scopeId }) => usage(scope, scopeId, executor)));
@@ -439,7 +441,7 @@ export class QuotaService {
 
   /** Instance row for the target, else the type-level default row, else undefined. */
   private mostSpecific(
-    rows: readonly { scope: QuotaScope; scopeId: string; limit: bigint; softOverage: boolean; enforced: boolean }[],
+    rows: readonly { enforced: boolean; limit: bigint; scope: QuotaScope; scopeId: string; softOverage: boolean }[],
     scope: QuotaScope,
     scopeId: string,
   ) {

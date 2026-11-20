@@ -1,4 +1,5 @@
-import { AuthType, type DataGateway } from '@bge/database';
+import type { DataGateway } from '@bge/database';
+import { AuthType } from '@bge/database';
 import type { RoutedPlugin } from '../plugin-driver-source';
 
 type Where = Readonly<Record<string, unknown>>;
@@ -8,17 +9,17 @@ type Where = Readonly<Record<string, unknown>>;
  * which the fake doesn't narrow by. An include names relations the same way.
  */
 interface Query {
-  where?: Where;
-  select?: Readonly<Record<string, boolean | object>>;
   include?: Readonly<Record<string, boolean | object>>;
+  select?: Readonly<Record<string, boolean | object>>;
+  where?: Where;
 }
 
 /** A stored row, with the plugin a read may select beside it: null for a remote DataGateway. */
 type StoredRow = DataGateway & { plugin: RoutedPlugin | null };
 
 interface Update {
-  where: Where;
   data: Readonly<Record<string, unknown>>;
+  where: Where;
 }
 
 const isOperator = (value: unknown): value is Record<string, unknown> =>
@@ -46,7 +47,11 @@ const matchesField = (actual: unknown, condition: unknown): boolean => {
       case 'equals':
         return sameValue(actual, operand);
       case 'in':
-        return (operand as unknown[]).some((candidate) => sameValue(actual, candidate));
+        if (!Array.isArray(operand)) {
+          throw new TypeError(`The fake data_gateways table's 'in' filter takes an array`);
+        }
+
+        return operand.some((candidate) => sameValue(actual, candidate));
       case 'not':
         return !sameValue(actual, operand);
       default:
@@ -55,8 +60,14 @@ const matchesField = (actual: unknown, condition: unknown): boolean => {
   });
 };
 
+/** A field a query names, which may be no column at all: then undefined, as reading it off the row gives. */
+const fieldOf = (row: StoredRow, field: string): unknown => {
+  const fields: Readonly<Record<string, unknown>> = row;
+  return fields[field];
+};
+
 const matches = (row: StoredRow, where: Where = {}): boolean =>
-  Object.entries(where).every(([field, condition]) => matchesField(row[field as keyof StoredRow], condition));
+  Object.entries(where).every(([field, condition]) => matchesField(fieldOf(row, field), condition));
 
 /**
  * Without a select, the row's own columns, as Prisma answers: a relation
@@ -64,7 +75,7 @@ const matches = (row: StoredRow, where: Where = {}): boolean =>
  */
 const project = (row: StoredRow, { select, include }: Pick<Query, 'select' | 'include'>): Partial<StoredRow> => {
   if (select) {
-    return Object.fromEntries(Object.keys(select).map((field) => [field, row[field as keyof StoredRow]]));
+    return Object.fromEntries(Object.keys(select).map((field) => [field, fieldOf(row, field)]));
   }
 
   const { plugin, ...columns } = row;

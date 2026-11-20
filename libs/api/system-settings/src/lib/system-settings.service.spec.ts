@@ -1,13 +1,8 @@
 import { Prisma } from '@bge/database';
 import { MailDispatcherService, MailQueueUnavailableError } from '@bge/queue-mail';
 import { EncryptionService } from '@bge/services';
-import {
-  createMockDatabaseService,
-  createTestingModuleWithDb,
-  rawQueryText,
-  unwrapTransaction,
-  type MockDatabaseService,
-} from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService, createTestingModuleWithDb, rawQueryText, unwrapTransaction } from '@bge/testing';
 import { ConflictException, HttpStatus, NotFoundException } from '@nestjs/common';
 import type { SystemSettingsView } from './read-shapes';
 import { SystemSettingsService } from './system-settings.service';

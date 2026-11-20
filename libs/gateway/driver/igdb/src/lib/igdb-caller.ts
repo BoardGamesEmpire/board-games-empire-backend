@@ -1,5 +1,7 @@
-import { fromAbortable, type DriverLogger, type UpstreamFetch } from '@boardgamesempire/gateway-driver-contract';
-import { from, Observable, throwError, timer } from 'rxjs';
+import type { DriverLogger, UpstreamFetch } from '@boardgamesempire/gateway-driver-contract';
+import { fromAbortable } from '@boardgamesempire/gateway-driver-contract';
+import type { Observable } from 'rxjs';
+import { from, throwError, timer } from 'rxjs';
 import { catchError, switchMap } from 'rxjs/operators';
 import { fetchAccessToken, TWITCH_TOKEN_URL } from './client/fetch-access-token';
 import type { IgdbRequest } from './client/igdb-client.interface';
@@ -10,20 +12,22 @@ const UNAUTHORIZED = 401;
 const TOO_MANY_REQUESTS = 429;
 
 export interface IgdbCallerOptions {
-  /** How the caller reaches IGDB and Twitch; it has no other way (#1082). */
-  fetch: UpstreamFetch;
+  /** IGDB's API. Defaults to `https://api.igdb.com/v4`. */
+  baseUrl?: string;
+
   clientId: string;
   clientSecret: string;
 
-  /** Where the access token comes from. Defaults to Twitch's endpoint. */
-  tokenUrl?: string;
+  /** How the caller reaches IGDB and Twitch; it has no other way (#1082). */
+  fetch: UpstreamFetch;
 
-  /** IGDB's API. Defaults to `https://api.igdb.com/v4`. */
-  baseUrl?: string;
   logger: DriverLogger;
 
   /** The wait before retrying a 429. Defaults to 1 second. */
   rateLimitRetryMs?: number;
+
+  /** Where the access token comes from. Defaults to Twitch's endpoint. */
+  tokenUrl?: string;
 }
 
 /**

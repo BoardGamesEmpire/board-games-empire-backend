@@ -1,6 +1,7 @@
 import { Action, ResourceType } from '@bge/database';
 import type { ExtractSubjectType, SubjectRawRule } from '@casl/ability';
-import { createPrismaAbility, type PrismaQuery } from '@casl/prisma';
+import type { PrismaQuery } from '@casl/prisma';
+import { createPrismaAbility } from '@casl/prisma';
 import type { AppAbility, Subjects } from '../interfaces';
 import { accessExtent, everyAbilityCan, resourceTypeAccess } from './resource-access';
 

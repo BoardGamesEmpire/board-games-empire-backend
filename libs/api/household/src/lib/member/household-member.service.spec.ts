@@ -2,8 +2,10 @@ import { Action, HouseholdMembershipOrigin, Prisma, QuotaScope, ResourceType, Sy
 import { uniqueViolation, uniqueViolationWithoutMeta } from '@bge/database/testing';
 import { InviteService } from '@bge/invites';
 import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
-import { QuotaExceededException, QuotaService, type QuotaCheckResult, type QuotaSoftOverageEvent } from '@bge/quota';
+import type { QuotaCheckResult, QuotaSoftOverageEvent } from '@bge/quota';
+import { QuotaExceededException, QuotaService } from '@bge/quota';
 import { DEFAULT_PAGE_SIZE } from '@bge/shared';
+import type { MockDatabaseService } from '@bge/testing';
 import {
   batchTransactionCall,
   createTestingModuleWithDb,
@@ -13,7 +15,6 @@ import {
   rawQueryText,
   readPrismaModels,
   unwrapTransaction,
-  type MockDatabaseService,
 } from '@bge/testing';
 import { WebhookEventType } from '@bge/webhooks';
 import {
@@ -33,13 +34,21 @@ import {
   HOUSEHOLD_MEMBER_UNIQUE_FIELDS,
 } from '../constants/household.constants';
 import type { AssignableHouseholdRole } from '../dto';
-import { HouseholdGameShareEndedEvent } from '../events/household.events';
-import { MEMBER_SELECT } from '../read-shapes';
+import { HouseholdEventPublisher } from '../events/household-event.publisher';
 import {
-  HouseholdMemberService,
-  type AdmissibleMembershipOrigin,
-  type HouseholdMemberWithRelations,
+  HouseholdGameShareEndedEvent,
+  HouseholdMemberAdmittedEvent,
+  HouseholdMemberRemovedEvent,
+  HouseholdMemberRoleChangedEvent,
+  MembershipEndCause,
+} from '../events/household.events';
+import { MEMBER_SELECT } from '../read-shapes';
+import type {
+  AdmissibleMembershipOrigin,
+  HouseholdMemberWithRelations,
+  RemovedMembership,
 } from './household-member.service';
+import { HouseholdMemberService } from './household-member.service';
 
 /*
  * Module-scoped because THREE independent raw statements now reach this
@@ -134,6 +143,9 @@ const dependentRecordNotFound = () =>
     clientVersion: 'test',
   });
 
+/** The member's row as the scoped `where` reads it again under the household lock, with its role (#245). */
+const LOCKED_RECHECK_SELECT = { id: true, role: { select: { role: { select: { name: true } } } } };
+
 describe('HouseholdMemberService', () => {
   let service: HouseholdMemberService;
   let db: MockDatabaseService;
@@ -196,6 +208,38 @@ describe('HouseholdMemberService', () => {
     );
   };
 
+  /** The names published on the bus, in order. */
+  const emittedNames = () => events.emit.mock.calls.map(([name]) => name);
+
+  /** What was published under `name`. */
+  const emittedUnder = (name: string): unknown => events.emit.mock.calls.find(([emitted]) => emitted === name)?.[1];
+
+  /**
+   * Notes, in `order`, the commit of the callback transaction (run on `db`),
+   * the cache eviction, the invites announced, and each name published on the
+   * bus. The db mocks keep their own call counter, so an order across them and
+   * these mocks is recorded by hand.
+   */
+  const recordOrder = (order: string[]) => {
+    db.$transaction.mockImplementation((async (callback: (tx: MockDatabaseService) => Promise<unknown>) => {
+      const result = await callback(db);
+      order.push('commit');
+
+      return result;
+    }) as never);
+    permissions.invalidateUser.mockImplementation(async () => {
+      order.push('evict');
+    });
+    invites.emit.mockImplementation(() => {
+      order.push('invites');
+    });
+    events.emit.mockImplementation((name) => {
+      order.push(String(name));
+
+      return true;
+    });
+  };
+
   beforeEach(async () => {
     abilityService = {
       getCurrentResourceConditions: jest.fn().mockReturnValue([COND]),
@@ -224,6 +268,9 @@ describe('HouseholdMemberService', () => {
         ScopeComposer,
         { provide: AbilityService, useValue: abilityService },
         { provide: PermissionsService, useValue: permissions },
+        // The real publisher over the mocked emitter, so the `events.emit`
+        // assertions below see what the service publishes (#245).
+        HouseholdEventPublisher,
         { provide: EventEmitter2, useValue: events },
         { provide: QuotaService, useValue: quotas },
         { provide: InviteService, useValue: invites },
@@ -801,6 +848,92 @@ describe('HouseholdMemberService', () => {
       await expect(service.updateMemberRole('hh-1', 'member-1', DTO)).rejects.toThrow(ForbiddenException);
       expect(permissions.invalidateUser).not.toHaveBeenCalled();
     });
+
+    describe('the role-change domain event (#245)', () => {
+      const asAdmin = () => makeMember({ role: { role: { id: 'role-admin', name: SystemRole.HouseholdAdmin } } });
+      const changed = () => emittedUnder(HouseholdEvents.MemberRoleChanged) as HouseholdMemberRoleChangedEvent;
+
+      beforeEach(() => {
+        db.householdMember.findFirst.mockResolvedValue(resolves(makeMember()));
+        db.householdMember.findUniqueOrThrow.mockResolvedValue(resolves(asAdmin()));
+      });
+
+      it('emits household.member.role_changed with the locked role before and the new role after (#245)', async () => {
+        const order: string[] = [];
+        recordOrder(order);
+
+        await service.updateMemberRole('hh-1', 'member-1', DTO);
+
+        expect(changed()).toBeInstanceOf(HouseholdMemberRoleChangedEvent);
+        expect(changed()).toMatchObject({ subject: ResourceType.Household, subjectId: 'hh-1', action: 'update' });
+        expect(changed().before).toEqual({
+          householdId: 'hh-1',
+          userId: 'user-1',
+          memberId: 'member-1',
+          role: SystemRole.HouseholdMember,
+        });
+        expect(changed().after).toEqual({
+          householdId: 'hh-1',
+          userId: 'user-1',
+          memberId: 'member-1',
+          role: SystemRole.HouseholdAdmin,
+        });
+        // Ids only: no role names leave for a subscriber's URL.
+        expect(emittedUnder(WebhookEventType.HouseholdMemberRoleChanged)).toEqual({
+          subjectId: 'hh-1',
+          householdId: 'hh-1',
+          data: { householdId: 'hh-1', memberId: 'member-1', userId: 'user-1' },
+        });
+        // After commit, and after the member's cache is evicted, so a listener
+        // that reads their grants sees the new role.
+        expect(order).toEqual([
+          'commit',
+          'evict',
+          HouseholdEvents.MemberRoleChanged,
+          WebhookEventType.HouseholdMemberRoleChanged,
+        ]);
+      });
+
+      it('emits no role-change domain event when the role is unchanged', async () => {
+        // The member holds the role the change gives, as the roster read
+        // under the lock says: the write changes nothing, so nothing is
+        // recorded and no webhook goes out (#728).
+        db.householdMember.findMany.mockResolvedValue(lockedRoster(SystemRole.HouseholdAdmin) as never);
+
+        await service.updateMemberRole('hh-1', 'member-1', DTO);
+
+        expect(events.emit).not.toHaveBeenCalled();
+      });
+
+      it('records the role read under the lock, not the pre-lock read', async () => {
+        // A household owner made the member a household admin while this
+        // waited for the lock: the scoped read before it still says member.
+        db.householdMember.findMany.mockResolvedValue(lockedRoster(SystemRole.HouseholdAdmin) as never);
+        db.householdMember.findUniqueOrThrow.mockResolvedValue(
+          resolves(makeMember({ role: { role: { id: 'role-guest', name: SystemRole.HouseholdGuest } } })),
+        );
+
+        await service.updateMemberRole('hh-1', 'member-1', { role: SystemRole.HouseholdGuest });
+
+        expect(changed().before.role).toBe(SystemRole.HouseholdAdmin);
+        expect(changed().after.role).toBe(SystemRole.HouseholdGuest);
+      });
+
+      it.each([
+        ['refused with 403', () => abilityService.currentActorCan.mockReturnValue(false)],
+        ['refused with 404', () => db.householdMember.findMany.mockResolvedValue(lockedRoster(null) as never)],
+        [
+          'rolled back by a scoped miss at the write',
+          () => db.householdRole.upsert.mockRejectedValue(dependentRecordNotFound()),
+        ],
+      ])('emits nothing when the change is %s (#245)', async (_label, arrange) => {
+        arrange();
+
+        await expect(service.updateMemberRole('hh-1', 'member-1', DTO)).rejects.toThrow();
+
+        expect(events.emit).not.toHaveBeenCalled();
+      });
+    });
   });
 
   describe('removeMember', () => {
@@ -847,9 +980,10 @@ describe('HouseholdMemberService', () => {
 
       // The scope is asked again under the lock and before the first delete:
       // a grant reading the member's role matches nothing once it's gone (#168).
+      // It reads the role the member-removed domain event records (#245).
       expect(db.householdMember.findFirst).toHaveBeenLastCalledWith({
         where: expect.objectContaining({ id: 'member-1', householdId: 'hh-1', AND: [COND] }),
-        select: { id: true },
+        select: LOCKED_RECHECK_SELECT,
       });
       const recheckOrder = db.householdMember.findFirst.mock.invocationCallOrder[1];
       expect(recheckOrder).toBeGreaterThan(db.$queryRaw.mock.invocationCallOrder[0]);
@@ -921,20 +1055,23 @@ describe('HouseholdMemberService', () => {
       // The sharer removed `share-2` themselves between the read and its
       // delete: their delete takes no household lock, and announced it.
       db.gameShare.deleteMany.mockResolvedValueOnce({ count: 1 } as never).mockResolvedValueOnce({ count: 0 } as never);
-      const cacheEvicted: boolean[] = [];
-      events.emit.mockImplementation(() => {
-        cacheEvicted.push(permissions.invalidateUser.mock.calls.length > 0);
-        return true;
-      });
+      const order: string[] = [];
+      recordOrder(order);
 
       await service.removeMember('hh-1', 'member-1');
 
-      expect(events.emit).toHaveBeenCalledTimes(1);
-      expect(events.emit).toHaveBeenCalledWith(
+      // The membership's end, its webhook, then the one share that ended
+      // with it (#245).
+      expect(order).toEqual([
+        'commit',
+        'evict',
+        'invites',
+        HouseholdEvents.MemberRemoved,
+        WebhookEventType.HouseholdMemberRemoved,
         HouseholdEvents.GameShareEnded,
-        expect.any(HouseholdGameShareEndedEvent),
-      );
-      const event = events.emit.mock.calls[0]?.[1] as HouseholdGameShareEndedEvent;
+      ]);
+      const event = emittedUnder(HouseholdEvents.GameShareEnded) as HouseholdGameShareEndedEvent;
+      expect(event).toBeInstanceOf(HouseholdGameShareEndedEvent);
       expect(event.subjectId).toBe('share-1');
       expect(event.before).toEqual({
         id: 'share-1',
@@ -946,17 +1083,151 @@ describe('HouseholdMemberService', () => {
         approvedAt: SHARE_APPROVED_AT,
       });
       expect(event.after).toBeNull();
-      expect(cacheEvicted).toEqual([true]);
+    });
+
+    it('emits household.member.removed with cause removed, between the invites and the ended shares', async () => {
+      db.householdMember.findFirst.mockResolvedValue(resolves(makeMember()));
+      db.gameShare.findMany.mockResolvedValue([gameShareRow('share-1')] as never);
+      const order: string[] = [];
+      recordOrder(order);
+
+      await service.removeMember('hh-1', 'member-1');
+
+      const removed = emittedUnder(HouseholdEvents.MemberRemoved) as HouseholdMemberRemovedEvent;
+      expect(removed).toBeInstanceOf(HouseholdMemberRemovedEvent);
+      expect(removed).toMatchObject({ subject: ResourceType.Household, subjectId: 'hh-1', action: 'update' });
+      expect(removed.before).toEqual({
+        householdId: 'hh-1',
+        userId: 'user-1',
+        memberId: 'member-1',
+        role: SystemRole.HouseholdMember,
+      });
+      expect(removed.after).toEqual({
+        householdId: 'hh-1',
+        userId: 'user-1',
+        memberId: null,
+        role: null,
+        cause: MembershipEndCause.Removed,
+      });
+      // Ids only, and no cause: a membership's end reads the same to a
+      // subscriber whatever ended it (#245).
+      expect(emittedUnder(WebhookEventType.HouseholdMemberRemoved)).toEqual({
+        subjectId: 'hh-1',
+        householdId: 'hh-1',
+        data: { householdId: 'hh-1', memberId: 'member-1', userId: 'user-1' },
+      });
+      expect(order).toEqual([
+        'commit',
+        'evict',
+        'invites',
+        HouseholdEvents.MemberRemoved,
+        WebhookEventType.HouseholdMemberRemoved,
+        HouseholdEvents.GameShareEnded,
+      ]);
+    });
+
+    it('records the role read under the lock, not the pre-lock read', async () => {
+      // A household owner made the member a household admin while this
+      // waited for the lock: the scoped read before it still says member, and
+      // the scoped read under it says household admin (#245).
+      db.householdMember.findFirst
+        .mockResolvedValueOnce(resolves(makeMember()))
+        .mockResolvedValueOnce({ id: 'member-1', role: { role: { name: SystemRole.HouseholdAdmin } } } as never);
+
+      await service.removeMember('hh-1', 'member-1');
+
+      const removed = emittedUnder(HouseholdEvents.MemberRemoved) as HouseholdMemberRemovedEvent;
+      expect(removed.before.role).toBe(SystemRole.HouseholdAdmin);
+      expect(db.householdMember.findFirst).toHaveBeenLastCalledWith({
+        where: expect.objectContaining({ id: 'member-1', householdId: 'hh-1', AND: [COND] }),
+        select: LOCKED_RECHECK_SELECT,
+      });
+    });
+
+    it('emits nothing when the last owner is refused', async () => {
+      db.householdMember.findFirst.mockResolvedValue(resolves(makeOwner()));
+      db.$queryRaw.mockResolvedValue([{ household_member_id: 'member-1' }]);
+
+      await expect(service.removeMember('hh-1', 'member-1')).rejects.toThrow(BadRequestException);
+
+      // The transaction rolled back and the membership stands, so there is no
+      // end to record (#245).
+      expect(events.emit).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      [
+        'hidden from the actor (403)',
+        () => {
+          db.householdMember.findFirst.mockResolvedValue(null);
+          db.householdMember.count.mockResolvedValue(1);
+        },
+      ],
+      [
+        'missing (404)',
+        () => {
+          db.householdMember.findFirst.mockResolvedValue(null);
+          db.householdMember.count.mockResolvedValue(0);
+        },
+      ],
+      [
+        'out of reach once the lock is held (403)',
+        () => {
+          db.householdMember.findFirst.mockResolvedValueOnce(resolves(makeMember())).mockResolvedValueOnce(null);
+        },
+      ],
+    ])('emits nothing when the member is %s (#245)', async (_label, arrange) => {
+      arrange();
+
+      await expect(service.removeMember('hh-1', 'member-1')).rejects.toThrow();
+
+      expect(events.emit).not.toHaveBeenCalled();
     });
 
     it('still answers the removal when announcing an ended game share throws, since it has committed (#810)', async () => {
       db.householdMember.findFirst.mockResolvedValue(resolves(makeMember()));
       db.gameShare.findMany.mockResolvedValue([gameShareRow('share-1')] as never);
+      const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
       events.emit.mockImplementation(() => {
         throw new Error('listener failed');
       });
 
       await expect(service.removeMember('hh-1', 'member-1')).resolves.toMatchObject({ id: 'member-1' });
+
+      // Logged by the publisher's guard (#245), not lost: without the guard the
+      // throw would reach the mutation's catch and answer a 500.
+      expect(logged).toHaveBeenCalledWith(
+        expect.stringContaining(`${HouseholdEvents.GameShareEnded} (GameShare share-1)`),
+        expect.stringContaining('Error: '),
+      );
+      logged.mockRestore();
+    });
+
+    it('still announces the other ended game shares when one share’s listener throws (#245)', async () => {
+      db.householdMember.findFirst.mockResolvedValue(resolves(makeMember()));
+      db.gameShare.findMany.mockResolvedValue([gameShareRow('share-1'), gameShareRow('share-2')] as never);
+      const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      events.emit.mockImplementation((name, event) => {
+        if (
+          name === HouseholdEvents.GameShareEnded &&
+          (event as HouseholdGameShareEndedEvent).subjectId === 'share-1'
+        ) {
+          throw new Error('listener failed');
+        }
+
+        return true;
+      });
+
+      await service.removeMember('hh-1', 'member-1');
+
+      // Each share is published on its own, so the first share's failure
+      // leaves the second announced.
+      const announced = events.emit.mock.calls
+        .filter(([name]) => name === HouseholdEvents.GameShareEnded)
+        .map(([, event]) => (event as HouseholdGameShareEndedEvent).subjectId);
+      expect(announced).toEqual(['share-1', 'share-2']);
+      expect(logged).toHaveBeenCalledTimes(1);
+      logged.mockRestore();
     });
 
     it('locks the owner rows and allows removing an owner when another owner remains', async () => {
@@ -1120,7 +1391,7 @@ describe('HouseholdMemberService', () => {
       );
       expect(db.householdMember.findFirst).toHaveBeenLastCalledWith({
         where: expect.objectContaining({ householdId: 'hh-1', userId: 'actor-1', AND: [COND], id: 'member-1' }),
-        select: { id: true },
+        select: LOCKED_RECHECK_SELECT,
       });
       expect(db.householdMember.delete).toHaveBeenCalledWith({ where: { id: 'member-1' } });
       expect(permissions.invalidateUser).toHaveBeenCalledWith('actor-1');
@@ -1147,6 +1418,45 @@ describe('HouseholdMemberService', () => {
       });
     });
 
+    it('emits household.member.removed with cause left, between the invites and the ended shares', async () => {
+      db.householdMember.findFirst.mockResolvedValue(resolves(makeMember({ userId: 'actor-1' })));
+      db.gameShare.findMany.mockResolvedValue([gameShareRow('share-1')] as never);
+      const order: string[] = [];
+      recordOrder(order);
+
+      await service.leaveHousehold('hh-1');
+
+      const removed = emittedUnder(HouseholdEvents.MemberRemoved) as HouseholdMemberRemovedEvent;
+      expect(removed).toBeInstanceOf(HouseholdMemberRemovedEvent);
+      expect(removed.subjectId).toBe('hh-1');
+      expect(removed.before).toEqual({
+        householdId: 'hh-1',
+        userId: 'actor-1',
+        memberId: 'member-1',
+        role: SystemRole.HouseholdMember,
+      });
+      expect(removed.after).toEqual({
+        householdId: 'hh-1',
+        userId: 'actor-1',
+        memberId: null,
+        role: null,
+        cause: MembershipEndCause.Left,
+      });
+      expect(emittedUnder(WebhookEventType.HouseholdMemberRemoved)).toEqual({
+        subjectId: 'hh-1',
+        householdId: 'hh-1',
+        data: { householdId: 'hh-1', memberId: 'member-1', userId: 'actor-1' },
+      });
+      expect(order).toEqual([
+        'commit',
+        'evict',
+        'invites',
+        HouseholdEvents.MemberRemoved,
+        WebhookEventType.HouseholdMemberRemoved,
+        HouseholdEvents.GameShareEnded,
+      ]);
+    });
+
     it('rejects the sole owner leaving (400) — transfer ownership first', async () => {
       db.householdMember.findFirst.mockResolvedValue(resolves(makeOwner({ userId: 'actor-1' })));
       db.$queryRaw.mockResolvedValue([{ household_member_id: 'member-1' }]);
@@ -1155,6 +1465,8 @@ describe('HouseholdMemberService', () => {
 
       expect(db.householdMember.delete).not.toHaveBeenCalled();
       expect(permissions.invalidateUser).not.toHaveBeenCalled();
+      // Refused, so nothing is recorded (#245).
+      expect(events.emit).not.toHaveBeenCalled();
     });
 
     it('allows an owner to leave when another owner remains', async () => {
@@ -1252,7 +1564,18 @@ describe('HouseholdMemberService', () => {
       expect(db.householdMember.delete).toHaveBeenCalledWith({ where: { id: 'member-2' } });
       expect(invites.revokeOutstandingOfUserWithin).toHaveBeenCalledWith(db, { householdId: 'hh-1' }, 'user-2');
       expect(db.gameShare.deleteMany).toHaveBeenCalledWith({ where: { id: 'share-1' } });
-      expect(removed).toEqual({ removed: target, revoked, endedShares: [gameShareRow('share-1')] });
+      // The role is the one read under the household lock, for the caller's
+      // member-removed domain event (#245).
+      expect(db.householdMember.findFirst).toHaveBeenLastCalledWith({
+        where: { householdId: 'hh-1', userId: 'user-2', AND: [COND], id: 'member-2' },
+        select: LOCKED_RECHECK_SELECT,
+      });
+      expect(removed).toEqual({
+        removed: target,
+        role: SystemRole.HouseholdMember,
+        revoked,
+        endedShares: [gameShareRow('share-1')],
+      });
 
       // On the caller's transaction; evicting the cache and announcing the
       // invites and the shares wait for the caller's commit.
@@ -1289,6 +1612,87 @@ describe('HouseholdMemberService', () => {
       });
 
       expect(db.householdMember.delete).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('emitMemberAdmitted (#245)', () => {
+    it('records the origin it is given and the role on the admitted row, and sends neither in the webhook', () => {
+      const initiatedAt = new Date('2026-11-19T00:00:00.000Z');
+      const member = makeMember({
+        id: 'member-new',
+        userId: 'user-new',
+        role: { role: { id: 'role-admin', name: SystemRole.HouseholdAdmin } },
+      });
+
+      service.emitMemberAdmitted(member, HouseholdMembershipOrigin.InviteAccepted, initiatedAt);
+
+      expect(emittedNames()).toEqual([HouseholdEvents.MemberAdmitted, WebhookEventType.HouseholdMemberAdmitted]);
+      const admitted = emittedUnder(HouseholdEvents.MemberAdmitted) as HouseholdMemberAdmittedEvent;
+      expect(admitted).toBeInstanceOf(HouseholdMemberAdmittedEvent);
+      expect(admitted).toMatchObject({ subject: ResourceType.Household, subjectId: 'hh-1', action: 'update' });
+      expect(admitted.initiatedAt).toBe(initiatedAt);
+      expect(admitted.before).toEqual({ householdId: 'hh-1', userId: 'user-new', memberId: null, role: null });
+      expect(admitted.after).toEqual({
+        householdId: 'hh-1',
+        userId: 'user-new',
+        memberId: 'member-new',
+        role: SystemRole.HouseholdAdmin,
+        origin: HouseholdMembershipOrigin.InviteAccepted,
+      });
+      // Ids only: no role and no origin leave for a subscriber's URL.
+      expect(emittedUnder(WebhookEventType.HouseholdMemberAdmitted)).toEqual({
+        subjectId: 'hh-1',
+        householdId: 'hh-1',
+        data: { householdId: 'hh-1', memberId: 'member-new', userId: 'user-new' },
+      });
+    });
+
+    it('records no role for a row that carries none', () => {
+      service.emitMemberAdmitted(
+        makeMember({ role: null }),
+        HouseholdMembershipOrigin.InviteAccepted,
+        new Date('2026-11-19T00:00:00.000Z'),
+      );
+
+      expect((emittedUnder(HouseholdEvents.MemberAdmitted) as HouseholdMemberAdmittedEvent).after.role).toBeNull();
+    });
+  });
+
+  describe('emitMemberRemoved (#245)', () => {
+    const membership: RemovedMembership = {
+      removed: makeMember({ id: 'member-2', userId: 'user-2' }),
+      role: SystemRole.HouseholdAdmin,
+      revoked: [],
+      endedShares: [],
+    };
+
+    it('records the cause it is given and the role read under the lock, and sends no cause in the webhook', () => {
+      const initiatedAt = new Date('2026-11-19T00:00:00.000Z');
+
+      service.emitMemberRemoved(membership, MembershipEndCause.Banned, initiatedAt);
+
+      expect(emittedNames()).toEqual([HouseholdEvents.MemberRemoved, WebhookEventType.HouseholdMemberRemoved]);
+      const removed = emittedUnder(HouseholdEvents.MemberRemoved) as HouseholdMemberRemovedEvent;
+      expect(removed.initiatedAt).toBe(initiatedAt);
+      expect(removed.before).toEqual({
+        householdId: 'hh-1',
+        userId: 'user-2',
+        memberId: 'member-2',
+        role: SystemRole.HouseholdAdmin,
+      });
+      expect(removed.after).toEqual({
+        householdId: 'hh-1',
+        userId: 'user-2',
+        memberId: null,
+        role: null,
+        cause: MembershipEndCause.Banned,
+      });
+      // A ban's membership end reads to a subscriber as any other does.
+      expect(emittedUnder(WebhookEventType.HouseholdMemberRemoved)).toEqual({
+        subjectId: 'hh-1',
+        householdId: 'hh-1',
+        data: { householdId: 'hh-1', memberId: 'member-2', userId: 'user-2' },
+      });
     });
   });
 
@@ -1659,7 +2063,14 @@ describe('HouseholdMemberService', () => {
         const result = await service.transferOwnership('hh-1', 'member-2');
 
         expect(result.owner.id).toBe('member-2');
-        expect(logged).toHaveBeenCalled();
+        // Each emit is guarded on its own by the publisher (#245), so the
+        // webhook is still attempted after the audit listener's throw, and
+        // each failure is logged under the name of what was lost.
+        expect(events.emit).toHaveBeenCalledTimes(2);
+        expect(logged.mock.calls.map(([message]) => message)).toEqual([
+          expect.stringContaining(`for ${HouseholdEvents.OwnershipTransferred} (Household hh-1)`),
+          expect.stringContaining(`for ${WebhookEventType.HouseholdOwnershipTransferred} (Household hh-1)`),
+        ]);
         logged.mockRestore();
       });
 

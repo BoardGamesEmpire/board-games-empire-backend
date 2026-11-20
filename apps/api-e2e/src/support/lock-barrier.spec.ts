@@ -1,3 +1,12 @@
+import type {
+  AdvisoryWaiter,
+  Barrier,
+  BarrierConnection,
+  LockWaiter,
+  PendingStatement,
+  QueuedBackend,
+  UngrantedLock,
+} from './lock-barrier';
 import {
   BARRIER_IDLE_IN_TRANSACTION_TIMEOUT_MS,
   BARRIER_LOCK_TIMEOUT_MS,
@@ -10,13 +19,6 @@ import {
   expectLockWaiter,
   expectNotBlocked,
   quoteIdentifier,
-  type AdvisoryWaiter,
-  type Barrier,
-  type BarrierConnection,
-  type LockWaiter,
-  type PendingStatement,
-  type QueuedBackend,
-  type UngrantedLock,
 } from './lock-barrier';
 
 /**
@@ -190,12 +192,12 @@ const barrierWatching = (rows: readonly (AdvisoryWaiter | LockWaiter)[], seen: u
 /**
  * Watching the LOCK rather than a backend.
  *
- * The pre-row races contend an application transaction against a barrier, and
- * the application's backend is not knowable from here: the request runs on a
- * connection from the API's own pool, and this suite never imports application
- * code. So the assertion is inverted — the holder asks whether anyone is queued
- * behind the key it holds — and the join against its own granted rows, plus the
- * caller's exclusion list, is what keeps that from meaning "anyone, anywhere".
+ * A spec that contends an application transaction against a barrier cannot
+ * know the application's backend: the request runs on a connection from the
+ * API's own pool, and this suite never imports application code. So the
+ * assertion is inverted — the holder asks whether anyone is queued behind the
+ * key it holds — and the join against its own granted rows, plus the caller's
+ * exclusion list, is what keeps that from meaning "anyone, anywhere".
  */
 describe('expectAdvisoryWaiter', () => {
   it('returns the waiting backend and what it is running', async () => {

@@ -72,7 +72,9 @@ function deriveUnitIdColumns(datamodel) {
     }
 
     for (const field of model.fields) {
-      if (field.kind !== 'object') continue;
+      if (field.kind !== 'object') {
+        continue;
+      }
 
       relations[field.name] = field.type;
 
@@ -110,12 +112,16 @@ function renderUnitIdColumns(columns) {
     ' * fields (#994).',
     ' */',
     'export interface ModelUnitIdColumns {',
+    // Members in the order and layout lint asks of hand-written code: sorted
+    // case-insensitively (#1374), and a blank line around each documented one (#1318).
     "  /** Scalar fields holding a Household id: foreign keys to `Household.id`, and Household's own `id`. */",
     '  readonly Household: readonly string[];',
-    "  /** Scalar fields holding a User id: foreign keys to `User.id`, and User's own `id`. */",
-    '  readonly User: readonly string[];',
+    '',
     '  /** Each relation field, and the model it points to. */',
     '  readonly relations: Readonly<Record<string, string>>;',
+    '',
+    "  /** Scalar fields holding a User id: foreign keys to `User.id`, and User's own `id`. */",
+    '  readonly User: readonly string[];',
     '}',
     '',
     '/** Every Prisma model in the schema this build was generated from, by name. */',

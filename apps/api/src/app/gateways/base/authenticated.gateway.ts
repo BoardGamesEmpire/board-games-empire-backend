@@ -1,8 +1,10 @@
 import { AuthService } from '@bge/auth';
-import { type I18nMessage, type I18nPath, isI18nMessage, t } from '@bge/i18n';
+import type { I18nMessage, I18nPath } from '@bge/i18n';
+import { isI18nMessage, t } from '@bge/i18n';
 import { PoliciesGuard } from '@bge/permissions';
 import type { BaseClientData } from '@bge/shared';
-import { buildWsClientData, type WsRefusalReason } from '@bge/utils';
+import type { WsRefusalReason } from '@bge/utils';
+import { buildWsClientData } from '@bge/utils';
 import { HttpException, Logger, UseFilters, UseGuards } from '@nestjs/common';
 import { OnGatewayConnection, OnGatewayInit } from '@nestjs/websockets';
 import { Http } from '@status/codes';
@@ -106,7 +108,7 @@ export abstract class AuthenticatedGateway implements OnGatewayInit, OnGatewayCo
    * base's. Left open, it would hear everything the namespace broadcasts.
    */
   handleConnection(client: Socket): void {
-    const { userId, correlationId, actor } = client.data as Partial<BaseClientData>;
+    const { userId, correlationId, actor }: Partial<BaseClientData> = client.data;
     if (!actor) {
       this.logger.error(`WS connection was never authenticated: socketId=${client.id}`);
       client.disconnect(true);
@@ -217,13 +219,13 @@ export abstract class AuthenticatedGateway implements OnGatewayInit, OnGatewayCo
  * `translateException` renders: the body is the marker, or an object whose
  * `message` is one.
  */
-function markedBody(body: unknown): { marker: I18nMessage; fields: Record<string, unknown> } | undefined {
+function markedBody(body: unknown): { fields: Record<string, unknown>; marker: I18nMessage } | undefined {
   if (isI18nMessage(body)) {
     return { marker: body, fields: {} };
   }
 
-  if (body !== null && typeof body === 'object') {
-    const { message, ...fields } = body as Record<string, unknown>;
+  if (body !== null && typeof body === 'object' && 'message' in body) {
+    const { message, ...fields } = body;
     if (isI18nMessage(message)) {
       return { marker: message, fields };
     }

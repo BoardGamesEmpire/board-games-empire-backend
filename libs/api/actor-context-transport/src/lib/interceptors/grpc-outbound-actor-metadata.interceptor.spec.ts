@@ -19,6 +19,7 @@ const decodeActor = (metadata: Metadata): Actor | undefined => {
   if (value === undefined) {
     return undefined;
   }
+
   const decoded = Buffer.from(value as string, 'base64').toString('utf8');
   return JSON.parse(decoded) as Actor;
 };

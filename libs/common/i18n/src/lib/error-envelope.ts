@@ -20,11 +20,11 @@ export type ErrorCode = Uppercase<string>;
  * beside these.
  */
 export interface ErrorEnvelope<M = string | string[]> {
-  readonly statusCode: number;
+  readonly code?: ErrorCode;
   readonly error: string;
   readonly message: M;
-  readonly code?: ErrorCode;
   readonly [field: string]: unknown;
+  readonly statusCode: number;
 }
 
 /** The keys the envelope owns. No extra field of the same name reaches the wire. */
@@ -59,6 +59,7 @@ export function reasonPhrase(status: number): string {
  * `PLUGIN_SDK_VERSION`) (#1260).
  */
 export function toErrorCode(name: string): ErrorCode {
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- `toUpperCase()` returns `string`, which TypeScript doesn't type as `Uppercase<string>` (#1321)
   return name
     .replace(/Error$/, '')
     .replace(/([a-z\d])([A-Z])/g, '$1_$2')

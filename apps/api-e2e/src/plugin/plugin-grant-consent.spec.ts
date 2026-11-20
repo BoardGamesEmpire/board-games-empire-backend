@@ -1,16 +1,14 @@
-import {
-  PluginConsentActKind,
-  PluginGrantScope,
-  PluginGrantStatus,
-  PluginScope,
-  RiskLevel,
-  type Plugin,
-} from '@bge/database';
-import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
-import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
+import type { Plugin } from '@bge/database';
+import { PluginConsentActKind, PluginGrantScope, PluginGrantStatus, PluginScope, RiskLevel } from '@bge/database';
+import type { Actors, SessionActor } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
+import type { PluginManifest } from '@boardgamesempire/plugin-manifest';
+import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
+import type { ConsentAnswerStatus } from './consent-act-fixtures';
 import {
   readConsentSurface,
   readStagedShownRisks,
@@ -20,7 +18,6 @@ import {
   sendToggle,
   switchOnBody,
   toggleBody,
-  type ConsentAnswerStatus,
 } from './consent-act-fixtures';
 import { FIXTURE_ACT_ID, INVENTORY_STAGING_ID, pluginRowData, stagedUpdateColumns } from './plugin-row-fixtures';
 
@@ -156,7 +153,7 @@ describe('plugin consent acts + consent surface (#322, #1150, #1336)', () => {
   const seedServerDecision = async (
     plugin: Plugin,
     permissionSlug: string,
-    decision: { readonly status: PluginGrantStatus; readonly decidedRiskLevel: RiskLevel; readonly decidedAt: Date },
+    decision: { readonly decidedAt: Date; readonly decidedRiskLevel: RiskLevel; readonly status: PluginGrantStatus },
   ) => {
     const act = await db.client.pluginConsentAct.create({
       data: {
@@ -654,7 +651,7 @@ describe('plugin consent acts + consent surface (#322, #1150, #1336)', () => {
       );
 
       const response = await readHouseholdConsent(ownerA, fixtureA.household.id, plugin.slug).expect(200);
-      const checks: { slug: string; decision: string; decidableByUnit: boolean }[] = response.body.presentation.checks;
+      const checks: { decidableByUnit: boolean; decision: string; slug: string }[] = response.body.presentation.checks;
       const household = checks.find((check) => check.slug === 'read:game:public');
       expect(household).toMatchObject({ decision: 'denied', decidableByUnit: true });
       // A SERVER check from the household viewpoint is not per-unit: the
@@ -683,7 +680,7 @@ describe('plugin consent acts + consent surface (#322, #1150, #1336)', () => {
       await switchOnUser(user, plugin.slug, { 'read:game_collection:public': PluginGrantStatus.Granted }, 200);
 
       const response = await readUserConsent(user, plugin.slug).expect(200);
-      const checks: { slug: string; decision: string }[] = response.body.presentation.checks;
+      const checks: { decision: string; slug: string }[] = response.body.presentation.checks;
       expect(checks.find((check) => check.slug === 'read:game_collection:public')).toMatchObject({
         decision: 'granted',
         decidableByUnit: true,

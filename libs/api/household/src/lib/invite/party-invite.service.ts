@@ -8,6 +8,7 @@ import {
   SystemRole,
 } from '@bge/database';
 import { t } from '@bge/i18n';
+import type { InvitePartyView, InviteTarget, RespondToInviteParams } from '@bge/invites';
 import {
   effectiveInviteStatusWhere,
   InviteService,
@@ -15,9 +16,6 @@ import {
   PARTY_INVITE_SELECT,
   unexpiredInviteWhere,
   withEffectiveInviteStatus,
-  type InvitePartyView,
-  type InviteTarget,
-  type RespondToInviteParams,
 } from '@bge/invites';
 import { AbilityService, PermissionsService } from '@bge/permissions';
 import { QuotaService } from '@bge/quota';
@@ -25,7 +23,8 @@ import { PaginatedRows, PaginationQueryDto } from '@bge/shared';
 import { ConflictException, Injectable } from '@nestjs/common';
 import { ListSentInvitesQueryDto } from '../dto';
 import { lockExistingHousehold } from '../household-access.helpers';
-import { HouseholdMemberService, type HouseholdMemberWithRelations } from '../member/household-member.service';
+import type { HouseholdMemberWithRelations } from '../member/household-member.service';
+import { HouseholdMemberService } from '../member/household-member.service';
 import { offeredRole, readInviteAuthority, senderCouldStillSend } from './household-authority';
 import { receivedHouseholdInviteWhere, vouchedEmailOf } from './received-invites';
 
@@ -205,14 +204,16 @@ export class PartyInviteService {
    *    inviter whose address it was, and no settled status would be true.
    *
    * After commit the new member's ability cache is evicted, so their grants on
-   * the household hold from their next request, and then the accepted invite
-   * and any soft cap the admission passed are announced. An invite revoked at
-   * step 4 is committed and announced before the 409 goes out.
+   * the household hold from their next request, and then the accepted invite,
+   * the admission (#245) and any soft cap the admission passed are announced.
+   * An invite revoked at step 4 is committed and announced before the 409 goes
+   * out. Neither 409 admitted anyone, so neither publishes an admission.
    *
    * By token, the token is the credential: whoever holds the link is bound to
    * the invite (#161), whatever their address.
    */
   async accept(target: InviteTarget): Promise<HouseholdInviteAcceptance> {
+    const initiatedAt = new Date();
     const inviteeId = requireSessionUserId(this.auditContext.getActor());
 
     const outcome = await this.db.$transaction(async (tx) => {
@@ -269,6 +270,7 @@ export class PartyInviteService {
 
     await this.permissions.invalidateUser(inviteeId);
     this.invites.emit([event]);
+    this.members.emitMemberAdmitted(member, HouseholdMembershipOrigin.InviteAccepted, initiatedAt);
     this.quotas.emitSoftOverages(softOverages);
 
     return { invite, member };

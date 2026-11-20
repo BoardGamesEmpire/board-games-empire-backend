@@ -2,19 +2,21 @@ import { MutationEvent } from '@bge/actor-context';
 import { PluginGrantScope, PluginGrantStatus, RiskLevel } from '@bge/database';
 import { PluginEvent, buildPluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
 import type { StaticAnalysisFinding } from '../install/static-analysis.types';
-import {
+import type {
   GrantedPermissionRecord,
+  NpmAuditFinding,
+  PluginInstallAuditContext,
+  PluginProvenance,
+} from './plugin.events';
+import {
   HouseholdPluginConfigUpdatedEvent,
   HouseholdPluginReconsentRequestedEvent,
-  NpmAuditFinding,
   PluginConfigUpdatedEvent,
   PluginDisabledEvent,
   PluginGrantCreatedEvent,
   PluginGrantRejectedEvent,
   PluginGrantRevokedEvent,
-  PluginInstallAuditContext,
   PluginInstalledEvent,
-  PluginProvenance,
   PluginUninstalledEvent,
   PluginUpdateCheckCompletedEvent,
   UserPluginReconsentRequestedEvent,
@@ -255,12 +257,12 @@ describe('plugin lifecycle events', () => {
       expect(PluginGrantRejectedEvent.eventName).toBe(PluginEvent.GrantRejected);
     });
 
-    it('revocation is delete-shaped and carries the plugin manifest change that caused it (#211)', () => {
-      const event = new PluginGrantRevokedEvent(grantRow, 'permission-no-longer-requested', context, initiatedAt);
+    it('revocation is delete-shaped and carries the rejected staged update that caused it (#211, #1152)', () => {
+      const event = new PluginGrantRevokedEvent(grantRow, 'staged-update-rejected', context, initiatedAt);
 
       expect(event.action).toBe('delete');
       expect(event.after).toBeNull();
-      expect(event.reason).toBe('permission-no-longer-requested');
+      expect(event.reason).toBe('staged-update-rejected');
       expect(event.before.decidedRiskLevel).toBe(RiskLevel.Low);
       expect(PluginGrantRevokedEvent.eventName).toBe(PluginEvent.GrantRevoked);
     });
@@ -302,7 +304,7 @@ describe('plugin lifecycle events', () => {
 
   describe('base invariants', () => {
     it('rejects construction with both snapshots null (inherited MutationEvent guard)', () => {
-      type Snapshot = Readonly<{ id: string; slug: string; enabled: boolean }>;
+      type Snapshot = Readonly<{ enabled: boolean; id: string; slug: string }>;
 
       expect(
         () => new PluginDisabledEvent(null as unknown as Snapshot, null as unknown as Snapshot, initiatedAt),

@@ -1,5 +1,9 @@
 {
   "$schema": "./node_modules/nx/schemas/nx-schema.json",
+  "cli": {
+    "// packageManager": "Named so Nx never guesses from lockfiles (#1375, #1370). Nx checks for yarn.lock before package-lock.json, and the bug agent's sandbox leaves an empty yarn.lock and pnpm-lock.yaml at the root. Guessing from them, Nx picks yarn, parses an empty lockfile, and finds no npm packages. The re-includes in .nxignore are the other half: the same sandbox hides package-lock.json from Nx's file walker.",
+    "packageManager": "npm"
+  },
   "namedInputs": {
     "default": ["{projectRoot}/**/*", "sharedGlobals"],
     "production": [

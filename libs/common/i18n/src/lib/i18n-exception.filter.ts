@@ -1,18 +1,21 @@
 import { AuditContextService } from '@bge/actor-context';
-import { t, type I18nTranslations } from '@bge/i18n-core';
+import type { I18nTranslations } from '@bge/i18n-core';
+import { t } from '@bge/i18n-core';
 import { ArgumentsHost, Catch, HttpException } from '@nestjs/common';
 import { BaseExceptionFilter } from '@nestjs/core';
 import { Http } from '@status/codes';
 import { I18nService } from 'nestjs-i18n';
 import { CodedHttpException } from './coded-http.exception';
 import { LocaleResolutionService } from './locale-resolution.service';
-import { translateException, type EdgeLocaleSource } from './translate-exception';
+import type { EdgeLocaleSource } from './translate-exception';
+import { translateException } from './translate-exception';
 
 /** What the filter reads from the request. */
 interface EdgeRequest {
+  readonly headers?: { readonly 'accept-language'?: string };
+
   /** Set by Express exactly when a route matched. */
   readonly route?: unknown;
-  readonly headers?: { readonly 'accept-language'?: string };
 }
 
 /**

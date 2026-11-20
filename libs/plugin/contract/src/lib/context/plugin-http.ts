@@ -5,9 +5,9 @@
  * import the gateway contract to say so: the shapes match structurally.
  */
 export interface PluginHttpRequest {
-  readonly method: 'GET' | 'POST';
-  readonly headers: Readonly<Record<string, string>>;
   readonly body?: string;
+  readonly headers: Readonly<Record<string, string>>;
+  readonly method: 'GET' | 'POST';
 
   /** Aborts the request. */
   readonly signal?: AbortSignal;

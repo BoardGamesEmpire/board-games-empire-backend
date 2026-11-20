@@ -1,3 +1,11 @@
+import type {
+  PermissionRuleColumns,
+  PluginActiveManifest,
+  PluginActiveManifestReader,
+  PluginGrant,
+  Prisma,
+  RiskLevel,
+} from '@bge/database';
 import {
   derivePluginUnitDormancy,
   isPluginServing,
@@ -6,19 +14,13 @@ import {
   PluginGrantScope,
   PluginGrantStatus,
   requestedByManifest,
-  type PermissionRuleColumns,
-  type PluginActiveManifest,
-  type PluginActiveManifestReader,
-  type PluginGrant,
-  type Prisma,
-  type RiskLevel,
 } from '@bge/database';
 
 /** The columns of a permission that decide whether a consent decision on it confers anything. */
 export type ConsentEffectColumns = PermissionRuleColumns & {
-  readonly slug: string;
-  readonly riskLevel: RiskLevel;
   readonly retiredAt: Date | null;
+  readonly riskLevel: RiskLevel;
+  readonly slug: string;
 };
 
 /** A plugin's consent decision on a core permission, as far as conferring goes. */
@@ -115,6 +117,7 @@ export async function loadConsentDecisionsInForce(
         : null;
       boundByPlugin.set(decision.pluginId, bound);
     }
+
     return bound;
   };
 

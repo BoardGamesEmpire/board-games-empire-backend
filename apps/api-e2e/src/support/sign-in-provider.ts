@@ -22,20 +22,29 @@ export function fakeProviderUrl(env: Readonly<Record<string, string | undefined>
 }
 
 export interface ProviderSignInResult {
+  /** The session cookie the callback set, as `name=value`, or `''` when it set none. */
+  readonly cookie: string;
+
   /**
    * Where the API sent the browser at the end: the `callbackURL` the flow was
    * started with, or better-auth's error page with an `error` code.
    */
   readonly location: URL;
 
-  /** The session cookie the callback set, as `name=value`, or `''` when it set none. */
-  readonly cookie: string;
-
   /** The fake's ticket for this sign-in, to read back what the API asked the provider for. */
   readonly ticket: string;
 }
 
 export interface ProviderSignInOptions {
+  /** better-auth's `additionalData`, which rides the flow's state; none unless set. */
+  readonly additionalData?: Record<string, unknown>;
+
+  /** Where the callback sends the browser on success; `/` unless set. */
+  readonly callbackURL?: string;
+
+  /** Spoils the ID token the provider sends, when it sends one; a sound one unless set. */
+  readonly idToken?: IdTokenFault;
+
   /**
    * A signed-in user's headers. With them the flow links the provider to that
    * user (`/link-social`) instead of signing in with it.
@@ -45,17 +54,8 @@ export interface ProviderSignInOptions {
   /** The listed provider to sign in through; the strict fake unless set. */
   readonly providerId?: string;
 
-  /** Spoils the ID token the provider sends, when it sends one; a sound one unless set. */
-  readonly idToken?: IdTokenFault;
-
   /** What `/userinfo` answers instead of the claims; the claims unless set (#993). */
   readonly userInfo?: Record<string, unknown>;
-
-  /** Where the callback sends the browser on success; `/` unless set. */
-  readonly callbackURL?: string;
-
-  /** better-auth's `additionalData`, which rides the flow's state; none unless set. */
-  readonly additionalData?: Record<string, unknown>;
 }
 
 /** Each `Set-Cookie` header as the `name=value` pair a `Cookie` header sends back. */

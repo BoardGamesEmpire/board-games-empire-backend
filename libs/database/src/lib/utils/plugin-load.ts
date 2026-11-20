@@ -52,7 +52,7 @@ export function categoriesLoadedBy(processRole: string): PluginCategory[] {
  */
 export async function hasLivePluginLoad(
   db: Pick<PrismaClient, 'pluginProcessLoad'>,
-  plugin: { readonly slug: string; readonly installedAt: Date },
+  plugin: { readonly installedAt: Date; readonly slug: string },
   processRole: string,
   now: Date = new Date(),
 ): Promise<boolean> {

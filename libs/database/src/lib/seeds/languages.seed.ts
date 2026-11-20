@@ -6,8 +6,8 @@ import type { PrismaClient } from '../client';
 const systemSupportedTags = ['en'];
 
 interface CuratedLanguage {
-  iso6393: string;
   iso6391: string;
+  iso6393: string;
 
   // Canonical BCP 47 tags to seed; the first entry is the language's bare
   // tag. Extra entries are the script/region variants game releases
@@ -81,6 +81,7 @@ function assertSystemSupportedTags(curated: readonly CuratedLanguage[]) {
     if (canonical === null) {
       throw new Error(`languagesSeed: systemSupported tag '${tag}' is not a valid BCP 47 tag`);
     }
+
     if (canonical !== tag) {
       throw new Error(`languagesSeed: systemSupported tag '${tag}' is not canonical (expected '${canonical}')`);
     }

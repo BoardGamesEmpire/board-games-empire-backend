@@ -265,6 +265,21 @@ describe('ActorSpanProcessor', () => {
       const provider: ActorContextProvider = () => {
         throw new Error('provider broke');
       };
+
+      const processor = new ActorSpanProcessor(provider);
+
+      expect(() => processor.onStart(span as unknown as Span, emptyContext)).not.toThrow();
+      expect(span.setAttribute).not.toHaveBeenCalled();
+    });
+
+    // A catch binding can hold anything; reading `.message` off a thrown null
+    // would throw inside the catch and break the isolation (#1321).
+    it('does not throw when the provider throws something other than an Error', () => {
+      const span = createMockSpan();
+      const provider: ActorContextProvider = () => {
+        throw null;
+      };
+
       const processor = new ActorSpanProcessor(provider);
 
       expect(() => processor.onStart(span as unknown as Span, emptyContext)).not.toThrow();

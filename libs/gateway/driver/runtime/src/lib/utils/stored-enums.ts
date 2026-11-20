@@ -112,6 +112,7 @@ export const toStoredUpstream = (value: unknown): Upstream | undefined => lookup
  */
 
 const byStoredValue = <T extends string, P extends string>(byName: ByProtoName<T>): ReadonlyMap<T, P> =>
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Object.entries types every key as string; the caller names P, the proto enum these keys come from (#1321)
   new Map(Object.entries(byName).map(([name, stored]) => [stored, name as P]));
 
 const PROTO_PLATFORM_TYPES = byStoredValue<PlatformType, proto.PlatformType>(PLATFORM_TYPES);

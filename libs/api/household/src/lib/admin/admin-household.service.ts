@@ -1,6 +1,8 @@
-import { Action, DatabaseService, Prisma, type Reach, ResourceType } from '@bge/database';
+import type { Reach } from '@bge/database';
+import { Action, DatabaseService, Prisma, ResourceType } from '@bge/database';
 import { ScopeComposer, Unscoped } from '@bge/permissions';
-import { escapeLikePattern, type PaginatedRows } from '@bge/shared';
+import type { PaginatedRows } from '@bge/shared';
+import { escapeLikePattern } from '@bge/shared';
 import { Injectable } from '@nestjs/common';
 import { ADMIN_HOUSEHOLD_ROW_SELECT } from '../read-shapes';
 import type {
@@ -11,22 +13,23 @@ import type {
 
 /** A household owner as one row of the staff households list names them (#419). */
 export interface AdminHouseholdOwner {
-  readonly userId: string;
-  readonly username: string;
   /** The profile's display name as stored: null when the user has none, or has no profile. */
   readonly displayName: string | null;
+
+  readonly userId: string;
+  readonly username: string;
 }
 
 /** One row of the staff households list (#419). */
 export interface AdminHouseholdRow {
-  readonly id: string;
-  readonly name: string;
-  readonly image: string | null;
-  readonly reach: Reach;
   readonly createdAt: Date;
   readonly deletedAt: Date | null;
+  readonly id: string;
+  readonly image: string | null;
   readonly memberCount: number;
+  readonly name: string;
   readonly owners: readonly AdminHouseholdOwner[];
+  readonly reach: Reach;
 }
 
 /**

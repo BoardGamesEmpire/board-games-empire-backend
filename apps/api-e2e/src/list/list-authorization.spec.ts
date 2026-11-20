@@ -1,16 +1,11 @@
 import { FriendshipStatus, ListKind, Reach, ResourceType } from '@bge/database';
-import {
-  arrangeExtendedNetwork,
-  arrangeFriendship,
-  befriend,
-  createActors,
-  type Actors,
-  type AuthenticatedActor,
-} from '@bge/testing-e2e';
+import type { Actors, AuthenticatedActor } from '@bge/testing-e2e';
+import { arrangeExtendedNetwork, arrangeFriendship, befriend, createActors } from '@bge/testing-e2e';
 import request from 'supertest';
 import { mintApiKey } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { arrangeGame, arrangeList, findWishlist } from './list-fixtures';
 import { listEntriesEnvelope, listsEnvelope } from './list-wire';
 
@@ -210,6 +205,7 @@ describe('list authorization (#1241)', () => {
       const refused = await request(baseUrl).put('/api/lists/order').set(pinned.headers).send({ listIds }).expect(403);
       expect(refused.body.code).toBe('LIST_ORDER_FORBIDDEN');
     }
+
     expect(await positions()).toEqual(before);
 
     // An unpinned key holding the same slug reorders them.

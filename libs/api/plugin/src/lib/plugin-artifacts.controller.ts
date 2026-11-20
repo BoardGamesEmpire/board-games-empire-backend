@@ -2,14 +2,10 @@ import { AuditContextService } from '@bge/actor-context';
 import { Action, ResourceType } from '@bge/database';
 import { SupportedLocalesService } from '@bge/i18n';
 import { AbilityService, CheckPolicies, PoliciesGuard, ScopeComposer } from '@bge/permissions';
-import {
-  MODULE_OPTIONS_TOKEN,
-  PluginInventoryService,
-  presentArtifactChecks,
-  type PluginModuleOptions,
-  type PluginUpdateAssessment,
-} from '@bge/plugin';
-import { PluginArtifactInstaller, PluginArtifactReceiver, type PluginArtifactReceipt } from '@bge/plugin-artifacts';
+import type { PluginModuleOptions, PluginUpdateAssessment } from '@bge/plugin';
+import { MODULE_OPTIONS_TOKEN, PluginInventoryService, presentArtifactChecks } from '@bge/plugin';
+import type { PluginArtifactReceipt } from '@bge/plugin-artifacts';
+import { PluginArtifactInstaller, PluginArtifactReceiver } from '@bge/plugin-artifacts';
 import { resolveLocalizedString } from '@boardgamesempire/plugin-manifest';
 import {
   Body,
@@ -312,7 +308,7 @@ export class PluginArtifactsController {
           description: text(feature.description),
         })),
       },
-      checks: [...presentArtifactChecks(assessment, locale, defaultLocale)] as PluginArtifactResponseDto['checks'],
+      checks: [...presentArtifactChecks(assessment, locale, defaultLocale)],
       locale: locale ?? defaultLocale,
       criticalSlugsToReenter: [...assessment.criticalSlugsToReenter],
       forbiddenImportsToAccept: [...assessment.forbiddenImportsToAccept],

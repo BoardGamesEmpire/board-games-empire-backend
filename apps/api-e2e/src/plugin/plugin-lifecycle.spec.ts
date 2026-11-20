@@ -1,18 +1,13 @@
-import {
-  PluginGrantScope,
-  PluginGrantStatus,
-  PluginLifecycleEventType,
-  PluginScope,
-  RiskLevel,
-  type Plugin,
-  type Prisma,
-} from '@bge/database';
-import { createActors, pollUntil, type Actors, type SessionActor } from '@bge/testing-e2e';
+import type { Plugin, Prisma } from '@bge/database';
+import { PluginGrantScope, PluginGrantStatus, PluginLifecycleEventType, PluginScope, RiskLevel } from '@bge/database';
+import type { Actors, SessionActor } from '@bge/testing-e2e';
+import { createActors, pollUntil } from '@bge/testing-e2e';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { FIXTURE_ACT_ID, pluginRowData, stagedUpdateColumns } from './plugin-row-fixtures';
 
 /**
@@ -183,18 +178,32 @@ describe('plugin lifecycle (server-level)', () => {
       });
     };
 
-    it('tombstones the row, purges consent, clears the staged update, and reports the affected units', async () => {
+    it('marks the plugin uninstalled, purges consent, clears the staged update, switches every unit enablement off keeping its configuration, and reports the affected units (#1328)', async () => {
       const admin = await actors.admin();
+      const owner = await actors.user();
+      const { household } = await actors.householdWithMembers({ owner });
       const plugin = await arrangePlugin({
+        scope: PluginScope.Household,
+        manifestJson: buildPluginManifest({ scope: 'household' }) as never,
         enabled: true,
         ...stagedUpdateColumns({ version: '1.3.0' }),
       });
       await arrangeConsentSurface(plugin);
-      await db.client.userPlugin.create({ data: { userId: admin.user.id, pluginId: plugin.id, enabled: true } });
+      const householdConfig = { webhookUrl: 'https://household.example.test/hook' };
+      const userConfig = { webhookUrl: 'https://user.example.test/hook' };
+      await db.client.householdPlugin.create({
+        data: { householdId: household.id, pluginId: plugin.id, enabled: true, config: householdConfig },
+      });
+      await db.client.userPlugin.create({
+        data: { userId: admin.user.id, pluginId: plugin.id, enabled: true, config: userConfig },
+      });
 
       const response = await post(admin, `/${plugin.slug}/uninstall`).expect(200);
 
-      expect(response.body.affectedUnits).toEqual([{ scopeType: 'User', userId: admin.user.id }]);
+      expect(response.body.affectedUnits).toEqual([
+        { scopeType: 'Household', householdId: household.id },
+        { scopeType: 'User', userId: admin.user.id },
+      ]);
 
       const row = await db.client.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
       expect(row.uninstalledAt).not.toBeNull();
@@ -207,8 +216,15 @@ describe('plugin lifecycle (server-level)', () => {
 
       await expect(db.client.pluginGrant.count({ where: { pluginId: plugin.id } })).resolves.toBe(0);
       await expect(db.client.pluginPermission.count({ where: { pluginId: plugin.id } })).resolves.toBe(0);
-      // Retained by default — the tombstone exists to preserve unit config.
-      await expect(db.client.userPlugin.count({ where: { pluginId: plugin.id } })).resolves.toBe(1);
+      // Retained by default, each switched off with its configuration kept:
+      // nothing reads as on for a plugin that is not installed, and a
+      // reinstall finds every unit off (#1328).
+      await expect(db.client.householdPlugin.findMany({ where: { pluginId: plugin.id } })).resolves.toEqual([
+        expect.objectContaining({ householdId: household.id, enabled: false, config: householdConfig }),
+      ]);
+      await expect(db.client.userPlugin.findMany({ where: { pluginId: plugin.id } })).resolves.toEqual([
+        expect.objectContaining({ userId: admin.user.id, enabled: false, config: userConfig }),
+      ]);
     });
 
     it('purgeData: true deletes the retained unit config rows', async () => {

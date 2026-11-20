@@ -16,7 +16,9 @@ const { checkBundleExternals } = require('../bundle-externals/check');
 const bundles = process.argv.slice(2).map((bundle) => path.resolve(bundle));
 
 try {
-  if (bundles.length === 0) throw new Error('name the bundles to check');
+  if (bundles.length === 0) {
+    throw new Error('name the bundles to check');
+  }
 
   const { externals, missing, withoutExternals } = checkBundleExternals(bundles);
 
@@ -25,11 +27,13 @@ try {
       `bundle-externals: found no externals in ${path.relative(process.cwd(), bundle)}, so it cannot be checked; has the bundle's format changed?`,
     );
   }
+
   for (const { bundle, specifier } of missing) {
     console.error(
       `bundle-externals: ${path.relative(process.cwd(), bundle)} requires "${specifier}", which does not resolve`,
     );
   }
+
   if (missing.length > 0) {
     console.error(
       'bundle-externals: a package the code imports at runtime must be a production dependency; see libs/scripts/src/bundle-externals/check.js',

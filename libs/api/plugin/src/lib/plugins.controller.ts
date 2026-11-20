@@ -18,7 +18,8 @@ import {
   PluginUpdateService,
   restartProcessRoles,
 } from '@bge/plugin';
-import { PluginArtifactStager, type PluginArtifactStagingResult } from '@bge/plugin-artifacts';
+import type { PluginArtifactStagingResult } from '@bge/plugin-artifacts';
+import { PluginArtifactStager } from '@bge/plugin-artifacts';
 import { paginated, PaginatedResponseDto } from '@bge/shared';
 import { Body, Controller, Get, HttpCode, Param, Patch, Post, Query, UseFilters, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
@@ -296,7 +297,9 @@ export class PluginsController {
     summary: 'Replace the server-scope plugin configuration',
     description:
       "Validates the payload against the manifest's config.schema (422 with issues[] on violation), persists it, " +
-      'and triggers the config hot-reload. Last-writer-wins between two writes; a plugin manifest replaced ' +
+      'and triggers the config hot-reload. The document the plugin already holds, in any key order, changes ' +
+      'nothing: it is not written and triggers no reload (#903). Last-writer-wins between two writes; a plugin ' +
+      'manifest replaced ' +
       'mid-request is refused with 409.',
   })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
@@ -324,7 +327,8 @@ export class PluginsController {
     summary: 'Uninstall a plugin (tombstone)',
     description:
       'Purges all consent (grants and the declared-permission catalog — reinstall is fresh consent), retains the row ' +
-      'and unit configuration unless purgeData is true, and clears any staged update. The loaded module keeps running ' +
+      'and unit configuration unless purgeData is true, and clears any staged update. Every household and user unit ' +
+      'is switched off, so each is switched on again after a reinstall. The loaded module keeps running ' +
       'until restart but is no longer served; restartRequired records that.',
   })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
@@ -539,10 +543,13 @@ export class PluginsController {
       "The approval screen's data source: the escalation comparison recomputed against today's decisions " +
       '(escalations, serverGating, deniedRequiredSlugs), pendingSince, stagingId (which approve and reject send back, ' +
       'so neither answers a staging the admin was not shown, #357), the declares[] catalog diff approving would ' +
-      'apply (added/removed plugin-namespaced permissions — removed takes their grants), noLongerRequested (the ' +
-      'requested permissions the update stops requesting, whose decisions approving deletes at every scope), ' +
+      'apply (added/removed plugin-namespaced permissions — approving deletes the catalog rows of removed ones), ' +
+      'noLongerRequested (the requested permissions the update stops requesting, whose consent decisions stop ' +
+      'conferring), ' +
       "and the staged manifest's " +
-      'consent surface localized for the requester. deniedRequiredSlugs lists the server-scope permissions the ' +
+      'consent surface localized for the requester. Approving deletes no consent decision: one on a removed or ' +
+      'no longer requested permission is kept and confers nothing until a later update requests the permission ' +
+      'at its consent scope. deniedRequiredSlugs lists the server-scope permissions the ' +
       'update requires that the Server unit denied: approving grants them. unitCoverage gives, for the household ' +
       'and the user scope, switchedOn (units with the plugin switched on) and covered (those of them approving ' +
       'would ask nothing of, such as a household that already accepted the staged update); the rest are told ' +
@@ -757,12 +764,13 @@ export class PluginsController {
       // The catalog diff approving would apply. Separate from `escalations`
       // because no escalation kind describes a declaration change, and a
       // declaration the plugin never requests appears in neither the checks
-      // nor the escalations — `removed` is the destructive half of approving,
+      // nor the escalations — approving deletes the catalog rows of `removed`,
       // and the screen has to be able to say so.
       declares: description.declares,
-      // The requested permissions approving stops requesting, whose decisions
-      // it deletes at every scope (#577). The staged consent surface only
-      // omits them, and an omission is not a warning.
+      // The requested permissions approving stops requesting (#577). Their
+      // consent decisions are kept and stop conferring until a later update
+      // requests them at their scope again (#1152). The staged consent
+      // surface only omits them, and an omission is not a warning.
       noLongerRequested: description.noLongerRequested,
       // The DataGateway name the update would take, when another holds it:
       // the update approval is refused until it is free (#1096).

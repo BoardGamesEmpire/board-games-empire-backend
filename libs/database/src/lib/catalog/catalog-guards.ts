@@ -1,3 +1,4 @@
+import type { TemplateSpans } from 'mustache';
 import * as Mustache from 'mustache';
 import { hasBoundingConditions } from '../utils/permission-conditions';
 import type { PermissionSeedDefinition, RoleScope } from './seed-definitions';
@@ -72,17 +73,18 @@ export type TemplateProblem =
   { kind: 'malformed-template'; message: string } | { kind: 'unsupported-token-type'; tokenType: string };
 
 export interface ParsedTemplate {
-  /** The variables the template interpolates or sections on, once each, in order of first use. */
-  variables: readonly string[];
   /** Empty when the template parses and uses only the token types the factory renders. */
   problems: readonly TemplateProblem[];
+
+  /** The variables the template interpolates or sections on, once each, in order of first use. */
+  variables: readonly string[];
 }
 
 /** A scoped role holding a permission whose conditions bind to nothing about the actor. */
 export interface UnconditionedScopedGrant {
-  slug: string;
   role: string;
   scope: RoleScope;
+  slug: string;
 }
 
 /**
@@ -95,33 +97,33 @@ export interface UnconditionedScopedGrant {
  * retired grant that was the second of those, read like the first.
  */
 export interface UnconditionedGlobalGrant {
-  slug: string;
-  role: string;
   action: PermissionSeedDefinition['action'];
+  role: string;
+  slug: string;
   subject: PermissionSeedDefinition['subject'];
 }
 
 /** A grant on a role that may hold only grants narrowing the rows they reach, that narrows nothing. */
 export interface UnboundedGrant {
-  slug: string;
   role: string;
+  slug: string;
 }
 
 /** An event role holding a grant whose conditions never name the event, so it spans every event the actor attends. */
 export interface EventSpanningGrant {
-  slug: string;
   role: string;
+  slug: string;
 }
 
 /** A relation filter written without an operator, which the in-memory matcher cannot evaluate. */
 export interface ShorthandRelationCondition {
-  slug: string;
-
   /**
    * Where the relation sits in the conditions, from the root: keys joined by
    * `.`, through any operator on the way, and array positions as `[n]`.
    */
   path: string;
+
+  slug: string;
 }
 
 /** A role→permission edge whose pass never supplies a variable the conditions need. */
@@ -153,7 +155,7 @@ export function parseTemplate(conditions: unknown): ParsedTemplate {
     return { variables: [], problems: [] };
   }
 
-  let tokens: unknown[];
+  let tokens: TemplateSpans;
   try {
     tokens = Mustache.parse(JSON.stringify(conditions));
   } catch (error) {
@@ -166,8 +168,8 @@ export function parseTemplate(conditions: unknown): ParsedTemplate {
   // Mustache token tuples: [type, name, start, end, subTokens?]. A whitelist,
   // like the factory's: 'text' carries no variable; anything not listed is a
   // problem, because `name` is then a partial name or comment text, not a path.
-  const walk = (tokens: unknown[]): void => {
-    for (const [type, name, , , subTokens] of tokens as [string, string, number, number, unknown[]?][]) {
+  const walk = (tokens: TemplateSpans): void => {
+    for (const [type, name, , , subTokens] of tokens) {
       if (type === 'text') {
         continue;
       }
@@ -177,6 +179,7 @@ export function parseTemplate(conditions: unknown): ParsedTemplate {
         if ((type === '#' || type === '^') && Array.isArray(subTokens)) {
           walk(subTokens);
         }
+
         continue;
       }
 
@@ -514,13 +517,16 @@ export function findShorthandRelationConditions(
         if (relationOperators.length < keys.length) {
           findings.push({ slug, path: here });
         }
+
         for (const operator of relationOperators) {
           if (value[operator] === null) {
             findings.push({ slug, path: `${here}.${operator}` });
             continue;
           }
+
           walk(slug, value[operator], `${here}.${operator}`);
         }
+
         continue;
       }
 
@@ -608,6 +614,7 @@ function holdersBySlug(
         list = [];
         holders.set(slug, list);
       }
+
       if (!list.some((holder) => holder.role === role)) {
         list.push({ role, scope });
       }
@@ -627,12 +634,15 @@ function isReadableScalarFilter(filter: Record<string, unknown>): boolean {
       if (!SCALAR_FILTER_OPERATORS.has(operator)) {
         return false;
       }
+
       if (operator !== 'equals' && operator !== 'not') {
         return true;
       }
+
       if (Array.isArray(operand)) {
         return false;
       }
+
       return !isObject(operand) || (operator === 'not' && isReadableScalarFilter(operand));
     })
   );
@@ -647,5 +657,6 @@ function scopeOf(role: string, roleScope: Readonly<Record<string, RoleScope>>): 
   if (scope === undefined) {
     throw new Error(`Role '${role}' is not classified by the scope map, so its render pass is unknown`);
   }
+
   return scope;
 }

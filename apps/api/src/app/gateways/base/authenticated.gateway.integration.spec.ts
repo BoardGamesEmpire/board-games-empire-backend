@@ -1,29 +1,26 @@
-import { type Actor, AuditContextModule, getActorSnapshotFromCls } from '@bge/actor-context';
+import type { Actor } from '@bge/actor-context';
+import { AuditContextModule, getActorSnapshotFromCls } from '@bge/actor-context';
 import { injectActorContextMetadata, WsActorScope } from '@bge/actor-context-transport';
 import { AuthService } from '@bge/auth';
 import { GatewayCoordinatorClientService } from '@bge/coordinator';
 import { Action, DatabaseModule, DatabaseService, ResourceType } from '@bge/database';
 import { gameListScope, GameService } from '@bge/game';
 import { GameSearchService, SearchEvents } from '@bge/game-search';
-import {
-  FALLBACK_LOCALE,
-  I18N_CATALOG_DIR,
-  type I18nTranslations,
-  i18nValidationMessage,
-  type LocaleResolutionInput,
-  LocaleResolutionService,
-} from '@bge/i18n';
+import type { I18nTranslations, LocaleResolutionInput } from '@bge/i18n';
+import { FALLBACK_LOCALE, I18N_CATALOG_DIR, i18nValidationMessage, LocaleResolutionService } from '@bge/i18n';
+import type { UserWithRoles } from '@bge/permissions';
 import {
   AbilityService,
   PERMISSIONS_CACHE,
   PermissionsModule,
   PermissionsService,
   PoliciesGuard,
-  type UserWithRoles,
 } from '@bge/permissions';
-import { BGE_ACTOR_HEADER, WsErrorEvents, type WsErrorPayload } from '@bge/shared';
+import type { WsErrorPayload } from '@bge/shared';
+import { BGE_ACTOR_HEADER, WsErrorEvents } from '@bge/shared';
 import { Metadata } from '@grpc/grpc-js';
-import { type INestApplication, Logger, Module, UsePipes } from '@nestjs/common';
+import type { INestApplication } from '@nestjs/common';
+import { Logger, Module, UsePipes } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { ThrottlerModule, ThrottlerStorageService } from '@nestjs/throttler';
 import { MessageBody, SubscribeMessage, WebSocketGateway } from '@nestjs/websockets';
@@ -35,7 +32,8 @@ import type { IncomingHttpHeaders } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
 import { Observable } from 'rxjs';
-import { type Socket as ClientSocket, io } from 'socket.io-client';
+import type { Socket as ClientSocket } from 'socket.io-client';
+import { io } from 'socket.io-client';
 import { createThrottlers } from '../../lib/throttlers';
 import { WsErrorFilter } from '../filters';
 import { GameSearchGateway } from '../game/search.gateway';
@@ -264,7 +262,7 @@ describe('AuthenticatedGateway (over a real socket)', () => {
   const sessionGuardSaw: (Actor | null)[] = [];
 
   /** What `PoliciesGuard` read on each frame: the actor, and the rules of its abilities. */
-  const policiesGuardSaw: { actor: Actor | null; abilityRules: unknown[] }[] = [];
+  const policiesGuardSaw: { abilityRules: unknown[]; actor: Actor | null }[] = [];
 
   /** The rules of the abilities an explicit resolution gives `userId`. */
   const resolvedAbilityRules = async (userId: string) =>

@@ -25,17 +25,27 @@ import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import { z } from 'zod';
 import { MediaUrlSigner } from './media-url-signer.js';
 import type { MediaConfig, MountCheckMode } from './media.config.js';
 
 const SIDECAR_SUFFIX = '.meta.json';
 
-interface Sidecar {
-  readonly contentType: string;
-  readonly checksum: string;
-  readonly etag: string;
-  readonly originalName?: string;
-}
+/**
+ * The metadata sidecar beside each object. It is a file on disk, so it is data
+ * from outside the process: a hand edit or a partial restore can leave it in
+ * any shape, and `readSidecar` parses it rather than trusting it (#1322).
+ */
+const sidecarSchema = z
+  .object({
+    checksum: z.string(),
+    contentType: z.string(),
+    etag: z.string(),
+    originalName: z.string().optional(),
+  })
+  .readonly();
+
+type Sidecar = z.infer<typeof sidecarSchema>;
 
 /** Effective mount-check strategy after `auto` has been resolved at construction. */
 type ResolvedMountCheck = 'st_dev' | 'sentinel' | 'off';
@@ -43,8 +53,10 @@ type ResolvedMountCheck = 'st_dev' | 'sentinel' | 'off';
 // jest runs specs in a VM realm whose `Error` differs from the host `Error`
 // that node core modules (fs) throw, so `instanceof Error` is unreliable here.
 // Detect the errno by duck-typing `.code` instead.
-const isENOENT = (error: unknown): boolean =>
-  typeof error === 'object' && error !== null && (error as NodeJS.ErrnoException).code === 'ENOENT';
+const errnoCode = (error: unknown): unknown =>
+  typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined;
+
+const isENOENT = (error: unknown): boolean => errnoCode(error) === 'ENOENT';
 
 /**
  * Raised by `withProbeTimeout` when a reachability probe exceeds its budget —
@@ -79,20 +91,22 @@ class ProbeTimeoutError extends Error {
 @Injectable()
 export class LocalDiskDriver implements StorageDriver {
   private readonly logger = new Logger(LocalDiskDriver.name);
-
   readonly slug = 'localdisk';
   private readonly root: string;
   private readonly baseUrl: string;
   private readonly streamPath: string;
-
   private readonly mountCheck: ResolvedMountCheck;
+
   /** Root `st_dev` captured at construction; set only in `st_dev` mode. Immutable by design. */
   private readonly deviceBaseline: number | undefined;
+
   /** Absolute sentinel path; set only in `sentinel` mode. */
   private readonly sentinelPath: string | undefined;
+
   private readonly probeTimeoutMs: number;
   private readonly fatalThreshold: number;
   private consecutiveTimeouts = 0;
+
   /** Shared in-flight probe so concurrent callers dedupe onto one stat() + one counter update. */
   private inFlightProbe: Promise<StorageUnavailableError | undefined> | null = null;
 
@@ -244,6 +258,7 @@ export class LocalDiskDriver implements StorageDriver {
     if (key === '' || key.includes('\\')) {
       throw new InvalidObjectKeyError(key);
     }
+
     for (const segment of key.split('/')) {
       if (segment === '' || segment === '.' || segment === '..') {
         throw new InvalidObjectKeyError(key);
@@ -261,14 +276,17 @@ export class LocalDiskDriver implements StorageDriver {
     if (prefix === '') {
       return;
     }
+
     if (prefix.includes('\\')) {
       throw new InvalidObjectKeyError(prefix);
     }
+
     const segments = prefix.split('/');
     segments.forEach((segment, index) => {
       if (segment === '.' || segment === '..') {
         throw new InvalidObjectKeyError(prefix);
       }
+
       if (segment === '' && index !== segments.length - 1) {
         throw new InvalidObjectKeyError(prefix);
       }
@@ -298,13 +316,15 @@ export class LocalDiskDriver implements StorageDriver {
       if (isENOENT(error)) {
         throw await this.classifyEnoent(error, key);
       }
+
       throw this.classify(error, key) ?? error;
     }
   }
 
   private async readSidecar(key: string, filePath: string): Promise<Sidecar> {
+    let text: string;
     try {
-      return JSON.parse(await readFile(this.sidecarPath(filePath), 'utf8')) as Sidecar;
+      text = await readFile(this.sidecarPath(filePath), 'utf8');
     } catch (error) {
       if (isENOENT(error)) {
         throw await this.classifyEnoent(error, key);
@@ -312,6 +332,35 @@ export class LocalDiskDriver implements StorageDriver {
 
       throw this.classify(error, key) ?? error;
     }
+
+    return this.parseSidecar(key, text);
+  }
+
+  /**
+   * A sidecar that isn't JSON, or doesn't match the schema, is a storage fault
+   * the operator has to repair, so it is reported as unavailable and not
+   * retryable, naming the file to fix (#1322).
+   */
+  private parseSidecar(key: string, text: string): Sidecar {
+    const malformed = (cause: unknown) =>
+      new StorageUnavailableError(`Metadata sidecar '${key}${SIDECAR_SUFFIX}' is malformed`, {
+        retryable: false,
+        cause,
+      });
+
+    let json: unknown;
+    try {
+      json = JSON.parse(text);
+    } catch (error) {
+      throw malformed(error);
+    }
+
+    const parsed = sidecarSchema.safeParse(json);
+    if (!parsed.success) {
+      throw malformed(parsed.error);
+    }
+
+    return parsed.data;
   }
 
   /**
@@ -325,7 +374,7 @@ export class LocalDiskDriver implements StorageDriver {
    * from an unmounted volume).
    */
   private classify(error: unknown, key: string): InsufficientStorageError | StorageUnavailableError | undefined {
-    switch ((error as NodeJS.ErrnoException | null)?.code) {
+    switch (errnoCode(error)) {
       case 'ENOSPC':
       case 'EDQUOT':
         return new InsufficientStorageError(`No space left while accessing '${key}'`, { cause: error });
@@ -456,6 +505,7 @@ export class LocalDiskDriver implements StorageDriver {
             { retryable: true },
           );
         }
+
         return undefined;
       case 'sentinel':
         return this.checkSentinel();
@@ -613,9 +663,11 @@ export class LocalDiskDriver implements StorageDriver {
         { cause: error },
       );
     }
+
     if (!stats.isDirectory()) {
       throw new StorageMisconfiguredError(`media.localDiskRoot '${this.root}' is not a directory`);
     }
+
     return stats;
   }
 
@@ -630,7 +682,7 @@ export class LocalDiskDriver implements StorageDriver {
     requested: MountCheckMode,
     rootStats: Stats,
     sentinelFile: string,
-  ): { mode: ResolvedMountCheck; baseline?: number; sentinelPath?: string } {
+  ): { baseline?: number; mode: ResolvedMountCheck; sentinelPath?: string } {
     switch (requested) {
       case 'off':
         this.logger.debug('Mount check disabled (off)');
@@ -644,6 +696,7 @@ export class LocalDiskDriver implements StorageDriver {
         this.logger.debug(`Mount check: sentinel (${sentinelPath})`);
         return { mode: 'sentinel', sentinelPath };
       }
+
       case 'auto':
         return this.resolveAuto(rootStats);
       default:
@@ -660,7 +713,7 @@ export class LocalDiskDriver implements StorageDriver {
    * differ. Operators on NFS/overlay/bind, where `st_dev` is unreliable, should
    * select `sentinel` explicitly.
    */
-  private resolveAuto(rootStats: Stats): { mode: 'st_dev' | 'off'; baseline?: number } {
+  private resolveAuto(rootStats: Stats): { baseline?: number; mode: 'st_dev' | 'off' } {
     let parentDev: number;
     try {
       parentDev = statSync(dirname(this.root)).dev;
@@ -712,6 +765,7 @@ export class LocalDiskDriver implements StorageDriver {
           `resolving to a marker directly under the storage root '${this.root}'`,
       );
     }
+
     return join(this.root, sentinelFile);
   }
 
@@ -736,7 +790,7 @@ export class LocalDiskDriver implements StorageDriver {
 
       // Non-ENOENT (EACCES/EPERM/EIO, …): the marker may exist but isn't readable
       // or the volume is unhealthy — don't send the operator to `touch`.
-      const code = (error as NodeJS.ErrnoException | null)?.code ?? 'unknown error';
+      const code = errnoCode(error) ?? 'unknown error';
       throw new StorageMisconfiguredError(
         `media.mountCheck is 'sentinel' but the sentinel file '${sentinelPath}' could not be read (${code}); ` +
           `check the storage volume's health and permissions`,

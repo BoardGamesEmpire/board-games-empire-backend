@@ -21,10 +21,10 @@ const KNOWN_TAGS: ReadonlySet<string> = new Set(['b', 'i', 'u', 's', 'url', 'quo
 const MAX_NESTING = 32;
 
 interface BbElement {
-  readonly kind: 'element';
-  readonly name: string;
   readonly attribute: string | undefined;
   readonly children: BbNode[];
+  readonly kind: 'element';
+  readonly name: string;
 }
 
 interface BbText {
@@ -43,6 +43,7 @@ type BbNode = BbElement | BbText | BbItem;
 /** An element still open while parsing, with the tag that opened it. */
 interface OpenElement extends BbElement {
   readonly openingTag: string;
+
   /**
    * How many opening tags of each name inside it were nested too deep, and
    * are still waiting for their closing tags. Those close nothing either.
@@ -97,6 +98,7 @@ function parse(source: string): BbNode[] {
       } else if (!closing) {
         append(top(), { kind: 'item', tag });
       }
+
       continue;
     }
 
@@ -114,6 +116,7 @@ function parse(source: string): BbNode[] {
         append(top(), { kind: 'element', name, attribute, children: [{ kind: 'text', value: code }] });
         index = tags.lastIndex = close.lastIndex;
       }
+
       continue;
     }
 
@@ -124,6 +127,7 @@ function parse(source: string): BbNode[] {
       } else {
         stack.push({ kind: 'element', name, attribute, children: [], openingTag: tag, tooDeep: new Map() });
       }
+
       continue;
     }
 
@@ -146,6 +150,7 @@ function parse(source: string): BbNode[] {
       leaveUnclosed(stack);
     }
 
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- the root stays at the bottom of the stack and `depth` is above it, so `pop()` returns an element; TypeScript can't see that invariant (#1321)
     const element = stack.pop() as OpenElement;
     const parent = top();
     if (KNOWN_TAGS.has(name)) {
@@ -170,11 +175,13 @@ function openDepth(stack: readonly OpenElement[], name: string): number {
       return depth;
     }
   }
+
   return -1;
 }
 
 /** Pops an element that was never closed: its opening tag, and a list's items, are only text. */
 function leaveUnclosed(stack: OpenElement[]): void {
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- called only while an element sits above the root, so `pop()` returns one; TypeScript can't see that invariant (#1321)
   const element = stack.pop() as OpenElement;
   const parent = stack[stack.length - 1];
 
@@ -207,6 +214,7 @@ function toFlow(nodes: readonly BbNode[]): BlockContent[] {
     for (const paragraph of toParagraphs(inline)) {
       blocks.push(paragraph);
     }
+
     inline = [];
   };
 
@@ -347,6 +355,7 @@ function splitItems(children: readonly BbNode[]): BbNode[][] {
       segments[segments.length - 1].push(child);
     }
   }
+
   return segments;
 }
 
@@ -359,5 +368,6 @@ function textOf(node: BbNode): string {
   if (node.kind === 'text') {
     return node.value;
   }
+
   return node.kind === 'element' ? node.children.map(textOf).join('') : '';
 }

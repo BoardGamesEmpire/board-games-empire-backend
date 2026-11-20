@@ -9,16 +9,17 @@ export const DATABASE_URL_VARIABLE = 'DATABASE_URL';
  * boot summary that carries it is logged.
  */
 export interface MigrationCredential {
-  readonly variable: typeof MIGRATION_URL_VARIABLE | typeof DATABASE_URL_VARIABLE;
-  readonly user: string;
   readonly host: string;
+  readonly user: string;
+  readonly variable: typeof MIGRATION_URL_VARIABLE | typeof DATABASE_URL_VARIABLE;
 }
 
 export interface ResolvedMigrationCredential {
-  /** What the migrator connects with. */
-  readonly url: string;
   /** What the boot summary and the refusals say about it. */
   readonly credential: MigrationCredential;
+
+  /** What the migrator connects with. */
+  readonly url: string;
 }
 
 /**

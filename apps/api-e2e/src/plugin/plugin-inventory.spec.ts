@@ -1,10 +1,14 @@
-import { PluginGrantScope, PluginGrantStatus, PluginScope, ResourceType, RiskLevel, type Plugin } from '@bge/database';
-import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
+import type { Plugin } from '@bge/database';
+import { PluginGrantScope, PluginGrantStatus, PluginScope, ResourceType, RiskLevel } from '@bge/database';
+import type { Actors, SessionActor } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
-import { mintApiKey, type Caller } from '../support/api-key';
+import type { Caller } from '../support/api-key';
+import { mintApiKey } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { arrangeInventoryPlugin } from './inventory-fixtures';
 import type { Check } from './manifest-checks';
 import { FIXTURE_ACT_ID } from './plugin-row-fixtures';

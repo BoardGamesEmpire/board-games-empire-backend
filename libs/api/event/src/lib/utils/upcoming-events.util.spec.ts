@@ -1,20 +1,10 @@
-import {
-  EventParticipationStatus,
-  EventStatus,
-  liveEventWhere,
-  OccurrenceStatus,
-  Prisma,
-  type DatabaseService,
-} from '@bge/database';
-import {
-  createMockDatabaseService,
-  makeEvent,
-  makeEventOccurrence,
-  makeEventPolicy,
-  type MockDatabaseService,
-} from '@bge/testing';
+import type { DatabaseService } from '@bge/database';
+import { EventParticipationStatus, EventStatus, liveEventWhere, OccurrenceStatus, Prisma } from '@bge/database';
+import type { MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService, makeEvent, makeEventOccurrence, makeEventPolicy } from '@bge/testing';
 import { OCCURRENCE_ORDER } from '../constants/occurrence-order.constant';
-import { EVENT_ATTENDANCE_SELECT, type OwnAttendeeWhere } from './event-attendance.util';
+import type { OwnAttendeeWhere } from './event-attendance.util';
+import { EVENT_ATTENDANCE_SELECT } from './event-attendance.util';
 import { pageUpcomingEvents, upcomingDateWhere, upcomingEventWhere } from './upcoming-events.util';
 
 const now = new Date('2026-11-01T12:00:00Z');

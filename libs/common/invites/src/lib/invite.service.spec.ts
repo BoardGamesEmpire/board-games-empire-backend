@@ -1,12 +1,14 @@
-import { InviteStatus, InviteType, Prisma } from '@bge/database';
+import type { Prisma } from '@bge/database';
+import { InviteStatus, InviteType } from '@bge/database';
 import { uniqueViolation } from '@bge/database/testing';
-import { createMockDatabaseService, createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService, createTestingModuleWithDb } from '@bge/testing';
+import type { HttpException } from '@nestjs/common';
 import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
   GoneException,
-  HttpException,
   InternalServerErrorException,
   Logger,
   NotFoundException,
@@ -18,6 +20,7 @@ import {
   INVITE_TOKEN_MINT_ATTEMPTS,
   OUTSTANDING_INVITE_STATUSES,
 } from './constants/invite.constants';
+import type { InviteDomainEvent } from './events/invite.events';
 import {
   InviteAcceptedEvent,
   InviteApprovedEvent,
@@ -27,16 +30,10 @@ import {
   InviteRevokedEvent,
   InviteWithdrawnEvent,
   toInviteSnapshot,
-  type InviteDomainEvent,
 } from './events/invite.events';
 import { InviteService, receivedInviteWhere } from './invite.service';
-import {
-  CONTEXT_INVITE_SELECT,
-  INVITE_SNAPSHOT_SELECT,
-  PARTY_INVITE_SELECT,
-  TRANSITION_SELECT,
-  type InviteTransitionRow,
-} from './read-shapes';
+import type { InviteTransitionRow } from './read-shapes';
+import { CONTEXT_INVITE_SELECT, INVITE_SNAPSHOT_SELECT, PARTY_INVITE_SELECT, TRANSITION_SELECT } from './read-shapes';
 
 const PAST = new Date('2026-10-01T00:00:00Z');
 const FUTURE = new Date('2099-01-01T00:00:00Z');
@@ -506,7 +503,7 @@ describe('InviteService', () => {
 
       await service.createWithin(asTx(tx), { ...params, inviteeEmail: '  Sam@Example.TEST ', message: 'come play' });
 
-      const [probe] = tx.invite.findUnique.mock.calls[0] as [{ where: { token: string }; select: unknown }];
+      const [probe] = tx.invite.findUnique.mock.calls[0] as [{ select: unknown; where: { token: string } }];
       expect(probe.where.token).toMatch(BASE64URL_43);
       expect(probe.select).toEqual({ id: true });
 
@@ -1831,8 +1828,8 @@ describe('InviteService', () => {
      * call finds follows from the earlier calls' writes rather than from a
      * stubbed answer.
      */
-    const useTable = <Row extends { id: string; status: InviteStatus; expiresAt: Date }>(table: Row[]) => {
-      type Where = { status: InviteStatus; expiresAt: { lte: Date }; id?: { in: string[] } };
+    const useTable = <Row extends { expiresAt: Date; id: string; status: InviteStatus }>(table: Row[]) => {
+      type Where = { expiresAt: { lte: Date }; id?: { in: string[] }; status: InviteStatus };
       const matching = (where: Where) =>
         table.filter(
           (row) =>
@@ -1840,11 +1837,11 @@ describe('InviteService', () => {
             row.expiresAt <= where.expiresAt.lte &&
             (!where.id || where.id.in.includes(row.id)),
         );
-      tx.invite.findMany.mockImplementation((async ({ where, take }: { where: Where; take: number }) =>
+      tx.invite.findMany.mockImplementation((async ({ where, take }: { take: number; where: Where }) =>
         matching(where)
           .slice(0, take)
           .map(({ id }) => ({ id }))) as never);
-      tx.invite.updateManyAndReturn.mockImplementation((async ({ where, data }: { where: Where; data: object }) =>
+      tx.invite.updateManyAndReturn.mockImplementation((async ({ where, data }: { data: object; where: Where }) =>
         matching(where).map((row) => ({ ...Object.assign(row, data) }))) as never);
 
       return table;
@@ -1918,14 +1915,23 @@ describe('InviteService', () => {
     it('logs a throwing listener and still announces the rest', () => {
       // EventEmitterModule runs without `ignoreErrors`; a sync listener's throw
       // would otherwise turn a committed transition into a failed request.
+      const failure = new Error('listener exploded');
       emitter.emit.mockImplementationOnce(() => {
-        throw new Error('listener exploded');
+        throw failure;
       });
 
-      expect(() => service.emit([created(), revoked()])).not.toThrow();
+      const first = created();
+      expect(() => service.emit([first, revoked()])).not.toThrow();
 
       expect(emitter.emit).toHaveBeenCalledTimes(2);
-      expect(error).toHaveBeenCalledTimes(1);
+      // As (message, stack), so nestjs-pino keeps the error (#245): it drops
+      // an `Error` object passed as a bare argument.
+      expect(error.mock.calls).toEqual([
+        [
+          `A listener failed for ${InviteEvents.Created} (invite ${first.subjectId}) after the change committed: listener exploded`,
+          failure.stack,
+        ],
+      ]);
     });
 
     it('is a no-op on an empty list', () => {

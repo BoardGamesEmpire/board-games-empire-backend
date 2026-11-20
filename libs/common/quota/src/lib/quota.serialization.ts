@@ -1,5 +1,6 @@
 import type { Quota } from '@bge/database';
-import { DEFAULT_SCOPE_ID, type QuotaResource } from './constants/quota-resource';
+import type { QuotaResource } from './constants/quota-resource';
+import { DEFAULT_SCOPE_ID } from './constants/quota-resource';
 import type { QuotaView } from './dto/quota-response.dto';
 
 /**
@@ -25,6 +26,7 @@ export function toQuotaView(quota: Quota): QuotaView {
     scope: quota.scope,
     scopeId: toPublicScopeId(quota.scopeId),
     householdId: quota.householdId,
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Prisma types `Quota.resource` as a plain string; quota writes accept only QuotaResource values (#1321)
     resource: quota.resource as QuotaResource,
     limit: quota.limit.toString(),
     softOverage: quota.softOverage,

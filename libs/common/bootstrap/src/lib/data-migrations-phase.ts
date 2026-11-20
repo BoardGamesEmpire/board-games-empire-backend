@@ -1,17 +1,15 @@
-import {
-  applyDataMigrations,
-  DATA_MIGRATIONS,
-  type DataMigrationEntry,
-  type DataMigrationsClient,
-} from '@bge/database';
+import type { DataMigrationEntry, DataMigrationsClient } from '@bge/database';
+import { applyDataMigrations, DATA_MIGRATIONS } from '@bge/database';
 import { Logger } from '@nestjs/common';
 import type { CacheFlush, DataMigrationsPhase, DataMigrationsSummary } from './ports';
 
 export interface RegistryDataMigrationsOptions {
   /** The entries to apply; the shipped registry unless a test supplies its own. */
   readonly entries?: readonly DataMigrationEntry[];
+
   /** The api's cache flush; absent in a build without one. */
   readonly flush?: CacheFlush;
+
   /** Where the entries log; a Nest `Logger` named `DataMigrations` by default. */
   readonly logger?: Logger;
 }

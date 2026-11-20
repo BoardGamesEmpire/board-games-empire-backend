@@ -1,5 +1,6 @@
 import type { Logger } from '@nestjs/common';
-import { CATALOG_MANIFEST, reconcileCatalog, type ReconcilePlan, type ReconcileResult } from '../catalog';
+import type { ReconcilePlan, ReconcileResult } from '../catalog';
+import { CATALOG_MANIFEST, reconcileCatalog } from '../catalog';
 import type { PrismaClient } from '../client';
 
 /**

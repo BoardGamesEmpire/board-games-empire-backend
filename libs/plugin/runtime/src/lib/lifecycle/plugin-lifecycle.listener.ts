@@ -1,11 +1,7 @@
-import { actorUserId, AuditContextService, MutationEvent, type SystemActor } from '@bge/actor-context';
-import {
-  DatabaseService,
-  PluginGrantScope,
-  ResourceType,
-  type PluginLifecycleEventType,
-  type Prisma,
-} from '@bge/database';
+import type { SystemActor } from '@bge/actor-context';
+import { actorUserId, AuditContextService, MutationEvent } from '@bge/actor-context';
+import type { PluginLifecycleEventType, Prisma } from '@bge/database';
+import { DatabaseService, PluginGrantScope, ResourceType } from '@bge/database';
 import { Injectable, Logger, OnApplicationShutdown, OnModuleInit } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PluginConfigEventsService } from '../config/plugin-config-events.service';
@@ -48,13 +44,15 @@ const LIFECYCLE_TYPE_BY_ROUTING_KEY: ReadonlyMap<string, PluginLifecycleEventTyp
 );
 
 interface LifecycleRowIdentity {
-  readonly pluginId: string;
-  /** `null` when the event class does not carry the slug — resolved via DB lookup. */
-  readonly pluginSlug: string | null;
-  readonly scopeType: PluginGrantScope | null;
-  readonly scopeId: string | null;
   readonly manifestVersion: string | null;
   readonly payload: Record<string, unknown>;
+  readonly pluginId: string;
+
+  /** `null` when the event class does not carry the slug — resolved via DB lookup. */
+  readonly pluginSlug: string | null;
+
+  readonly scopeId: string | null;
+  readonly scopeType: PluginGrantScope | null;
 }
 
 /**
@@ -291,7 +289,7 @@ export class PluginLifecycleListener implements OnModuleInit, OnApplicationShutd
         scopeType: event.before.scopeType,
         scopeId: event.before.scopeId === '' ? null : event.before.scopeId,
         manifestVersion: event.context.manifestVersion,
-        // The grant row is gone (delete-to-pending, #211): the lifecycle row
+        // The consent decision's row is gone (#211): the lifecycle row
         // is the only durable record of what was revoked and why, and of the
         // consent act that wrote it (#1150).
         payload: {
@@ -417,7 +415,10 @@ export class PluginLifecycleListener implements OnModuleInit, OnApplicationShutd
       return null;
     }
 
-    const snapshot = (event.after ?? event.before) as { id?: unknown; slug?: unknown };
+    // MutationEvent's constructor refuses an event with neither snapshot, so
+    // the empty fallback is never taken; it gives the compiler a non-null
+    // value (#1321).
+    const snapshot: { readonly id?: unknown; readonly slug?: unknown } = event.after ?? event.before ?? {};
 
     return this.pluginRowIdentity({
       id: typeof snapshot.id === 'string' ? snapshot.id : event.subjectId,
@@ -459,6 +460,7 @@ export class PluginLifecycleListener implements OnModuleInit, OnApplicationShutd
    * write cannot fail on a non-JSON payload smuggled through `unknown`.
    */
   private serialize(value: unknown): Prisma.InputJsonValue {
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- JSON.parse returns any; the stringify round trip in this line is what makes the value JSON, an in-process copy rather than outside data (#1322)
     return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
   }
 }

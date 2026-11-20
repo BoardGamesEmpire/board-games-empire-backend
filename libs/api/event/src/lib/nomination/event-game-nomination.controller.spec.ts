@@ -5,7 +5,7 @@ import { paginationQuery } from '@bge/testing';
 import { ClsServiceManager } from 'nestjs-cls';
 import { firstValueFrom } from 'rxjs';
 import { EventGameNominationController } from './event-game-nomination.controller';
-import { EventGameNominationService, type NominationDetail } from './event-game-nomination.service';
+import type { EventGameNominationService, NominationDetail } from './event-game-nomination.service';
 
 const PAGINATION = paginationQuery({ limit: 10 });
 

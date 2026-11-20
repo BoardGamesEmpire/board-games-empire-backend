@@ -1,5 +1,6 @@
-import { Prisma } from '@bge/database';
-import { INVITE_SNAPSHOT_FIELDS, type InviteSnapshotField } from './events/invite.events';
+import type { Prisma } from '@bge/database';
+import type { InviteSnapshotField } from './events/invite.events';
+import { INVITE_SNAPSHOT_FIELDS } from './events/invite.events';
 
 /**
  * Select-shaped read surfaces for invites, owned here so every consumer of
@@ -143,6 +144,7 @@ export const INVITE_SCALARS_PARTY_ONLY = {
  * domain event and the returned view from one row. `token` is not in the list
  * and must never be; `read-shapes.spec.ts` pins it.
  */
+// eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Object.fromEntries types its keys as string, so it can't return a record keyed by the snapshot fields (#1321)
 export const INVITE_SNAPSHOT_SELECT = Object.fromEntries(INVITE_SNAPSHOT_FIELDS.map((field) => [field, true])) as {
   readonly [Field in InviteSnapshotField]: true;
 };

@@ -35,8 +35,8 @@ export type Wire<TRow> = {
  * `body: any` satisfies `body: unknown`.
  */
 export interface HttpResponseLike {
-  readonly status: number;
   readonly body: unknown;
+  readonly status: number;
 }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {

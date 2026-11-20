@@ -1,5 +1,6 @@
-import { type SafeHttpPolicy } from '@bge/database';
-import { createTestingModuleWithDb, MockDatabaseService } from '@bge/testing';
+import type { SafeHttpPolicy } from '@bge/database';
+import type { MockDatabaseService } from '@bge/testing';
+import { createTestingModuleWithDb } from '@bge/testing';
 import {
   SAFE_HTTP_DEFAULT_MAX_REDIRECTS,
   SAFE_HTTP_DEFAULT_STRICT_MODE,

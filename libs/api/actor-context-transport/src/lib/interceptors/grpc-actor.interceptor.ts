@@ -82,12 +82,15 @@ export class GrpcActorInterceptor extends ActorInterceptor {
     if (!value) {
       return null;
     }
+
     if ('metadata' in value && value.metadata) {
       return value.metadata;
     }
+
     if ('get' in value && typeof value.get === 'function') {
-      return value as Metadata;
+      return value;
     }
+
     return null;
   }
 
@@ -102,9 +105,11 @@ export class GrpcActorInterceptor extends ActorInterceptor {
     if (typeof first === 'string') {
       return first;
     }
+
     if (first instanceof Buffer) {
       return first.toString('utf-8');
     }
+
     return undefined;
   }
 }

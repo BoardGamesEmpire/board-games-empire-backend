@@ -12,7 +12,6 @@ import {
 export interface ActorContextInit {
   readonly actor: Actor | null;
   readonly correlationId: string;
-  readonly source: EventSource;
 
   /**
    * Resolved catalog locale (a `systemSupported` `LanguageTag.tag`). Optional:
@@ -22,6 +21,8 @@ export interface ActorContextInit {
    * via {@link AuditContextInternalService.setLocale} instead.
    */
   readonly locale?: string;
+
+  readonly source: EventSource;
 }
 
 /**
@@ -50,9 +51,9 @@ export class AuditContextInternalService {
    * until whatever dispatches into the scope re-primes for the new actor.
    */
   runWith<T>(init: ActorContextInit, fn: () => T): T {
-    // ClsStore only indexes symbol keys statically; the widening cast is for
+    // ClsStore only indexes symbol keys statically; the wider annotation is for
     // the computed-key severing below (on the copy, never the live store).
-    const existingStore = { ...(this.cls.get() ?? {}) } as Record<string, unknown>;
+    const existingStore: Record<string | symbol, unknown> = { ...(this.cls.get() ?? {}) };
     delete existingStore[ABILITIES_CLS_KEY];
     const store = {
       ...existingStore,

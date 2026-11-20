@@ -104,6 +104,7 @@ export type MutationAction = 'create' | 'update' | 'delete';
 export abstract class MutationEvent<T = unknown> {
   /** Domain model name of the mutated row (a `ResourceType` value by convention). */
   public abstract readonly subject: string;
+
   /** Primary key of the mutated row. */
   public abstract readonly subjectId: string;
 

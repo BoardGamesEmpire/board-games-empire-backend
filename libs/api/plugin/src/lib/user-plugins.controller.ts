@@ -1,15 +1,15 @@
-import { AuditContextService, requireSessionUserId, type UserPluginUnit } from '@bge/actor-context';
+import type { UserPluginUnit } from '@bge/actor-context';
+import { AuditContextService, requireSessionUserId } from '@bge/actor-context';
 import { Action, ResourceType } from '@bge/database';
 import { SupportedLocalesService, t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard, ScopeComposer } from '@bge/permissions';
+import type { ConsentActAnswer, ConsentActInput } from '@bge/plugin';
 import {
   PluginConsentActService,
   PluginConsentPresentationService,
   PluginFeatureStateService,
   PluginInventoryService,
   PluginUnitLifecycleService,
-  type ConsentActAnswer,
-  type ConsentActInput,
 } from '@bge/plugin';
 import { DefaultPaginationQueryDto, paginated, PaginatedResponseDto } from '@bge/shared';
 import { Body, Controller, Get, HttpCode, Param, Post, Query, UseFilters, UseGuards } from '@nestjs/common';
@@ -321,7 +321,7 @@ export class UserPluginsController {
    */
   private actInput(
     slug: string,
-    body: { readonly manifestSha256: string; readonly locale?: string },
+    body: { readonly locale?: string; readonly manifestSha256: string },
     answers: readonly ConsentActAnswer[],
   ): ConsentActInput {
     const userId = this.selfUserId();

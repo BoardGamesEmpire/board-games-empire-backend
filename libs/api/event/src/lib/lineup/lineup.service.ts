@@ -10,7 +10,8 @@ import { emitRemovedGames, LINEUP_GAME_SNAPSHOT_SELECT, lineupStillAhead } from 
 import { assertEventExists, requireEvent } from '../event-access.helpers';
 import { lockLiveEvent } from '../utils/lock-live-event.util';
 import type { ListLineupQueryDto } from './dto/list-lineup.query.dto';
-import { LINEUP_GAME_SELECT, lineupGameSubject, withSuppliers, type LineupGame } from './lineup-game';
+import type { LineupGame } from './lineup-game';
+import { LINEUP_GAME_SELECT, lineupGameSubject, withSuppliers } from './lineup-game';
 import { readableLineupWhere } from './lineup-scope';
 
 /**
@@ -148,7 +149,7 @@ export class LineupService {
     const snapshot = await this.db.$transaction(async (tx) => {
       // FOR NO KEY UPDATE, the lock a date write takes, so this takes turns
       // with those writes and with every write that can leave a lineup game
-      // with nobody bringing it (`lockEventDates`'s FOR SHARE). Under the
+      // with nobody bringing it (`shareLiveEvent`'s FOR SHARE). Under the
       // shared lock alone, a removal and a supplier leaving could both read
       // the same game, and each would report deleting it. A cancel or reopen
       // updates the row, so the cancel it reads holds until this commits.

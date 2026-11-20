@@ -1,9 +1,11 @@
 import { Action, parseTemplate, ResourceType, RiskLevel, SystemRole } from '@bge/database';
-import { createActors, type Actors } from '@bge/testing-e2e';
+import type { Actors } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import request from 'supertest';
 import { createMemberClient, membersPath } from '../household/household-request';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 
 /**
  * What #244 changed, asserted against the SEEDED rows rather than the catalog

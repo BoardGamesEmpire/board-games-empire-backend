@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { lookup } from 'node:dns/promises';
 import { IpFamily } from '../ip';
-import { DnsResolutionError, type DnsResolver, type ResolvedAddress } from './dns-resolver.interface';
+import type { DnsResolver, ResolvedAddress } from './dns-resolver.interface';
+import { DnsResolutionError } from './dns-resolver.interface';
 
 /**
  * Default `DnsResolver` implementation backed by `dns.promises.lookup`.
@@ -23,6 +24,7 @@ export class DefaultDnsResolver implements DnsResolver {
   async resolveAll(hostname: string): Promise<ResolvedAddress[]> {
     try {
       const addresses = await lookup(hostname, { all: true, verbatim: true });
+      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Node types an address family as `number`; `lookup` returns only 4 or 6 (#1321)
       return addresses.map((a) => ({ address: a.address, family: a.family as IpFamily }));
     } catch (err) {
       throw new DnsResolutionError(hostname, err instanceof Error ? err : new Error(String(err)));

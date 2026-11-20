@@ -1,6 +1,8 @@
 import { APP_SIGN_IN_FLOW_INVALID, APP_SIGN_IN_UNAVAILABLE } from './app-sign-in-codes';
-import { APP_SIGN_IN_FLOW_KEY, handOffAppSignIn, type AppSignInHandOff } from './app-sign-in-hand-off';
-import { createAppSignInStore, type AppSignInStore } from './app-sign-in-store';
+import type { AppSignInHandOff } from './app-sign-in-hand-off';
+import { APP_SIGN_IN_FLOW_KEY, handOffAppSignIn } from './app-sign-in-hand-off';
+import type { AppSignInStore } from './app-sign-in-store';
+import { createAppSignInStore } from './app-sign-in-store';
 import { memoryVerificationStore } from './verification-store.fixture';
 
 const CHALLENGE = 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM';

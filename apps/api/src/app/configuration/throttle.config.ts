@@ -30,7 +30,7 @@ import Joi from 'joi';
  * before these factories ever run.
  */
 export default registerAs('throttle', () =>
-  env.provideMany<{ ttlMs: number; limit: number; trustedProxyHops: number }>([
+  env.provideMany<{ limit: number; trustedProxyHops: number; ttlMs: number }>([
     {
       keyTo: 'ttlMs',
       defaultValue: seconds(60),

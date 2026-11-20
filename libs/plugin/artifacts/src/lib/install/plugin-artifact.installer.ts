@@ -1,12 +1,12 @@
-import { DatabaseService, type Plugin } from '@bge/database';
+import type { Plugin } from '@bge/database';
+import { DatabaseService } from '@bge/database';
+import type { PluginInstallResult, ShownRisk } from '@bge/plugin';
 import {
   PluginDirectoryNotFoundError,
   PluginDirectoryResolverService,
   PluginGrantAuthorityService,
   PluginInstallAuthorityError,
   PluginInstallerService,
-  type PluginInstallResult,
-  type ShownRisk,
 } from '@bge/plugin';
 import type { PluginArtifactDirectory, PluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
 import { Injectable, Logger } from '@nestjs/common';
@@ -16,19 +16,25 @@ import { PluginArtifactStore } from '../store/plugin-artifact.store';
 import { removeArtifactRowBestEffort } from '../store/remove-artifact-row';
 
 export interface InstallPluginArtifactInput {
-  /** The checksum of a received plugin artifact, as its receipt names it, in either case. */
-  readonly sha256: string;
-  readonly actorId: string;
-  /** The risk the artifact read showed for each server-scope requested permission (#1336). */
-  readonly shownRisks?: readonly ShownRisk[];
-  /** Exact re-entry of every Critical permission slug the install will grant. */
-  readonly confirmCriticalSlugs?: readonly string[];
   /** Exact re-entry of every forbidden import static analysis reported. */
   readonly acknowledgeForbiddenImports?: readonly string[];
+
+  readonly actorId: string;
+
+  /** Exact re-entry of every Critical permission slug the install will grant. */
+  readonly confirmCriticalSlugs?: readonly string[];
+
   /** Extend static analysis into node_modules; its findings only advise. */
   readonly deepScan?: boolean;
+
   /** The locale the server admin read the requested permissions in, which the install's consent act records (#1336). */
   readonly locale?: string;
+
+  /** The checksum of a received plugin artifact, as its receipt names it, in either case. */
+  readonly sha256: string;
+
+  /** The risk the artifact read showed for each server-scope requested permission (#1336). */
+  readonly shownRisks?: readonly ShownRisk[];
 }
 
 /**

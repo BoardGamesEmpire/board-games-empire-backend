@@ -1,5 +1,6 @@
 import { MutationEvent } from '@bge/actor-context';
-import { ResourceType, type DataGateway } from '@bge/database';
+import type { DataGateway } from '@bge/database';
+import { ResourceType } from '@bge/database';
 import { GATEWAY_CAPABILITIES_CHANGED_EVENT, GATEWAY_DISABLED_EVENT } from '../constants/gateway-registry.constants';
 
 /**
@@ -20,11 +21,11 @@ export type GatewayAutoDisableReason = 'repeated_connection_failure' | 'repeated
  * Failure-tracking context carried for admin notifications — not row state.
  */
 export interface GatewayAutoDisableFailure {
-  readonly reason: GatewayAutoDisableReason;
   readonly consecutiveFailures: number;
   readonly firstFailureAt: Date;
-  readonly lastFailureAt: Date;
   readonly lastError: string;
+  readonly lastFailureAt: Date;
+  readonly reason: GatewayAutoDisableReason;
 }
 
 type GatewayDisabledSnapshot = Readonly<Pick<DataGateway, 'id' | 'enabled'>>;
@@ -36,10 +37,8 @@ type GatewayDisabledSnapshot = Readonly<Pick<DataGateway, 'id' | 'enabled'>>;
  */
 export class GatewayDisabledEvent extends MutationEvent<DataGateway> {
   static readonly eventName = GATEWAY_DISABLED_EVENT;
-
   declare readonly before: GatewayDisabledSnapshot;
   declare readonly after: GatewayDisabledSnapshot;
-
   readonly subject = ResourceType.DataGateway;
   readonly subjectId: string;
 
@@ -65,10 +64,8 @@ type GatewayCapabilitiesSnapshot = Readonly<Pick<DataGateway, 'id' | 'capabiliti
  */
 export class GatewayCapabilitiesChangedEvent extends MutationEvent<DataGateway> {
   static readonly eventName = GATEWAY_CAPABILITIES_CHANGED_EVENT;
-
   declare readonly before: GatewayCapabilitiesSnapshot;
   declare readonly after: GatewayCapabilitiesSnapshot;
-
   readonly subject = ResourceType.DataGateway;
   readonly subjectId: string;
 

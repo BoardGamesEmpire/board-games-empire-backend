@@ -1,6 +1,7 @@
 import type { Game, GameCollection, Platform, PlatformGame } from '@bge/database';
 import type { ExpansionLinkWire } from '../game/game-wire';
-import { envelopeFailure, isRecord, type HttpResponseLike, type RequestDescription, type Wire } from '../support/wire';
+import type { HttpResponseLike, RequestDescription, Wire } from '../support/wire';
+import { envelopeFailure, isRecord } from '../support/wire';
 
 /**
  * Fail-loud parsers for the game-collection envelopes (#484), on the pattern
@@ -23,12 +24,15 @@ export type CollectionRowGameWire = Wire<
   >
 > & { readonly baseGames: readonly ExpansionLinkWire[] };
 
-/** The platform game a collection row embeds, with its platform and game (#1070). */
+/**
+ * The platform game a collection row embeds, with its platform and game
+ * (#1070), and its own content type, null when it overrides none (#1391).
+ */
 export type CollectionRowPlatformGameWire = Wire<
-  Pick<PlatformGame, 'id' | 'image' | 'thumbnail' | PlayerAndPlayTimeField>
+  Pick<PlatformGame, 'id' | 'image' | 'thumbnail' | 'contentType' | PlayerAndPlayTimeField>
 > & {
-  readonly platform: Pick<Platform, 'id' | 'name' | 'slug' | 'platformType'>;
   readonly game: CollectionRowGameWire;
+  readonly platform: Pick<Platform, 'id' | 'name' | 'slug' | 'platformType'>;
 };
 
 export interface ListCollectionsEnvelope {

@@ -1,16 +1,12 @@
 import { Reach, SystemRole } from '@bge/database';
-import {
-  createActors,
-  HOUSEHOLD_ROLE_NAMES,
-  type Actors,
-  type HouseholdRoleName,
-  type SessionActor,
-} from '@bge/testing-e2e';
+import type { Actors, HouseholdRoleName, SessionActor } from '@bge/testing-e2e';
+import { createActors, HOUSEHOLD_ROLE_NAMES } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { arrangeCollectionEntry } from '../game-collection/game-collection-fixtures';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { createMemberClient } from './household-request';
 import { memberEnvelope } from './household-wire';
 
@@ -93,7 +89,7 @@ describe('removing household members and leaving households', () => {
   const messageOf = (response: { body: unknown }): unknown => (response.body as { message?: unknown } | null)?.message;
 
   /** The last-owner refusal names the household and points at the way out of it. */
-  const expectLastOwnerRefusal = (response: { status: number; body: unknown }, householdId: string) => {
+  const expectLastOwnerRefusal = (response: { body: unknown; status: number }, householdId: string) => {
     expect(response.status).toBe(400);
 
     const message = messageOf(response);

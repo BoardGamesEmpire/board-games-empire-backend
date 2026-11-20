@@ -1,5 +1,6 @@
 import { wasScopeComposed } from './composed-scope-registry.js';
-import { isUnscoped, type ListScope } from './list-scope.js';
+import type { ListScope } from './list-scope.js';
+import { isUnscoped } from './list-scope.js';
 import { ListScopeNotComposedError } from './unscoped-list.error.js';
 
 /**

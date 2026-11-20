@@ -1,12 +1,11 @@
-import { fetchEachGame, type DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
+import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
+import { fetchEachGame } from '@boardgamesempire/gateway-driver-contract';
 import * as proto from '@boardgamesempire/proto-gateway';
-import { concat, from, Observable, of, throwError } from 'rxjs';
+import type { Observable } from 'rxjs';
+import { concat, from, of, throwError } from 'rxjs';
 import { OPERATIONS } from './operations.js';
 
 export interface InMemoryGatewayFixtures {
-  /** Reported as gateway_name on ping. */
-  gatewayName?: string;
-
   /**
    * The operations describe declares, unless set every one the contract suite
    * has cases for. An operation left out answers UNIMPLEMENTED, as a
@@ -14,8 +13,20 @@ export interface InMemoryGatewayFixtures {
    */
   capabilities?: proto.Capability[];
 
+  /** listCategories returns these. */
+  categories?: proto.CategoryData[];
+
   /** The coverage describe declares, none unless set. */
   coverage?: proto.Coverage;
+
+  /** fetchExpansions streams these per base externalId, then completes. */
+  expansionsByBaseExternalId?: Record<string, proto.GameSearchData[]>;
+
+  /**
+   * The most distinct external IDs fetchGames takes, 50 unless set. describe
+   * declares it while it declares FetchGames (#925).
+   */
+  fetchGamesMaxIds?: number;
 
   /**
    * The search filters describe declares its search narrows by, none unless
@@ -23,11 +34,27 @@ export interface InMemoryGatewayFixtures {
    */
   filterableAxes?: proto.SearchFilterAxis[];
 
-  /** The upstream describe declares, none unless set (#925). */
-  upstream?: proto.Upstream;
-
   /** fetchGame resolves against these by `externalId`. */
   games?: proto.GameData[];
+
+  /** Reported as gateway_name on ping. */
+  gatewayName?: string;
+
+  /** listLanguages returns these. */
+  languages?: proto.GatewayLanguageEntry[];
+
+  /** listMechanics returns these. */
+  mechanics?: proto.MechanicData[];
+
+  /** listPlatforms returns these. */
+  platforms?: proto.PlatformData[];
+
+  /**
+   * searchGames streams these (as RESULT frames) for ANY query, then
+   * SOURCE_DONE, leaving out those its filter excludes on an axis it
+   * declares.
+   */
+  searchResults?: proto.GameSearchData[];
 
   /**
    * External IDs fetchGame and fetchGames answer throttled, each with the
@@ -42,33 +69,8 @@ export interface InMemoryGatewayFixtures {
    */
   throttledStreamRetryAfterMs?: number;
 
-  /**
-   * The most distinct external IDs fetchGames takes, 50 unless set. describe
-   * declares it while it declares FetchGames (#925).
-   */
-  fetchGamesMaxIds?: number;
-
-  /**
-   * searchGames streams these (as RESULT frames) for ANY query, then
-   * SOURCE_DONE, leaving out those its filter excludes on an axis it
-   * declares.
-   */
-  searchResults?: proto.GameSearchData[];
-
-  /** fetchExpansions streams these per base externalId, then completes. */
-  expansionsByBaseExternalId?: Record<string, proto.GameSearchData[]>;
-
-  /** listLanguages returns these. */
-  languages?: proto.GatewayLanguageEntry[];
-
-  /** listPlatforms returns these. */
-  platforms?: proto.PlatformData[];
-
-  /** listCategories returns these. */
-  categories?: proto.CategoryData[];
-
-  /** listMechanics returns these. */
-  mechanics?: proto.MechanicData[];
+  /** The upstream describe declares, none unless set (#925). */
+  upstream?: proto.Upstream;
 }
 
 /** gRPC's status code for an operation a DataGateway doesn't implement. */

@@ -1,10 +1,13 @@
 import { NotificationType, ResourceType } from '@bge/database';
 import type { GameImportedPayload } from '@bge/notifications-service';
-import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
+import type { Actors, SessionActor } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import request from 'supertest';
-import { mintApiKey, type Caller } from '../support/api-key';
+import type { Caller } from '../support/api-key';
+import { mintApiKey } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { unreadNotifications } from './notification-wire';
 
 /**
@@ -107,6 +110,24 @@ describe('notification authorization', () => {
 
     await expect(isRead(marked)).resolves.toBe(true);
     await expect(unreadIds(reader)).resolves.toEqual([kept]);
+  });
+
+  it('mark-read leaves readAt alone on a notification already read (#903)', async () => {
+    const reader = await actors.user();
+    const [alreadyRead, unread] = await Promise.all([notify(reader), notify(reader)]);
+    const readEarlier = new Date('2026-01-01T00:00:00.000Z');
+    await db.client.notification.update({ where: { id: alreadyRead }, data: { read: true, readAt: readEarlier } });
+
+    await request(baseUrl)
+      .post(MARK_READ_PATH)
+      .set(reader.headers)
+      .send({ userId: reader.user.id, notificationIds: [alreadyRead, unread] })
+      .expect(201);
+
+    const readAt = async (id: string) =>
+      (await db.client.notification.findUniqueOrThrow({ where: { id }, select: { readAt: true } })).readAt;
+    await expect(readAt(alreadyRead)).resolves.toEqual(readEarlier);
+    await expect(readAt(unread)).resolves.toEqual(expect.any(Date));
   });
 
   it("lets a plain user mark all their own notifications read, and leaves another user's unread", async () => {

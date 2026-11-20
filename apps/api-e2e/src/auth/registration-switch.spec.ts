@@ -1,16 +1,17 @@
+import type { Actors } from '@bge/testing-e2e';
 import {
   createActors,
   performSignup,
   prepareSignup,
   SIGN_IN_ANONYMOUS_PATH,
   SIGN_UP_EMAIL_PATH,
-  type Actors,
 } from '@bge/testing-e2e';
 import request from 'supertest';
 import { postToAuth, signInAgain } from '../support/auth-routes';
 import { requireBaseUrl } from '../support/e2e-env';
 import { useSettingSwitch } from '../support/setting-switch';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 
 const ADMIN_CREATE_USER_PATH = '/api/auth/admin/create-user';
 const DISCOVERY_PATH = '/.well-known/bge-identity';

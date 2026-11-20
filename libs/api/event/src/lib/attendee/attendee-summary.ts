@@ -1,4 +1,5 @@
-import { Action, type Prisma, ResourceType } from '@bge/database';
+import type { Prisma } from '@bge/database';
+import { Action, ResourceType } from '@bge/database';
 import type { ScopeComposer } from '@bge/permissions';
 
 /**

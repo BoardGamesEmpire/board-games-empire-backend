@@ -2,7 +2,8 @@ import type { Logger } from '@nestjs/common';
 import { performance } from 'node:perf_hooks';
 import type { PrismaClient } from '../client';
 import type { DataMigrationEntry } from './data-migration-entry';
-import { describeMismatch, planDataMigrations, type RevisionMismatch } from './plan-data-migrations';
+import type { RevisionMismatch } from './plan-data-migrations';
+import { describeMismatch, planDataMigrations } from './plan-data-migrations';
 import { readDataMigrationLedger } from './read-data-migration-ledger';
 
 /** What the apply needs of the client: the ledger model and interactive transactions. */
@@ -11,10 +12,12 @@ export type DataMigrationsClient = Pick<PrismaClient, '$transaction' | 'dataMigr
 export interface DataMigrationsResult {
   /** The entries this call applied, in order. */
   readonly applied: readonly string[];
-  /** Ledger rows this build's registry does not know; reported, never touched. */
-  readonly unknown: readonly string[];
+
   /** Whether the invalidation port ran after the entries applied; false when none did, or no port was given. */
   readonly invalidated: boolean;
+
+  /** Ledger rows this build's registry does not know; reported, never touched. */
+  readonly unknown: readonly string[];
 }
 
 export interface ApplyDataMigrationsOptions {
@@ -93,6 +96,7 @@ export async function applyDataMigrations(
         'migration rolled back and apply the migrations again.',
     );
   }
+
   const plan = planDataMigrations(entries, rows);
 
   if (plan.edited.length > 0) {
@@ -152,6 +156,7 @@ export async function applyDataMigrations(
     if (applied.length > 0) {
       await invalidateAfter(applied, options, logger);
     }
+
     throw error;
   }
 
@@ -177,6 +182,7 @@ async function invalidateAfter(
     );
     return false;
   }
+
   try {
     await options.invalidate();
     return true;

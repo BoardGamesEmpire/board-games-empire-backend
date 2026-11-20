@@ -1,5 +1,6 @@
 import { MutationEvent } from '@bge/actor-context';
-import { ResourceType, type EventGame, type EventGameNomination, type EventGameVote } from '@bge/database';
+import type { EventGame, EventGameNomination, EventGameVote } from '@bge/database';
+import { ResourceType } from '@bge/database';
 import type { LineupRemovalReason } from '@bge/notifications-service';
 import { NominationEvent } from '../constants';
 
@@ -33,10 +34,8 @@ type NominationCreatedSnapshot = Readonly<
 
 export class NominationCreatedEvent extends MutationEvent<EventGameNomination> {
   static readonly eventName = NominationEvent.NominationCreated;
-
   declare readonly before: null;
   declare readonly after: NominationCreatedSnapshot;
-
   readonly subject = ResourceType.EventGameNomination;
   readonly subjectId: string;
 
@@ -51,10 +50,8 @@ type NominationStatusSnapshot = Readonly<Pick<EventGameNomination, 'id' | 'event
 
 export class NominationWithdrawnEvent extends MutationEvent<EventGameNomination> {
   static readonly eventName = NominationEvent.NominationWithdrawn;
-
   declare readonly before: NominationStatusSnapshot;
   declare readonly after: NominationStatusSnapshot;
-
   readonly subject = ResourceType.EventGameNomination;
   readonly subjectId: string;
 
@@ -70,10 +67,8 @@ type NominationResolvedSnapshot = Readonly<Pick<EventGameNomination, 'id' | 'eve
 /** A nomination left the Open/AwaitingApproval state (vote resolution or host decision). */
 export class NominationResolvedEvent extends MutationEvent<EventGameNomination> {
   static readonly eventName = NominationEvent.NominationResolved;
-
   declare readonly before: NominationResolvedSnapshot;
   declare readonly after: NominationResolvedSnapshot;
-
   readonly subject = ResourceType.EventGameNomination;
   readonly subjectId: string;
 
@@ -96,10 +91,8 @@ export class NominationResolvedEvent extends MutationEvent<EventGameNomination> 
  */
 export class NominationPausedEvent extends MutationEvent<EventGameNomination> {
   static readonly eventName = NominationEvent.NominationPaused;
-
   declare readonly before: NominationStatusSnapshot;
   declare readonly after: NominationStatusSnapshot;
-
   readonly subject = ResourceType.EventGameNomination;
   readonly subjectId: string;
 
@@ -112,10 +105,8 @@ export class NominationPausedEvent extends MutationEvent<EventGameNomination> {
 /** A paused nomination returned to the status it paused from, its supplier back in the event (#551). */
 export class NominationResumedEvent extends MutationEvent<EventGameNomination> {
   static readonly eventName = NominationEvent.NominationResumed;
-
   declare readonly before: NominationStatusSnapshot;
   declare readonly after: NominationStatusSnapshot;
-
   readonly subject = ResourceType.EventGameNomination;
   readonly subjectId: string;
 
@@ -134,10 +125,8 @@ type VoteCastSnapshot = Readonly<Partial<EventGameVote> & Pick<EventGameVote, 'i
  */
 export class VoteCastEvent extends MutationEvent<EventGameVote> {
   static readonly eventName = NominationEvent.VoteCast;
-
   declare readonly before: VoteCastSnapshot | null;
   declare readonly after: VoteCastSnapshot;
-
   readonly subject = ResourceType.EventGameVote;
   readonly subjectId: string;
 
@@ -157,10 +146,8 @@ type EventGameAddedSnapshot = Readonly<
 /** An EventGame row was created — via direct add or elevation from a passed nomination. */
 export class GameAddedToEventEvent extends MutationEvent<EventGame> {
   static readonly eventName = NominationEvent.GameAddedToEvent;
-
   declare readonly before: null;
   declare readonly after: EventGameAddedSnapshot;
-
   readonly subject = ResourceType.EventGame;
   readonly subjectId: string;
 
@@ -190,10 +177,8 @@ export class GameAddedToEventEvent extends MutationEvent<EventGame> {
  */
 export class GameRemovedFromEventEvent extends MutationEvent<EventGame> {
   static readonly eventName = NominationEvent.GameRemovedFromEvent;
-
   declare readonly before: EventGameAddedSnapshot;
   declare readonly after: null;
-
   readonly subject = ResourceType.EventGame;
   readonly subjectId: string;
 

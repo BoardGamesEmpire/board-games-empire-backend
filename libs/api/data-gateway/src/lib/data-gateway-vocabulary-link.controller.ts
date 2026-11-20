@@ -1,16 +1,14 @@
 import { Action, ResourceType } from '@bge/database';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { paginated, PaginatedResponseDto, Unscoped } from '@bge/shared';
-import {
-  DEFAULT_VOCABULARY_REVIEW_STATUSES,
-  VocabularyLinkReviewService,
-  type ReviewedVocabularyKind,
-  type VocabularyLinkView,
-} from '@bge/vocabulary';
-import { Body, Controller, Get, HttpCode, Param, Post, Query, UseGuards, type Type } from '@nestjs/common';
+import type { ReviewedVocabularyKind, VocabularyLinkView } from '@bge/vocabulary';
+import { DEFAULT_VOCABULARY_REVIEW_STATUSES, VocabularyLinkReviewService } from '@bge/vocabulary';
+import type { Type } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
-import { from, type Observable } from 'rxjs';
+import type { Observable } from 'rxjs';
+import { from } from 'rxjs';
 import { concatMap, map } from 'rxjs/operators';
 import { DataGatewayService } from './data-gateway.service';
 import {
@@ -22,13 +20,13 @@ import {
 
 /** The review routes each kind of link has. */
 export interface VocabularyLinkRoutes {
-  list(id: string, query: VocabularyLinkQueryDto): Observable<unknown>;
-  link(id: string, linkId: string, body: LinkVocabularyLinkDto): Observable<unknown>;
-  ignore(id: string, linkId: string): Observable<unknown>;
   accept(id: string, linkId: string): Observable<unknown>;
+  ignore(id: string, linkId: string): Observable<unknown>;
+  link(id: string, linkId: string, body: LinkVocabularyLinkDto): Observable<unknown>;
+  list(id: string, query: VocabularyLinkQueryDto): Observable<unknown>;
 }
 
-const NAMES: Readonly<Record<ReviewedVocabularyKind, { record: string; controller: string }>> = {
+const NAMES: Readonly<Record<ReviewedVocabularyKind, { controller: string; record: string }>> = {
   platform: { record: 'platform', controller: 'DataGatewayPlatformLinkController' },
   category: { record: 'category', controller: 'DataGatewayCategoryLinkController' },
   mechanic: { record: 'mechanic', controller: 'DataGatewayMechanicLinkController' },

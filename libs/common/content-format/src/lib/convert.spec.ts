@@ -18,19 +18,24 @@ function shownText(markdown: string): string {
       case 'root': {
         return node.children.map(show).join('\n\n');
       }
+
       case 'paragraph': {
         return node.children.map(show).join('');
       }
+
       case 'link': {
         expect(node.url).toMatch(/^(https?|mailto):/);
         return node.children.map(show).join('');
       }
+
       case 'text': {
         return node.value;
       }
+
       case 'break': {
         return '\n';
       }
+
       default: {
         throw new Error(`Read as ${node.type}: ${JSON.stringify(markdown)}`);
       }
@@ -367,6 +372,7 @@ Next`,
           runs++;
           elapsed = performance.now() - started;
         } while (elapsed < 10);
+
         return elapsed / runs;
       };
 
@@ -376,6 +382,7 @@ Next`,
         short = Math.min(short, timeEach(length));
         long = Math.min(long, timeEach(length * 4));
       }
+
       return long / short;
     }
 

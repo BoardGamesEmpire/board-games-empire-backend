@@ -1,12 +1,13 @@
 import { Action, ResourceType, WishlistPriority } from '@bge/database';
 import { t } from '@bge/i18n';
-import { CHECK_POLICIES_KEY, type AppAbility } from '@bge/permissions';
+import type { AppAbility } from '@bge/permissions';
+import { CHECK_POLICIES_KEY } from '@bge/permissions';
 import { ListScopeNotComposedError } from '@bge/shared';
 import { paginationQuery } from '@bge/testing';
 import { ClsServiceManager } from 'nestjs-cls';
 import { firstValueFrom } from 'rxjs';
 import { ListEntryController } from './list-entry.controller';
-import { ListEntryService } from './list-entry.service';
+import type { ListEntryService } from './list-entry.service';
 
 const PAGINATION = paginationQuery({ limit: 20 });
 const LIST = 'list-1';

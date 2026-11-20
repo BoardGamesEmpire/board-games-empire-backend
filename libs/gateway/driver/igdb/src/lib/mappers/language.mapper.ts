@@ -1,5 +1,5 @@
 import * as proto from '@boardgamesempire/proto-gateway';
-import { IgdbLanguageEntry } from '../types';
+import type { IgdbLanguageEntry } from '../types';
 
 /**
  * Static registry of IGDB language records.
@@ -8,9 +8,6 @@ import { IgdbLanguageEntry } from '../types';
 
 export interface IgdbLanguage {
   id: number;
-  name: string;
-  nativeName: string;
-  locale: string;
 
   // Canonical BCP 47 tag this IGDB language *means* — the minimal tag that
   // carries the distinction IGDB is making. Region subtags are kept only
@@ -18,8 +15,11 @@ export interface IgdbLanguage {
   // are dropped (cs-CZ → cs) and Chinese uses script subtags (zh-Hans).
   ietfTag: string;
 
-  iso6393: string;
   iso6391?: string;
+  iso6393: string;
+  locale: string;
+  name: string;
+  nativeName: string;
 }
 
 export const IGDB_LANGUAGES: readonly IgdbLanguage[] = [

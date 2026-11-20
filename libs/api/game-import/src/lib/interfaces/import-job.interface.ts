@@ -31,17 +31,18 @@ interface JobContext {
    */
   correlationId: string;
 
+  gatewayId: string;
+  initiatorType: InitiatorType;
+
   /**
    * BGE Job.id — drives status updates and WS events
    */
   jobId: string;
 
-  initiatorType: InitiatorType;
-  gatewayId: string;
-  userId: string | null;
-
   /** Why the job is in its batch. Also stored on its Job row's payload. */
   origin: ImportJobOrigin;
+
+  userId: string | null;
 }
 
 /**
@@ -65,8 +66,6 @@ export interface ExpansionFetchJobPayload extends GameFetchJobPayload {
  * child's return value.
  */
 export interface GameImportJobPayload extends JobContext {
-  externalId: string;
-
   /**
    * External ids of expansions to co-import once this base game persists.
    * Base jobs only. The base import processor spawns one expansion flow per id
@@ -74,6 +73,8 @@ export interface GameImportJobPayload extends JobContext {
    * (the ordering bug this replaces). Empty/absent on expansion jobs.
    */
   expansionExternalIds?: string[];
+
+  externalId: string;
 
   /**
    * Locale forwarded to the expansion fetch jobs this base spawns. Base jobs
@@ -99,25 +100,11 @@ export interface ExpansionImportJobPayload extends GameImportJobPayload {
  * forcing clients to re-derive them from gameId.
  */
 export interface PlatformGameRef {
-  platformId: string;
   platformGameId: string;
+  platformId: string;
 }
 
 export interface ImportJobResult {
-  /**
-   * True when the Game row was created for the first time (not a re-import)
-   */
-  gameCreated: boolean;
-
-  gameId: string;
-
-  platformGames: PlatformGameRef[];
-
-  /**
-   * True when this specific gatewayId+externalId GameSource was new
-   */
-  sourceCreated: boolean;
-
   /**
    * The base games the game is linked to, in the order its DataGateway named
    * them. Empty for a game linked to none (#971).
@@ -132,11 +119,25 @@ export interface ImportJobResult {
   baseGameToAdd?: string;
 
   /**
+   * True when the Game row was created for the first time (not a re-import)
+   */
+  gameCreated: boolean;
+
+  gameId: string;
+
+  /**
    * True when the game is an add-on (an expansion, DLC, mod, standalone
    * expansion or accessory) with a base game: linked to one, or missing the
    * one it needs and adding it to the batch (#971).
    */
   isExpansion: boolean;
+
+  platformGames: PlatformGameRef[];
+
+  /**
+   * True when this specific gatewayId+externalId GameSource was new
+   */
+  sourceCreated: boolean;
 }
 
 /**
@@ -146,8 +147,8 @@ export interface ImportJobResult {
 export interface PersistedJobResult {
   gameId: string;
   gameTitle: string;
-  thumbnail: string | null;
   platformGames: PlatformGameRef[];
+  thumbnail: string | null;
 }
 
 /**
@@ -160,8 +161,8 @@ export interface PersistedJobResult {
  * debugging only and must never be serialized into an API response.
  */
 export interface PersistedJobFailure {
-  errorCode: ImportErrorCode;
   error: string;
+  errorCode: ImportErrorCode;
 }
 
 /**
@@ -172,19 +173,19 @@ export interface PersistedJobFailure {
  * batchId occurrenceId, in-process listeners must tolerate a duplicate.
  */
 export interface ImportBatchCompletedEvent {
-  batchId: string;
   baseJobId: string;
+  batchId: string;
   correlationId: string;
-  status: ImportBatchStatus;
   counts: ImportBatchCounts;
+  status: ImportBatchStatus;
   userId: string | null;
 }
 
 export interface ImportBatchCounts {
-  total: number;
+  cancelled: number;
   completed: number;
   failed: number;
-  cancelled: number;
+  total: number;
 }
 
 /**

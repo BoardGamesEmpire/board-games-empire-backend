@@ -38,7 +38,7 @@ import { Prisma } from '../client';
  * Take it FIRST in the transaction. Every household writer that locks the row
  * does so before anything else, so a caller that took another lock and then
  * this one could close a cycle against a soft-delete holding the row. The
- * plugin runtime's claimed lock order states it as its first stage.
+ * plugin runtime's household writers take it before the plugin row.
  *
  * NOTE: raw SQL because Prisma exposes no row-locking clause. The identifiers
  * are pinned against the checked-in Prisma models by the household lib's

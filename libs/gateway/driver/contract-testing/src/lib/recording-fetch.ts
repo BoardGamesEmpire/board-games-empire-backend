@@ -2,9 +2,9 @@ import type { UpstreamFetch } from '@boardgamesempire/gateway-driver-contract';
 
 /** A request a recording fetch passed on, as its recorder sees it. */
 export interface RecordedRequest {
-  url: URL;
-  method: string;
   body?: string;
+  method: string;
+  url: URL;
 }
 
 /** Statuses whose answer has no body, which a Response refuses one for. */

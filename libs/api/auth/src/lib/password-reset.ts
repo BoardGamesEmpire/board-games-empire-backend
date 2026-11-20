@@ -1,7 +1,8 @@
 import { defineRequestState, hasRequestState } from '@better-auth/core/context';
 import type { PrismaClient } from '@bge/database';
 import type { I18nPath, I18nTranslations } from '@bge/i18n';
-import { isMailConfigured, MAIL_READINESS_SELECT, MailFailureCode, type MailMessage } from '@bge/mail';
+import type { MailMessage } from '@bge/mail';
+import { isMailConfigured, MAIL_READINESS_SELECT, MailFailureCode } from '@bge/mail';
 import type { MailDispatcherService } from '@bge/queue-mail';
 import { Logger } from '@nestjs/common';
 import { APIError } from 'better-auth/api';
@@ -16,12 +17,14 @@ const RESET_IDENTIFIER_PREFIX = 'reset-password:';
 export type MailState = { configured: boolean; lifetimeMinutes: number } | null;
 
 export interface PasswordResetDeps {
+  readonly enqueue: (recipientUserId: string, message: MailMessage) => Promise<void>;
+  readonly now: () => Date;
+
   /** What a reset needs from the settings row, or `null` when the row is missing. */
   readonly readMailState: () => Promise<MailState>;
-  readonly enqueue: (recipientUserId: string, message: MailMessage) => Promise<void>;
+
   /** Renders a refusal's catalog key. */
   readonly render: (key: I18nPath) => string;
-  readonly now: () => Date;
 }
 
 /**
@@ -95,12 +98,14 @@ export function createPasswordReset(deps: PasswordResetDeps) {
      * could not be mailed, before better-auth mints a token. Only the request
      * is refused: finishing a reset with a token already mailed needs no mail.
      */
-    async beforeRoute(context: { path?: string; body?: unknown; context?: OriginMatcher }): Promise<void> {
+    async beforeRoute(context: { body?: unknown; context?: OriginMatcher; path?: string }): Promise<void> {
       if (context.path !== REQUEST_PATH) {
         return;
       }
 
-      const redirectTo = (context.body as { redirectTo?: unknown } | undefined)?.redirectTo;
+      const { body } = context;
+      const redirectTo =
+        typeof body === 'object' && body !== null && 'redirectTo' in body ? body.redirectTo : undefined;
       if (!isAbsolute(redirectTo)) {
         throw refusal(
           'BAD_REQUEST',
@@ -133,7 +138,7 @@ export function createPasswordReset(deps: PasswordResetDeps) {
      * would show which hold accounts (#654). The log names neither token nor
      * link, nor the error's message, which could carry job data.
      */
-    async sendResetPassword(data: { user: { id: string }; url: string; token: string }): Promise<void> {
+    async sendResetPassword(data: { token: string; url: string; user: { id: string } }): Promise<void> {
       let state: MailState;
       try {
         state = await readMailState();

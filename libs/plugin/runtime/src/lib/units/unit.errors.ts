@@ -1,6 +1,7 @@
 import type { ManifestIssue } from '@boardgamesempire/plugin-manifest';
 import type { PluginConfigIssue } from '../config/config-schema.errors';
-import { describeManifestMove, type PluginChangeKind } from '../manifest/manifest-move';
+import type { PluginChangeKind } from '../manifest/manifest-move';
+import { describeManifestMove } from '../manifest/manifest-move';
 
 /**
  * Typed failures for the unit enablement surface (#323): the household

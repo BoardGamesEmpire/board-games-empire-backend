@@ -1,12 +1,9 @@
-import {
-  unsupportedOperation,
-  type DataGatewayDriver,
-  type DriverLogger,
-  type UpstreamFetch,
-} from '@boardgamesempire/gateway-driver-contract';
+import type { DataGatewayDriver, DriverLogger, UpstreamFetch } from '@boardgamesempire/gateway-driver-contract';
+import { unsupportedOperation } from '@boardgamesempire/gateway-driver-contract';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { randomUUID } from 'node:crypto';
-import { defer, EMPTY, from, Observable, of, throwError } from 'rxjs';
+import type { Observable } from 'rxjs';
+import { defer, EMPTY, from, of, throwError } from 'rxjs';
 import { catchError, endWith, map, mergeMap, tap, timeout, toArray } from 'rxjs/operators';
 import { BggCaller } from './bgg-caller';
 import { createBggClient } from './client/bgg-client';
@@ -22,13 +19,13 @@ import {
 } from './mappers/game.mapper';
 import { toGatewayLanguageEntries } from './mappers/language.mapper';
 import { toCategoryList, toMechanicList } from './mappers/taxonomy.mapper';
+import type { ThingFetchOptions } from './requests/game.requests';
 import {
   chunk,
   fetchThingRequest,
   fetchThingsRequest,
   parseExternalId,
   searchGamesRequest,
-  type ThingFetchOptions,
 } from './requests/game.requests';
 import type { BggSearchItem, BggThing } from './types';
 
@@ -52,9 +49,30 @@ const SEARCH_THING_OPTIONS: ThingFetchOptions = { stats: 1, versions: 0, types: 
 const SEARCH_THINGS_DEADLINE_MS = 12_000;
 
 export interface BoardGameGeekDriverOptions {
+  apiKey: string;
+
+  /** BGG's XML API 2. Defaults to `https://boardgamegeek.com/xmlapi2`. */
+  baseUrl?: string;
+
   /** How the driver reaches BGG; it has no other way (#1082). */
   fetch: UpstreamFetch;
-  apiKey: string;
+
+  logger: DriverLogger;
+
+  /** The driver's waits, which tests shorten. Each defaults to what BGG needs. */
+  timing?: {
+    /** How many times to ask again after a 202. Defaults to 5. */
+    acceptedRetries?: number;
+
+    /** The wait before asking again after a 202. Defaults to 6 seconds. */
+    acceptedRetryMs?: number;
+
+    /** The wait before retrying a 429 whose `Retry-After` names none. Defaults to 2 seconds. */
+    rateLimitRetryMs?: number;
+
+    /** How long from a search's start its details may take. Defaults to 12 seconds. */
+    searchThingsDeadlineMs?: number;
+  };
 
   /**
    * The version Ping reports. The gateway app passes the BGE version; a
@@ -62,25 +80,6 @@ export interface BoardGameGeekDriverOptions {
    * is interviewed again.
    */
   version: string;
-  logger: DriverLogger;
-
-  /** BGG's XML API 2. Defaults to `https://boardgamegeek.com/xmlapi2`. */
-  baseUrl?: string;
-
-  /** The driver's waits, which tests shorten. Each defaults to what BGG needs. */
-  timing?: {
-    /** The wait before retrying a 429 whose `Retry-After` names none. Defaults to 2 seconds. */
-    rateLimitRetryMs?: number;
-
-    /** The wait before asking again after a 202. Defaults to 6 seconds. */
-    acceptedRetryMs?: number;
-
-    /** How many times to ask again after a 202. Defaults to 5. */
-    acceptedRetries?: number;
-
-    /** How long from a search's start its details may take. Defaults to 12 seconds. */
-    searchThingsDeadlineMs?: number;
-  };
 }
 
 /**

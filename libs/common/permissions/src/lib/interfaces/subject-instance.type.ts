@@ -19,8 +19,8 @@ export type SubjectInstance<TResource extends ModelResourceType> = PayloadInstan
 >;
 
 interface ModelPayload {
-  scalars: object;
   objects: object;
+  scalars: object;
 }
 
 type PayloadInstance<TPayload extends ModelPayload> = Partial<TPayload['scalars']> & {

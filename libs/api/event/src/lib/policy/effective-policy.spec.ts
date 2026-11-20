@@ -1,11 +1,5 @@
-import {
-  GameAdditionMode,
-  InterestedWeight,
-  VoteEligibility,
-  VoteQuorumType,
-  VoteThresholdType,
-  type EventOccurrencePolicy,
-} from '@bge/database';
+import type { EventOccurrencePolicy } from '@bge/database';
+import { GameAdditionMode, InterestedWeight, VoteEligibility, VoteQuorumType, VoteThresholdType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { makeEventPolicy } from '@bge/testing';
 import { assertValidVotingPolicy, foldPolicy } from './effective-policy';

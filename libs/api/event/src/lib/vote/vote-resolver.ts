@@ -8,7 +8,8 @@ import {
   VoteType,
 } from '@bge/database';
 import type { ResolutionResult, ResolvedStatus, VoteTally, VotingPolicy } from '../interfaces/vote.interface';
-import { countsAsVoter, type VoterGrant } from './vote-grant';
+import type { VoterGrant } from './vote-grant';
+import { countsAsVoter } from './vote-grant';
 
 export class VoteResolver {
   /**
@@ -136,7 +137,10 @@ export class VoteResolver {
       case VoteQuorumType.FixedCount:
         return totalVotes >= (policy.voteQuorumValue ?? 1);
       case VoteQuorumType.PercentOfAttendees: {
-        if (eligibleCount === 0) return false;
+        if (eligibleCount === 0) {
+          return false;
+        }
+
         const requiredPercent = (policy.voteQuorumValue ?? 50) / 100;
         return totalVotes >= Math.ceil(eligibleCount * requiredPercent);
       }
@@ -175,13 +179,14 @@ export class VoteResolver {
 }
 
 export interface AttendeeStub extends VoterGrant {
-  status: EventParticipationStatus;
-  removedAt: Date | null;
   /** The games they offer, without the ones taken back. */
   availableGames: { id: string }[];
+
+  removedAt: Date | null;
+  status: EventParticipationStatus;
 }
 
 export interface VoteStub {
-  voteType: VoteType;
   voter: AttendeeStub;
+  voteType: VoteType;
 }

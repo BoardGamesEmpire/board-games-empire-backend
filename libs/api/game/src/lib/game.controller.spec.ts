@@ -1,9 +1,11 @@
 import { ResourceType } from '@bge/database';
 import { ListScopeNotComposedError, RandomSampleQueryDto } from '@bge/shared';
-import { boundPageQuery, createTestingModuleWithDb, type PageQueryInit } from '@bge/testing';
+import type { PageQueryInit } from '@bge/testing';
+import { boundPageQuery, createTestingModuleWithDb } from '@bge/testing';
 import { ClsServiceManager } from 'nestjs-cls';
 import { firstValueFrom } from 'rxjs';
-import { ListGamesQueryDto, type CreateGameDto, type UpdateGameDto } from './dto';
+import type { CreateGameDto, UpdateGameDto } from './dto';
+import { ListGamesQueryDto } from './dto';
 import { GameController } from './game.controller';
 import { GameService } from './game.service';
 

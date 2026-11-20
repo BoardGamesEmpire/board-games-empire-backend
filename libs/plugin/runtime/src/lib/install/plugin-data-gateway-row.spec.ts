@@ -1,6 +1,7 @@
 import type { Prisma } from '@bge/database';
 import { uniqueViolation, uniqueViolationWithoutMeta } from '@bge/database/testing';
-import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService } from '@bge/testing';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { PluginInstallDataGatewayNameConflictError } from './install.errors';
 import {
@@ -42,8 +43,8 @@ describe('plugin DataGateway row (#1083)', () => {
 
   describe('findDataGatewayNameHolder', () => {
     /** The rows the unique lookups find: by the plugin that owns one, and by the name one holds. */
-    const rows = (found: { readonly byPluginId?: string; readonly byName?: string }): void => {
-      db.dataGateway.findUnique.mockImplementation(((args: { where: { pluginId?: string; name?: string } }) => {
+    const rows = (found: { readonly byName?: string; readonly byPluginId?: string }): void => {
+      db.dataGateway.findUnique.mockImplementation(((args: { where: { name?: string; pluginId?: string } }) => {
         const id = args.where.pluginId !== undefined ? found.byPluginId : found.byName;
 
         return Promise.resolve(id === undefined ? null : { id });

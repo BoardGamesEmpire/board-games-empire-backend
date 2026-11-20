@@ -21,14 +21,13 @@ export type BggText = string;
  * alternate names (translations / regional editions).
  */
 export interface BggName {
-  type: BggNameType | string;
-
   /**
    * Sort index used by BGG to alphabetize titles (ignoring leading articles).
    * Optional because BGG does not always populate it on alternate names.
    */
   sortindex?: number;
 
+  type: BggNameType | string;
   value: BggText;
 }
 
@@ -37,11 +36,7 @@ export interface BggName {
  * (category, mechanic, designer, expansion, etc.).
  */
 export interface BggLink {
-  type: BggLinkType | string;
   id: number;
-
-  /** Absent when BGG sends a link with no `value` attribute. */
-  value?: BggText;
 
   /**
    * BGG returns `inbound="true"` when the link points back at this thing
@@ -50,6 +45,11 @@ export interface BggLink {
    * (inbound undefined / false). The string as BGG sent it.
    */
   inbound?: string;
+
+  type: BggLinkType | string;
+
+  /** Absent when BGG sends a link with no `value` attribute. */
+  value?: BggText;
 }
 
 /**
@@ -63,24 +63,24 @@ export interface BggRatings {
   average?: number;
 
   /**
-   * Bayesian-adjusted rating used for the BGG ranking.
-   */
-  bayesaverage?: number;
-
-  /**
-   * Total number of user ratings on file.
-   */
-  usersrated?: number;
-
-  /**
    * Community-voted complexity (1.0–5.0).
    */
   averageweight?: number;
 
   /**
+   * Bayesian-adjusted rating used for the BGG ranking.
+   */
+  bayesaverage?: number;
+
+  /**
    * Number of users who voted on complexity.
    */
   numweights?: number;
+
+  /**
+   * Total number of user ratings on file.
+   */
+  usersrated?: number;
 }
 
 export interface BggStatistics {
@@ -93,27 +93,20 @@ export interface BggStatistics {
  * `links` and `names` are absent when the answer has no such element.
  */
 export interface BggThing {
-  id: number;
-  type: BggThingType | string;
-
-  thumbnail?: string;
-  image?: string;
   description?: BggText;
-
-  yearpublished?: number;
-  minplayers?: number;
-  maxplayers?: number;
+  id: number;
+  image?: string;
 
   /**
-   * BGG `playingtime` is the canonical play-time. `minplaytime`
-   * and `maxplaytime` are sometimes populated for variable-length games.
+   * Relational links — categories, mechanics, designers, expansions, etc.
    */
-  playingtime?: number;
+  links?: BggLink[];
 
-  minplaytime?: number;
+  maxplayers?: number;
   maxplaytime?: number;
-
   minage?: number;
+  minplayers?: number;
+  minplaytime?: number;
 
   /**
    * Primary + alternate names, each with its type, in the order BGG sent
@@ -124,9 +117,10 @@ export interface BggThing {
   names?: BggName[];
 
   /**
-   * Relational links — categories, mechanics, designers, expansions, etc.
+   * BGG `playingtime` is the canonical play-time. `minplaytime`
+   * and `maxplaytime` are sometimes populated for variable-length games.
    */
-  links?: BggLink[];
+  playingtime?: number;
 
   /**
    * Community statistics. Only populated when the request was made with
@@ -134,12 +128,17 @@ export interface BggThing {
    */
   statistics?: BggStatistics;
 
+  thumbnail?: string;
+  type: BggThingType | string;
+
   /**
    * Populated when the thing endpoint is called with `versions=1`.
    * Absent or empty when the request did not request versions or when
    * the underlying thing has no published versions on BGG.
    */
   versions?: BggVersion[];
+
+  yearpublished?: number;
 }
 
 /**
@@ -151,7 +150,6 @@ export interface BggThing {
  */
 export interface BggSearchItem {
   id: number;
-  type: BggThingType | string;
 
   /**
    * The name search matched, which can be an alternate one. A search result
@@ -159,14 +157,15 @@ export interface BggSearchItem {
    */
   name?: BggText;
 
+  type: BggThingType | string;
   yearpublished?: number;
 }
 
 export interface BggSearchResult {
-  total: number;
-
   /** Absent when nothing matched: BGG's answer has no `<item>` (#967). */
   items?: BggSearchItem[];
+
+  total: number;
 }
 
 /**
@@ -184,8 +183,10 @@ export interface BggVersion {
   length: number;
   links: BggLink[];
   name: BggText;
+
   /** No mapper reads it yet. */
   productcode: BggText;
+
   type: BggThingType | string;
   weight: number;
   width: number;

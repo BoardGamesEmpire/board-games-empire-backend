@@ -1,6 +1,7 @@
 import { USER_REMOVAL_BLOCKERS } from '@bge/auth';
 import { EventParticipationStatus, GameAdditionMode, ResourceType } from '@bge/database';
-import { createActors, prepareSignup, SIGN_UP_EMAIL_PATH, type Actors, type SessionActor } from '@bge/testing-e2e';
+import type { Actors, SessionActor } from '@bge/testing-e2e';
+import { createActors, prepareSignup, SIGN_UP_EMAIL_PATH } from '@bge/testing-e2e';
 import request from 'supertest';
 import { arrangeListEntry } from '../event/event-fixtures';
 import { createEventClient, EVENTS_PATH } from '../event/event-request';
@@ -8,7 +9,8 @@ import { createEnvelope } from '../household/household-wire';
 import { mintApiKey } from '../support/api-key';
 import { postToAuth, signInAgain } from '../support/auth-routes';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 
 const REMOVE_USER_PATH = '/api/auth/admin/remove-user';
 const DELETE_ANONYMOUS_USER_PATH = '/api/auth/delete-anonymous-user';
@@ -210,7 +212,7 @@ describe('removing a user', () => {
     // that cascades from one already in it. Bound to `db.schema`, not
     // `current_schema()`: raw SQL runs against the connection default, which
     // is not the schema under the `?schema=` escape hatch.
-    const rows = await db.client.$queryRaw<{ table: string; column: string }[]>`
+    const rows = await db.client.$queryRaw<{ column: string; table: string }[]>`
       WITH RECURSIVE doomed(oid) AS (
         SELECT users.oid
         FROM pg_class users

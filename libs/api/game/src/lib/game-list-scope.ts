@@ -1,8 +1,8 @@
+import type { Prisma } from '@bge/database';
 import {
   acceptedFriendOf,
   friendOfFriendOf,
   gameSharedWith,
-  type Prisma,
   Reach,
   REACHES_ADMITTING_FRIENDS,
   withinExtendedNetworkOf,

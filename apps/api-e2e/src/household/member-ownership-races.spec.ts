@@ -1,7 +1,9 @@
 import { SystemRole } from '@bge/database';
-import { createActors, type Actors } from '@bge/testing-e2e';
+import type { Actors } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { createMemberClient } from './household-request';
 
 /**
@@ -51,13 +53,13 @@ describe('concurrent household owner transitions', () => {
     db.client.householdMember.count({ where: { householdId } });
 
   /** Status plus message, so a surprise reads as a diff rather than as `500`. */
-  const outcome = (response: { status: number; body: unknown }) => ({
+  const outcome = (response: { body: unknown; status: number }) => ({
     status: response.status,
     message: (response.body as { message?: unknown } | null)?.message ?? null,
   });
 
   /** Sorted by status, so an assertion does not pin which request won. */
-  const outcomes = (responses: readonly { status: number; body: unknown }[]) =>
+  const outcomes = (responses: readonly { body: unknown; status: number }[]) =>
     responses.map(outcome).sort((left, right) => left.status - right.status);
 
   it('lets exactly one of two simultaneous owner departures through', async () => {

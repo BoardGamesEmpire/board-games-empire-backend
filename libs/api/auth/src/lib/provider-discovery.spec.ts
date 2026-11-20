@@ -2,7 +2,8 @@ import type { PrismaClient } from '@bge/database';
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Keyv from 'keyv';
-import { createServer, type Server } from 'node:http';
+import type { Server } from 'node:http';
+import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { authFactory } from './auth-factory';
 import { memoryAuthStorage } from './memory-auth-storage.fixture';
@@ -18,11 +19,13 @@ const noUsers = new Proxy(
 
 /** A sign-in provider's discovery endpoint, answering over a real loopback socket. */
 interface FakeProvider {
-  /** Its origin, with no trailing slash: the issuer. */
-  readonly url: string;
   /** What its discovery document gives as the authorization endpoint. */
   readonly authorizationEndpoint: string;
+
   close(): Promise<void>;
+
+  /** Its origin, with no trailing slash: the issuer. */
+  readonly url: string;
 }
 
 /**

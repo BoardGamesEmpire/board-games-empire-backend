@@ -1,3 +1,16 @@
+import type {
+  CatalogSnapshot,
+  CatalogView,
+  EntryProblem,
+  EntryWarning,
+  FieldChange,
+  PermissionSeedDefinition,
+  PermissionSnapshotRow,
+  PluginActiveManifestReader,
+  Prisma,
+  RolePermissionSnapshotRow,
+  RoleSnapshotRow,
+} from '@bge/database';
 import {
   CATALOG_MANIFEST,
   catalogViewFromSnapshot,
@@ -12,17 +25,6 @@ import {
   probeConditions,
   RECONCILE_TRANSACTION_TIMEOUT_MS,
   ROLE_SCOPE,
-  type CatalogSnapshot,
-  type CatalogView,
-  type EntryProblem,
-  type EntryWarning,
-  type FieldChange,
-  type PermissionSeedDefinition,
-  type PermissionSnapshotRow,
-  type PluginActiveManifestReader,
-  type Prisma,
-  type RolePermissionSnapshotRow,
-  type RoleSnapshotRow,
 } from '@bge/database';
 import { CodedHttpException, t } from '@bge/i18n';
 import { PermissionsService } from '@bge/permissions';
@@ -31,27 +33,21 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Http } from '@status/codes';
 import { isDeepStrictEqual } from 'node:util';
 import { countConsentDecisionsLost, loadConsentDecisionsInForce } from './consent-effect';
-import {
-  catalogGrant,
-  catalogListsGrant,
-  catalogPermission,
-  catalogRole,
-  codeUnitOrder,
-  type CatalogRoleDto,
-  type GrantEditDto,
-  type HandBackDto,
-  type PermissionCatalogDto,
-  type PermissionEditDto,
+import type {
+  CatalogRoleDto,
+  GrantEditDto,
+  HandBackDto,
+  PermissionCatalogDto,
+  PermissionEditDto,
 } from './dto/catalog.response';
+import { catalogGrant, catalogListsGrant, catalogPermission, catalogRole, codeUnitOrder } from './dto/catalog.response';
 import type { UpdatePermissionDto } from './dto/update-permission.dto';
 import type { UpdateRoleDto } from './dto/update-role.dto';
+import type { GrantSnapshot, PermissionSnapshot, RoleSnapshot } from './events/permission-catalog.events';
 import {
   PermissionUpdatedEvent,
   RolePermissionChangedEvent,
   RoleUpdatedEvent,
-  type GrantSnapshot,
-  type PermissionSnapshot,
-  type RoleSnapshot,
 } from './events/permission-catalog.events';
 import { refuseOwnerLockout } from './owner-control';
 
@@ -211,6 +207,7 @@ export class PermissionCatalogService {
       const { count } = await tx.permission.updateMany({
         where: { id, managedBy: before.managedBy, updatedAt },
         data: {
+          // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- the conditions came from a JSON request body, so they are a JSON object, which Record<string, unknown> can't tell Prisma's JSON types (#1321)
           ...(edit.conditions !== undefined && { conditions: edit.conditions as Prisma.InputJsonObject }),
           ...(edit.reason !== undefined && { reason: edit.reason }),
           ...(edit.riskLevel !== undefined && { riskLevel: edit.riskLevel }),
@@ -674,6 +671,7 @@ function applyEdit(row: PermissionSnapshotRow, edit: UpdatePermissionDto, now: D
 
   return {
     ...row,
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- the conditions came from a JSON request body, so they are a JSON object, which Record<string, unknown> can't tell Prisma's JSON types (#1321)
     conditions: edit.conditions === undefined ? row.conditions : (edit.conditions as Prisma.JsonObject),
     reason: edit.reason === undefined ? row.reason : edit.reason,
     riskLevel: edit.riskLevel ?? row.riskLevel,
@@ -766,7 +764,9 @@ function withPermissionRow(snapshot: CatalogSnapshot, row: PermissionSnapshotRow
 function probedEntry(row: PermissionSnapshotRow): Pick<PermissionSeedDefinition, 'slug' | 'subject' | 'conditions'> {
   return {
     slug: row.slug,
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- the column is a plain string; a catalog row's subject is a ResourceType or 'all', written from a seed definition (#1321)
     subject: row.subject as PermissionSeedDefinition['subject'],
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Prisma types the column as any JSON value; seeds and edits write only objects to it (#1321)
     ...(row.conditions === null ? {} : { conditions: row.conditions as Prisma.InputJsonObject }),
   };
 }
@@ -853,7 +853,7 @@ async function grantNextStart(
 ): Promise<HandBackDto> {
   const failing = await findFailingEditedEntries(tx, CATALOG_MANIFEST, snapshot);
   const { restore, delete: removed, withheld } = planReconcile(CATALOG_MANIFEST, snapshot, failing).rolePermissions;
-  const isThisGrant = (edge: { roleName: string; permissionSlug: string }) =>
+  const isThisGrant = (edge: { permissionSlug: string; roleName: string }) =>
     edge.roleName === roleName && edge.permissionSlug === slug;
 
   const held = withheld.find(isThisGrant);
@@ -905,7 +905,7 @@ async function readGrant(
   tx: Prisma.TransactionClient,
   roleName: string,
   slug: string,
-): Promise<{ role: { id: string }; permission: { id: string; retiredAt: Date | null }; grant: GrantRow | null }> {
+): Promise<{ grant: GrantRow | null; permission: { id: string; retiredAt: Date | null }; role: { id: string } }> {
   const role = await readEditableRole(tx, roleName);
 
   const permission = await tx.permission.findUnique({

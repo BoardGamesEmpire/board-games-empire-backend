@@ -8,8 +8,8 @@ import { STATUS_CODES } from 'node:http';
  * no specific refusal.
  */
 export function expectErrorEnvelope(
-  response: { readonly status: number; readonly body: unknown },
-  expected: { readonly status: number; readonly code: string | null },
+  response: { readonly body: unknown; readonly status: number },
+  expected: { readonly code: string | null; readonly status: number },
 ): void {
   expect(response.status).toBe(expected.status);
 

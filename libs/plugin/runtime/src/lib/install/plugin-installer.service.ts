@@ -1,4 +1,5 @@
 import { AuditContextService } from '@bge/actor-context';
+import type { Permission, Plugin, PluginConsentAct, PluginGrant, PluginPermission } from '@bge/database';
 import {
   DatabaseService,
   PluginCategory,
@@ -7,21 +8,18 @@ import {
   Prisma,
   RiskLevel,
   SERVER_SCOPE_SENTINEL,
-  type Permission,
-  type Plugin,
-  type PluginConsentAct,
-  type PluginGrant,
-  type PluginPermission,
 } from '@bge/database';
 import type { PluginArtifactDirectory } from '@boardgamesempire/plugin-contract';
+import type {
+  ManifestWarning,
+  NormalizedPermissionRequest,
+  PluginManifest,
+  PluginManifestValidationResult,
+} from '@boardgamesempire/plugin-manifest';
 import {
   PluginManifestValidationError,
   resolveLocalizedString,
   validatePluginManifest,
-  type ManifestWarning,
-  type NormalizedPermissionRequest,
-  type PluginManifest,
-  type PluginManifestValidationResult,
 } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -31,10 +29,13 @@ import { retainedServerConfig } from '../config/retained-server-config';
 import { PluginConsentActStaleError } from '../consent/plugin-consent-act.errors';
 import type { ShownRisk } from '../consent/plugin-consent-act.types';
 import { planServerAcceptance, staleShownRisks } from '../consent/server-acceptance';
-import { PluginInstalledEvent, type GrantedPermissionRecord, type PluginProvenance } from '../events/plugin.events';
+import { writeConsentAct } from '../consent/write-consent-act';
+import type { GrantedPermissionRecord, PluginProvenance } from '../events/plugin.events';
+import { PluginInstalledEvent } from '../events/plugin.events';
 import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
 import { PluginDirectoryResolverService } from '../loader/plugin-directory-resolver.service';
-import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
+import type { PluginModuleOptions } from '../plugin-module.options';
+import { MODULE_OPTIONS_TOKEN } from '../plugin-module.options';
 import { MANIFEST_CATEGORY_TO_PRISMA } from '../registry/plugin-category.map';
 import { CLEARED_STAGED_UPDATE } from '../update/staged-update.columns';
 import {
@@ -64,36 +65,10 @@ import {
 } from './manifest-enum.maps';
 import { findDataGatewayNameHolder, placePluginDataGatewayRow, pluginDataGatewayName } from './plugin-data-gateway-row';
 import { PluginStaticAnalysisService } from './plugin-static-analysis.service';
-import { gatingFindings, type StaticAnalysisFinding, type StaticAnalysisReport } from './static-analysis.types';
+import type { StaticAnalysisFinding, StaticAnalysisReport } from './static-analysis.types';
+import { gatingFindings } from './static-analysis.types';
 
 export interface PluginInstallInput {
-  /**
-   * The plugin artifact's directory, which the install ingress placed
-   * (#1094); its checksum is the one the row records (#224). The
-   * installer never opens the plugin artifact itself (#59).
-   */
-  readonly directory: PluginArtifactDirectory;
-  /**
-   * The link the plugin artifact was fetched from (#84). Omitted for a manual
-   * upload, which has a checksum but no link. The checksum is the artifact
-   * directory's own (#224), so it is not a second input that could disagree.
-   */
-  readonly url?: string;
-  /** `PluginRegistrySource.slug` the artifact was discovered through (#84). */
-  readonly registrySlug?: string;
-  /** The installing admin — server-admin authority is verified, never assumed. */
-  readonly installerId: string;
-  /**
-   * The risk the artifact read showed for each server-scope requested
-   * permission (#1336). A missing one, or one that is not today's, refuses
-   * the install as stale: it grants them all at today's risk. The HTTP route
-   * always sends it; a caller that showed nothing omits it and is not checked.
-   */
-  readonly shownRisks?: readonly ShownRisk[];
-  /** Exact re-entry of every Critical + required permission slug. */
-  readonly confirmCriticalSlugs?: readonly string[];
-  /** Admin opt-in: extend static analysis into node_modules; findings advisory only. */
-  readonly deepScan?: boolean;
   /**
    * Exact re-entry of every forbidden import specifier static analysis
    * reported, accepting the risk and installing anyway.
@@ -107,12 +82,47 @@ export interface PluginInstallInput {
    * violation appearing in a later tarball cannot ride an old acceptance.
    */
   readonly acknowledgeForbiddenImports?: readonly string[];
+
+  /** Exact re-entry of every Critical + required permission slug. */
+  readonly confirmCriticalSlugs?: readonly string[];
+
+  /** Admin opt-in: extend static analysis into node_modules; findings advisory only. */
+  readonly deepScan?: boolean;
+
+  /**
+   * The plugin artifact's directory, which the install ingress placed
+   * (#1094); its checksum is the one the row records (#224). The
+   * installer never opens the plugin artifact itself (#59).
+   */
+  readonly directory: PluginArtifactDirectory;
+
+  /** The installing admin — server-admin authority is verified, never assumed. */
+  readonly installerId: string;
+
   /**
    * The locale the server admin read the install's requested permissions in,
    * which the `InstallAccept` consent act records them in (#1336). Defaults to
    * the server's default locale.
    */
   readonly locale?: string;
+
+  /** `PluginRegistrySource.slug` the artifact was discovered through (#84). */
+  readonly registrySlug?: string;
+
+  /**
+   * The risk the artifact read showed for each server-scope requested
+   * permission (#1336). A missing one, or one that is not today's, refuses
+   * the install as stale: it grants them all at today's risk. The HTTP route
+   * always sends it; a caller that showed nothing omits it and is not checked.
+   */
+  readonly shownRisks?: readonly ShownRisk[];
+
+  /**
+   * The link the plugin artifact was fetched from (#84). Omitted for a manual
+   * upload, which has a checksum but no link. The checksum is the artifact
+   * directory's own (#224), so it is not a second input that could disagree.
+   */
+  readonly url?: string;
 }
 
 /**
@@ -120,40 +130,50 @@ export interface PluginInstallInput {
  * everything an install would ask the server admin to confirm (#1094).
  */
 export interface PluginInstallAssessment {
-  readonly validated: PluginManifestValidationResult;
-  /** The checks the install would seed `Granted` at server scope. */
-  readonly serverChecks: readonly NormalizedPermissionRequest[];
+  readonly analysis: StaticAnalysisReport;
   readonly corePermissions: ReadonlyMap<string, Permission>;
+
   /** Critical slugs `install()` wants re-entered, sorted. */
   readonly criticalSlugsToReenter: readonly string[];
-  readonly analysis: StaticAnalysisReport;
-  /** Forbidden import specifiers `install()` wants acknowledged, distinct. */
-  readonly forbiddenImportsToAccept: readonly string[];
+
   /**
    * The name a data-gateway plugin's DataGateway row would take, when another
    * row holds it and `install()` would refuse (#1083). Null when the install
    * would create no row under a taken name, and for every other category.
    */
   readonly dataGatewayNameConflict: string | null;
+
+  /** Forbidden import specifiers `install()` wants acknowledged, distinct. */
+  readonly forbiddenImportsToAccept: readonly string[];
+
+  /** The checks the install would seed `Granted` at server scope. */
+  readonly serverChecks: readonly NormalizedPermissionRequest[];
+
+  readonly validated: PluginManifestValidationResult;
 }
 
 export interface PluginInstallResult {
-  readonly plugin: Plugin;
-  readonly declaredPermissions: readonly PluginPermission[];
+  /** Forbidden specifiers the installer accepted to bypass the analysis gate; empty on a clean install. */
+  readonly acknowledgedForbiddenImports: readonly string[];
+
   /**
    * The `InstallAccept` consent act the install recorded for the Server unit
    * (#1336). Written on every install, even one whose manifest requests
    * nothing of the server, and named by every seeded consent decision.
    */
   readonly act: PluginConsentAct;
-  /** Server-scope consent decisions seeded by this install; per-unit consent starts empty. */
-  readonly seededGrants: readonly PluginGrant[];
+
   /** Full analysis report — warnings and deep-scan advisories for the install response. */
   readonly analysis: StaticAnalysisReport;
+
+  readonly declaredPermissions: readonly PluginPermission[];
+  readonly plugin: Plugin;
+
+  /** Server-scope consent decisions seeded by this install; per-unit consent starts empty. */
+  readonly seededGrants: readonly PluginGrant[];
+
   /** Author-guidance warnings from manifest validation, surfaced but never gating. */
   readonly warnings: readonly ManifestWarning[];
-  /** Forbidden specifiers the installer accepted to bypass the analysis gate; empty on a clean install. */
-  readonly acknowledgedForbiddenImports: readonly string[];
 }
 
 /**
@@ -610,6 +630,7 @@ export class PluginInstallerService {
         scope: MANIFEST_SCOPE_TO_PRISMA[manifest.scope],
         // The VALIDATED manifest object — the canonical form every later
         // re-validation (loader, grants, C3 comparison) starts from.
+        // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Prisma's InputJsonValue can't take the manifest type, whose config.schema is Record<string, unknown>; the manifest is the validated JSON document (#1321)
         manifestJson: manifest as Prisma.InputJsonValue,
         installedFromUrl: provenance.url,
         installedSha256: provenance.sha256,
@@ -638,9 +659,11 @@ export class PluginInstallerService {
 
         // Reinstall clears the tombstone in place. Consent starts from zero
         // (the uninstall purge emptied the catalog; re-seeded below), the
-        // enable switch starts OFF like any fresh install, and the running
-        // process may still hold the pre-uninstall module — restartRequired
-        // says so until the loader's success path clears it.
+        // Server switch starts OFF like any fresh install, every unit
+        // enablement is already off because uninstall switched each one off
+        // (#1328), and the running process may still hold the pre-uninstall
+        // module — restartRequired says so until the loader's success path
+        // clears it.
         //
         // Guarded on the tombstone STILL being present, the way the unique
         // slug index guards a fresh install: two concurrent reinstalls both
@@ -664,6 +687,7 @@ export class PluginInstallerService {
             restartRequired: true,
             loadFailed: false,
             loadError: null,
+            // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Prisma's InputJsonValue can't take Record<string, unknown>; the document is JSON the plugin's config schema has checked (#1321)
             config: retained.config as Prisma.InputJsonValue,
             // Stale signals about the uninstalled version.
             latestKnownVersion: null,
@@ -682,8 +706,10 @@ export class PluginInstallerService {
 
         plugin = await tx.plugin.findUniqueOrThrow({ where: { id: existing.id } });
 
-        // A reinstall reads and writes no household unit enablement: whether a
-        // retained one can run under this manifest is worked out when read (#1151).
+        // A reinstall reads and writes no unit enablement: uninstall switched
+        // every one off (#1328), so each unit switches on again by a consent
+        // act under this sha, and whether a retained one can run under this
+        // manifest is worked out when read (#1151).
       }
 
       // A data-gateway plugin's DataGateway row, created or (on a reinstall)
@@ -716,44 +742,27 @@ export class PluginInstallerService {
 
       // The Server unit's consent to this install, one act whatever the
       // manifest requests of the server, so every install leaves a record of
-      // what the server admin accepted and under which sha (#1336).
-      const act = await tx.pluginConsentAct.create({
-        data: {
-          pluginId: plugin.id,
-          pluginSlug: manifest.slug,
-          scopeType: PluginGrantScope.Server,
-          scopeId: SERVER_SCOPE_SENTINEL,
-          kind: PluginConsentActKind.InstallAccept,
-          manifestVersion: manifest.version,
-          manifestSha256: provenance.sha256,
-          presentation: acceptance.presentation as unknown as Prisma.InputJsonValue,
-          decidedById: installerId,
-          decidedAt: initiatedAt,
-          correlationId,
-        },
+      // what the server admin accepted and under which sha (#1336). The
+      // acceptance's decisions are in permission order. No consent decision
+      // stands before an install, fresh or a reinstall, whose uninstall purged
+      // every one, so each upsert inserts.
+      const { act, rows: seededGrants } = await writeConsentAct(tx, {
+        pluginId: plugin.id,
+        pluginSlug: manifest.slug,
+        scopeType: PluginGrantScope.Server,
+        scopeId: SERVER_SCOPE_SENTINEL,
+        kind: PluginConsentActKind.InstallAccept,
+        manifestVersion: manifest.version,
+        manifestSha256: provenance.sha256,
+        // An install answers no staged update.
+        stagingId: null,
+        presentation: acceptance.presentation,
+        decisions: acceptance.decisions,
+        standingBySlug: new Map(),
+        actorId: installerId,
+        decidedAt: initiatedAt,
+        correlationId,
       });
-
-      // In permission order, which the acceptance sorts by code unit: the
-      // order every writer of the Server unit's consent decisions takes them.
-      const seededGrants: PluginGrant[] = [];
-
-      for (const decision of acceptance.decisions) {
-        seededGrants.push(
-          await tx.pluginGrant.create({
-            data: {
-              pluginId: plugin.id,
-              scopeType: PluginGrantScope.Server,
-              scopeId: SERVER_SCOPE_SENTINEL,
-              permissionSlug: decision.permissionSlug,
-              status: decision.status,
-              decidedById: installerId,
-              decidedAt: initiatedAt,
-              decidedRiskLevel: decision.decidedRiskLevel,
-              actId: act.id,
-            },
-          }),
-        );
-      }
 
       return { plugin, declaredPermissions, act, seededGrants, retainedConfigReset };
     });

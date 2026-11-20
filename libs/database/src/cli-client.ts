@@ -1,4 +1,5 @@
-import { openStandaloneClient, type StandaloneClient } from './lib/standalone-client';
+import type { StandaloneClient } from './lib/standalone-client';
+import { openStandaloneClient } from './lib/standalone-client';
 
 /**
  * The client the CLIs beside this file run on (`seed-cli.ts`, `plan-cli.ts`):
@@ -10,5 +11,6 @@ export function openCliClient(): StandaloneClient {
   if (!url) {
     throw new Error('DATABASE_URL is not set. `.env` is loaded first; set the variable and run again.');
   }
+
   return openStandaloneClient(url);
 }

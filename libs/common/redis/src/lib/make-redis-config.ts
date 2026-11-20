@@ -13,10 +13,10 @@ import type { BgeRedisConnectionConfig } from './redis-connection.config';
  */
 export interface MakeRedisConfigOptions {
   /**
-   * `ConfigService` namespace the connection registers under, e.g.
-   * `'redis.cache'`, `'redis.queue'`, `'redis.websocket'`.
+   * Default logical database index used when `${envPrefix}DATABASE` is unset.
+   * Defaults to `0`.
    */
-  namespace: string;
+  database?: number;
 
   /**
    * Environment-variable prefix for this connection, e.g. `'REDIS_'`,
@@ -26,10 +26,10 @@ export interface MakeRedisConfigOptions {
   envPrefix: string;
 
   /**
-   * Default logical database index used when `${envPrefix}DATABASE` is unset.
-   * Defaults to `0`.
+   * `ConfigService` namespace the connection registers under, e.g.
+   * `'redis.cache'`, `'redis.queue'`, `'redis.websocket'`.
    */
-  database?: number;
+  namespace: string;
 }
 
 /**

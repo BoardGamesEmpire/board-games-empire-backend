@@ -1,22 +1,21 @@
 import { RiskLevel } from '@bge/database';
-import {
-  PLUGIN_UPDATE_STAGING_REFUSALS,
-  type PluginArtifactCheckPresentation,
-  type PluginUpdateAssessment,
-  type PluginUpdateChanges,
-  type PluginUpdateDeclaresDiff,
-  type PluginUpdateStagingRefusal,
-  type StaticAnalysisFinding,
-  type UpdateEscalationComparison,
+import type {
+  PluginArtifactCheckPresentation,
+  PluginUpdateAssessment,
+  PluginUpdateChanges,
+  PluginUpdateDeclaresDiff,
+  PluginUpdateStagingRefusal,
+  StaticAnalysisFinding,
+  UpdateEscalationComparison,
 } from '@bge/plugin';
+import { PLUGIN_UPDATE_STAGING_REFUSALS } from '@bge/plugin';
+import type { ManifestWarning, ResolvedLocalizedString } from '@boardgamesempire/plugin-manifest';
 import {
   ManifestWarningCode,
   PLUGIN_CATEGORIES,
   PLUGIN_CONSENT_SCOPES,
   PLUGIN_EXECUTION_MODES,
   PLUGIN_SCOPES,
-  type ManifestWarning,
-  type ResolvedLocalizedString,
 } from '@boardgamesempire/plugin-manifest';
 import { ApiProperty } from '@nestjs/swagger';
 import { UpdateEscalationDto } from './plugin-update.response';

@@ -1,6 +1,7 @@
 import { NotificationType } from '@bge/database';
 import { NotificationsService } from '@bge/notifications-service';
-import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { createTestingModuleWithDb } from '@bge/testing';
 import { Logger } from '@nestjs/common';
 import { UserCreatedEvent } from '../events/auth.events';
 import { UsernameVariantNotificationListener } from './username-variant-notification.listener';

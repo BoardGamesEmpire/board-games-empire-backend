@@ -1,10 +1,5 @@
-import {
-  CATALOG_MANIFEST,
-  PermissionOwner,
-  reconcileCatalog,
-  type PrismaClient,
-  type ReconcileResult,
-} from '@bge/database';
+import type { PrismaClient, ReconcileResult } from '@bge/database';
+import { CATALOG_MANIFEST, PermissionOwner, reconcileCatalog } from '@bge/database';
 import { permissionGraphFlushPatterns } from '@bge/permissions';
 import { RedisKeyFlush } from '@bge/redis';
 import { connectToHarnessRedis } from '../support/redis-reset';

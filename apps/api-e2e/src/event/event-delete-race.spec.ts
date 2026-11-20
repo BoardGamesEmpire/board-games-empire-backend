@@ -1,9 +1,14 @@
-import { createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
+import { EventParticipationStatus, NominationStatus, OccurrenceStatus, VoteType } from '@bge/database';
+import type { Actors, AuthenticatedActor } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import { setTimeout as sleep } from 'node:timers/promises';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
-import { expectBackendsQueuedBehind, expectLockWaiter, withBarrier, type Barrier } from '../support/lock-barrier';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { Barrier } from '../support/lock-barrier';
+import { expectBackendsQueuedBehind, expectLockWaiter, withBarrier } from '../support/lock-barrier';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
+import { auditRowsDuring } from './event-audit';
 import { arrangeListEntry } from './event-fixtures';
 import { createEventClient, EVENTS_PATH } from './event-request';
 import { eventGameEnvelope } from './event-wire';
@@ -22,6 +27,9 @@ import { eventGameEnvelope } from './event-wire';
  * passed every check in front of the lock while the event was still live.
  * Parallel requests could never promise that interleaving, and would pass on
  * the bug.
+ *
+ * The writes beneath the event race its delete the same way (#1065): each
+ * takes the event's row before it writes, and reads the event under it.
  */
 describe('two writes racing one event (#731)', () => {
   const baseUrl = requireBaseUrl(process.env);
@@ -220,5 +228,151 @@ describe('two writes racing one event (#731)', () => {
 
     // Last, for the reason the first test gives.
     expect(queuedOn).toEqual([expect.stringMatching(LOCKS_THE_EVENT), expect.stringMatching(LOCKS_THE_EVENT)]);
+  });
+
+  /**
+   * A write beneath the event, queued behind its delete (#1065). The barrier
+   * is the delete: it stamps the event's row and holds it uncommitted, so the
+   * write reads the event live in front of its lock, then queues on the row.
+   * Once the delete commits, the write reads the event under its lock and
+   * answers 404, as one arriving after the delete would.
+   */
+  describe('a write beneath the event, queued behind its delete (#1065)', () => {
+    /** The statement an unlocked write queues on: the event's row, as a share. */
+    const SHARES_THE_EVENT = /FROM events WHERE id = \$1 FOR SHARE/;
+
+    /**
+     * The write's status, the statement it queued on, and the audit rows its
+     * actor caused meanwhile, which a refused write leaves at none.
+     */
+    const behindADelete = async (
+      actor: AuthenticatedActor,
+      eventId: string,
+      send: () => request.Test,
+      description: string,
+    ) => {
+      const { auditRows, result } = await auditRowsDuring(baseUrl, db.client, actor, () =>
+        withBarrier(async (barrier) => {
+          const { holder } = barrier;
+
+          await holder.begin();
+          await expect(
+            holder.query('UPDATE events SET deleted_at = now() WHERE id = $1 RETURNING id', [eventId]),
+          ).resolves.toHaveLength(1);
+
+          // Deliberately not awaited: it is supposed to be stuck.
+          const write = fire(send);
+
+          const waiting = await expectLockWaiter(barrier, {
+            heldBy: holder.pid,
+            description,
+            timeoutMs: REQUEST_REACHES_LOCK_MS,
+            exclude: barrierPids(barrier),
+            settledEarly: write.settledEarly,
+          });
+
+          await holder.commit();
+
+          return { status: (await write.settled).status, queuedOn: waiting.query };
+        }),
+      );
+
+      return { ...result, auditRows };
+    };
+
+    const hostAttendee = (host: AuthenticatedActor, eventId: string) =>
+      db.client.eventAttendee.findFirstOrThrow({
+        where: { eventId, userId: host.user.id },
+        select: { id: true, status: true },
+      });
+
+    it('an RSVP queued behind a delete answers 404 and writes nothing (#1065)', async () => {
+      const host = await actors.user();
+      const eventId = await createdEventId(host);
+      const attendee = await hostAttendee(host, eventId);
+
+      const { status, queuedOn, auditRows } = await behindADelete(
+        host,
+        eventId,
+        () =>
+          request(baseUrl)
+            .patch(`${EVENTS_PATH}/${eventId}/attendees/${attendee.id}/status`)
+            .set(host.headers)
+            .send({ status: EventParticipationStatus.NotAttending }),
+        'the RSVP',
+      );
+
+      expect(status).toBe(404);
+      await expect(hostAttendee(host, eventId)).resolves.toEqual(attendee);
+      expect(auditRows).toBe(0);
+
+      // Last, so a run against a lib that doesn't lock fails on the outcome
+      // above rather than here.
+      expect(queuedOn).toMatch(SHARES_THE_EVENT);
+    });
+
+    it('a vote queued behind a delete answers 404 and writes nothing (#1065)', async () => {
+      const host = await actors.user();
+      const eventId = await createdEventId(host);
+      const attendee = await hostAttendee(host, eventId);
+      const entry = await arrangeListEntry(db.client, eventId, host.user.id);
+      const { id: nominationId } = await db.client.eventGameNomination.create({
+        data: {
+          eventId,
+          platformGameId: entry.platformGameId,
+          suppliedFromId: entry.suppliedById,
+          nominatedById: attendee.id,
+          status: NominationStatus.Open,
+        },
+        select: { id: true },
+      });
+
+      const { status, queuedOn, auditRows } = await behindADelete(
+        host,
+        eventId,
+        () =>
+          request(baseUrl)
+            .post(`${EVENTS_PATH}/${eventId}/nominations/${nominationId}/votes`)
+            .set(host.headers)
+            .send({ voteType: VoteType.For }),
+        'the vote',
+      );
+
+      expect(status).toBe(404);
+      await expect(db.client.eventGameVote.count({ where: { eventGameNominationId: nominationId } })).resolves.toBe(0);
+      expect(auditRows).toBe(0);
+
+      // Last, for the reason the test above gives.
+      expect(queuedOn).toMatch(SHARES_THE_EVENT);
+    });
+
+    it('a date edit queued behind a delete answers 404 and writes nothing (#1065)', async () => {
+      const host = await actors.user();
+      const eventId = await createdEventId(host);
+      const { id: occurrenceId } = await db.client.eventOccurrence.create({
+        data: { eventId, status: OccurrenceStatus.Proposed, label: 'Before the race' },
+        select: { id: true },
+      });
+
+      const { status, queuedOn, auditRows } = await behindADelete(
+        host,
+        eventId,
+        () =>
+          request(baseUrl)
+            .patch(`${EVENTS_PATH}/${eventId}/occurrences/${occurrenceId}`)
+            .set(host.headers)
+            .send({ label: 'Too late' }),
+        'the date edit',
+      );
+
+      expect(status).toBe(404);
+      await expect(
+        db.client.eventOccurrence.findUniqueOrThrow({ where: { id: occurrenceId }, select: { label: true } }),
+      ).resolves.toEqual({ label: 'Before the race' });
+      expect(auditRows).toBe(0);
+
+      // A date write takes the row the way a delete does, and checks under it.
+      expect(queuedOn).toMatch(LOCKS_THE_EVENT);
+    });
   });
 });

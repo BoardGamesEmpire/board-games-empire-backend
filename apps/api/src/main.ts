@@ -21,8 +21,9 @@ import { createWebClient } from '@bge/web-client';
 import { Logger, RequestMethod } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
-import { NestExpressApplication } from '@nestjs/platform-express';
-import { DocumentBuilder, OpenAPIObject, SwaggerModule } from '@nestjs/swagger';
+import type { NestExpressApplication } from '@nestjs/platform-express';
+import type { OpenAPIObject } from '@nestjs/swagger';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import compression from 'compression';
 import helmet from 'helmet';
 import { I18nService, I18nValidationPipe } from 'nestjs-i18n';
@@ -34,7 +35,8 @@ import redisConfig, { redisConfigValidationSchema } from './app/configuration/re
 import { API_REQUEST_TIMEOUT_MS, installRequestBodyRateGuard } from './app/http/request-body-rate-guard';
 import { createAuthClientIpHandler } from './app/lib/auth-client-ip';
 import { createHostCheck } from './app/lib/host-check';
-import { allowsEveryHost, createHostRule, type ServerNames } from './app/lib/host-rule';
+import type { ServerNames } from './app/lib/host-rule';
+import { allowsEveryHost, createHostRule } from './app/lib/host-rule';
 
 async function bootstrap() {
   const LOGGER_CONTEXT = 'Bootstrap';
@@ -192,12 +194,12 @@ async function bootstrap() {
       .build();
 
     const openAPISchema: OpenAPIObject = await authInstance.api.generateOpenAPISchema();
-    const paths = Object.entries(openAPISchema.paths).reduce(
+    const paths = Object.entries(openAPISchema.paths).reduce<OpenAPIObject['paths']>(
       (acc, [path, methods]) => ({
         ...acc,
         [path.startsWith(`/${globalPrefix}/auth`) ? path : `/${globalPrefix}/auth${path}`]: methods,
       }),
-      {} as OpenAPIObject['paths'],
+      {},
     );
 
     const document = SwaggerModule.createDocument(app, swaggerConfig);

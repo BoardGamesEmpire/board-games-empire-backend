@@ -1,9 +1,11 @@
 import { Reach } from '@bge/database';
-import { createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
+import type { Actors, AuthenticatedActor } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { listMediaEnvelope, readMediaEnvelope } from './media-wire';
 
 /**
@@ -92,6 +94,7 @@ describe('media read scope', () => {
       );
       expect(read.media.id).toBe(strangersPrivate);
     }
+
     await readMedia(plainUser, strangersPrivate).expect(404);
 
     for (const [who, actor, ownId] of staff) {

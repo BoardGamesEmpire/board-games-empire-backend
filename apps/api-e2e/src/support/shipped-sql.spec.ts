@@ -1,10 +1,10 @@
+import type { ShippedStatement } from './shipped-sql';
 import {
   bindTemplate,
   extractSqlTemplate,
   extractValueTemplate,
   parameterMismatch,
   shapeMismatch,
-  type ShippedStatement,
 } from './shipped-sql';
 
 /**
@@ -266,9 +266,9 @@ describe('extractSqlTemplate', () => {
 });
 
 /**
- * Key derivations are not SQL, and the advisory locks are keyed on one
- * (D-360-1). `plugin_grant:household_unit:${householdId}:${pluginId}` is built
- * in TypeScript a line above the statement that hashes it, so lifting only the
+ * Key derivations are not SQL, and an advisory lock is keyed on one. A key
+ * such as `QuotaService`'s `quota:${resource}:${scope}:${scopeId}` is built in
+ * TypeScript before the statement that takes the lock, so lifting only the
  * statement leaves the spec free to invent its own key format — and a barrier
  * whose two sides agree on a format production no longer uses blocks
  * beautifully while proving nothing.
@@ -276,7 +276,7 @@ describe('extractSqlTemplate', () => {
 describe('extractValueTemplate', () => {
   it('lifts a template assigned to a const', () => {
     const source = 'const scopeKey = `plugin_grant:user_unit:${userId}:${pluginId}`;';
-    const statement = extractValueTemplate(source, 'unit-scope-lock.ts');
+    const statement = extractValueTemplate(source, 'lock.ts');
 
     expect(statement.text).toBe('plugin_grant:user_unit:$1:$2');
     expect(statement.params).toEqual(['userId', 'pluginId']);
@@ -301,7 +301,7 @@ describe('extractValueTemplate', () => {
   it('ignores a template that lives inside a doc comment', () => {
     // Doc comments in this repo quote code, and a quoted key format is
     // indistinguishable from the real one to a pattern that only looks at the
-    // character before the backtick. `unit-scope-lock.ts` already carries one.
+    // character before the backtick.
     const source = [
       '/**',
       ' * The key is built as (`plugin_grant:household_unit:${id}`) — see below.',

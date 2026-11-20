@@ -1,8 +1,8 @@
 import type { VerificationStore } from './app-sign-in-store';
 
 export interface StoredRecord {
-  readonly value: string;
   readonly expiresAt: Date;
+  readonly value: string;
 }
 
 /**
@@ -12,8 +12,8 @@ export interface StoredRecord {
  * or spoil what was stored.
  */
 export function memoryVerificationStore(now: () => number = Date.now): {
-  readonly store: VerificationStore;
   readonly records: Map<string, StoredRecord>;
+  readonly store: VerificationStore;
 } {
   const records = new Map<string, StoredRecord>();
 

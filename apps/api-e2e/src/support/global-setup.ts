@@ -8,11 +8,14 @@ import {
   requireBundle,
   WORKSPACE_ROOT,
 } from '@bge/testing-e2e/child-process';
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
-import { spawnSync, type ChildProcess } from 'node:child_process';
+import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
+import { PostgreSqlContainer } from '@testcontainers/postgresql';
+import type { ChildProcess } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
+import type { RedisEndpoint } from './e2e-env';
 import {
   apiEnvOverrides,
   decideProvisioning,
@@ -27,11 +30,12 @@ import {
   POSTGRES_IMAGE,
   redisEnvOverrides,
   redisOwnershipOverride,
-  type RedisEndpoint,
 } from './e2e-env';
-import { startFakeSignInProvider, type FakeSignInProvider } from './fake-sign-in-provider';
+import type { FakeSignInProvider } from './fake-sign-in-provider';
+import { startFakeSignInProvider } from './fake-sign-in-provider';
 import { setE2EGlobalState } from './global-state';
-import { startMailpit, type StartedMailpit } from './mailpit';
+import type { StartedMailpit } from './mailpit';
+import { startMailpit } from './mailpit';
 import { sweepThrottleBuckets } from './redis-reset';
 import type { StartedRedisServer } from './redis-server';
 import { selectRedisServer, startRedisServer } from './redis-server';
@@ -74,8 +78,8 @@ function runPrisma(args: readonly string[], databaseUrl: string): void {
 }
 
 interface LaunchedApi {
-  readonly child: ChildProcess;
   readonly baseUrl: string;
+  readonly child: ChildProcess;
 }
 
 const apiBaseUrl = (port: number): string => `http://127.0.0.1:${port}`;

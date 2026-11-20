@@ -1,4 +1,5 @@
-import { bindsConsentUnit, PluginGrantScope, type Permission } from '@bge/database';
+import type { Permission } from '@bge/database';
+import { bindsConsentUnit, PluginGrantScope } from '@bge/database';
 import type { NormalizedPermissionRequest } from '@boardgamesempire/plugin-manifest';
 import type { ConsentCheckDecisionInput } from './plugin-consent-check-classifier.service';
 
@@ -17,9 +18,9 @@ export type ConsentCatalogPermission = Pick<
  * server-consented checks are exempt.
  */
 export function consentCatalogFlags(input: {
-  readonly origin: NormalizedPermissionRequest['origin'];
-  readonly decidingScope: PluginGrantScope;
   readonly corePermission: ConsentCatalogPermission | undefined;
+  readonly decidingScope: PluginGrantScope;
+  readonly origin: NormalizedPermissionRequest['origin'];
 }): Pick<ConsentCheckDecisionInput, 'wildcardSubject' | 'unboundedUnitScope'> {
   const { origin, decidingScope, corePermission } = input;
 

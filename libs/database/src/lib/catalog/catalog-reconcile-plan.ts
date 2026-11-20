@@ -12,45 +12,49 @@ import type { PermissionSeedDefinition, RoleSeedDefinition } from './seed-defini
  */
 export interface CatalogManifest {
   readonly permissions: readonly PermissionSeedDefinition[];
-  readonly roles: readonly RoleSeedDefinition[];
+
   /** Role name → slugs the role holds. */
   readonly rolePermissions: Readonly<Record<string, readonly string[]>>;
+
+  readonly roles: readonly RoleSeedDefinition[];
 }
 
 /** The columns of a `Permission` row the planner compares or reads. */
 export interface PermissionSnapshotRow {
-  readonly slug: string;
   readonly action: Action;
-  readonly subject: string;
-  readonly fields: readonly string[];
   readonly conditions: Prisma.JsonValue | null;
+  readonly fields: readonly string[];
   readonly inverted: boolean;
-  readonly reason: string | null;
-  readonly riskLevel: RiskLevel;
   readonly managedBy: PermissionOwner;
+  readonly reason: string | null;
   readonly retiredAt: Date | null;
+  readonly riskLevel: RiskLevel;
+  readonly slug: string;
+  readonly subject: string;
 }
 
 export interface RoleSnapshotRow {
-  readonly name: string;
   readonly description: string | null;
   readonly managedBy: PermissionOwner;
+  readonly name: string;
 }
 
 /** A `RolePermission` row by the names the manifest speaks in, not by id. */
 export interface RolePermissionSnapshotRow {
-  readonly roleName: string;
-  readonly permissionSlug: string;
   readonly managedBy: PermissionOwner;
+  readonly permissionSlug: string;
+
   /** Set when the grant is revoked: the row stays, and confers nothing (#772). */
   readonly revokedAt: Date | null;
+
+  readonly roleName: string;
 }
 
 /** The current state of the three catalog tables, as `loadCatalogSnapshot` reads it. */
 export interface CatalogSnapshot {
   readonly permissions: readonly PermissionSnapshotRow[];
-  readonly roles: readonly RoleSnapshotRow[];
   readonly rolePermissions: readonly RolePermissionSnapshotRow[];
+  readonly roles: readonly RoleSnapshotRow[];
 }
 
 /**
@@ -70,8 +74,8 @@ export interface FieldChange<Field extends string = string> {
 
 /** A `System` permission that drifted from the manifest, and how. */
 export interface PermissionUpdate {
-  readonly slug: string;
   readonly changes: readonly FieldChange<PermissionField>[];
+  readonly slug: string;
 }
 
 /**
@@ -81,33 +85,35 @@ export interface PermissionUpdate {
  * report must say so.
  */
 export interface PermissionSkip {
-  readonly slug: string;
-  readonly managedBy: PermissionOwner;
   readonly drift: readonly FieldChange<PermissionField | 'retiredAt'>[];
+  readonly managedBy: PermissionOwner;
+  readonly slug: string;
 }
 
 /** A permission the manifest does not list and the reconciler does not own. */
 export interface RetainedPermission {
-  readonly slug: string;
   readonly managedBy: PermissionOwner;
+
   /** Set when the row is retired, so the report can say it confers nothing (#772). */
   readonly retiredAt: Date | null;
+
+  readonly slug: string;
 }
 
 export interface RoleUpdate {
-  readonly name: string;
   readonly changes: readonly FieldChange<'description'>[];
+  readonly name: string;
 }
 
 export interface RoleSkip {
-  readonly name: string;
-  readonly managedBy: PermissionOwner;
   readonly drift: readonly FieldChange<'description'>[];
+  readonly managedBy: PermissionOwner;
+  readonly name: string;
 }
 
 export interface RolePermissionEdge {
-  readonly roleName: string;
   readonly permissionSlug: string;
+  readonly roleName: string;
 }
 
 /**
@@ -117,8 +123,9 @@ export interface RolePermissionEdge {
  * something.
  */
 export interface FailingEntries {
-  readonly permissions: ReadonlyMap<string, readonly EntryProblem[]>;
   readonly grants: ReadonlyMap<string, readonly EntryProblem[]>;
+  readonly permissions: ReadonlyMap<string, readonly EntryProblem[]>;
+
   /**
    * Grants the permission catalog ships, by {@link edgeKey}, that this start
    * would create or restore and that the Owner's edits make fail the entry
@@ -129,8 +136,8 @@ export interface FailingEntries {
 
 /** An `Admin` permission the entry check failed, retired with its edit kept (#772). */
 export interface EditedPermissionRetire {
-  readonly slug: string;
   readonly problems: readonly EntryProblem[];
+  readonly slug: string;
 }
 
 /** An `Admin` grant the entry check failed, revoked with the row kept (#772). */
@@ -150,47 +157,58 @@ const NO_FAILING_ENTRIES: FailingEntries = { permissions: new Map(), grants: new
  */
 export interface ReconcilePlan {
   readonly permissions: {
+    /** `Plugin` row whose slug the manifest claims → the apply refuses to run. */
+    readonly conflicts: readonly { readonly slug: string }[];
+
     /** Manifest has it, database lacks it → written as `System`. */
     readonly create: readonly PermissionSeedDefinition[];
-    /** `System` row that drifted from the manifest → converged, field by field. */
-    readonly update: readonly PermissionUpdate[];
-    /** Retired `System` row whose slug is back → `retiredAt` cleared (may also appear in `update`). */
-    readonly revive: readonly string[];
+
+    /** Row the manifest does not list and the reconciler does not own → left alone. */
+    readonly retained: readonly RetainedPermission[];
+
     /** `System` row the manifest no longer lists and not yet retired → tombstoned. */
     readonly retire: readonly string[];
+
     /**
      * `Admin` row, not yet retired, that fails the entry check → retired and
      * left `Admin`, its edit kept to fix and hand back (#772). It is also in
      * `skipped` or `retained`, as every `Admin` row is.
      */
     readonly retireEdited: readonly EditedPermissionRetire[];
+
+    /** Retired `System` row whose slug is back → `retiredAt` cleared (may also appear in `update`). */
+    readonly revive: readonly string[];
+
     /** `Admin` row the manifest lists → left alone; its drift is the report. */
     readonly skipped: readonly PermissionSkip[];
-    /** Row the manifest does not list and the reconciler does not own → left alone. */
-    readonly retained: readonly RetainedPermission[];
-    /** `Plugin` row whose slug the manifest claims → the apply refuses to run. */
-    readonly conflicts: readonly { readonly slug: string }[];
+
+    /** `System` row that drifted from the manifest → converged, field by field. */
+    readonly update: readonly PermissionUpdate[];
   };
-  readonly roles: {
-    readonly create: readonly RoleSeedDefinition[];
-    readonly update: readonly RoleUpdate[];
-    readonly skipped: readonly RoleSkip[];
-    /** `System` role the manifest no longer lists → reported, never mutated. */
-    readonly orphans: readonly string[];
-    readonly conflicts: readonly { readonly name: string }[];
-  };
+
   readonly rolePermissions: {
+    readonly conflicts: readonly RolePermissionEdge[];
     readonly create: readonly RolePermissionEdge[];
-    /** Listed `System` edge that is revoked (`revokedAt` set) → `revokedAt` cleared; the grant is back (#772). */
-    readonly restore: readonly RolePermissionEdge[];
+
     /** `System` edge the manifest no longer lists → deleted (revoked or not); this is how a grant is removed. */
     readonly delete: readonly RolePermissionEdge[];
+
+    /** Listed `System` edge that is revoked (`revokedAt` set) → `revokedAt` cleared; the grant is back (#772). */
+    readonly restore: readonly RolePermissionEdge[];
+
+    /** Edge the manifest does not list and the reconciler does not own → left alone. */
+    readonly retained: readonly RolePermissionSnapshotRow[];
+
     /**
      * `Admin` edge, not yet revoked, that fails the entry check → revoked and
      * left `Admin`, the row kept to fix and hand back (#772). One the
      * permission catalog does not list is also in `retained`.
      */
     readonly revokeEdited: readonly EditedGrantRevoke[];
+
+    /** Listed `Admin` edge that is revoked → left revoked; the report says so (#772). */
+    readonly skipped: readonly RolePermissionEdge[];
+
     /**
      * Listed edge this start would create, or `System` edge it would restore,
      * that the Owner's edits make fail the entry check → not written, so the
@@ -198,11 +216,17 @@ export interface ReconcilePlan {
      * Not a write, so it is part of the report.
      */
     readonly withheld: readonly WithheldGrant[];
-    /** Listed `Admin` edge that is revoked → left revoked; the report says so (#772). */
-    readonly skipped: readonly RolePermissionEdge[];
-    /** Edge the manifest does not list and the reconciler does not own → left alone. */
-    readonly retained: readonly RolePermissionSnapshotRow[];
-    readonly conflicts: readonly RolePermissionEdge[];
+  };
+
+  readonly roles: {
+    readonly conflicts: readonly { readonly name: string }[];
+    readonly create: readonly RoleSeedDefinition[];
+
+    /** `System` role the manifest no longer lists → reported, never mutated. */
+    readonly orphans: readonly string[];
+
+    readonly skipped: readonly RoleSkip[];
+    readonly update: readonly RoleUpdate[];
   };
 }
 
@@ -268,21 +292,26 @@ export function countMutations(plan: ReconcilePlan): number {
  * it once. Every field is zero on a converged database.
  */
 export interface ReconcileCounts {
-  readonly permissionsCreated: number;
-  readonly permissionsUpdated: number;
-  readonly permissionsRevived: number;
-  /** `System` permissions the catalog no longer lists. */
-  readonly permissionsRetired: number;
-  /** The Owner's permissions that failed the entry check (#772). */
-  readonly permissionsRetiredAfterCheck: number;
-  readonly rolesCreated: number;
-  readonly rolesUpdated: number;
   readonly grantsCreated: number;
-  readonly grantsRestored: number;
   readonly grantsRemoved: number;
+  readonly grantsRestored: number;
+
   /** The Owner's grants that failed the entry check (#772). */
   readonly grantsRevokedAfterCheck: number;
+
   readonly mutations: number;
+  readonly permissionsCreated: number;
+
+  /** `System` permissions the catalog no longer lists. */
+  readonly permissionsRetired: number;
+
+  /** The Owner's permissions that failed the entry check (#772). */
+  readonly permissionsRetiredAfterCheck: number;
+
+  readonly permissionsRevived: number;
+  readonly permissionsUpdated: number;
+  readonly rolesCreated: number;
+  readonly rolesUpdated: number;
 }
 
 export function reconcileCounts(plan: ReconcilePlan): ReconcileCounts {
@@ -332,19 +361,24 @@ function planPermissions(
         if (changes.length > 0) {
           update.push({ slug: wanted.slug, changes });
         }
+
         if (row.retiredAt !== null) {
           revive.push(wanted.slug);
         }
+
         break;
       }
+
       case PermissionOwner.Admin: {
         const drift: FieldChange<PermissionField | 'retiredAt'>[] = diffPermission(wanted, row);
         if (row.retiredAt !== null) {
           drift.push({ field: 'retiredAt', from: row.retiredAt, to: null });
         }
+
         skipped.push({ slug: wanted.slug, managedBy: row.managedBy, drift });
         break;
       }
+
       case PermissionOwner.Plugin:
         conflicts.push({ slug: wanted.slug });
         break;
@@ -407,6 +441,7 @@ function planRoles(manifest: CatalogManifest, snapshot: CatalogSnapshot): Reconc
         if (drift.length > 0) {
           update.push({ name: wanted.name, changes: drift });
         }
+
         break;
       case PermissionOwner.Admin:
         skipped.push({ name: wanted.name, managedBy: row.managedBy, drift });
@@ -460,6 +495,7 @@ function planRolePermissions(
         } else {
           withheld.push({ roleName, permissionSlug, problems });
         }
+
         continue;
       }
 
@@ -474,12 +510,14 @@ function planRolePermissions(
               withheld.push({ roleName, permissionSlug, problems });
             }
           }
+
           break;
         case PermissionOwner.Admin:
           // An Owner's edge: left as it is, and a revocation on it is reported.
           if (row.revokedAt !== null) {
             skipped.push({ roleName, permissionSlug });
           }
+
           break;
         case PermissionOwner.Plugin:
           conflicts.push({ roleName, permissionSlug });
@@ -592,11 +630,13 @@ function comparePermissionField(
       const to = wanted.fields ?? [];
       return [row.fields, to, sameSet(row.fields, to)];
     }
+
     case 'conditions': {
       const to: Prisma.InputJsonObject = wanted.conditions ?? {};
       const from: Prisma.JsonValue = row.conditions ?? {};
       return [from, to, canonicalJson(from) === canonicalJson(to)];
     }
+
     default:
       return assertNever(field);
   }
@@ -624,9 +664,10 @@ function sortKeys(value: unknown): unknown {
 
   if (typeof value === 'object' && value !== null) {
     return Object.fromEntries(
-      Object.keys(value)
-        .sort()
-        .map((key) => [key, sortKeys((value as Record<string, unknown>)[key])]),
+      // The comparison `.sort()` makes on keys: UTF-16 code units, not locale.
+      Object.entries(value)
+        .sort(([left], [right]) => (left < right ? -1 : 1))
+        .map(([key, item]) => [key, sortKeys(item)]),
     );
   }
 

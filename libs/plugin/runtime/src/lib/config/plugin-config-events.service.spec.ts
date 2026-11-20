@@ -1,14 +1,16 @@
 import type { Redis } from '@bge/redis';
-import { PluginConfigEventsService, type PluginConfigReloadEvent } from './plugin-config-events.service';
+import { Logger } from '@nestjs/common';
+import type { PluginConfigReloadEvent } from './plugin-config-events.service';
+import { PluginConfigEventsService } from './plugin-config-events.service';
 import { PLUGIN_CONFIG_UPDATE_CHANNEL } from './plugin-config.constants';
 
 type MessageHandler = (channel: string, message: string) => void;
 
 interface MockSubscriber {
+  on: jest.Mock;
+  quit: jest.Mock;
   subscribe: jest.Mock;
   unsubscribe: jest.Mock;
-  quit: jest.Mock;
-  on: jest.Mock;
 }
 
 describe('PluginConfigEventsService', () => {
@@ -44,6 +46,10 @@ describe('PluginConfigEventsService', () => {
     } as unknown as Redis;
 
     service = new PluginConfigEventsService(redis);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
   describe('publish', () => {
@@ -88,14 +94,38 @@ describe('PluginConfigEventsService', () => {
       expect(handler).not.toHaveBeenCalled();
     });
 
-    it('drops malformed JSON without invoking the handler or crashing', async () => {
-      const handler = jest.fn();
+    // A message on the channel is outside data until a schema says otherwise:
+    // a wrong-typed slug must not reach the config reload (#1322).
+    it('drops a message that fails its schema, logging the channel, and still handles the next (#1322)', async () => {
+      const errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      const handler = jest.fn<Promise<void>, [PluginConfigReloadEvent]>().mockResolvedValue(undefined);
+      await service.subscribe(handler);
+
+      deliveredHandler()(PLUGIN_CONFIG_UPDATE_CHANNEL, JSON.stringify({ slug: 5 }));
+      deliveredHandler()(PLUGIN_CONFIG_UPDATE_CHANNEL, JSON.stringify({ slug: 'demo-sink' }));
+      await flush();
+
+      expect(handler).toHaveBeenCalledTimes(1);
+      expect(handler).toHaveBeenCalledWith({ slug: 'demo-sink' });
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining(PLUGIN_CONFIG_UPDATE_CHANNEL));
+    });
+
+    // Invalid JSON takes the same path as a failed schema: one error line
+    // naming the channel, and the listener keeps serving (#1322).
+    it('drops a message that is not JSON (#1322)', async () => {
+      const errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      const handler = jest.fn<Promise<void>, [PluginConfigReloadEvent]>().mockResolvedValue(undefined);
       await service.subscribe(handler);
 
       deliveredHandler()(PLUGIN_CONFIG_UPDATE_CHANNEL, 'not-json{');
+      deliveredHandler()(PLUGIN_CONFIG_UPDATE_CHANNEL, JSON.stringify({ slug: 'demo-sink' }));
       await flush();
 
-      expect(handler).not.toHaveBeenCalled();
+      expect(handler).toHaveBeenCalledTimes(1);
+      expect(handler).toHaveBeenCalledWith({ slug: 'demo-sink' });
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining(PLUGIN_CONFIG_UPDATE_CHANNEL));
     });
 
     it('drops structurally invalid events (missing slug)', async () => {

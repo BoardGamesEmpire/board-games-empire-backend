@@ -1,5 +1,6 @@
 import type { DriverLogger } from '@boardgamesempire/gateway-driver-contract';
-import { Observable, throwError, timer } from 'rxjs';
+import type { Observable } from 'rxjs';
+import { throwError, timer } from 'rxjs';
 import { catchError, switchMap } from 'rxjs/operators';
 import type { BggClientLike, BggRequest } from './client/bgg-client.interface';
 import { BggHttpError } from './client/bgg-http.error';
@@ -7,14 +8,14 @@ import { BggHttpError } from './client/bgg-http.error';
 const TOO_MANY_REQUESTS = 429;
 
 export interface BggCallerOptions {
-  /** The wait before retrying a 429 that names none. Defaults to 2 seconds. */
-  rateLimitRetryMs?: number;
-
   /**
    * The longest wait a 429's `Retry-After` may ask for. A 429 that asks for
    * longer fails at once rather than hold the call. Defaults to 30 seconds.
    */
   maxRateLimitWaitMs?: number;
+
+  /** The wait before retrying a 429 that names none. Defaults to 2 seconds. */
+  rateLimitRetryMs?: number;
 }
 
 /**

@@ -1,29 +1,26 @@
 import { sanitizeMarkdown } from '@bge/content-format';
+import type { GameSummary } from '@bge/database';
 import {
   Action,
+  ADD_ON_CONTENT_TYPES,
   DatabaseService,
   gameSummaryReader,
   isPrismaDependentRecordNotFoundError,
+  isStandaloneAddOn,
+  linkPlatformIds,
   Prisma,
   Reach,
   readBaseGameLinks,
   ResourceType,
-  type GameSummary,
 } from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService, PermissionsService, resolveScopeSubjectId, ScopeComposer } from '@bge/permissions';
-import { sampleByOffsets, type PaginatedRows, type RandomSampleQueryDto } from '@bge/shared';
+import type { PaginatedRows, RandomSampleQueryDto } from '@bge/shared';
+import { sampleByOffsets } from '@bge/shared';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import type { DataGatewayLink } from './data-gateway-link';
-import {
-  CreateGameDto,
-  GAME_DESCRIPTION_MAX_LENGTH,
-  ListGamesQueryDto,
-  UpdateGameDto,
-  type GameDetailDto,
-  type GameListItemDto,
-  type GameSort,
-} from './dto';
+import type { GameDetailDto, GameListItemDto, GameSort } from './dto';
+import { CreateGameDto, GAME_DESCRIPTION_MAX_LENGTH, ListGamesQueryDto, UpdateGameDto } from './dto';
 import { GAME_DETAIL_INCLUDE } from './game-detail.include';
 import { gameListScope } from './game-list-scope';
 import { LINKED_GAME_SELECT } from './linked-game.select';
@@ -100,11 +97,7 @@ export class GameService {
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
 
-    const links = await readBaseGameLinks(
-      this.db,
-      rows.map((row) => row.id),
-      where,
-    );
+    const links = await readBaseGameLinks(this.db, rows, where);
 
     return { rows: rows.map((row) => ({ ...row, baseGames: links.get(row.id) ?? [] })), total };
   }
@@ -141,7 +134,10 @@ export class GameService {
 
   /**
    * A game the actor may read, with its platform games (#791), its expansions
-   * and, for an expansion, its base games (#1069).
+   * and, for an expansion, its base games (#1069). Each add-on link carries
+   * the platforms it holds on, and is listed even when it holds on none
+   * (#1391). A link whose add-on end has a content type that is not an
+   * add-on's is left out (#1391).
    *
    * Each relation is a read of its own, not a filter in the game's `include`:
    * a deny-all condition is dropped there, so a key with no
@@ -155,7 +151,7 @@ export class GameService {
     const game = await this.readGame(id);
     const linkedGameWhere = this.linkedGameWhere();
 
-    const [platformGames, expansionRows, baseGameRows] = await Promise.all([
+    const [platformGames, linkedExpansionRows, baseGameRows] = await Promise.all([
       this.db.platformGame.findMany({
         where: this.scopeComposer.compose(ResourceType.PlatformGame, Action.read, { gameId: id }),
         select: PLATFORM_GAME_DETAIL_SELECT,
@@ -164,32 +160,54 @@ export class GameService {
 
       this.db.gameExpansion.findMany({
         where: { baseGameId: id, expansionGame: { is: linkedGameWhere } },
-        select: { isStandalone: true, expansionGame: { select: LINKED_GAME_SELECT } },
+        select: { expansionGame: { select: LINKED_GAME_SELECT } },
         orderBy: [{ expansionGame: { title: 'asc' } }, { expansionGameId: 'asc' }],
       }),
 
-      this.db.gameExpansion.findMany({
-        where: { expansionGameId: id, baseGame: { is: linkedGameWhere } },
-        select: { isStandalone: true, baseGame: { select: LINKED_GAME_SELECT } },
-        orderBy: [{ baseGame: { title: 'asc' } }, { baseGameId: 'asc' }],
-      }),
+      // Only an add-on has base games (#1391).
+      ADD_ON_CONTENT_TYPES.has(game.contentType)
+        ? this.db.gameExpansion.findMany({
+            where: { expansionGameId: id, baseGame: { is: linkedGameWhere } },
+            select: { baseGame: { select: LINKED_GAME_SELECT } },
+            orderBy: [{ baseGame: { title: 'asc' } }, { baseGameId: 'asc' }],
+          })
+        : [],
     ]);
 
-    const platformIds = await this.readPlatformIds(expansionRows.map(({ expansionGame }) => expansionGame.id));
+    // A link of a game that is no add-on can still be stored (#1178), and is
+    // left out as on a row (#1391). The test is on the rows read, not in the
+    // read's `where`, where it would sit beside the ceiling in an `AND`.
+    const expansionRows = linkedExpansionRows.filter(({ expansionGame }) =>
+      ADD_ON_CONTENT_TYPES.has(expansionGame.contentType),
+    );
+
+    const platformIds = await this.readPlatformIds([
+      ...expansionRows.map(({ expansionGame }) => expansionGame.id),
+      ...baseGameRows.map(({ baseGame }) => baseGame.id),
+    ]);
+    // A link holds on the platforms both its games are on (#1391). This
+    // game's side is the platform games already read under the ceiling, so an
+    // actor who may read none of them gets links that hold on none.
+    const ownPlatformIds = new Set(platformGames.map(({ platform }) => platform.id));
+    const linkPlatformIdsWith = (gameId: string) => linkPlatformIds(platformIds.get(gameId) ?? [], ownPlatformIds);
+    // On its base games' links this game is the add-on, so its own content
+    // type decides them all (#1391).
+    const isStandalone = isStandaloneAddOn(game.contentType);
 
     return {
       ...game,
       platformGames,
-      expansions: expansionRows.map(({ isStandalone, expansionGame }) => ({
+      expansions: expansionRows.map(({ expansionGame }) => ({
         gameId: expansionGame.id,
-        isStandalone,
+        isStandalone: isStandaloneAddOn(expansionGame.contentType),
         game: expansionGame,
-        platformIds: platformIds.get(expansionGame.id) ?? [],
+        platformIds: linkPlatformIdsWith(expansionGame.id),
       })),
-      baseGames: baseGameRows.map(({ isStandalone, baseGame }) => ({
+      baseGames: baseGameRows.map(({ baseGame }) => ({
         gameId: baseGame.id,
         isStandalone,
         game: baseGame,
+        platformIds: linkPlatformIdsWith(baseGame.id),
       })),
     };
   }
@@ -212,8 +230,10 @@ export class GameService {
 
   /**
    * The platforms each of `gameIds` has a platform game on, in platform name
-   * order, through the platform game ceiling (#1069). Empty for an API key
-   * with no `read:platform_game`, as its platform games are (#791).
+   * order, through the platform game ceiling (#1069). One read covers the
+   * linked games at the far end of each of a game's add-on links, expansions
+   * and base games alike (#1391). Empty for an API key with no
+   * `read:platform_game`, as its platform games are (#791).
    */
   private async readPlatformIds(gameIds: readonly string[]): Promise<ReadonlyMap<string, string[]>> {
     const byGame = new Map<string, string[]>();

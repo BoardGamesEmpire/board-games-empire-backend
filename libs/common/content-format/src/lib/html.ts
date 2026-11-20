@@ -13,6 +13,7 @@ import { withScheme } from './url';
  */
 export function htmlTree(html: string): Root {
   // A root converts to a root.
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- hast-util-to-mdast types its result as any mdast node, though a hast root converts to an mdast root (#1321)
   const tree = toMdast(fromHtml(html, { fragment: true })) as Root;
 
   visit(tree, (node) => {

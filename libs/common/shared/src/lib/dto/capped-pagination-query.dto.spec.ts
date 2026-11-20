@@ -1,5 +1,6 @@
 import { plainToInstance } from 'class-transformer';
-import { validate, type ValidationError } from 'class-validator';
+import type { ValidationError } from 'class-validator';
+import { validate } from 'class-validator';
 import {
   CappedOffsetPaginationQueryDto,
   CappedPaginationQueryDto,

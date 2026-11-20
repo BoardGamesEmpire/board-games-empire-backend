@@ -5,7 +5,8 @@ import { AbilityService, resolveActingUserIdOrNull } from '@bge/permissions';
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import assert from 'node:assert';
 import type { UpdateUserProfileDto } from '../dto/update-user-profile.dto';
-import { PROFILE_SELECT, toProfileView, type UserProfileView } from './profile-view';
+import type { UserProfileView } from './profile-view';
+import { PROFILE_SELECT, toProfileView } from './profile-view';
 
 @Injectable()
 export class UserProfileService {

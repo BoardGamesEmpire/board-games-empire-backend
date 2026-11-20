@@ -1,10 +1,13 @@
-import { FriendshipStatus, MemberSharePolicy, Reach, SystemRole, type DatabaseService } from '@bge/database';
+import type { DatabaseService } from '@bge/database';
+import { FriendshipStatus, MemberSharePolicy, Reach, SystemRole } from '@bge/database';
 import { ServiceAccountService } from '@bge/services';
-import { arrangeFriendship, createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
+import type { Actors, AuthenticatedActor } from '@bge/testing-e2e';
+import { arrangeFriendship, createActors } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { gameShareEnvelope, listGameSharesEnvelope } from './game-share-wire';
 import { listGamesEnvelope, localSearchGameIds } from './game-wire';
 
@@ -79,7 +82,7 @@ describe('game shares', () => {
     gameShareEnvelope(await shareGame(actor, gameId, body).expect(201), `POST /api/games/:id/shares`).share;
 
   /** A refusal's status and message, so a 404 can be told apart by the id it names. */
-  const refusal = (response: { status: number; body: unknown }) => ({
+  const refusal = (response: { body: unknown; status: number }) => ({
     status: response.status,
     message: (response.body as { message?: unknown } | null)?.message ?? null,
   });

@@ -1,16 +1,8 @@
 import { env } from '@bge/env';
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
-import {
-  ConsoleLogger,
-  Controller,
-  Injectable,
-  Logger,
-  Module,
-  type INestMicroservice,
-  type OnModuleInit,
-  type Type,
-} from '@nestjs/common';
+import type { INestMicroservice, OnModuleInit, Type } from '@nestjs/common';
+import { ConsoleLogger, Controller, Injectable, Logger, Module } from '@nestjs/common';
 import { ConfigModule, registerAs } from '@nestjs/config';
 import { GrpcMethod } from '@nestjs/microservices';
 import Joi from 'joi';
@@ -21,11 +13,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { Writable } from 'node:stream';
 import pino from 'pino';
-import {
-  bootstrapGrpcMicroservice,
-  type GrpcListenAddress,
-  type GrpcMicroserviceBootstrapConfig,
-} from './bootstrap-grpc-microservice';
+import type { GrpcListenAddress, GrpcMicroserviceBootstrapConfig } from './bootstrap-grpc-microservice';
+import { bootstrapGrpcMicroservice } from './bootstrap-grpc-microservice';
 
 const HOST_ENV = 'GATEWAY_HOST_SPEC_GRPC_HOST';
 const PORT_ENV = 'GATEWAY_HOST_SPEC_GRPC_PORT';
@@ -149,10 +138,10 @@ function appWithInvalidConfig(): Type<unknown> {
 }
 
 interface LogRecord {
-  readonly level?: number;
-  readonly msg: string;
   readonly context?: string;
   readonly err?: { readonly message: string; readonly stack?: string };
+  readonly level?: number;
+  readonly msg: string;
 }
 
 /** A real pino logger whose records are kept in memory, in the order they were written. */
@@ -353,6 +342,7 @@ describe('bootstrapGrpcMicroservice', () => {
       const stopped = (): never => {
         throw new Error('the process would have ended here');
       };
+
       const exit = jest.spyOn(process, 'exit').mockImplementation(stopped);
       jest.spyOn(process, 'abort').mockImplementation(stopped);
       const stderr = jest.spyOn(process.stderr, 'write').mockImplementation(() => true);

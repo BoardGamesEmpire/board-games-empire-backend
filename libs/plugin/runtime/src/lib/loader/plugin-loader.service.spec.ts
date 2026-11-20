@@ -1,23 +1,25 @@
-import { PluginActorScope, SystemActorScope } from '@bge/actor-context';
-import { DatabaseService, PluginCategory, PluginScope, Prisma, type Plugin } from '@bge/database';
-import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
+import type { PluginActorScope, SystemActorScope } from '@bge/actor-context';
+import type { DatabaseService, Plugin } from '@bge/database';
+import { PluginCategory, PluginScope, Prisma } from '@bge/database';
+import type { MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService } from '@bge/testing';
 import type { PluginArtifactDirectory, PluginContext } from '@boardgamesempire/plugin-contract';
 import { PluginEvent, buildPluginArtifactSha256 as sha } from '@boardgamesempire/plugin-contract';
 import type { PluginManifest } from '@boardgamesempire/plugin-manifest';
 import { validatePluginManifest } from '@boardgamesempire/plugin-manifest';
 import { Logger } from '@nestjs/common';
-import { EventEmitter2 } from '@nestjs/event-emitter';
+import type { EventEmitter2 } from '@nestjs/event-emitter';
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PluginConfigService } from '../config/plugin-config.service';
-import { PluginContextFactory } from '../context/plugin-context.factory';
+import type { PluginConfigService } from '../config/plugin-config.service';
+import type { PluginContextFactory } from '../context/plugin-context.factory';
 import { PluginDisabledEvent, PluginLoadFailedEvent } from '../events/plugin.events';
 import type { PluginModuleOptions } from '../plugin-module.options';
 import { buildPluginModuleOptions } from '../testing/plugin-module-options.fixture';
-import { PluginDirectoryResolverService } from './plugin-directory-resolver.service';
+import type { PluginDirectoryResolverService } from './plugin-directory-resolver.service';
 import { PluginInstanceRegistry } from './plugin-instance-registry';
-import { PluginLoadRecorder } from './plugin-load-recorder.service';
+import type { PluginLoadRecorder } from './plugin-load-recorder.service';
 import { PluginLoaderService } from './plugin-loader.service';
 import type { PluginModuleImporter } from './plugin-module-importer';
 
@@ -294,7 +296,7 @@ describe('PluginLoaderService', () => {
       // Captured, not asserted, inside the mock: the loader catches and logs
       // whatever the recorder throws, so an expect failing in there would
       // never fail the test.
-      const atRecord: { resolved: number; imported: number; registered: boolean }[] = [];
+      const atRecord: { imported: number; registered: boolean; resolved: number }[] = [];
       recorder.record.mockImplementation(() => {
         atRecord.push({
           resolved: directories.resolve.mock.calls.length,

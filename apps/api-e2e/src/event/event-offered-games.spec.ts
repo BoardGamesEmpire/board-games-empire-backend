@@ -1,22 +1,25 @@
 import { ContentType, EventParticipationStatus, GameMedium, PlatformType, Reach, ResourceType } from '@bge/database';
-import { createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
+import type { Actors, AuthenticatedActor } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { arrangeCollectionEntry } from '../game-collection/game-collection-fixtures';
 import { findWishlist } from '../list/list-fixtures';
-import { mintApiKey, type Caller } from '../support/api-key';
+import type { Caller } from '../support/api-key';
+import { mintApiKey } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
-import { arrangeOfferedGame, platformOfType, type OfferedGameFacts } from './event-fixtures';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
+import type { OfferedGameFacts } from './event-fixtures';
+import { arrangeOfferedGame, platformOfType } from './event-fixtures';
 import { attendeeGamesPath, attendeesPath, createEventClient, EVENTS_PATH } from './event-request';
+import type { ListOfferedGamesEnvelope, OfferedGameWire } from './event-wire';
 import {
   attendeeEnvelope,
   listAttendeeGamesEnvelope,
   listAttendeesEnvelope,
   listOfferedGamesEnvelope,
   offeredGameEnvelope,
-  type ListOfferedGamesEnvelope,
-  type OfferedGameWire,
 } from './event-wire';
 
 /**
@@ -175,6 +178,103 @@ describe('GET /api/events/:eventId/offered-games (#1187)', () => {
 
     await listOfferedGames(host, eventId, { attendeeIds: '' }).expect(400);
     await listOfferedGames(host, eventId, { platformTypes: 'Boardgame' }).expect(400);
+  });
+
+  /**
+   * The content type filters read the offered copy's platform game: its own
+   * content type, else its game's (#1391). The platform game's column is
+   * nullable, so each case below is one a NULL could get wrong, checked
+   * against a row in the same response that the filter treats the other way.
+   */
+  describe("content type, by the offered platform game's own, else the game's (#1391)", () => {
+    /**
+     * Offers a game, a base game unless `gameContentType` names another, whose
+     * platform game has `contentType` as its own.
+     */
+    const offerOverridden = async (
+      eventId: string,
+      owner: AuthenticatedActor,
+      title: string,
+      contentType: ContentType,
+      gameContentType: ContentType = ContentType.BaseGame,
+    ) => {
+      const arranged = await offer(eventId, owner, { title, contentType: gameContentType });
+      await db.client.platformGame.update({ where: { id: arranged.platformGameId }, data: { contentType } });
+
+      return arranged;
+    };
+
+    // A NOT over the include could read `NULL IN (…)` as unknown and drop an
+    // entry with no content type of its own, whatever its game is.
+    it('keeps an entry with no content type of its own, whose game is a base game, under excludeContentTypes', async () => {
+      const { host, eventId } = await arrangeEvent(0);
+      await offer(eventId, host, { title: 'Base, no override' });
+      await offer(eventId, host, { title: 'DLC, no override', contentType: ContentType.DLC });
+
+      expect(await listedTitles(host, eventId, {})).toEqual(['Base, no override', 'DLC, no override']);
+      // The DLC game is gone from the same response, so the filter applied.
+      expect(await listedTitles(host, eventId, { excludeContentTypes: ContentType.DLC })).toEqual([
+        'Base, no override',
+      ]);
+    });
+
+    it("reads a platform game's own content type over its game's, both ways", async () => {
+      const { host, eventId } = await arrangeEvent(0);
+      await offer(eventId, host, { title: 'Base, no override' });
+      const overridden = await offerOverridden(eventId, host, 'Base, DLC here', ContentType.DLC);
+
+      expect(await listedTitles(host, eventId, {})).toEqual(['Base, DLC here', 'Base, no override']);
+      // Its game is a base game, as the control's is: only the override tells them apart.
+      expect(await listedTitles(host, eventId, { excludeContentTypes: ContentType.DLC })).toEqual([
+        'Base, no override',
+      ]);
+      expect(await listedTitles(host, eventId, { contentTypes: ContentType.DLC })).toEqual(['Base, DLC here']);
+      expect(await listedTitles(host, eventId, { contentTypes: ContentType.BaseGame })).toEqual(['Base, no override']);
+
+      // The override is sent beside the game's own, so a client can tell the two apart.
+      const [row] = (await offered(host, eventId, { contentTypes: ContentType.DLC })).offeredGames;
+      expect(row.id).toBe(overridden.entryId);
+      expect(row.collection.platformGame.contentType).toBe(ContentType.DLC);
+      expect(row.collection.platformGame.game.contentType).toBe(ContentType.BaseGame);
+    });
+
+    // The own-column arm is `notIn` on a nullable column. Were it to match a
+    // NULL, an entry with no content type of its own would pass the exclude
+    // by that arm, whatever its game is.
+    it('drops an entry with no content type of its own, whose game is DLC, under excludeContentTypes', async () => {
+      const { host, eventId } = await arrangeEvent(0);
+      await offer(eventId, host, { title: 'Base, no override' });
+      await offer(eventId, host, { title: 'DLC, no override', contentType: ContentType.DLC });
+      await offerOverridden(eventId, host, 'Base, expansion here', ContentType.Expansion);
+
+      expect(await listedTitles(host, eventId, {})).toEqual([
+        'Base, expansion here',
+        'Base, no override',
+        'DLC, no override',
+      ]);
+      // The other two stay in the same response, one with an override and one without.
+      expect(await listedTitles(host, eventId, { excludeContentTypes: ContentType.DLC })).toEqual([
+        'Base, expansion here',
+        'Base, no override',
+      ]);
+      expect(await listedTitles(host, eventId, { contentTypes: ContentType.DLC })).toEqual(['DLC, no override']);
+    });
+
+    // The rescue direction: an override can also save an entry its game's
+    // content type would filter. Read on the game alone, the DLC game would
+    // fall to the exclude and be matched by the include.
+    it('keeps a DLC game whose platform game is a base game under excludeContentTypes, and out of contentTypes', async () => {
+      const { host, eventId } = await arrangeEvent(0);
+      await offer(eventId, host, { title: 'DLC, no override', contentType: ContentType.DLC });
+      await offerOverridden(eventId, host, 'DLC, base game here', ContentType.BaseGame, ContentType.DLC);
+
+      expect(await listedTitles(host, eventId, {})).toEqual(['DLC, base game here', 'DLC, no override']);
+      // Its game is DLC, as the control's is: only the override tells them apart.
+      expect(await listedTitles(host, eventId, { excludeContentTypes: ContentType.DLC })).toEqual([
+        'DLC, base game here',
+      ]);
+      expect(await listedTitles(host, eventId, { contentTypes: ContentType.DLC })).toEqual(['DLC, no override']);
+    });
   });
 
   // A host can offer a game for an attendee added by name (#1210), whose row

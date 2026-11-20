@@ -14,7 +14,6 @@ export interface BaseClientData {
   };
 
   readonly correlationId: string;
-  readonly userId: string;
 
   /**
    * The catalog locale the connection's copy renders in: the user's stored
@@ -23,4 +22,6 @@ export interface BaseClientData {
    * socket's next connection (#180).
    */
   readonly locale: string;
+
+  readonly userId: string;
 }

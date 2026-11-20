@@ -1,6 +1,7 @@
 import { AuditContextService } from '@bge/actor-context';
 import { CodedHttpException, t } from '@bge/i18n';
-import { Injectable, type CanActivate, type ExecutionContext } from '@nestjs/common';
+import type { CanActivate, ExecutionContext } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { Http } from '@status/codes';
 

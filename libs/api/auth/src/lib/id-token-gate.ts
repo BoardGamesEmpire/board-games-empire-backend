@@ -13,9 +13,10 @@ const ID_TOKEN_PATHS: ReadonlySet<string> = new Set(['/sign-in/social', '/link-s
 
 /** The slice of better-auth's endpoint context the gate reads. */
 export interface IdTokenGateContext {
-  readonly path?: string;
   /** The request body as sent, before the route validates it. */
   readonly body?: { readonly idToken?: unknown; readonly [field: string]: unknown } | null;
+
+  readonly path?: string;
 }
 
 export interface IdTokenGate {

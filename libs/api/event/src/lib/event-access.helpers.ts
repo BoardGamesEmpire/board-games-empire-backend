@@ -1,4 +1,5 @@
-import { liveEventWhere, type DatabaseService, type Event, type Prisma } from '@bge/database';
+import type { DatabaseService, Event, Prisma } from '@bge/database';
+import { liveEventWhere } from '@bge/database';
 import { t } from '@bge/i18n';
 import type { AbilityService } from '@bge/permissions';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';

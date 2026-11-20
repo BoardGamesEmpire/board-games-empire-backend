@@ -4,7 +4,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createAuthClientIpHandler } from './auth-client-ip';
 
 /** A request stand-in carrying what the handler reads and writes. */
-function request(options: { peer?: string; headers?: Record<string, string> } = {}) {
+function request(options: { headers?: Record<string, string>; peer?: string } = {}) {
   return {
     headers: { ...options.headers },
     socket: { remoteAddress: options.peer ?? '203.0.113.7' },

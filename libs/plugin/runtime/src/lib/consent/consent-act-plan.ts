@@ -1,17 +1,21 @@
 import type { PluginUnit } from '@bge/actor-context';
-import { PluginGrantStatus, type RiskLevel } from '@bge/database';
-import { resolveLocalizedStringDetailed, type NormalizedPermissionRequest } from '@boardgamesempire/plugin-manifest';
+import type { RiskLevel } from '@bge/database';
+import { PluginGrantStatus } from '@bge/database';
+import type { NormalizedPermissionRequest } from '@boardgamesempire/plugin-manifest';
+import { resolveLocalizedStringDetailed } from '@boardgamesempire/plugin-manifest';
 import type { ConsentCheckClassification, ConsentManifestSource } from './consent-classification.types';
 import { unitOwnsConsentScope } from './consent-classification.types';
 import { byPermissionSlugCodeUnit } from './decision-lock-order';
+import type {
+  ConsentActAnswerRule,
+  ConsentActStaleRisk,
+  ConsentActUngrantablePermission,
+} from './plugin-consent-act.errors';
 import {
   PluginConsentActAnswerError,
   PluginConsentActRequiredSetError,
   PluginConsentActStaleError,
   PluginConsentActUngrantableError,
-  type ConsentActAnswerRule,
-  type ConsentActStaleRisk,
-  type ConsentActUngrantablePermission,
 } from './plugin-consent-act.errors';
 import type {
   ConsentActAnswer,
@@ -23,19 +27,23 @@ import type {
 import { presentedRiskLevel } from './presented-risk-level';
 
 export interface PlanConsentActInput {
-  readonly kind: ConsentActKind;
-  readonly pluginSlug: string;
-  readonly unit: PluginUnit;
-  readonly source: ConsentManifestSource;
-  /** permissionChecks of the manifest the sha names. */
-  readonly checks: readonly NormalizedPermissionRequest[];
   /** The ACTIVE manifest's permissionChecks; consulted only when source is 'staged'. */
   readonly activeChecks: readonly NormalizedPermissionRequest[];
+
+  readonly answers: readonly ConsentActAnswer[];
+
+  /** permissionChecks of the manifest the sha names. */
+  readonly checks: readonly NormalizedPermissionRequest[];
+
   /** classify() of `checks` for this unit, read inside the act's transaction. */
   readonly classification: ConsentCheckClassification;
-  readonly answers: readonly ConsentActAnswer[];
-  readonly locale: string;
+
   readonly defaultLocale: string;
+  readonly kind: ConsentActKind;
+  readonly locale: string;
+  readonly pluginSlug: string;
+  readonly source: ConsentManifestSource;
+  readonly unit: PluginUnit;
 }
 
 /**
@@ -60,6 +68,7 @@ export function planConsentAct(input: PlanConsentActInput): ConsentActPlan {
     // A permission named twice is listed once, in the order it was first named.
     throw new PluginConsentActAnswerError(pluginSlug, rule, [...new Set(slugs)]);
   };
+
   const slugsWhere = (predicate: (answer: ConsentActAnswer) => boolean): string[] =>
     answers.filter(predicate).map((answer) => answer.permissionSlug);
 
@@ -84,8 +93,10 @@ export function planConsentAct(input: PlanConsentActInput): ConsentActPlan {
     if (seen.has(permissionSlug)) {
       duplicated.add(permissionSlug);
     }
+
     seen.add(permissionSlug);
   }
+
   if (duplicated.size > 0) {
     refuse('duplicate', [...duplicated]);
   }
@@ -146,15 +157,19 @@ export function planConsentAct(input: PlanConsentActInput): ConsentActPlan {
           refused.map((check) => check.canonicalSlug),
         );
       }
+
       break;
     }
+
     case 'Toggle': {
       const required = slugsWhere((answer) => isRequired(answer.permissionSlug));
       if (required.length > 0) {
         refuse('toggle-required', required);
       }
+
       break;
     }
+
     case 'Review': {
       // The server admin's approval is the Server unit's consent, so its review
       // only accepts; refusing is a toggle of an optional permission (#1336).
@@ -189,6 +204,7 @@ export function planConsentAct(input: PlanConsentActInput): ConsentActPlan {
           refuse('not-outstanding', refusedWhileGranted);
         }
       }
+
       break;
     }
   }
@@ -208,6 +224,7 @@ export function planConsentAct(input: PlanConsentActInput): ConsentActPlan {
       ungrantable.push(permission);
     }
   }
+
   if (ungrantable.length > 0) {
     throw new PluginConsentActUngrantableError(pluginSlug, ungrantable);
   }
@@ -224,6 +241,7 @@ export function planConsentAct(input: PlanConsentActInput): ConsentActPlan {
       });
     }
   }
+
   if (staleRisks.length > 0) {
     throw new PluginConsentActStaleError(pluginSlug, 'risk', staleRisks);
   }

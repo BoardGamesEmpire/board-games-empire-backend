@@ -1,4 +1,5 @@
-import { createFakeFetch, type FakeFetchReply } from '@boardgamesempire/gateway-driver-contract-testing';
+import type { FakeFetchReply } from '@boardgamesempire/gateway-driver-contract-testing';
+import { createFakeFetch } from '@boardgamesempire/gateway-driver-contract-testing';
 import { createBggClient } from './bgg-client';
 import { BggHttpError } from './bgg-http.error';
 

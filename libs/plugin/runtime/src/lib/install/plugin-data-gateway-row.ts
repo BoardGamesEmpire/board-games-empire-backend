@@ -1,5 +1,7 @@
-import { constraintIdentity, identifiesConstraint, type Prisma } from '@bge/database';
-import { resolveLocalizedString, type PluginManifest } from '@boardgamesempire/plugin-manifest';
+import type { Prisma } from '@bge/database';
+import { constraintIdentity, identifiesConstraint } from '@bge/database';
+import type { PluginManifest } from '@boardgamesempire/plugin-manifest';
+import { resolveLocalizedString } from '@boardgamesempire/plugin-manifest';
 
 /**
  * A data-gateway plugin's DataGateway row (#1083): what installing,
@@ -29,10 +31,10 @@ const DATA_GATEWAY_NAME_UNIQUE_INDEX = 'data_gateways_name_key';
 const DATA_GATEWAY_NAME_UNIQUE_COLUMNS = ['name'] as const;
 
 export interface PluginDataGatewayPlacement {
-  readonly pluginId: string;
+  readonly installerId: string;
+
   /** The name a new row takes; a row the plugin kept keeps its own. */
   readonly name: string;
-  readonly installerId: string;
 
   /**
    * The refusal to throw when the new row's name is taken. The caller's own,
@@ -40,6 +42,8 @@ export interface PluginDataGatewayPlacement {
    * update again.
    */
   readonly nameTaken: (name: string) => Error;
+
+  readonly pluginId: string;
 }
 
 /**

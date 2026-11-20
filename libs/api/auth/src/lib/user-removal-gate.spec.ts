@@ -1,15 +1,11 @@
 import { isAPIError } from 'better-auth/api';
-import {
-  createUserRemovalGate,
-  REMOVE_USER_PATH,
-  USER_REMOVAL_BLOCKED,
-  type UserRemovalGateDeps,
-} from './user-removal-gate';
+import type { UserRemovalGateDeps } from './user-removal-gate';
+import { createUserRemovalGate, REMOVE_USER_PATH, USER_REMOVAL_BLOCKED } from './user-removal-gate';
 
 /** What a refusal carries on the wire, read off the rejected `APIError`. */
 async function refusalOf(
   attempt: () => Promise<void>,
-): Promise<{ status: number; code?: string; message?: string } | undefined> {
+): Promise<{ code?: string; message?: string; status: number } | undefined> {
   try {
     await attempt();
   } catch (error) {

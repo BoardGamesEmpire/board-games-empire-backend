@@ -1,13 +1,9 @@
 import { SystemActorScope } from '@bge/actor-context';
-import {
-  DatabaseService,
-  DataGatewayCapability,
-  DataGatewayInterviewFailure,
-  type DataGateway,
-  type Prisma,
-} from '@bge/database';
+import type { DataGateway, Prisma } from '@bge/database';
+import { DatabaseService, DataGatewayCapability, DataGatewayInterviewFailure } from '@bge/database';
 import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
-import { Capability, type GatewayPingResponse } from '@boardgamesempire/proto-gateway';
+import type { GatewayPingResponse } from '@boardgamesempire/proto-gateway';
+import { Capability } from '@boardgamesempire/proto-gateway';
 import { status } from '@grpc/grpc-js';
 import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -37,7 +33,7 @@ const sameList = <T>(left: readonly T[], right: readonly T[]): boolean =>
 
 /** A Describe the DataGateway doesn't implement, or one that failed in some other way. */
 const describeFailure = (err: unknown): DataGatewayInterviewFailure =>
-  (err as { code?: unknown } | null)?.code === status.UNIMPLEMENTED
+  typeof err === 'object' && err !== null && 'code' in err && err.code === status.UNIMPLEMENTED
     ? DataGatewayInterviewFailure.DescribeUnsupported
     : DataGatewayInterviewFailure.DescribeFailed;
 
@@ -56,9 +52,9 @@ const withFirstInterview = (answers: InterviewData, before: StoredState, intervi
 
 /** An interview under way: the driver it asks through, and how to abandon it. */
 interface InterviewAttempt {
-  readonly driver: DataGatewayDriver;
   readonly abandonment: AbortController;
   readonly done: Promise<void>;
+  readonly driver: DataGatewayDriver;
 }
 
 /**
@@ -67,9 +63,9 @@ interface InterviewAttempt {
  * and driver it asks through, and how to abandon it.
  */
 interface PendingStart {
-  readonly gatewayId: string;
-  readonly driver: DataGatewayDriver;
   readonly abandonment: AbortController;
+  readonly driver: DataGatewayDriver;
+  readonly gatewayId: string;
 }
 
 /**
@@ -463,6 +459,7 @@ export class GatewayInterviewService {
           `DataGateway ${gatewayId} was disabled or deleted during its interview; its answers weren't stored`,
         );
       }
+
       before = current;
     }
 

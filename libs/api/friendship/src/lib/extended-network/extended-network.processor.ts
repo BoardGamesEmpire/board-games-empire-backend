@@ -1,12 +1,12 @@
-import { ActorAwareWorkerHost, type JobMetaEnvelope } from '@bge/queue-actor-context';
+import type { JobMetaEnvelope } from '@bge/queue-actor-context';
+import { ActorAwareWorkerHost } from '@bge/queue-actor-context';
 import { Processor } from '@nestjs/bullmq';
-import { DelayedError, type Job, UnrecoverableError } from 'bullmq';
-import {
-  EXTENDED_NETWORK_QUEUE,
-  type ExtendedNetworkJob,
-  ExtendedNetworkJobNames,
-} from './extended-network-queue.constants';
-import { type ExtendedNetworkRebuildResult, ExtendedNetworkService } from './extended-network.service';
+import type { Job } from 'bullmq';
+import { DelayedError, UnrecoverableError } from 'bullmq';
+import type { ExtendedNetworkJob } from './extended-network-queue.constants';
+import { EXTENDED_NETWORK_QUEUE, ExtendedNetworkJobNames } from './extended-network-queue.constants';
+import type { ExtendedNetworkRebuildResult } from './extended-network.service';
+import { ExtendedNetworkService } from './extended-network.service';
 
 type ExtendedNetworkJobData = ExtendedNetworkJob & JobMetaEnvelope;
 

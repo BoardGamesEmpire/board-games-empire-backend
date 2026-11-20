@@ -1,5 +1,7 @@
-import { DefaultPaginationQueryDto, PaginationQueryDto } from '@bge/shared';
-import { plainToInstance, type ClassConstructor } from 'class-transformer';
+import type { PaginationQueryDto } from '@bge/shared';
+import { DefaultPaginationQueryDto } from '@bge/shared';
+import type { ClassConstructor } from 'class-transformer';
+import { plainToInstance } from 'class-transformer';
 
 /**
  * The fields a test may set on a page-based query DTO: every input it
@@ -26,5 +28,5 @@ export const boundPageQuery = <T extends PaginationQueryDto>(
  * type, and hand-writing the derived values is how a test ends up asserting
  * paging arithmetic that the DTO does not actually perform (#230).
  */
-export const paginationQuery = (init: { page?: number; limit?: number } = {}): PaginationQueryDto =>
+export const paginationQuery = (init: { limit?: number; page?: number } = {}): PaginationQueryDto =>
   boundPageQuery(DefaultPaginationQueryDto, init);

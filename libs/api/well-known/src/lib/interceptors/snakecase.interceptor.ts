@@ -36,10 +36,7 @@ export function transformKeysToSnakeCase(value: unknown): unknown {
 
   if (value !== null && typeof value === 'object' && !(value instanceof Date)) {
     return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([key, val]) => [
-        toSnakeCase(key),
-        transformKeysToSnakeCase(val),
-      ]),
+      Object.entries(value).map(([key, val]: [string, unknown]) => [toSnakeCase(key), transformKeysToSnakeCase(val)]),
     );
   }
 

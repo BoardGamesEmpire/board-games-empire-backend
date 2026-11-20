@@ -4,13 +4,8 @@ import type { PluginModuleOptions } from '@bge/plugin';
 import { MODULE_OPTIONS_TOKEN } from '@bge/plugin';
 import { parsePluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
 import { PLUGIN_SLUG_PATTERN } from '@boardgamesempire/plugin-manifest';
-import {
-  type BeforeApplicationShutdown,
-  Inject,
-  Injectable,
-  Logger,
-  type OnApplicationBootstrap,
-} from '@nestjs/common';
+import type { BeforeApplicationShutdown, OnApplicationBootstrap } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { createId } from '@paralleldrive/cuid2';
 import type { Stats } from 'node:fs';
@@ -56,29 +51,35 @@ const SWEPT_SUFFIX = '.swept';
 const LOST_AND_FOUND = 'lost+found';
 
 export interface PluginArtifactSweepResult {
-  /** `<slug>/<sha256>/` directories removed. */
-  readonly removedDirectories: number;
-  /** Entries removed from `.incoming/`. */
-  readonly removedIncoming: number;
-  /** Artifact rows deleted at their expiry. */
-  readonly expiredArtifacts: number;
   /** Live artifact rows deleted because their directory was gone, removed by hand. */
   readonly artifactsWithoutDirectory: number;
+
+  /** Artifact rows deleted at their expiry. */
+  readonly expiredArtifacts: number;
+
+  /** `<slug>/<sha256>/` directories removed. */
+  readonly removedDirectories: number;
+
+  /** Entries removed from `.incoming/`. */
+  readonly removedIncoming: number;
+
   /** Load records deleted because their process stopped refreshing them. */
   readonly staleLoadRecords: number;
 }
 
 /** What a run keeps, read once before its walk. */
 interface WhatToKeep {
-  /** The checksums something still needs. */
-  readonly checksums: ReadonlySet<string>;
   /** Whether the database holds any plugin row at all, uninstalled ones included. */
   readonly anyPlugin: boolean;
+
+  /** The checksums something still needs. */
+  readonly checksums: ReadonlySet<string>;
 }
 
 interface WalkTotals {
   readonly removedDirectories: number;
   readonly removedIncoming: number;
+
   /** Aged directories nothing names, kept because the database holds no plugin at all. */
   readonly sparedDirectories: number;
 }
@@ -92,7 +93,7 @@ const addTotals = (totals: WalkTotals, more: Partial<WalkTotals> | undefined): W
 });
 
 const errorCode = (err: unknown): string | undefined =>
-  typeof err === 'object' && err !== null ? (err as NodeJS.ErrnoException).code : undefined;
+  typeof err === 'object' && err !== null && 'code' in err && typeof err.code === 'string' ? err.code : undefined;
 
 const describeError = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
@@ -101,9 +102,11 @@ const describeEntry = (stats: Stats): string => {
   if (stats.isSymbolicLink()) {
     return 'a symbolic link';
   }
+
   if (stats.isFile()) {
     return 'a file';
   }
+
   return stats.isDirectory() ? 'a directory' : 'a special file';
 };
 
@@ -156,8 +159,10 @@ const summarize = (result: PluginArtifactSweepResult): string =>
 @Injectable()
 export class PluginArtifactSweepService implements OnApplicationBootstrap, BeforeApplicationShutdown {
   private readonly logger = new Logger(PluginArtifactSweepService.name);
+
   /** Set once shutdown begins: no run starts, and a run in flight walks no further entry. */
   private stopping = false;
+
   /** The runs in flight, which shutdown waits for. */
   private readonly running = new Set<Promise<unknown>>();
 
@@ -378,6 +383,7 @@ export class PluginArtifactSweepService implements OnApplicationBootstrap, Befor
     for (const { sha256 } of artifacts) {
       checksums.add(sha256);
     }
+
     for (const { installedSha256, pendingSha256, uninstalledAt } of plugins) {
       // An uninstalled plugin's code is kept only while a process still runs it.
       if (uninstalledAt !== null) {
@@ -389,6 +395,7 @@ export class PluginArtifactSweepService implements OnApplicationBootstrap, Befor
         checksums.add(pendingSha256);
       }
     }
+
     for (const { sha256 } of loads) {
       checksums.add(sha256);
     }

@@ -1,3 +1,4 @@
+import type { Plugin } from '@bge/database';
 import {
   PluginConsentActKind,
   PluginGrantScope,
@@ -5,25 +6,29 @@ import {
   PluginLifecycleEventType,
   PluginScope,
   RiskLevel,
-  type Plugin,
 } from '@bge/database';
-import { createActors, pollUntil, type Actors, type SessionActor } from '@bge/testing-e2e';
-import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
+import type { Actors, SessionActor } from '@bge/testing-e2e';
+import { createActors, pollUntil } from '@bge/testing-e2e';
+import type { PluginManifest } from '@boardgamesempire/plugin-manifest';
+import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { restoreShippedCatalog } from '../permission-catalog/shipped-catalog';
 import { deferredRequest } from '../support/deferred-request';
 import { requireBaseUrl } from '../support/e2e-env';
 import { errorText } from '../support/error-text';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import {
   readConsentSurface,
   readStagedShownRisks,
   reviewBody,
   sendReview,
+  sendSwitchOn,
   shownServerRisks,
+  switchOnBody,
 } from './consent-act-fixtures';
-import { pluginAbilitySlugsForHousehold } from './plugin-ability-fixtures';
+import { pluginAbilitySlugsForHousehold, pluginOwnAbilitySlugsForHousehold } from './plugin-ability-fixtures';
 import {
   FIXTURE_ACT_ID,
   INSTALLED_SHA256,
@@ -141,18 +146,22 @@ describe('plugin update consent (approve/reject/pending)', () => {
     pendingChecks: readonly Check[],
     pendingDeclares?: readonly string[],
     overrides: {
-      /** Defaults to 'server' — every existing caller's plugin. */
-      readonly scope?: PluginManifest['scope'];
-      /** The PENDING manifest's scope, for a re-scope (#1151). Defaults to `scope`. */
-      readonly pendingScope?: PluginManifest['scope'];
       /** The ACTIVE manifest's requested permissions. Defaults to `[MANAGE_DIGEST_CHECK]`. */
       readonly activeChecks?: readonly Check[];
+
       /** The ACTIVE row's retained config, pre-activation. Defaults to `{}`. */
       readonly activeConfig?: Record<string, unknown>;
+
       /** Merged onto the pending manifest's `config` section (D-CN, #370). */
       readonly pendingConfig?: Partial<PluginManifest['config']>;
+
+      /** The PENDING manifest's scope, for a re-scope (#1151). Defaults to `scope`. */
+      readonly pendingScope?: PluginManifest['scope'];
+
+      /** Defaults to 'server' — every existing caller's plugin. */
+      readonly scope?: PluginManifest['scope'];
     } = {},
-  ): Promise<{ plugin: Plugin; pending: PluginManifest }> => {
+  ): Promise<{ pending: PluginManifest; plugin: Plugin }> => {
     const scope = overrides.scope ?? 'server';
     const active: PluginManifest = { ...activeManifest(overrides.activeChecks), scope };
     const pendingBase = manifestWithChecks('1.3.0', pendingChecks, pendingDeclares);
@@ -671,28 +680,210 @@ describe('plugin update consent (approve/reject/pending)', () => {
       expect(untouched).toEqual(stale);
     });
 
-    it('revokes the decision on a permission the update stops requesting, and records why (#577)', async () => {
-      const admin = await actors.admin();
-      const { plugin } = await arrangeStagedPlugin([MANAGE_DIGEST_CHECK], undefined, {
-        activeChecks: [MANAGE_DIGEST_CHECK, NEW_SERVER_CHECK],
+    /**
+     * Activation deletes no consent decision (#1152). A decision the active
+     * manifest does not request at its scope is kept and confers nothing, by
+     * the bound applied when the ability is read, and it counts again, with
+     * no act, when a later manifest requests the permission at that scope.
+     * Each case approves twice, so it gives the second staging its own id.
+     */
+    describe('a consent decision outside the active manifest (#1152)', () => {
+      /** P: OPTIONAL at household scope, so no update asks the household for it again. */
+      const HOUSEHOLD_OPTIONAL_CHECK: Check = { ...HOUSEHOLD_CHECK, required: false };
+      const SECOND_STAGING_ID = 'e2e-staging-second';
+
+      /** A household with the plugin switched on, granting `slug` in its one switch-on act. */
+      const switchOnGranting = async (plugin: Plugin, slug: string) => {
+        const owner = await actors.user();
+        const { household } = await actors.householdWithMembers({ owner });
+        const unit = { householdId: household.id };
+        const surface = await readConsentSurface(baseUrl, owner, unit, plugin.slug);
+
+        await sendSwitchOn(
+          baseUrl,
+          owner,
+          unit,
+          plugin.slug,
+          switchOnBody(surface, { [slug]: PluginGrantStatus.Granted }),
+        ).expect(200);
+
+        const decision = await db.client.pluginGrant.findUniqueOrThrow({
+          where: {
+            pluginId_scopeType_scopeId_permissionSlug: {
+              pluginId: plugin.id,
+              scopeType: PluginGrantScope.Household,
+              scopeId: household.id,
+              permissionSlug: slug,
+            },
+          },
+        });
+
+        return { householdId: household.id, decision };
+      };
+
+      const householdActCount = (plugin: Plugin, householdId: string) =>
+        db.client.pluginConsentAct.count({
+          where: { pluginId: plugin.id, scopeType: PluginGrantScope.Household, scopeId: householdId },
+        });
+
+      /**
+       * The plugin's revocation lifecycle rows, read once both approvals' own
+       * rows have landed. The listener writes each event on its own, so the
+       * approval rows do not order a revocation row the second approval
+       * might have caused: an empty answer shows no revocation landed by
+       * then, not that none was announced. The row-equality assertions are
+       * what guard the decisions.
+       */
+      const revocationsAfterTwoApprovals = async (plugin: Plugin) => {
+        await pollUntil(
+          async () =>
+            (await db.client.pluginLifecycleEvent.count({
+              where: { pluginId: plugin.id, event: PluginLifecycleEventType.UpdateApproved },
+            })) >= 2 || undefined,
+          { description: `both update approval lifecycle rows for '${plugin.slug}'`, timeoutMs: 5_000 },
+        );
+
+        return db.client.pluginLifecycleEvent.findMany({
+          where: { pluginId: plugin.id, event: PluginLifecycleEventType.GrantRevoked },
+        });
+      };
+
+      it('a consent decision on a permission the update stops requesting survives activation, confers nothing, and confers again when a later update requests it, with no act (#1152)', async () => {
+        const admin = await actors.admin();
+        const activeChecks = [MANAGE_DIGEST_CHECK, HOUSEHOLD_OPTIONAL_CHECK];
+        // A requests P; B stops requesting it.
+        const { plugin } = await arrangeStagedPlugin([MANAGE_DIGEST_CHECK], undefined, {
+          scope: 'household',
+          activeChecks,
+        });
+        const { householdId, decision } = await switchOnGranting(plugin, HOUSEHOLD_OPTIONAL_CHECK.slug);
+        const actsBefore = await householdActCount(plugin, householdId);
+
+        // The control: under A the decision confers, so its absence below is the bound's.
+        expect(await pluginAbilitySlugsForHousehold(db.client, plugin.id, householdId)).toContain(
+          HOUSEHOLD_OPTIONAL_CHECK.slug,
+        );
+
+        await approve(admin, plugin.slug).expect(200);
+
+        expect(await db.client.pluginGrant.findUniqueOrThrow({ where: { id: decision.id } })).toEqual(decision);
+        expect(await pluginAbilitySlugsForHousehold(db.client, plugin.id, householdId)).not.toContain(
+          HOUSEHOLD_OPTIONAL_CHECK.slug,
+        );
+
+        // A again, staged on the row under a staging of its own.
+        await stageAnotherUpdate(
+          plugin,
+          { ...manifestWithChecks('1.2.0', activeChecks), scope: 'household' },
+          SECOND_STAGING_ID,
+        );
+        await approve(admin, plugin.slug, { stagingId: SECOND_STAGING_ID }).expect(200);
+
+        expect(await db.client.pluginGrant.findUniqueOrThrow({ where: { id: decision.id } })).toEqual(decision);
+        expect(await pluginAbilitySlugsForHousehold(db.client, plugin.id, householdId)).toContain(
+          HOUSEHOLD_OPTIONAL_CHECK.slug,
+        );
+        expect(await householdActCount(plugin, householdId)).toBe(actsBefore);
+        expect(await revocationsAfterTwoApprovals(plugin)).toEqual([]);
       });
-      await seedPolicyGrant(plugin, { status: PluginGrantStatus.Granted });
 
-      await approve(admin, plugin.slug).expect(200);
+      it('a household decision on a permission whose consent scope moves to user survives, confers nothing, and confers again after the move back (#1152)', async () => {
+        const admin = await actors.admin();
+        const atHousehold = [MANAGE_DIGEST_CHECK, HOUSEHOLD_OPTIONAL_CHECK];
+        const atUser = [MANAGE_DIGEST_CHECK, { ...HOUSEHOLD_OPTIONAL_CHECK, consentScope: 'user' as const }];
+        const { plugin } = await arrangeStagedPlugin(atUser, undefined, {
+          scope: 'household',
+          activeChecks: atHousehold,
+        });
+        const { householdId, decision } = await switchOnGranting(plugin, HOUSEHOLD_OPTIONAL_CHECK.slug);
+        const actsBefore = await householdActCount(plugin, householdId);
 
-      await expect(
-        db.client.pluginGrant.count({ where: { pluginId: plugin.id, permissionSlug: 'read:safe_http_policy' } }),
-      ).resolves.toBe(0);
+        expect(await pluginAbilitySlugsForHousehold(db.client, plugin.id, householdId)).toContain(
+          HOUSEHOLD_OPTIONAL_CHECK.slug,
+        );
 
-      const rows = await awaitLifecycleRow(plugin, PluginLifecycleEventType.GrantRevoked);
-      expect(rows).toEqual([
-        expect.objectContaining({
-          payload: expect.objectContaining({
-            permissionSlug: 'read:safe_http_policy',
-            reason: 'permission-no-longer-requested',
-          }),
-        }),
-      ]);
+        await approve(admin, plugin.slug).expect(200);
+
+        expect(await db.client.pluginGrant.findUniqueOrThrow({ where: { id: decision.id } })).toEqual(decision);
+        expect(await pluginAbilitySlugsForHousehold(db.client, plugin.id, householdId)).not.toContain(
+          HOUSEHOLD_OPTIONAL_CHECK.slug,
+        );
+
+        await stageAnotherUpdate(
+          plugin,
+          { ...manifestWithChecks('1.4.0', atHousehold), scope: 'household' },
+          SECOND_STAGING_ID,
+        );
+        await approve(admin, plugin.slug, { stagingId: SECOND_STAGING_ID }).expect(200);
+
+        expect(await db.client.pluginGrant.findUniqueOrThrow({ where: { id: decision.id } })).toEqual(decision);
+        expect(await pluginAbilitySlugsForHousehold(db.client, plugin.id, householdId)).toContain(
+          HOUSEHOLD_OPTIONAL_CHECK.slug,
+        );
+        expect(await householdActCount(plugin, householdId)).toBe(actsBefore);
+        expect(await revocationsAfterTwoApprovals(plugin)).toEqual([]);
+      });
+
+      it('a decision on a permission the plugin stops declaring survives, confers nothing while undeclared, and confers again when a later update declares it, with no act (#1152)', async () => {
+        const admin = await actors.admin();
+        // The plugin's own permission, declared and requested at household scope.
+        const OWN_HOUSEHOLD_CHECK: Check = {
+          slug: 'manage:household_digest',
+          required: false,
+          reason: { en: 'Keeps the household digest settings it owns.' },
+          consentScope: 'household',
+        };
+        const declaring = ['manage:digest', OWN_HOUSEHOLD_CHECK.slug];
+        const activeChecks = [MANAGE_DIGEST_CHECK, OWN_HOUSEHOLD_CHECK];
+        const { plugin } = await arrangeStagedPlugin([MANAGE_DIGEST_CHECK], ['manage:digest'], {
+          scope: 'household',
+          activeChecks,
+        });
+        const ownSlug = `plugin|${plugin.slug}|${OWN_HOUSEHOLD_CHECK.slug}`;
+        const catalogRow = () =>
+          db.client.pluginPermission.findUnique({ where: { slug: ownSlug }, select: { riskLevel: true } });
+
+        // The active manifest declares it, so install recorded its catalog row
+        // (and the one the builder declares by default); arranged here as it would.
+        await db.client.pluginPermission.create({
+          data: { pluginId: plugin.id, slug: ownSlug, riskLevel: RiskLevel.Low },
+        });
+        await db.client.pluginPermission.create({
+          data: { pluginId: plugin.id, slug: `plugin|${plugin.slug}|manage:digest`, riskLevel: RiskLevel.Low },
+        });
+        // The active row's manifest is rewritten to declare it too: the
+        // fixture's active manifest takes the builder's declares.
+        await db.client.plugin.update({
+          where: { id: plugin.id },
+          data: {
+            manifestJson: { ...manifestWithChecks('1.2.0', activeChecks, declaring), scope: 'household' } as never,
+          },
+        });
+
+        const { householdId, decision } = await switchOnGranting(plugin, ownSlug);
+        const actsBefore = await householdActCount(plugin, householdId);
+
+        expect(await pluginOwnAbilitySlugsForHousehold(db.client, plugin.id, householdId)).toContain(ownSlug);
+
+        await approve(admin, plugin.slug).expect(200);
+
+        expect(await db.client.pluginGrant.findUniqueOrThrow({ where: { id: decision.id } })).toEqual(decision);
+        expect(await catalogRow()).toBeNull();
+        expect(await pluginOwnAbilitySlugsForHousehold(db.client, plugin.id, householdId)).not.toContain(ownSlug);
+
+        await stageAnotherUpdate(
+          plugin,
+          { ...manifestWithChecks('1.4.0', activeChecks, declaring), scope: 'household' },
+          SECOND_STAGING_ID,
+        );
+        await approve(admin, plugin.slug, { stagingId: SECOND_STAGING_ID }).expect(200);
+
+        expect(await db.client.pluginGrant.findUniqueOrThrow({ where: { id: decision.id } })).toEqual(decision);
+        expect(await catalogRow()).toEqual({ riskLevel: RiskLevel.Low });
+        expect(await pluginOwnAbilitySlugsForHousehold(db.client, plugin.id, householdId)).toContain(ownSlug);
+        expect(await householdActCount(plugin, householdId)).toBe(actsBefore);
+        expect(await revocationsAfterTwoApprovals(plugin)).toEqual([]);
+      });
     });
 
     it('round-trips the Critical challenge from the 409 body — the client re-submits, never recomputes', async () => {

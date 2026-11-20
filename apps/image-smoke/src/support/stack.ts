@@ -5,7 +5,8 @@ import { randomBytes } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { promisify } from 'node:util';
-import { parseLogRecords, type LogRecord } from './logs';
+import type { LogRecord } from './logs';
+import { parseLogRecords } from './logs';
 import { smokeProject } from './project';
 
 const execFileAsync = promisify(execFile);
@@ -70,24 +71,27 @@ export interface CandidateImages {
 
 /** What a container's state says about it, from `docker inspect`. */
 export interface ContainerState {
-  readonly service: string;
-  readonly status: string;
   readonly exitCode: number;
-  readonly oomKilled: boolean;
-  readonly restartCount: number;
+
   /** Undefined for a service without a healthcheck. */
   readonly health: string | undefined;
+
+  readonly oomKilled: boolean;
+  readonly restartCount: number;
+  readonly service: string;
+  readonly status: string;
 }
 
 interface InspectedContainer {
-  readonly RestartCount: number;
-  readonly State: {
-    readonly Status: string;
-    readonly ExitCode: number;
-    readonly OOMKilled: boolean;
-    readonly Health?: { readonly Status: string };
-  };
   readonly Config: { readonly Labels: Record<string, string> };
+  readonly RestartCount: number;
+
+  readonly State: {
+    readonly ExitCode: number;
+    readonly Health?: { readonly Status: string };
+    readonly OOMKilled: boolean;
+    readonly Status: string;
+  };
 }
 
 async function docker(args: readonly string[], options: { env?: NodeJS.ProcessEnv } = {}): Promise<string> {
@@ -100,7 +104,7 @@ async function docker(args: readonly string[], options: { env?: NodeJS.ProcessEn
 
     return stdout;
   } catch (error) {
-    const { stdout, stderr } = error as { stdout?: string; stderr?: string };
+    const { stdout, stderr } = error as { stderr?: string; stdout?: string };
     throw new Error(`docker ${args.join(' ')} failed:\n${[stderr, stdout].filter(Boolean).join('\n')}`, {
       cause: error,
     });

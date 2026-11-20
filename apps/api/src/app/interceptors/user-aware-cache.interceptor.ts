@@ -1,4 +1,5 @@
-import { AuditContextService, type Actor } from '@bge/actor-context';
+import type { Actor } from '@bge/actor-context';
+import { AuditContextService } from '@bge/actor-context';
 import { FALLBACK_LOCALE } from '@bge/i18n';
 import { CACHE_RESPONSE_KEY } from '@bge/shared';
 import { CACHE_MANAGER, CacheInterceptor } from '@nestjs/cache-manager';

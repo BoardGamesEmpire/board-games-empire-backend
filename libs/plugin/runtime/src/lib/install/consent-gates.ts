@@ -1,15 +1,7 @@
-import {
-  bindsConsentUnit,
-  CONSENT_UNIT_BINDING_REFUSAL,
-  PluginGrantScope,
-  RiskLevel,
-  type Permission,
-} from '@bge/database';
-import {
-  parsePluginPermissionSlug,
-  type NormalizedPermissionRequest,
-  type PluginManifestValidationResult,
-} from '@boardgamesempire/plugin-manifest';
+import type { Permission } from '@bge/database';
+import { bindsConsentUnit, CONSENT_UNIT_BINDING_REFUSAL, PluginGrantScope, RiskLevel } from '@bge/database';
+import type { NormalizedPermissionRequest, PluginManifestValidationResult } from '@boardgamesempire/plugin-manifest';
+import { parsePluginPermissionSlug } from '@boardgamesempire/plugin-manifest';
 import { CONSENT_SCOPE_TO_GRANT_SCOPE } from '../grants/consent-scope.map';
 import { isPluginAdministrationSlug } from '../grants/plugin-admin-permissions';
 import type { StaticAnalysisFinding } from './static-analysis.types';
@@ -27,8 +19,8 @@ import type { StaticAnalysisFinding } from './static-analysis.types';
  */
 
 export interface ForbiddenPermissionViolation {
-  readonly permissionSlug: string;
   readonly detail: string;
+  readonly permissionSlug: string;
 }
 
 /**
@@ -160,9 +152,9 @@ export const criticalConfirmationExpectation = (
     .sort();
 
 export interface ExactReentryComparison {
+  readonly exact: boolean;
   readonly expected: readonly string[];
   readonly received: readonly string[];
-  readonly exact: boolean;
 }
 
 /** EXACT re-entry: every expected entry present, nothing else — set equality on distinct, sorted values. */
@@ -182,8 +174,10 @@ export const compareExactReentry = (
 export interface ForbiddenAcknowledgementResolution {
   /** Distinct forbidden specifiers analysis reported, sorted. */
   readonly reported: readonly string[];
+
   /** Reported specifiers the acceptance did not name — outstanding consent. */
   readonly unacknowledged: readonly string[];
+
   /** Accepted specifiers analysis did not report — caller and server disagree about state. */
   readonly unexpected: readonly string[];
 }

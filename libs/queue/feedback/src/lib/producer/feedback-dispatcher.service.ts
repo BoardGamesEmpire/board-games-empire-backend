@@ -1,5 +1,7 @@
-import { AuditContextService, type Actor } from '@bge/actor-context';
-import { FeedbackEvents, type FeedbackReportSubmittedEvent } from '@bge/feedback';
+import type { Actor } from '@bge/actor-context';
+import { AuditContextService } from '@bge/actor-context';
+import type { FeedbackReportSubmittedEvent } from '@bge/feedback';
+import { FeedbackEvents } from '@bge/feedback';
 import { wrapJobData } from '@bge/queue-actor-context';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Injectable, Logger } from '@nestjs/common';

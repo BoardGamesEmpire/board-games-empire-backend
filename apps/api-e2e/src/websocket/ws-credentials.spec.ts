@@ -1,18 +1,22 @@
-import { WsErrorEvents, type WsErrorPayload } from '@bge/shared';
-import { createActors, type Actors, type SessionActor, type SessionCredentials } from '@bge/testing-e2e';
+import type { WsErrorPayload } from '@bge/shared';
+import { WsErrorEvents } from '@bge/shared';
+import type { Actors, SessionActor, SessionCredentials } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import type { Socket } from 'socket.io-client';
 import { requireBaseUrl } from '../support/e2e-env';
 import { connect, nextEvent, openSocket } from '../support/socket';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 
 /** What socket.io-client hands a `connect_error` listener for a middleware refusal. */
 type ConnectError = Error & { readonly data?: WsErrorPayload };
 
 interface SignedIn {
-  readonly credentials: SessionCredentials;
   /** The `Cookie` header a browser holding this session sends. */
   readonly cookie: string;
+
+  readonly credentials: SessionCredentials;
 }
 
 const SIGN_IN_PATH = '/api/auth/sign-in/email';
@@ -96,11 +100,13 @@ describe('WebSocket credentials', () => {
         socket.off('disconnect', onDisconnect);
         outcome();
       };
+
       const onDone = (frame: { correlationId?: string }): void => {
         if (frame.correlationId === correlationId) {
           settle(resolve);
         }
       };
+
       const onRefused = (payload: WsErrorPayload): void =>
         settle(() => reject(new Error(`Search refused: ${JSON.stringify(payload)}`)));
       const onDisconnect = (reason: string): void =>

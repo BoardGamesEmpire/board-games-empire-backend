@@ -7,7 +7,8 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
 import { PluginLifecycleAuthorityError } from '../lifecycle/lifecycle.errors';
 import { revalidateStoredManifest } from '../manifest/stored-manifest';
-import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
+import type { PluginModuleOptions } from '../plugin-module.options';
+import { MODULE_OPTIONS_TOKEN } from '../plugin-module.options';
 import { loadLivingPlugin } from '../units/living-plugin';
 import {
   PluginUnitManifestError,
@@ -15,24 +16,28 @@ import {
   PluginUnitPluginTombstonedError,
 } from '../units/unit.errors';
 import { planConsentAct } from './consent-act-plan';
-import { emitDecisionEvents, type WrittenDecision } from './consent-decision-events';
-import { decisionStands, decisionsStand } from './consent-decision-stands';
+import type { WrittenDecision } from './consent-decision-events';
+import { emitDecisionEvents } from './consent-decision-events';
+import { decisionsStand } from './consent-decision-stands';
 import { PluginConsentActStaleError } from './plugin-consent-act.errors';
 import type { ConsentActAnswer } from './plugin-consent-act.types';
 import { PluginConsentCheckClassifier } from './plugin-consent-check-classifier.service';
+import { writeConsentAct } from './write-consent-act';
 
 export interface ServerConsentActInput {
-  readonly slug: string;
   /** The acting server admin. Verified here. */
   readonly actorId: string;
-  readonly manifestSha256: string;
+
   readonly answers: readonly ConsentActAnswer[];
   readonly locale?: string;
+  readonly manifestSha256: string;
+  readonly slug: string;
 }
 
 export interface ServerConsentActResult {
   /** Null when the act would have changed nothing: no act, no event (ADR 0002). */
   readonly act: PluginConsentAct | null;
+
   readonly changed: boolean;
 }
 
@@ -41,15 +46,16 @@ type ServerConsentActKind = 'Toggle' | 'Review';
 
 /** The columns `claimPluginForAct` reads under the plugin row's share lock. */
 interface ServerConsentActClaimRow {
-  readonly uninstalled_at: Date | null;
   readonly installed_sha256: string;
+  readonly uninstalled_at: Date | null;
 }
 
 type ServerActOutcome =
   | { readonly changed: false }
   | {
-      readonly changed: true;
       readonly act: PluginConsentAct;
+      readonly changed: true;
+
       /** Only the decisions whose row changed: the ones an event announces. */
       readonly changedDecisions: readonly WrittenDecision[];
     };
@@ -62,12 +68,15 @@ type ServerActOutcome =
  * act and the consent decisions it carries, and the events go out after it
  * commits.
  *
- * The Server unit has no household row, no advisory key and no unit
- * enablement, so of the total lock order every plugin-runtime writer takes
- * (`apps/api-e2e/src/plugin/lock-order.ts`) it takes the plugin row and then
- * the grant rows. It answers only the active manifest: the server admin
- * consents to a staged update by approving it. It never reads the Server
- * switch: consenting before the plugin is switched on is a legitimate order.
+ * The Server unit has no household row and no unit enablement, so its
+ * transaction takes the plugin row, shared, on the sha the act names, and then
+ * the consent decisions, in permission order. Two acts on the Server unit are
+ * not ordered against each other: the later write wins on each permission and
+ * both acts stay on record (#1152).
+ *
+ * It answers only the active manifest: the server admin consents to a staged
+ * update by approving it. It never reads the Server switch: consenting before
+ * the plugin is switched on is a legitimate order.
  */
 @Injectable()
 export class PluginServerConsentActService {
@@ -165,55 +174,27 @@ export class PluginServerConsentActService {
         return { changed: false };
       }
 
-      const act = await tx.pluginConsentAct.create({
-        data: {
-          pluginId: plugin.id,
-          pluginSlug: plugin.slug,
-          scopeType: PluginGrantScope.Server,
-          scopeId: SERVER_SCOPE_SENTINEL,
-          kind: PluginConsentActKind[kind],
-          manifestVersion: plugin.version,
-          manifestSha256: input.manifestSha256,
-          presentation: plan.presentation as unknown as Prisma.InputJsonValue,
-          decidedById: input.actorId,
-          decidedAt: initiatedAt,
-          correlationId,
-        },
+      // The plan's decisions are already in permission order.
+      const written = await writeConsentAct(tx, {
+        pluginId: plugin.id,
+        pluginSlug: plugin.slug,
+        scopeType: PluginGrantScope.Server,
+        scopeId: SERVER_SCOPE_SENTINEL,
+        kind: PluginConsentActKind[kind],
+        manifestVersion: plugin.version,
+        manifestSha256: input.manifestSha256,
+        // The claim admits only the active sha: the Server unit answers a
+        // staged update through approval, never through this act.
+        stagingId: null,
+        presentation: plan.presentation,
+        decisions: plan.decisions,
+        standingBySlug,
+        actorId: input.actorId,
+        decidedAt: initiatedAt,
+        correlationId,
       });
 
-      // Every planned decision is written, the ones that already stand
-      // included, so a row's actId always names the act that last set it. In
-      // permission order, which the plan sorts by code unit, so two writers of
-      // the Server unit's decisions take their grant rows in the same order.
-      const changedDecisions: WrittenDecision[] = [];
-
-      for (const decision of plan.decisions) {
-        const fields = {
-          status: decision.status,
-          decidedRiskLevel: decision.decidedRiskLevel,
-          decidedById: input.actorId,
-          decidedAt: initiatedAt,
-          actId: act.id,
-        };
-        const coordinates = {
-          pluginId: plugin.id,
-          scopeType: PluginGrantScope.Server,
-          scopeId: SERVER_SCOPE_SENTINEL,
-          permissionSlug: decision.permissionSlug,
-        };
-        const after = await tx.pluginGrant.upsert({
-          where: { pluginId_scopeType_scopeId_permissionSlug: coordinates },
-          create: { ...coordinates, ...fields },
-          update: fields,
-        });
-        const before = standingBySlug.get(decision.permissionSlug) ?? null;
-
-        if (!decisionStands(decision, before)) {
-          changedDecisions.push({ before, after });
-        }
-      }
-
-      return { changed: true, act, changedDecisions };
+      return { changed: true, act: written.act, changedDecisions: written.changed };
     });
 
     if (!outcome.changed) {

@@ -40,11 +40,15 @@ try {
     const published = readTag(image, tag, {
       missing: ['not-found', 'denied'],
       onMissing: (failure, stderr) => {
-        if (failure === 'denied') console.log(`GHCR refused this job's token for ${image}:${tag}: ${stderr}`);
+        if (failure === 'denied') {
+          console.log(`GHCR refused this job's token for ${image}:${tag}: ${stderr}`);
+        }
       },
     });
     const decision = reuseDecision({ commit, platform: values.platform, published });
-    if (decision.action === 'stop') throw new Error(decision.reason);
+    if (decision.action === 'stop') {
+      throw new Error(decision.reason);
+    }
 
     const name = image.slice(image.lastIndexOf('/') + 1);
     if (decision.action === 'reuse') {

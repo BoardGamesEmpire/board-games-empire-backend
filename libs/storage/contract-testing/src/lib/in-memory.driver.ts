@@ -6,10 +6,11 @@ import type {
   SignedUrl,
   SignedUrlOptions,
   StorageDriver,
+  StorageError,
   StorageOp,
   StoredObject,
 } from '@boardgamesempire/storage-contract';
-import { ObjectNotFoundError, type StorageError } from '@boardgamesempire/storage-contract';
+import { ObjectNotFoundError } from '@boardgamesempire/storage-contract';
 import { Buffer } from 'node:buffer';
 import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
@@ -117,6 +118,7 @@ export class InMemoryStorageDriver implements StorageDriver {
     if (!entry) {
       throw new ObjectNotFoundError(key);
     }
+
     return entry;
   }
 

@@ -1,4 +1,5 @@
-import { cacheStoreKey, type Redis } from '@bge/redis';
+import type { Redis } from '@bge/redis';
+import { cacheStoreKey } from '@bge/redis';
 import { createPermissionsCache, PERMISSIONS_CACHE_NAMESPACE } from './permissions-cache';
 
 /**

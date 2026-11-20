@@ -1,6 +1,8 @@
-import { Action, DatabaseService, Prisma, ResourceType, SystemRole } from '@bge/database';
+import type { DatabaseService, Prisma } from '@bge/database';
+import { Action, ResourceType, SystemRole } from '@bge/database';
 import type { AbilityService } from '@bge/permissions';
-import { isAssignableHouseholdRole, type AssignableHouseholdRole } from '../dto';
+import type { AssignableHouseholdRole } from '../dto';
+import { isAssignableHouseholdRole } from '../dto';
 
 /**
  * Each member's user id and household role: what the invite grants' role
@@ -93,7 +95,7 @@ export async function senderCouldStillSend(
   abilities: AbilityService,
   tx: Prisma.TransactionClient,
   householdId: string,
-  invite: { readonly inviterId: string; readonly role: AssignableHouseholdRole; readonly needsApproval: boolean },
+  invite: { readonly inviterId: string; readonly needsApproval: boolean; readonly role: AssignableHouseholdRole },
   authority: InviteAuthority,
 ): Promise<boolean> {
   const senderCan = await abilities.userAbilityWithin(tx, invite.inviterId);

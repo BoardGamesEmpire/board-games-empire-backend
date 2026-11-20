@@ -1,14 +1,15 @@
 import { MutationEvent } from '@bge/actor-context';
-import { DatabaseService, JobStatus } from '@bge/database';
+import type { DatabaseService } from '@bge/database';
+import { JobStatus } from '@bge/database';
 import { WebhookEventType } from '@bge/webhooks';
-import { EventEmitter2 } from '@nestjs/event-emitter';
+import type { EventEmitter2 } from '@nestjs/event-emitter';
 import { ImportEvents } from '../constants/queue.constants';
 import { ImportBatchStatus } from '../interfaces/import-job.interface';
 import { ImportBatchCompletionService } from './batch-completion.service';
 
 describe('ImportBatchCompletionService', () => {
   let service: ImportBatchCompletionService;
-  let db: { job: { findMany: jest.Mock; count: jest.Mock } };
+  let db: { job: { count: jest.Mock; findMany: jest.Mock } };
   let events: { emit: jest.Mock };
 
   const baseRow = (status: JobStatus) => ({

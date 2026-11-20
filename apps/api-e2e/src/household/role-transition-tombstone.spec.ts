@@ -1,10 +1,13 @@
 import { SystemRole } from '@bge/database';
-import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
+import type { Actors, SessionActor } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
-import { expectLockWaiter, withBarrier, type Barrier } from '../support/lock-barrier';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { Barrier } from '../support/lock-barrier';
+import { expectLockWaiter, withBarrier } from '../support/lock-barrier';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { createMemberClient } from './household-request';
 import { SOFT_DELETE_HOUSEHOLD } from './lock-fixtures';
 
@@ -32,10 +35,10 @@ describe('role transitions racing a soft-delete (#386)', () => {
   const baseUrl = requireBaseUrl(process.env);
 
   /**
-   * Generous for the reason `plugin-prerow-race.spec.ts` gives: the request
-   * clears a session lookup and the route guards before it reaches the lock,
-   * and a cold start is seconds-scale. A request that answers is reported at
-   * once by `settledEarly`, so the long budget only costs time on a stuck run.
+   * Generous on purpose: the request clears a session lookup and the route
+   * guards before it reaches the lock, and a cold start is seconds-scale. A
+   * request that answers is reported at once by `settledEarly`, so the long
+   * budget only costs time on a stuck run.
    */
   const REQUEST_REACHES_LOCK_MS = 20_000;
 
@@ -66,9 +69,9 @@ describe('role transitions racing a soft-delete (#386)', () => {
 
   interface Arrangement {
     readonly householdId: string;
-    readonly owner: SessionActor;
     readonly member: SessionActor;
     readonly memberId: string;
+    readonly owner: SessionActor;
   }
 
   /** An owner and one plain member, which is all any of the four needs. */
@@ -124,8 +127,8 @@ describe('role transitions racing a soft-delete (#386)', () => {
    * Fires a request that is expected to BLOCK, and keeps hold of it safely: the
    * pending response is pre-handled so an assertion failing before it is
    * awaited cannot surface as an unhandled rejection, and its outcome is
-   * offered to `expectLockWaiter` for reporting. Same shape as the helper in
-   * `plugin-prerow-race.spec.ts`.
+   * offered to `expectLockWaiter` for reporting, so a request that answers
+   * early is reported as answered rather than as a timeout.
    */
   const fire = (send: () => request.Test) => {
     let outcome: string | undefined;

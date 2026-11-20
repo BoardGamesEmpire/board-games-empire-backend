@@ -1,10 +1,5 @@
-import {
-  deriveReadCeilings,
-  PERMISSION_CATALOG,
-  ResourceType,
-  ROLE_PERMISSION_CATALOG,
-  type ReadReach,
-} from '@bge/database';
+import type { ReadReach } from '@bge/database';
+import { deriveReadCeilings, PERMISSION_CATALOG, ResourceType, ROLE_PERMISSION_CATALOG } from '@bge/database';
 
 /**
  * Every reach the shipped catalog grants on `subject`: each role's read of it,

@@ -1,17 +1,12 @@
 import { FriendshipStatus, GameMedium, Reach } from '@bge/database';
-import {
-  arrangeExtendedNetwork,
-  arrangeFriendship,
-  befriend,
-  createActors,
-  type Actors,
-  type AuthenticatedActor,
-} from '@bge/testing-e2e';
+import type { Actors, AuthenticatedActor } from '@bge/testing-e2e';
+import { arrangeExtendedNetwork, arrangeFriendship, befriend, createActors } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { tabletopPlatform } from '../support/seeded-platforms';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { listCollectionsEnvelope, readCollectionEnvelope } from './game-collection-wire';
 
 /**
@@ -212,6 +207,7 @@ describe('game collection authorization', () => {
       for (const owner of [showingOwner, hidingOwner, blockingOwner]) {
         await arrangeExtendedNetwork(db.client, owner, viewer, 3);
       }
+
       await arrangeFriendship(db.client, blockingOwner, viewer, FriendshipStatus.Blocked);
       await db.client.userPreferences.update({
         where: { userId: hidingOwner.user.id },

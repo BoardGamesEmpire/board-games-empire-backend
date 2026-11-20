@@ -1,13 +1,9 @@
 import { InviteStatus, InviteType, NotificationType, SystemRole } from '@bge/database';
-import {
-  InviteAcceptedEvent,
-  InviteApprovedEvent,
-  InviteCreatedEvent,
-  InviteDeclinedEvent,
-  type InviteSnapshot,
-} from '@bge/invites';
+import type { InviteSnapshot } from '@bge/invites';
+import { InviteAcceptedEvent, InviteApprovedEvent, InviteCreatedEvent, InviteDeclinedEvent } from '@bge/invites';
 import { NotificationsService } from '@bge/notifications-service';
-import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { createTestingModuleWithDb } from '@bge/testing';
 import { Logger } from '@nestjs/common';
 import { HouseholdOwnershipTransferredEvent } from '../events/household.events';
 import { receivedHouseholdInviteWhere } from '../invite/received-invites';
@@ -76,11 +72,11 @@ const transferred = () =>
   );
 
 interface UserRow {
-  id: string;
   email: string;
   emailVerified: boolean;
-  username: string;
+  id: string;
   profile: { displayName: string | null } | null;
+  username: string;
 }
 
 const RILEY: UserRow = {
@@ -116,7 +112,7 @@ describe('HouseholdNotificationListener', () => {
    * vouched address and the display name.
    */
   const seedUsers = (...rows: UserRow[]) =>
-    db.user.findUnique.mockImplementation((({ where }: { where: { id?: string; email?: string } }) =>
+    db.user.findUnique.mockImplementation((({ where }: { where: { email?: string; id?: string } }) =>
       Promise.resolve(rows.find((row) => row.id === where.id || row.email === where.email) ?? null)) as never);
 
   beforeEach(async () => {

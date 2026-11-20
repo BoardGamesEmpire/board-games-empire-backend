@@ -1,4 +1,5 @@
-import { t, type I18nMessage } from '@bge/i18n';
+import type { I18nMessage } from '@bge/i18n';
+import { t } from '@bge/i18n';
 import type { OfferedGame } from '../offered-game/offered-game.types';
 
 /**
@@ -15,6 +16,11 @@ export const OfferRefusal = {
   RemovedFromCollection: 'removedFromCollection',
   /** Named as an expansion, but its game isn't an expansion of its item's game. */
   NotAnExpansionOfBase: 'notAnExpansionOfBase',
+  /**
+   * Named as an expansion of a game it's linked to, but its collection entry
+   * is on a different platform from that game's (#1391).
+   */
+  DifferentPlatform: 'differentPlatform',
   /** Named as an expansion of a game that was refused. */
   BaseRefused: 'baseRefused',
 } as const;
@@ -31,8 +37,8 @@ export const OFFER_REFUSALS: readonly OfferRefusal[] = Object.values(OfferRefusa
  * the response translates.
  */
 export type OfferResult =
-  | { collectionId: string; outcome: 'added' | 'alreadyOffered'; entry: OfferedGame }
-  | { collectionId: string; outcome: 'refused'; reason: OfferRefusal; message: I18nMessage };
+  | { collectionId: string; entry: OfferedGame; outcome: 'added' | 'alreadyOffered' }
+  | { collectionId: string; message: I18nMessage; outcome: 'refused'; reason: OfferRefusal };
 
 /**
  * The message for `reason`, naming `collectionId` where the message does. It
@@ -48,6 +54,8 @@ export function offerRefusalMessage(reason: OfferRefusal, collectionId: string):
       return t('errors.attendee.game_removed_from_collection');
     case OfferRefusal.NotAnExpansionOfBase:
       return t('errors.attendee.not_an_expansion_of_base');
+    case OfferRefusal.DifferentPlatform:
+      return t('errors.attendee.different_platform');
     case OfferRefusal.BaseRefused:
       return t('errors.attendee.base_refused');
   }

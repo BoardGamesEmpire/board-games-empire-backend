@@ -46,5 +46,6 @@ export function resolveDiagLogLevel(env: NodeJS.ProcessEnv = process.env): DiagL
   if (!otelLogLevel) {
     return DiagLogLevel.INFO;
   }
+
   return OTEL_DIAG_LEVEL_MAP[otelLogLevel.toLowerCase()] ?? DiagLogLevel.INFO;
 }

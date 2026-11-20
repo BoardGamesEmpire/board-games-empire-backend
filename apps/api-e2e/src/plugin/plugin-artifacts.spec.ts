@@ -1,12 +1,23 @@
-import { RiskLevel } from '@bge/database';
-import { createActors, type Actors } from '@bge/testing-e2e';
+import { PluginGrantStatus, RiskLevel } from '@bge/database';
+import type { Actors } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
+import type { PluginManifest } from '@boardgamesempire/plugin-manifest';
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import request from 'supertest';
 import { restoreShippedCatalog } from '../permission-catalog/shipped-catalog';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
-import { shownServerRisks } from './consent-act-fixtures';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
+import type { ConsentActUnit } from './consent-act-fixtures';
+import {
+  readConsentSurface,
+  sendSwitchOn,
+  shownServerRisks,
+  switchOnBody,
+  unitPluginsPath,
+} from './consent-act-fixtures';
+import type { BuiltArtifact } from './plugin-artifact-fixtures';
 import { ARTIFACTS_PATH, artifactRoutes, buildArtifact, exists, pluginsRoot } from './plugin-artifact-fixtures';
 
 /**
@@ -217,6 +228,114 @@ describe('plugin install ingress (#1094)', () => {
 
     expect(decisions).toHaveLength(1);
     expect(decisions.map((decision) => decision.actId)).toEqual([acts[1]?.id]);
+  });
+
+  // Uninstall switches every unit enablement off and keeps its configuration,
+  // so after a reinstall no unit reads as on for a version nobody switched it
+  // on for. Switching on again is a consent act, under the new sha (#1328).
+  it('a household switched on before an uninstall reads off after the reinstall, keeps its configuration, and switches on again with a new act under the new sha (#1328)', async () => {
+    const admin = await actors.admin();
+    const owner = await actors.user();
+    const { household } = await actors.householdWithMembers({ owner });
+    const householdUnit: ConsentActUnit = { householdId: household.id };
+    // Allowlisted public reads, which household and user consent may hold
+    // (#591). The household one is required, so each household switch-on
+    // answers it; without a user-scope request a user has nothing to switch on.
+    const HOUSEHOLD_READ = 'read:game:public';
+    const USER_READ = 'read:game_collection:public';
+    const checks: PluginManifest['permissions']['checks'] = [
+      {
+        slug: HOUSEHOLD_READ,
+        required: true,
+        reason: { en: 'Lists the public games the household digest features.' },
+        consentScope: 'household',
+      },
+      {
+        slug: USER_READ,
+        required: false,
+        reason: { en: 'Shows public collections in each member’s digest.' },
+        consentScope: 'user',
+      },
+    ];
+    // Both versions carry the fixture's config schema, which the document
+    // fits, so the switch-on after the reinstall is judged on consent alone.
+    const config = { webhookUrl: 'https://household.example.test/hook' };
+    const artifact = await buildArtifact({ extraChecks: checks, manifest: { scope: 'household' } });
+    const slug = artifact.slug;
+
+    const installAndSwitchOnServer = async (built: BuiltArtifact) => {
+      await upload(admin, built).expect(200);
+      await install(admin, { sha256: built.sha256 }).expect(201);
+      await request(baseUrl).post(`/api/plugins/${slug}/enable`).set(admin.headers).send({}).expect(200);
+    };
+
+    const switchOn = async (unit: ConsentActUnit, permissionSlug: string, document?: Record<string, unknown>) => {
+      const surface = await readConsentSurface(baseUrl, owner, unit, slug);
+
+      return sendSwitchOn(
+        baseUrl,
+        owner,
+        unit,
+        slug,
+        switchOnBody(surface, { [permissionSlug]: PluginGrantStatus.Granted }, document),
+      ).expect(200);
+    };
+
+    /** The unit's state as the owner's plugin read reports it: the household's list, or their own. */
+    const unitState = async (unit: ConsentActUnit): Promise<string | undefined> => {
+      const listed = await request(baseUrl)
+        .get(`${unitPluginsPath(unit)}?limit=100`)
+        .set(owner.headers)
+        .expect(200);
+
+      return listed.body.plugins.find((entry: { slug: string }) => entry.slug === slug)?.unit?.state;
+    };
+
+    await installAndSwitchOnServer(artifact);
+    await switchOn(householdUnit, HOUSEHOLD_READ, config);
+    await switchOn('me', USER_READ);
+
+    expect(await unitState(householdUnit)).toBe('on');
+    expect(await unitState('me')).toBe('on');
+
+    await request(baseUrl).post(`/api/plugins/${slug}/uninstall`).set(admin.headers).send({}).expect(200);
+
+    const again = await buildArtifact({
+      slug,
+      indexJs: 'module.exports = () => ({ again: true });\n',
+      extraChecks: checks,
+      manifest: { scope: 'household' },
+    });
+
+    await installAndSwitchOnServer(again);
+
+    expect(await unitState(householdUnit)).toBe('off');
+    expect(await unitState('me')).toBe('off');
+
+    const plugin = await db.client.plugin.findUniqueOrThrow({ where: { slug } });
+
+    expect(
+      await db.client.householdPlugin.findUnique({
+        where: { householdId_pluginId: { householdId: household.id, pluginId: plugin.id } },
+      }),
+    ).toMatchObject({ enabled: false, config });
+
+    // No document supplied: the retained one is judged and kept.
+    const householdOn = await switchOn(householdUnit, HOUSEHOLD_READ);
+
+    expect(householdOn.body.unit).toMatchObject({ enabled: true, config });
+
+    await switchOn('me', USER_READ);
+
+    expect(await unitState(householdUnit)).toBe('on');
+    expect(await unitState('me')).toBe('on');
+
+    const switchOns = await db.client.pluginConsentAct.findMany({
+      where: { pluginId: plugin.id, kind: 'SwitchOn', manifestSha256: again.sha256 },
+    });
+
+    expect(switchOns.map((act) => act.scopeType).sort()).toEqual(['Household', 'User']);
+    expect(switchOns.every((act) => act.decidedById === owner.user.id)).toBe(true);
   });
 
   it('a checksum mismatch by upload keeps nothing (#1094)', async () => {

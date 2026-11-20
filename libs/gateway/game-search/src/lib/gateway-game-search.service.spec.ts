@@ -1,21 +1,21 @@
 import { ContentFormat, ContentType, DataGatewayCapability, PlatformType, SearchFilterAxis } from '@bge/database';
-import {
-  coverageOverlaps,
-  GatewayRegistryService,
-  GatewayRoutingRefusedError,
-  type CoverageFilter,
-  type GatewayResolution,
-  type SearchResolution,
-  type SearchRoute,
-  type StoredCoverage,
+import type {
+  CoverageFilter,
+  GatewayResolution,
+  SearchResolution,
+  SearchRoute,
+  StoredCoverage,
 } from '@bge/gateway-registry';
-import { createTestingModuleWithDb, type CacheMock, type MockDatabaseService } from '@bge/testing';
+import { coverageOverlaps, GatewayRegistryService, GatewayRoutingRefusedError } from '@bge/gateway-registry';
+import type { CacheMock, MockDatabaseService } from '@bge/testing';
+import { createTestingModuleWithDb } from '@bge/testing';
 import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
 import { InMemoryGatewayDriver } from '@boardgamesempire/gateway-driver-contract-testing';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { Logger } from '@nestjs/common';
 import { setTimeout as delay } from 'node:timers/promises';
-import { from, lastValueFrom, toArray, type Observable } from 'rxjs';
+import type { Observable } from 'rxjs';
+import { from, lastValueFrom, toArray } from 'rxjs';
 import { GatewayGameSearchService } from './gateway-game-search.service';
 
 const {
@@ -67,8 +67,8 @@ const unclassified: proto.GameSearchData = {
 };
 
 interface ScriptedStreams {
-  searchGames?: proto.GatewaySearchResult[];
   fetchExpansions?: proto.GatewaySearchResult[];
+  searchGames?: proto.GatewaySearchResult[];
 }
 
 /** A driver whose streams are exactly the given frames, for statuses the fixture-backed driver never produces. */
@@ -97,11 +97,11 @@ const VIDEO_GAMES: StoredCoverage = {
 };
 
 interface Registration {
-  driver: DataGatewayDriver;
   capabilities: DataGatewayCapability[];
-  coverage: StoredCoverage;
-  filterableAxes: SearchFilterAxis[];
   contentFormat: ContentFormat | null;
+  coverage: StoredCoverage;
+  driver: DataGatewayDriver;
+  filterableAxes: SearchFilterAxis[];
 }
 
 /**
@@ -202,7 +202,7 @@ class FakeRegistry implements Pick<
 
 /** The dedup lookup's argument: a GameSource by its (gateway, external id) key. */
 interface SourceLookup {
-  where: { gatewayId_externalId: { gatewayId: string; externalId: string } };
+  where: { gatewayId_externalId: { externalId: string; gatewayId: string } };
 }
 
 const collect = <T>(stream: Observable<T>): Promise<T[]> => lastValueFrom(stream.pipe(toArray()));
@@ -373,6 +373,7 @@ describe('GatewayGameSearchService', () => {
         if (gatewayId === 'igdb') {
           throw outage;
         }
+
         return FakeRegistry.prototype.resolveSearch.call(registry, gatewayId, filter);
       });
 
@@ -470,6 +471,7 @@ describe('GatewayGameSearchService', () => {
         if (where.gatewayId_externalId.externalId === brass.externalId) {
           throw new Error('connection pool exhausted');
         }
+
         return null;
       }) as never);
 

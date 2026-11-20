@@ -8,6 +8,7 @@ import {
   WebhookSubscriptionStatus,
 } from '@bge/database';
 import { I18nMessage, t } from '@bge/i18n';
+import type { AppAbility } from '@bge/permissions';
 import {
   AbilityFactory,
   AbilityService,
@@ -15,16 +16,16 @@ import {
   PermissionsService,
   resolveScopeSubjectId,
   ScopeComposer,
-  type AppAbility,
 } from '@bge/permissions';
-import { QuotaExceededException, QuotaService, WEBHOOK_SUBSCRIPTION_OFF, type QuotaSoftOverageEvent } from '@bge/quota';
+import type { QuotaSoftOverageEvent } from '@bge/quota';
+import { QuotaExceededException, QuotaService, WEBHOOK_SUBSCRIPTION_OFF } from '@bge/quota';
 import { EncryptionService } from '@bge/services';
+import type { WebhookEventType } from '@bge/webhooks';
 import {
   CreateWebhookSubscriptionDto,
   UpdateWebhookSubscriptionDto,
   WebhookEventRegistry,
   WebhookVisibilityService,
-  type WebhookEventType,
 } from '@bge/webhooks';
 import { accessibleBy } from '@casl/prisma';
 import {
@@ -278,6 +279,7 @@ export class WebhookSubscriptionService {
 
     const existing = await this.getWritable(id);
     const abilities = await this.withRecordedKey(existing, actorAbilities);
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- the column is a plain string; this service writes only validated WebhookEventType values to it (#1321)
     const types = existing.eventTypes.map((row) => row.eventType as WebhookEventType);
 
     this.assertCanReceiveTypes(types, abilities);
@@ -482,6 +484,7 @@ export class WebhookSubscriptionService {
     if (abilities.length === 0) {
       throw new ForbiddenException(message);
     }
+
     return abilities;
   }
 

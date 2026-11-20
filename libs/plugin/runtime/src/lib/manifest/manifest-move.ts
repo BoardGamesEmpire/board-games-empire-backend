@@ -11,15 +11,14 @@ import type { Prisma } from '@bge/database';
  *
  * The distinction reaches the client because the two differ in what
  * survived. A reinstall's uninstall purged every grant for the plugin, so
- * consent starts from zero. An activation keeps every grant whose permission
- * the new plugin manifest still declares — it deletes the grants on REMOVED
- * declares, which is not the same event: those lapsed with the permission
- * they were consent to, and nothing is left to re-consent to.
+ * consent starts from zero. An activation keeps every consent decision
+ * (#1152): one the new plugin manifest does not request at its scope confers
+ * nothing, and counts again if a later manifest requests it there.
  *
  * Two arms, and a same-version re-activation (#368) adds no third: the
  * guard now also refuses an A→B→A pair, which moves the content while
  * leaving both columns where they were, and that pair is an activation —
- * consent to what the plugin manifest still declares outlived it. `kind` answers
+ * every consent decision outlived it. `kind` answers
  * "does the user start from zero", so the new case needs a different
  * SENTENCE, not a different kind.
  */
@@ -44,9 +43,9 @@ export type PluginChangeKind = 'reinstalled' | 'version-activated';
  * the document says so.
  */
 export interface ManifestSnapshot {
-  readonly version: string;
   readonly installedAt: Date;
   readonly manifestJson: Prisma.JsonValue;
+  readonly version: string;
 }
 
 /**
@@ -55,10 +54,10 @@ export interface ManifestSnapshot {
  * NULL when nothing was bound.
  */
 export interface ClaimedPluginRow {
-  readonly uninstalled_at: Date | null;
-  readonly version: string;
   readonly installed_at: Date;
   readonly manifest_matches: boolean | null;
+  readonly uninstalled_at: Date | null;
+  readonly version: string;
 }
 
 /**

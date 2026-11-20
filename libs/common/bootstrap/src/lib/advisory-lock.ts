@@ -33,15 +33,17 @@ export const LOCK_KEEP_ALIVE_MS = 30_000;
 const POOLER_QUEUE_HINT = 'as when a connection pooler has no server connection free';
 
 export interface PgAdvisoryLockOptions {
-  readonly connectionString: string;
-  readonly logger: BootstrapLogger;
   /** Shown in `pg_stat_activity` for whoever is waiting on us. */
   readonly applicationName: string;
-  readonly waitMs?: number;
-  readonly attemptMs?: number;
+
   /** See {@link LOCK_ATTEMPT_GRACE_MS}. */
   readonly attemptGraceMs?: number;
+
+  readonly attemptMs?: number;
   readonly clock?: Clock;
+  readonly connectionString: string;
+  readonly logger: BootstrapLogger;
+  readonly waitMs?: number;
 }
 
 export class LockNotAcquiredError extends Error {
@@ -92,8 +94,8 @@ export class LockLostError extends Error {
 }
 
 interface HolderRow {
-  pid: number;
   application_name: string;
+  pid: number;
   state: string | null;
 }
 
@@ -151,6 +153,7 @@ const UNANSWERED = Symbol('unanswered');
 export class PgAdvisoryLock implements BootstrapLock {
   private client: Client | undefined;
   private held = false;
+
   /** Why the connection failed while the lock was held. */
   private lost: Error | undefined;
 
@@ -177,7 +180,10 @@ export class PgAdvisoryLock implements BootstrapLock {
       if (taken === true) {
         // A failure read with the grant reaches the error listener before this
         // line, while the lock is not yet held, and only clears the client.
-        if (this.client !== client) throw new LockLostError('as the lock was granted');
+        if (this.client !== client) {
+          throw new LockLostError('as the lock was granted');
+        }
+
         this.held = true;
         return;
       }
@@ -210,12 +216,17 @@ export class PgAdvisoryLock implements BootstrapLock {
    * `finally`.
    */
   async release(): Promise<void> {
-    if (!this.held) return;
+    if (!this.held) {
+      return;
+    }
+
     this.held = false;
     const lost = this.lost;
     this.lost = undefined;
     const client = this.client;
-    if (lost || !client) throw new LockLostError(lost?.message ?? 'the connection is gone');
+    if (lost || !client) {
+      throw new LockLostError(lost?.message ?? 'the connection is gone');
+    }
 
     // Bounded like every other step: a connection that died without a reset
     // would otherwise hold the COMMIT for as long as TCP retries.
@@ -226,6 +237,7 @@ export class PgAdvisoryLock implements BootstrapLock {
     } catch (error) {
       throw new LockLostError(error instanceof Error ? error.message : String(error));
     }
+
     if (committed === UNANSWERED) {
       throw new LockLostError(`the database did not answer the COMMIT within ${graceMs}ms`);
     }
@@ -238,7 +250,10 @@ export class PgAdvisoryLock implements BootstrapLock {
    */
   assertHeld(): void {
     const lost = this.lost;
-    if (!lost) return;
+    if (!lost) {
+      return;
+    }
+
     this.held = false;
     this.lost = undefined;
     throw new LockLostError(lost.message);
@@ -280,6 +295,7 @@ export class PgAdvisoryLock implements BootstrapLock {
         await client.query('ROLLBACK').catch(() => undefined);
         throw error;
       }
+
       await client.query('ROLLBACK');
       return false;
     }
@@ -298,14 +314,20 @@ export class PgAdvisoryLock implements BootstrapLock {
     let abandoned = false;
     const timer = setTimeout(() => {
       abandoned = true;
-      if (this.client === client) this.client = undefined;
+      if (this.client === client) {
+        this.client = undefined;
+      }
+
       client.end().catch(() => undefined);
     }, ms);
 
     try {
       return await step();
     } catch (error) {
-      if (abandoned) return UNANSWERED;
+      if (abandoned) {
+        return UNANSWERED;
+      }
+
       throw error;
     } finally {
       clearTimeout(timer);
@@ -313,7 +335,9 @@ export class PgAdvisoryLock implements BootstrapLock {
   }
 
   private async connect(budgetMs: number): Promise<Client> {
-    if (this.client) return this.client;
+    if (this.client) {
+      return this.client;
+    }
 
     const client = new Client({
       connectionString: this.options.connectionString,
@@ -328,16 +352,25 @@ export class PgAdvisoryLock implements BootstrapLock {
     // node-postgres emits a failure that no query is waiting on, such as
     // Postgres ending an idle connection; unheard, it would end the process.
     client.on('error', (error) => {
-      if (this.client !== client) return;
+      if (this.client !== client) {
+        return;
+      }
+
       this.client = undefined;
-      if (this.held) this.lost ??= error;
+      if (this.held) {
+        this.lost ??= error;
+      }
     });
     try {
       await client.connect();
     } catch (error) {
-      if (isConnectTimeout(error)) throw new LockConnectionTimeoutError(budgetMs);
+      if (isConnectTimeout(error)) {
+        throw new LockConnectionTimeoutError(budgetMs);
+      }
+
       throw error;
     }
+
     this.client = client;
     return client;
   }
@@ -371,7 +404,7 @@ export function attemptWithin(attemptMs: number, remainingMs: number): number {
 }
 
 function isLockNotAvailable(error: unknown): boolean {
-  return typeof error === 'object' && error !== null && (error as { code?: unknown }).code === PG.LockNotAvailable;
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === PG.LockNotAvailable;
 }
 
 /** node-postgres destroys the socket with exactly this message when `connectionTimeoutMillis` expires; there is no code. */
@@ -380,7 +413,10 @@ function isConnectTimeout(error: unknown): boolean {
 }
 
 export function describeHolder(rows: readonly HolderRow[]): string | undefined {
-  if (rows.length === 0) return undefined;
+  if (rows.length === 0) {
+    return undefined;
+  }
+
   return rows
     .map((row) => `pid ${row.pid} (${row.application_name || 'unnamed'}${row.state ? `, ${row.state}` : ''})`)
     .join(', ');

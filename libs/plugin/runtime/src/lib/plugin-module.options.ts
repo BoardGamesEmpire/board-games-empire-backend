@@ -10,22 +10,9 @@ export type PluginProductCheck = (product: unknown) => string | null;
  * (or a test) states exactly which plugin root and version identity it runs with.
  */
 export interface PluginModuleOptions {
-  /**
-   * Root directory for installed plugins, one directory per plugin artifact
-   * (`<pluginsRoot>/<slug>/<sha256>`, #224), which the install ingress
-   * populates (#1094). The only one: no plugin ships inside the server
-   * (#696).
-   */
-  readonly pluginsRoot: string;
   /** Running BGE version for manifest `bgeCompat` evaluation — build-time injected constant per #59. */
   readonly bgeVersion: string;
-  /**
-   * What kind of process this is: `'api'`, or `'coordinator'` for the
-   * process that hosts the data-gateway plugins (#1083). It labels the plugin
-   * load records the process writes (#1094), and must be the process role
-   * `roleLoading` answers for each category in {@link loadCategories}.
-   */
-  readonly processRole: string;
+
   /** Server default locale for manifest localization resolution. */
   readonly defaultLocale: string;
 
@@ -35,6 +22,30 @@ export interface PluginModuleOptions {
    * plugins of the categories it names; one that names none loads nothing.
    */
   readonly loadCategories: readonly PluginCategory[];
+
+  /**
+   * Root directory for installed plugins, one directory per plugin artifact
+   * (`<pluginsRoot>/<slug>/<sha256>`, #224), which the install ingress
+   * populates (#1094). The only one: no plugin ships inside the server
+   * (#696).
+   */
+  readonly pluginsRoot: string;
+
+  /**
+   * What kind of process this is: `'api'`, or `'coordinator'` for the
+   * process that hosts the data-gateway plugins (#1083). It labels the plugin
+   * load records the process writes (#1094), and must be the process role
+   * `roleLoading` answers for each category in {@link loadCategories}.
+   */
+  readonly processRole: string;
+
+  /**
+   * The server's check, per category, that a factory's product is what the
+   * process hosting that category can serve (#1083). It runs before the
+   * product is registered; a reason it returns quarantines the plugin like
+   * any other load failure. A category without a check adopts any product.
+   */
+  readonly productChecks?: Partial<Record<PluginCategory, PluginProductCheck>>;
 
   /**
    * Whether this process's plugin load records say ready only once the host
@@ -48,14 +59,6 @@ export interface PluginModuleOptions {
    * process dials the api for a plugin.
    */
   readonly readyOnceServing?: boolean;
-
-  /**
-   * The server's check, per category, that a factory's product is what the
-   * process hosting that category can serve (#1083). It runs before the
-   * product is registered; a reason it returns quarantines the plugin like
-   * any other load failure. A category without a check adopts any product.
-   */
-  readonly productChecks?: Partial<Record<PluginCategory, PluginProductCheck>>;
 }
 
 export const { ConfigurableModuleClass, MODULE_OPTIONS_TOKEN } = new ConfigurableModuleBuilder<PluginModuleOptions>()

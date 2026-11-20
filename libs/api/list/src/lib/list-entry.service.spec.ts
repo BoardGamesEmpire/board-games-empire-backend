@@ -2,13 +2,13 @@ import { Action, ListKind, Prisma, ResourceType, WishlistPriority } from '@bge/d
 import { uniqueViolation, uniqueViolationWithoutMeta } from '@bge/database/testing';
 import { t } from '@bge/i18n';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
+import type { MockDatabaseService } from '@bge/testing';
 import {
   batchTransactionCall,
   createTestingModuleWithDb,
   paginationQuery,
   rawQueryText,
   unwrapTransaction,
-  type MockDatabaseService,
 } from '@bge/testing';
 import { Logger } from '@nestjs/common';
 import { LIST_ENTRY_SELECT } from './list-entry-row';
@@ -151,6 +151,13 @@ describe('ListEntryService', () => {
       expect(db.$transaction).toHaveBeenCalledTimes(1);
       expect(operations).toHaveLength(3);
       expect(options).toEqual({ isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    });
+
+    // A platform game's own content type is one of its overrides, so an entry
+    // naming a platform game sends it beside the image ones, a value or null
+    // (#1391).
+    it("sends a platform game's own content type beside its other overrides (#1391)", () => {
+      expect(LIST_ENTRY_SELECT.platformGame.select).toMatchObject({ image: true, thumbnail: true, contentType: true });
     });
   });
 

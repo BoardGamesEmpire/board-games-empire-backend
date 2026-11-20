@@ -9,18 +9,20 @@ import type { InjectionToken, ModuleMetadata } from '@nestjs/common';
  * and a raw ioredis client.
  */
 export interface BgeRedisConnectionConfig {
-  username?: string;
-  password?: string;
   database?: number;
+  password?: string;
+
   socket: {
-    host: string;
-    port: number;
-    tls: boolean;
-    rejectUnauthorized?: boolean;
     ca?: string;
-    key?: string;
     cert?: string;
+    host: string;
+    key?: string;
+    port: number;
+    rejectUnauthorized?: boolean;
+    tls: boolean;
   };
+
+  username?: string;
 }
 
 /**
@@ -38,7 +40,7 @@ export interface BgeRedisAsyncConnectionOptions {
 
   // NestJS DI factories are inherently variadic; `any[]` here matches the
   // codebase convention (see GatewayConfigEventsModuleAsyncOptions).
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- a Nest DI factory's arguments are whatever `inject` lists (#1321)
   useFactory: (...args: any[]) => Promise<BgeRedisConnectionConfig> | BgeRedisConnectionConfig;
 }
 

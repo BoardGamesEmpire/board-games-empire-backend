@@ -1,10 +1,8 @@
-import { ProviderLinkingPolicy, type PrismaClient } from '@bge/database';
+import type { PrismaClient } from '@bge/database';
+import { ProviderLinkingPolicy } from '@bge/database';
 import type { I18nPath } from '@bge/i18n';
-import {
-  createProviderLinkingGate,
-  providerLinkingPolicyReader,
-  type ProviderLinkingGateDeps,
-} from './provider-linking-gate';
+import type { ProviderLinkingGateDeps } from './provider-linking-gate';
+import { createProviderLinkingGate, providerLinkingPolicyReader } from './provider-linking-gate';
 
 const render = (key: I18nPath): string => `rendered:${key}`;
 
@@ -50,6 +48,7 @@ describe('createProviderLinkingGate', () => {
     for (const action of ['create-user', 'sign-in']) {
       await expect(gate({ user: { emailVerified: false }, source: { action } })).resolves.toBeUndefined();
     }
+
     expect(deps.readPolicy).not.toHaveBeenCalled();
   });
 

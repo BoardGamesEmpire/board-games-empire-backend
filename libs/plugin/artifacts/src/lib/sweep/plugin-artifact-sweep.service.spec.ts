@@ -1,7 +1,8 @@
 import type { SystemActorScope } from '@bge/actor-context';
 import { PLUGIN_LOAD_STALE_MS } from '@bge/database';
 import { buildPluginModuleOptions } from '@bge/plugin';
-import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService } from '@bge/testing';
 import { buildPluginArtifactSha256 as sha } from '@boardgamesempire/plugin-contract';
 import { Logger } from '@nestjs/common';
 import { lstat, mkdir, mkdtemp, readdir, rename, rm, symlink, utimes, writeFile } from 'node:fs/promises';
@@ -37,15 +38,15 @@ type Row = Record<string, unknown>;
 type Where = Record<string, unknown>;
 type Select = Record<string, boolean>;
 
-type ArtifactRow = { sha256: string; slug: string; expiresAt: Date };
-type PluginRow = { slug: string; installedSha256: string; pendingSha256: string | null; uninstalledAt: Date | null };
-type LoadRow = { processId: string; slug: string; sha256: string; heartbeatAt: Date };
+type ArtifactRow = { expiresAt: Date; sha256: string; slug: string };
+type PluginRow = { installedSha256: string; pendingSha256: string | null; slug: string; uninstalledAt: Date | null };
+type LoadRow = { heartbeatAt: Date; processId: string; sha256: string; slug: string };
 
 /** A mocked Prisma delegate, as far as the in-memory fake below drives it. */
 interface FakeableDelegate {
+  deleteMany: { mockImplementation(fn: never): unknown };
   findMany: { mockImplementation(fn: never): unknown };
   findUnique: { mockImplementation(fn: never): unknown };
-  deleteMany: { mockImplementation(fn: never): unknown };
   updateMany: { mockImplementation(fn: never): unknown };
 }
 
@@ -67,7 +68,7 @@ const matches = (row: Row, where: Where = {}): boolean =>
       return value instanceof Date && value.getTime() === condition.getTime();
     }
 
-    const { lte, gt, ...rest } = condition as { lte?: Date; gt?: Date };
+    const { lte, gt, ...rest } = condition as { gt?: Date; lte?: Date };
     if (Object.keys(rest).length > 0 || (lte === undefined && gt === undefined) || !(value instanceof Date)) {
       throw new Error(`The fake database cannot judge ${column} against ${JSON.stringify(condition)}`);
     }
@@ -97,7 +98,7 @@ describe('PluginArtifactSweepService (#1094)', () => {
 
   let root: string;
   let db: MockDatabaseService;
-  let tables: { artifacts: ArtifactRow[]; plugins: PluginRow[]; loads: LoadRow[] };
+  let tables: { artifacts: ArtifactRow[]; loads: LoadRow[]; plugins: PluginRow[] };
   /** What the fake database saw, in order: each delete, and each read's start and end. */
   let events: string[];
   /** Runs once a read has taken its result, before returning it: a change a test makes land there. */
@@ -116,7 +117,7 @@ describe('PluginArtifactSweepService (#1094)', () => {
 
   /** Backs a mocked delegate with an in-memory table, for the queries the sweep and the store send. */
   const backWithTable = (delegate: FakeableDelegate, table: string, rows: Row[]) => {
-    delegate.findMany.mockImplementation((async ({ where, select }: { where?: Where; select?: Select } = {}) => {
+    delegate.findMany.mockImplementation((async ({ where, select }: { select?: Select; where?: Where } = {}) => {
       events.push(`start read ${table}`);
       // A tick, so reads issued at once would show as interleaved starts.
       await Promise.resolve();
@@ -131,14 +132,16 @@ describe('PluginArtifactSweepService (#1094)', () => {
       for (const row of doomed) {
         rows.splice(rows.indexOf(row), 1);
       }
+
       events.push(`delete ${table}`);
       return { count: doomed.length };
     }) as never);
-    delegate.updateMany.mockImplementation((async ({ where, data }: { where?: Where; data: Row }) => {
+    delegate.updateMany.mockImplementation((async ({ where, data }: { data: Row; where?: Where }) => {
       const hit = rows.filter((row) => matches(row, where));
       for (const row of hit) {
         Object.assign(row, data);
       }
+
       return { count: hit.length };
     }) as never);
     delegate.findUnique.mockImplementation((async ({ where }: { where: Where }) => {
@@ -288,6 +291,7 @@ describe('PluginArtifactSweepService (#1094)', () => {
     for (const dir of named) {
       expect(await exists(dir)).toBe(true);
     }
+
     expect(await exists(unnamed)).toBe(false);
     expect(result).toEqual({
       removedDirectories: 1,
@@ -543,6 +547,7 @@ describe('PluginArtifactSweepService (#1094)', () => {
     for (const path of [lostAndFound, ...Object.values(strangers), join(root, 'demo-sink')]) {
       await age(path, AGED);
     }
+
     const unnamed = await artifactDirectory('other-plugin', sha('c'), AGED);
 
     await service.runSweep(now);
@@ -550,11 +555,13 @@ describe('PluginArtifactSweepService (#1094)', () => {
     for (const path of [lostAndFound, ...Object.values(strangers)]) {
       expect(await exists(path)).toBe(true);
     }
+
     expect(await exists(join(root, 'Not_A_Slug', sha('a')))).toBe(true);
     expect(await exists(unnamed)).toBe(false);
     for (const relative of Object.keys(strangers)) {
       expect(warn).toHaveBeenCalledWith(expect.stringContaining(`${relative} `));
     }
+
     expect(debug).toHaveBeenCalledWith(expect.stringContaining('lost+found '));
     expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('lost+found'));
   });
@@ -642,6 +649,7 @@ describe('PluginArtifactSweepService (#1094)', () => {
       await age(path, ageMs);
       return path;
     };
+
     const scratchExtraction = async (name: string, ageMs: number) => {
       const path = join(incoming, name);
       await mkdir(join(path, 'package'), { recursive: true });
@@ -649,6 +657,7 @@ describe('PluginArtifactSweepService (#1094)', () => {
       await age(path, ageMs);
       return path;
     };
+
     const removed = [
       await scratchArchive('aged.tgz', AGED),
       await scratchExtraction('aged', AGED),
@@ -665,9 +674,11 @@ describe('PluginArtifactSweepService (#1094)', () => {
     for (const path of removed) {
       expect(await exists(path)).toBe(false);
     }
+
     for (const path of kept) {
       expect(await exists(path)).toBe(true);
     }
+
     // The directory itself stays, for the next upload.
     expect(await exists(incoming)).toBe(true);
   });
@@ -675,7 +686,7 @@ describe('PluginArtifactSweepService (#1094)', () => {
   describe('removing an artifact directory', () => {
     it('moves it aside first, so its checksum path is gone the moment the rename lands (#1094)', async () => {
       const dir = await artifactDirectory('demo-sink', sha('a'), AGED);
-      const seen: { aside: string; checksumPathThere: boolean; asideComplete: boolean }[] = [];
+      const seen: { aside: string; asideComplete: boolean; checksumPathThere: boolean }[] = [];
       jest.mocked(rm).mockImplementation(async (path, options) => {
         if (String(path).endsWith('.swept')) {
           seen.push({
@@ -684,6 +695,7 @@ describe('PluginArtifactSweepService (#1094)', () => {
             asideComplete: await exists(join(String(path), 'manifest.json')),
           });
         }
+
         return actualRm(path, options);
       });
 
@@ -703,6 +715,7 @@ describe('PluginArtifactSweepService (#1094)', () => {
         if (String(path).endsWith('.swept')) {
           throw Object.assign(new Error(`EACCES: permission denied, rm '${String(path)}'`), { code: 'EACCES' });
         }
+
         return actualRm(path, options);
       });
 
@@ -753,6 +766,7 @@ describe('PluginArtifactSweepService (#1094)', () => {
         if (from === stuck) {
           throw Object.assign(new Error(`EACCES: permission denied, rename '${stuck}'`), { code: 'EACCES' });
         }
+
         return actualRename(from, to);
       });
 
@@ -793,6 +807,7 @@ describe('PluginArtifactSweepService (#1094)', () => {
       for (const dir of spared) {
         expect(await exists(dir)).toBe(true);
       }
+
       expect(await exists(join(root, 'empty-plugin'))).toBe(true);
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('notes.txt '));
       const guardWarnings = warn.mock.calls.filter(([message]) => String(message).includes('DATABASE_URL'));
@@ -852,9 +867,11 @@ describe('PluginArtifactSweepService (#1094)', () => {
       if (path === root) {
         await actualRm(join(root, 'other-plugin'), { recursive: true, force: true });
       }
+
       if (path === join(root, 'demo-sink')) {
         await actualRm(directoryGone, { recursive: true, force: true });
       }
+
       return names;
     }) as never);
 

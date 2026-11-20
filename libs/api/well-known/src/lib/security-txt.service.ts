@@ -52,19 +52,29 @@ export class SecurityTxtService {
     lines.push(`Canonical: ${issuer}/.well-known/security.txt`);
 
     const policy = this.configService.get<string>('security.policy');
-    if (policy) lines.push(`Policy: ${policy}`);
+    if (policy) {
+      lines.push(`Policy: ${policy}`);
+    }
 
     const encryption = this.configService.get<string>('security.encryption');
-    if (encryption) lines.push(`Encryption: ${encryption}`);
+    if (encryption) {
+      lines.push(`Encryption: ${encryption}`);
+    }
 
     const acknowledgments = this.configService.get<string>('security.acknowledgments');
-    if (acknowledgments) lines.push(`Acknowledgments: ${acknowledgments}`);
+    if (acknowledgments) {
+      lines.push(`Acknowledgments: ${acknowledgments}`);
+    }
 
     const preferredLanguages = this.configService.get<string>('security.preferredLanguages');
-    if (preferredLanguages) lines.push(`Preferred-Languages: ${preferredLanguages}`);
+    if (preferredLanguages) {
+      lines.push(`Preferred-Languages: ${preferredLanguages}`);
+    }
 
     const hiring = this.configService.get<string>('security.hiring');
-    if (hiring) lines.push(`Hiring: ${hiring}`);
+    if (hiring) {
+      lines.push(`Hiring: ${hiring}`);
+    }
 
     // Trailing newline required per RFC 9116 §3
     return lines.join('\n') + '\n';
@@ -86,6 +96,7 @@ export class SecurityTxtService {
     }
 
     const expiry = DateTime.fromJSDate(now).toUTC().plus({ years: 1 }).startOf('day');
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- luxon types toISO as string | null, null only for an invalid DateTime; one built from the clock's Date is valid (#1321)
     return expiry.toISO() as string;
   }
 }

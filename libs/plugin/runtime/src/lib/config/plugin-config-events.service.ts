@@ -1,11 +1,17 @@
-import { CACHE_REDIS_CLIENT, type Redis } from '@bge/redis';
+import type { Redis } from '@bge/redis';
+import { CACHE_REDIS_CLIENT } from '@bge/redis';
 import { Inject, Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { z } from 'zod';
 import { PLUGIN_CONFIG_UPDATE_CHANNEL } from './plugin-config.constants';
 
 /** Message published after a plugin's server-scope config commit. */
-export interface PluginConfigReloadEvent {
-  readonly slug: string;
-}
+export const pluginConfigReloadEventSchema = z
+  .object({
+    slug: z.string().min(1),
+  })
+  .readonly();
+
+export type PluginConfigReloadEvent = z.infer<typeof pluginConfigReloadEventSchema>;
 
 export type PluginConfigReloadHandler = (event: PluginConfigReloadEvent) => void | Promise<void>;
 
@@ -30,7 +36,9 @@ export class PluginConfigEventsService implements OnModuleDestroy {
 
   async onModuleDestroy(): Promise<void> {
     const connection = this.subscriberConnection;
-    if (!connection) return;
+    if (!connection) {
+      return;
+    }
 
     this.subscriberConnection = undefined;
 
@@ -73,17 +81,17 @@ export class PluginConfigEventsService implements OnModuleDestroy {
     // Attached BEFORE subscribing so no message can land in the window
     // between the subscription taking effect and the listener existing.
     connection.on('message', (channel: string, message: string) => {
-      if (channel !== PLUGIN_CONFIG_UPDATE_CHANNEL) return;
+      if (channel !== PLUGIN_CONFIG_UPDATE_CHANNEL) {
+        return;
+      }
+
+      const event = this.decode(message);
+      if (!event) {
+        return;
+      }
 
       void (async (): Promise<void> => {
         try {
-          const event = JSON.parse(message) as PluginConfigReloadEvent;
-
-          if (typeof event.slug !== 'string' || event.slug.length === 0) {
-            this.logger.error(`Malformed config reload message dropped: ${message}`);
-            return;
-          }
-
           await handler(event);
         } catch (err) {
           this.logger.error(`Failed to handle config reload message: ${err instanceof Error ? err.message : err}`);
@@ -110,5 +118,35 @@ export class PluginConfigEventsService implements OnModuleDestroy {
     return async () => {
       await this.onModuleDestroy();
     };
+  }
+
+  /**
+   * Parses a message from the channel, or returns `undefined` after logging
+   * one error line that names the channel. A message is outside data until
+   * its schema accepts it, so invalid JSON and a failed schema are both
+   * dropped the same way, without reaching the handler (#1322).
+   */
+  private decode(message: string): PluginConfigReloadEvent | undefined {
+    let payload: unknown;
+    try {
+      payload = JSON.parse(message);
+    } catch (err) {
+      this.logger.error(
+        `Dropped a message on ${PLUGIN_CONFIG_UPDATE_CHANNEL} that is not JSON: ${err instanceof Error ? err.message : err}`,
+      );
+
+      return undefined;
+    }
+
+    const parsed = pluginConfigReloadEventSchema.safeParse(payload);
+    if (!parsed.success) {
+      this.logger.error(
+        `Dropped a message on ${PLUGIN_CONFIG_UPDATE_CHANNEL} that fails its schema: ${z.prettifyError(parsed.error)}`,
+      );
+
+      return undefined;
+    }
+
+    return parsed.data;
   }
 }

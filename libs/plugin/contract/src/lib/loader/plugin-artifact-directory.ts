@@ -16,6 +16,7 @@ export const PLUGIN_ARTIFACT_SHA256_PATTERN = /^[0-9a-f]{64}$/;
 
 /** The branded checksum for a value that is 64 lowercase hex characters, otherwise `null` (#1117). */
 export function parsePluginArtifactSha256(value: string): PluginArtifactSha256 | null {
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- a brand exists only in the type system, so minting one takes an assertion; the pattern test is the check it stands for (#1321)
   return PLUGIN_ARTIFACT_SHA256_PATTERN.test(value) ? (value as PluginArtifactSha256) : null;
 }
 
@@ -34,15 +35,19 @@ export function parsePluginArtifactSha256(value: string): PluginArtifactSha256 |
  * `main` fallback — see `entrypoint-resolver.ts`).
  */
 export interface PluginArtifactDirectory {
-  readonly slug: string;
-  /** The artifact's SHA-256 (64 lowercase hex characters): the directory's name and its identity. */
-  readonly sha256: PluginArtifactSha256;
-  /** Absolute path to the artifact's directory. */
-  readonly rootDir: string;
   /** Absolute path to `manifest.json` (always at the root). */
   readonly manifestPath: string;
+
   /** Absolute path to `package.json` (always at the root). */
   readonly packageJsonPath: string;
+
+  /** Absolute path to the artifact's directory. */
+  readonly rootDir: string;
+
+  /** The artifact's SHA-256 (64 lowercase hex characters): the directory's name and its identity. */
+  readonly sha256: PluginArtifactSha256;
+
+  readonly slug: string;
 }
 
 export const PLUGIN_MANIFEST_FILENAME = 'manifest.json';

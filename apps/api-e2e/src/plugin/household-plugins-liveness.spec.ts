@@ -1,13 +1,18 @@
-import { PluginGrantStatus, PluginScope, RiskLevel, type Plugin } from '@bge/database';
-import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
+import type { Plugin } from '@bge/database';
+import { PluginGrantStatus, PluginScope, RiskLevel } from '@bge/database';
+import type { Actors, SessionActor } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import type { Caller } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
-import { readConsentSurface, reviewBody, switchOnBody, toggleBody, type ConsentSurface } from './consent-act-fixtures';
-import { MANAGE_DIGEST_CHECK, type Check } from './manifest-checks';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
+import type { ConsentSurface } from './consent-act-fixtures';
+import { readConsentSurface, reviewBody, switchOnBody, toggleBody } from './consent-act-fixtures';
+import type { Check } from './manifest-checks';
+import { MANAGE_DIGEST_CHECK } from './manifest-checks';
 import { householdPluginKey } from './plugin-api-key';
 import { pluginRowData } from './plugin-row-fixtures';
 

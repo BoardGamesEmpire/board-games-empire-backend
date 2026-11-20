@@ -1,5 +1,6 @@
 import { PluginGrantScope, PluginGrantStatus, RiskLevel } from '@bge/database';
-import { compareForEscalations, type EscalationComparatorInput } from './escalation-comparator';
+import type { EscalationComparatorInput } from './escalation-comparator';
+import { compareForEscalations } from './escalation-comparator';
 import type { GrantComparisonView, ManifestComparisonView } from './update-escalation.types';
 
 describe('compareForEscalations', () => {
@@ -247,6 +248,77 @@ describe('compareForEscalations', () => {
 
       expect(result.escalations).toEqual([]);
     });
+
+    it('a retained decision at a scope the next manifest does not request the permission at escalates nothing, however stale its risk (#1152)', () => {
+      // Activation keeps every consent decision, so a household's decision
+      // can outlive the manifests that requested the permission at household
+      // scope. It confers nothing while no manifest does, and no household
+      // act can answer a permission requested at user scope, so routing it
+      // would ask every household for a re-consent it cannot give.
+      const atUserScope = view({ checks: [check('read:public_content', 'user')] });
+      const result = compare({
+        active: atUserScope,
+        next: atUserScope,
+        grants: [
+          grant({
+            permissionSlug: 'read:public_content',
+            scopeType: PluginGrantScope.Household,
+            decidedRiskLevel: RiskLevel.Low,
+          }),
+        ],
+        currentRiskBySlug: new Map([['read:public_content', RiskLevel.High]]),
+      });
+
+      expect(result.escalations).not.toContainEqual(expect.objectContaining({ kind: 'risk-escalated' }));
+      expect(result.householdReconsentSlugs).toEqual([]);
+    });
+
+    it('a retained server decision on a permission required at another scope does not gate approval (#1152)', () => {
+      // Approval re-writes only server-scope requests, so gating on this
+      // decision would stage every later update for approval with nothing an
+      // approval could answer.
+      const atHouseholdScope = view({ checks: [check('calendar:read', 'household', true)] });
+      const result = compare({
+        active: atHouseholdScope,
+        next: atHouseholdScope,
+        grants: [grant({ permissionSlug: 'calendar:read', decidedRiskLevel: RiskLevel.Low })],
+        currentRiskBySlug: new Map([['calendar:read', RiskLevel.High]]),
+      });
+
+      expect(result.serverGating).toBe(false);
+      expect(result.serverRiskEscalatedSlugs).toEqual([]);
+    });
+  });
+
+  describe('re-consent slug lists', () => {
+    it('name a permission once when a re-requested permission is both new and risk-escalated (#1152)', () => {
+      // A decision kept from an earlier manifest that requested the
+      // permission at this scope counts again when the next one requests it,
+      // so its stale risk escalates alongside the new request.
+      const result = compare({
+        next: view({ checks: [check('calendar:read', 'household', true), check('read:public_content', 'user', true)] }),
+        // Two households' decisions on one permission: each escalates, and the
+        // list still names the permission once.
+        grants: [
+          grant({ permissionSlug: 'calendar:read', scopeType: PluginGrantScope.Household }),
+          grant({ permissionSlug: 'calendar:read', scopeType: PluginGrantScope.Household }),
+          grant({ permissionSlug: 'read:public_content', scopeType: PluginGrantScope.User }),
+        ],
+        currentRiskBySlug: new Map([
+          ['calendar:read', RiskLevel.High],
+          ['read:public_content', RiskLevel.High],
+        ]),
+      });
+
+      expect(result.escalations).toContainEqual(
+        expect.objectContaining({ kind: 'new-permission', slug: 'calendar:read' }),
+      );
+      expect(result.escalations).toContainEqual(
+        expect.objectContaining({ kind: 'risk-escalated', slug: 'calendar:read' }),
+      );
+      expect(result.householdReconsentSlugs).toEqual(['calendar:read']);
+      expect(result.userReconsentSlugs).toEqual(['read:public_content']);
+    });
   });
 
   describe('consent-scope changes', () => {
@@ -275,7 +347,7 @@ describe('compareForEscalations', () => {
       expect(result.householdReconsentSlugs).toEqual(['calendar:read']);
     });
 
-    it('does NOT also route a stale OLD-scope grant as a risk escalation — the scope change subsumes it', () => {
+    it('a stale decision at the scope a permission moves away from escalates nothing: the next manifest does not request it there (#1152)', () => {
       const result = compare({
         active: view({ checks: [check('calendar:read', 'household', true)] }),
         next: view({ checks: [check('calendar:read', 'user', true)] }),
@@ -297,6 +369,57 @@ describe('compareForEscalations', () => {
       expect(result.escalations).not.toContainEqual(expect.objectContaining({ kind: 'risk-escalated' }));
     });
 
+    it('a kept decision at the new scope of a moved permission escalates when its risk no longer covers (#1152)', () => {
+      // An optional move back to household asks nothing of the household by
+      // itself, so the household's decision kept from an earlier manifest
+      // that requested the permission there must escalate on its own, as a
+      // re-requested permission's kept decision does.
+      const result = compare({
+        active: view({ checks: [check('calendar:read', 'user', false)] }),
+        next: view({ checks: [check('calendar:read', 'household', false)] }),
+        grants: [
+          grant({
+            permissionSlug: 'calendar:read',
+            scopeType: PluginGrantScope.Household,
+            decidedRiskLevel: RiskLevel.Low,
+          }),
+        ],
+        currentRiskBySlug: new Map([['calendar:read', RiskLevel.High]]),
+      });
+
+      expect(result.escalations).toContainEqual({
+        kind: 'risk-escalated',
+        slug: 'calendar:read',
+        scopeType: PluginGrantScope.Household,
+        decidedRiskLevel: RiskLevel.Low,
+        currentRiskLevel: RiskLevel.High,
+      });
+      expect(result.householdReconsentSlugs).toEqual(['calendar:read']);
+    });
+
+    it('a required move whose new scope holds a stale kept decision names the permission once (#1152)', () => {
+      const result = compare({
+        active: view({ checks: [check('calendar:read', 'user', true)] }),
+        next: view({ checks: [check('calendar:read', 'household', true)] }),
+        grants: [
+          grant({
+            permissionSlug: 'calendar:read',
+            scopeType: PluginGrantScope.Household,
+            decidedRiskLevel: RiskLevel.Low,
+          }),
+        ],
+        currentRiskBySlug: new Map([['calendar:read', RiskLevel.High]]),
+      });
+
+      expect(result.escalations).toContainEqual(
+        expect.objectContaining({ kind: 'consent-scope-changed', slug: 'calendar:read', to: 'household' }),
+      );
+      expect(result.escalations).toContainEqual(
+        expect.objectContaining({ kind: 'risk-escalated', slug: 'calendar:read' }),
+      );
+      expect(result.householdReconsentSlugs).toEqual(['calendar:read']);
+    });
+
     it('does not gate the server admin on a stale SERVER grant for a permission moving away from server scope', () => {
       const result = compare({
         active: view({ checks: [check('calendar:read', 'server', true)] }),
@@ -311,7 +434,8 @@ describe('compareForEscalations', () => {
         currentRiskBySlug: new Map([['calendar:read', RiskLevel.High]]),
       });
 
-      // Activation deletes that grant as scope-moved; re-approving it would
+      // Activation keeps that decision, and it confers nothing while the
+      // permission is requested at user scope (#1152); re-approving it would
       // ask the admin to re-consent to something they are about to stop owning.
       expect(result.serverGating).toBe(false);
       expect(result.serverRiskEscalatedSlugs).toEqual([]);

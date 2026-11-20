@@ -160,6 +160,7 @@ export class GameFetchProcessor extends ActorAwareWorkerHost<
       } else {
         await this.gatewayRegistry.reportFailure(gatewayId, err);
       }
+
       throw err;
     }
   }
@@ -207,6 +208,7 @@ export class GameFetchProcessor extends ActorAwareWorkerHost<
           data: {
             status: JobStatus.Failed,
             error: error.message,
+            // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Prisma's InputJsonValue needs an index signature, which an interface lacks, so the types aren't comparable and the cast goes through unknown (#1321)
             result: persistedFailure as unknown as Prisma.InputJsonValue,
           },
         });

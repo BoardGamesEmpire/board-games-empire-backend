@@ -2,7 +2,8 @@ import type { PluginArtifactDirectory } from '@boardgamesempire/plugin-contract'
 import { classifyImportSpecifier, resolveAliasedPackageName } from '@boardgamesempire/plugin-manifest';
 import { Injectable, Logger } from '@nestjs/common';
 import { init, parse as parseEsm } from 'es-module-lexer';
-import { parse as parseAst, type ESTree } from 'meriyah';
+import type { ESTree } from 'meriyah';
+import { parse as parseAst } from 'meriyah';
 import { readdir, readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { isPlainJsonObject } from '../is-plain-json-object';
@@ -14,16 +15,14 @@ import {
   resolvedParserVersion,
   SCRIPT_PARSE_OPTIONS,
 } from './parser-capabilities';
-import {
-  isGatingFinding,
-  MAX_ADVISORY_FINDINGS,
-  MAX_GATING_EXAMPLES_PER_SPECIFIER,
-  type StaticAnalysisFinding,
-  type StaticAnalysisFindingKind,
-  type StaticAnalysisReport,
-  type StaticAnalysisScanScope,
-  type StaticAnalysisSeverity,
+import type {
+  StaticAnalysisFinding,
+  StaticAnalysisFindingKind,
+  StaticAnalysisReport,
+  StaticAnalysisScanScope,
+  StaticAnalysisSeverity,
 } from './static-analysis.types';
+import { isGatingFinding, MAX_ADVISORY_FINDINGS, MAX_GATING_EXAMPLES_PER_SPECIFIER } from './static-analysis.types';
 
 const SCANNABLE_EXTENSIONS = ['.js', '.mjs', '.cjs'] as const;
 const NODE_MODULES = 'node_modules';
@@ -69,23 +68,22 @@ export interface StaticAnalysisOptions {
 
 /** Minimal structural view of an ESTree node — meriyah's AST walked without type assertions. */
 interface EstreeNode {
-  readonly type: string;
   readonly [key: string]: unknown;
+  readonly type: string;
 }
 
 interface CollectedFiles {
   readonly files: readonly string[];
+
   /** Directories that could not be listed, so their contents were never screened. */
   readonly unreadableDirectories: readonly string[];
 }
 
 const isEstreeNode = (value: unknown): value is EstreeNode =>
-  typeof value === 'object' && value !== null && typeof (value as { type?: unknown }).type === 'string';
+  typeof value === 'object' && value !== null && 'type' in value && typeof value.type === 'string';
 
 const errorCode = (err: unknown): string | undefined =>
-  typeof err === 'object' && err !== null && typeof (err as { code?: unknown }).code === 'string'
-    ? (err as { code: string }).code
-    : undefined;
+  typeof err === 'object' && err !== null && 'code' in err && typeof err.code === 'string' ? err.code : undefined;
 
 /** A finding key that ignores `file` — the deep pass dedupes on this across the whole tree. */
 const findingIdentity = (finding: StaticAnalysisFinding): string => `${finding.kind}\u0000${finding.specifier ?? ''}`;
@@ -339,6 +337,7 @@ export class PluginStaticAnalysisService {
       const finding: StaticAnalysisFinding = { file, kind, specifier, severity, scanScope };
       collected.set(findingIdentity(finding), finding);
     };
+
     const classify = (kind: 'esm-import' | 'dynamic-import' | 'cjs-require', specifier: string): void => {
       const verdict = classifyImportSpecifier(specifier);
 
@@ -442,7 +441,7 @@ export class PluginStaticAnalysisService {
       const callee = node['callee'];
 
       if (isEstreeNode(callee) && callee.type === 'Identifier' && callee['name'] === 'require') {
-        const argument = Array.isArray(node['arguments']) ? (node['arguments'][0] as unknown) : undefined;
+        const argument: unknown = Array.isArray(node['arguments']) ? node['arguments'][0] : undefined;
 
         if (isEstreeNode(argument) && argument.type === 'Literal' && typeof argument['value'] === 'string') {
           classify('cjs-require', argument['value']);

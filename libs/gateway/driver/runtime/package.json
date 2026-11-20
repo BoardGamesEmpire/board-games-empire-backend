@@ -15,5 +15,7 @@
   "nx": {
     "name": "gateway-registry"
   },
-  "dependencies": {}
+  "dependencies": {
+    "zod": "^4.4.3"
+  }
 }

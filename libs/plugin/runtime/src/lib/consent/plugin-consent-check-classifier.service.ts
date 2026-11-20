@@ -1,25 +1,25 @@
 import type { PluginUnit } from '@bge/actor-context';
+import type { Prisma, RiskLevel } from '@bge/database';
 import {
   CONSENT_UNIT_BINDING_REFUSAL,
   DatabaseService,
   grantScopeCoordinatesForUnit,
   PluginGrantStatus,
   riskCovers,
-  type Prisma,
-  type RiskLevel,
 } from '@bge/database';
 import type { NormalizedPermissionRequest } from '@boardgamesempire/plugin-manifest';
 import { Injectable, Logger } from '@nestjs/common';
 import { consentUngrantableCause } from '../grants/consent-grantability';
 import { CONSENT_SCOPE_TO_GRANT_SCOPE } from '../grants/consent-scope.map';
-import { consentCatalogFlags, type ConsentCatalogPermission } from './consent-catalog-flags';
-import {
-  unitConsumesConsentScope,
-  type ClassifiedConsentCheck,
-  type ConsentCheckClassification,
-  type ConsentCheckDecision,
-  type ConsentManifestSource,
+import type { ConsentCatalogPermission } from './consent-catalog-flags';
+import { consentCatalogFlags } from './consent-catalog-flags';
+import type {
+  ClassifiedConsentCheck,
+  ConsentCheckClassification,
+  ConsentCheckDecision,
+  ConsentManifestSource,
 } from './consent-classification.types';
+import { unitConsumesConsentScope } from './consent-classification.types';
 import { presentedRiskLevel } from './presented-risk-level';
 
 /**
@@ -174,8 +174,8 @@ export class PluginConsentCheckClassifier {
     pluginId: string,
     checks: readonly NormalizedPermissionRequest[],
   ): Promise<{
-    riskBySlug: Map<string, RiskLevel>;
     corePermissionsBySlug: Map<string, ConsentCatalogPermission>;
+    riskBySlug: Map<string, RiskLevel>;
   }> {
     const coreSlugs = checks.filter((check) => check.origin === 'core').map((check) => check.canonicalSlug);
     const ownSlugs = checks.filter((check) => check.origin === 'plugin').map((check) => check.canonicalSlug);
@@ -222,23 +222,26 @@ export { consentCatalogFlags, type ConsentCatalogPermission } from './consent-ca
 export type ConsentReadClient = Prisma.TransactionClient | DatabaseService;
 
 export interface ConsentClassifyOptions {
+  /** Read through this client, so a consent act's transaction sees its own writes. Default: the service's database. */
+  readonly client?: ConsentReadClient;
+
   /**
    * Which manifest the requested permissions come from. A staged manifest's
    * new declared permission has no catalog row until activation creates it,
    * and is still grantable. Default `active`.
    */
   readonly source?: ConsentManifestSource;
-  /** Read through this client, so a consent act's transaction sees its own writes. Default: the service's database. */
-  readonly client?: ConsentReadClient;
 }
 
 export interface ConsentCheckDecisionInput {
-  /** The row at the check's deciding scope, `Granted` or `Denied`; `undefined` when none exists. */
-  readonly grant: { readonly status: PluginGrantStatus; readonly decidedRiskLevel: RiskLevel } | undefined;
   /** Today's catalog risk, `null` when the catalog row is gone. */
   readonly currentRiskLevel: RiskLevel | null;
-  readonly wildcardSubject: boolean;
+
+  /** The row at the check's deciding scope, `Granted` or `Denied`; `undefined` when none exists. */
+  readonly grant: { readonly decidedRiskLevel: RiskLevel; readonly status: PluginGrantStatus } | undefined;
+
   readonly unboundedUnitScope: boolean;
+  readonly wildcardSubject: boolean;
 }
 
 /**
@@ -261,8 +264,8 @@ export type ConsentCheckNonConferringCause =
  * `Low` (#59).
  */
 export function decideConsentCheck(input: ConsentCheckDecisionInput): {
-  readonly decision: ConsentCheckDecision;
   readonly cause: ConsentCheckNonConferringCause | null;
+  readonly decision: ConsentCheckDecision;
 } {
   const { grant, currentRiskLevel, wildcardSubject, unboundedUnitScope } = input;
 

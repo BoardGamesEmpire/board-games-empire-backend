@@ -3,12 +3,14 @@ import { gzipSync } from 'node:zlib';
 import { pack } from 'tar-stream';
 
 export interface PluginTarballEntry {
-  readonly name: string;
-  readonly type?: 'file' | 'directory' | 'symlink' | 'link';
   readonly content?: string;
   readonly linkname?: string;
+  readonly name: string;
+
   /** Pax extended-header records, which override the header's own fields. */
   readonly pax?: Record<string, string>;
+
+  readonly type?: 'file' | 'directory' | 'symlink' | 'link';
 }
 
 /**
@@ -21,6 +23,7 @@ export const buildPluginTarball = async (entries: ReadonlyArray<PluginTarballEnt
   const chunks: Buffer[] = [];
   const collected = (async () => {
     for await (const chunk of archive) {
+      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- tar-stream's pack types its async iterator's chunks as unknown, and every chunk it emits is a Buffer (#1321)
       chunks.push(Buffer.from(chunk as Uint8Array));
     }
   })();

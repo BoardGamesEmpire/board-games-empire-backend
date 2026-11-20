@@ -1,8 +1,8 @@
 /** One request a DataGateway driver makes to its upstream (#1082). */
 export interface UpstreamRequest {
-  method: 'GET' | 'POST';
-  headers: Readonly<Record<string, string>>;
   body?: string;
+  headers: Readonly<Record<string, string>>;
+  method: 'GET' | 'POST';
 
   /** Aborts the request. A driver passes one, so unsubscribing from its call stops the request (#1082). */
   signal?: AbortSignal;

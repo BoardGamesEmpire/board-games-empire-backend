@@ -1,10 +1,6 @@
 import { AbilityService, PoliciesGuard } from '@bge/permissions';
-import {
-  createMockAbilityService,
-  createTestingModuleWithDb,
-  MOCK_ACTING_USER_ID,
-  type MockAbilityService,
-} from '@bge/testing';
+import type { MockAbilityService } from '@bge/testing';
+import { createMockAbilityService, createTestingModuleWithDb, MOCK_ACTING_USER_ID } from '@bge/testing';
 import { ForbiddenException } from '@nestjs/common';
 import { MarkReadDto } from './dto/mark-read.dto';
 import { NotificationsController } from './notifications.controller';

@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import * as crypto from 'node:crypto';
 import { Observable } from 'rxjs';
-import { AuditContextInternalService, type ActorContextInit } from './audit-context-internal.service';
+import type { ActorContextInit } from './audit-context-internal.service';
+import { AuditContextInternalService } from './audit-context-internal.service';
 
 /**
  * Sanctioned API for entering a CLS scope from system code paths — health

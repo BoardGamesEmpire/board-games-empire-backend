@@ -1,6 +1,7 @@
 import type { AuditContextService } from '@bge/actor-context';
 import { t } from '@bge/i18n-core';
-import { type ArgumentsHost, HttpException, Logger, NotFoundException } from '@nestjs/common';
+import type { ArgumentsHost } from '@nestjs/common';
+import { HttpException, Logger, NotFoundException } from '@nestjs/common';
 import { BaseExceptionFilter } from '@nestjs/core';
 import type { I18nService } from 'nestjs-i18n';
 import type { LocaleResolutionService } from './locale-resolution.service';

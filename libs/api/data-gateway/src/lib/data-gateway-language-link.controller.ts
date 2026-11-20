@@ -1,11 +1,13 @@
 import { Action, ResourceType } from '@bge/database';
-import { DEFAULT_REVIEW_STATUSES, LanguageLinkReviewService, type LanguageLinkView } from '@bge/language';
+import type { LanguageLinkView } from '@bge/language';
+import { DEFAULT_REVIEW_STATUSES, LanguageLinkReviewService } from '@bge/language';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { paginated, PaginatedResponseDto, Unscoped } from '@bge/shared';
 import { Body, Controller, Get, HttpCode, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
-import { from, type Observable } from 'rxjs';
+import type { Observable } from 'rxjs';
+import { from } from 'rxjs';
 import { concatMap, map } from 'rxjs/operators';
 import { DataGatewayService } from './data-gateway.service';
 import { LanguageLinkEnvelopeDto, LanguageLinkQueryDto, LanguageLinkResponseDto, LinkLanguageLinkDto } from './dto';

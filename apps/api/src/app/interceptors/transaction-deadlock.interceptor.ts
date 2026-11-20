@@ -3,14 +3,14 @@ import { CodedHttpException, t, toErrorCode } from '@bge/i18n';
 import type { CallHandler, ExecutionContext, NestInterceptor } from '@nestjs/common';
 import { Injectable } from '@nestjs/common';
 import { Http } from '@status/codes';
-import { catchError, type Observable, throwError } from 'rxjs';
+import type { Observable } from 'rxjs';
+import { catchError, throwError } from 'rxjs';
 
 /** Pinned rather than read from the class, so the code survives a rename or minification. */
 const DEADLOCK_NAME = 'TransactionDeadlockError';
 
 /**
- * A deadlock that survived whatever retry its call site had, rendered as the
- * client's answer rather than as a bare 500 (#398).
+ * A deadlock, rendered as the client's answer rather than as a bare 500 (#398).
  *
  * 409 because the state is curable and the cure is the caller's: nothing about
  * the request was wrong, a concurrent writer and this one wanted the same rows
@@ -51,11 +51,10 @@ export class TransactionDeadlockError extends CodedHttpException {
  * marker, and the existing filters translate and render it like any other.
  *
  * Coverage, stated precisely rather than generously. Every controller and every
- * service reached through one is covered, including the paths with no deadlock
- * retry of their own — the quota consumers take their advisory locks inside a
- * caller-owned transaction, so retrying is that caller's decision and not
- * something this can make for them. Typed refusal is not the same as a retry; it
- * is what makes the refusal legible where the retry is absent or exhausted.
+ * service reached through one is covered. No call site retries a deadlock
+ * itself (#1152), so this is how a deadlock victim in an HTTP handler
+ * answers: a typed refusal the client can retry, which is not the same as a
+ * retry.
  *
  * What it does NOT cover: middleware and guards, which Nest runs BEFORE the
  * interceptor chain. `HttpActorMiddleware`, `AbilityContextMiddleware`, and

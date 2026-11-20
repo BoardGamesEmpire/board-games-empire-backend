@@ -3,14 +3,8 @@ import { Action, ContentType, PlatformType, ResourceType } from '@bge/database';
 import { gameListScope, GameService } from '@bge/game';
 import { t } from '@bge/i18n';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
-import {
-  createMockAbilityService,
-  createTestingModuleWithDb,
-  makeGame,
-  MOCK_ACTING_USER_ID,
-  type MockAbilityService,
-  type MockDatabaseService,
-} from '@bge/testing';
+import type { MockAbilityService, MockDatabaseService } from '@bge/testing';
+import { createMockAbilityService, createTestingModuleWithDb, makeGame, MOCK_ACTING_USER_ID } from '@bge/testing';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
@@ -46,7 +40,7 @@ describe('GameSearchService', () => {
   let db: MockDatabaseService;
   let abilityService: MockAbilityService;
   let compose: jest.SpyInstance;
-  let coordinator: { searchGames: jest.Mock; fetchExpansions: jest.Mock };
+  let coordinator: { fetchExpansions: jest.Mock; searchGames: jest.Mock };
   let gameService: { readDataGatewayLinks: jest.Mock };
 
   beforeEach(async () => {
@@ -427,6 +421,7 @@ describe('GameSearchService', () => {
         expect(refusal).toBeInstanceOf(ForbiddenException);
         expect(refusal.getResponse()).toEqual(t('errors.game_search.data_gateways_forbidden'));
       }
+
       expect(gameService.readDataGatewayLinks).not.toHaveBeenCalled();
       expect(coordinator.fetchExpansions).not.toHaveBeenCalled();
     });

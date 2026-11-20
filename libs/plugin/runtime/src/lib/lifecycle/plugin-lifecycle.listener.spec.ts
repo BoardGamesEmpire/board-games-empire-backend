@@ -1,19 +1,14 @@
-import { AuditContextService, MutationEvent, type Actor } from '@bge/actor-context';
-import {
-  DatabaseService,
-  Plugin,
-  PluginGrantScope,
-  PluginGrantStatus,
-  PluginLifecycleEvent,
-  PluginLifecycleEventType,
-  ResourceType,
-  RiskLevel,
-} from '@bge/database';
-import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
+import type { Actor, AuditContextService } from '@bge/actor-context';
+import { MutationEvent } from '@bge/actor-context';
+import type { DatabaseService, Plugin, PluginLifecycleEvent } from '@bge/database';
+import { PluginGrantScope, PluginGrantStatus, PluginLifecycleEventType, ResourceType, RiskLevel } from '@bge/database';
+import type { MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService } from '@bge/testing';
 import { PluginEvent, buildPluginArtifactSha256 as sha } from '@boardgamesempire/plugin-contract';
 import { Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { PluginConfigEventsService } from '../config/plugin-config-events.service';
+import type { PluginConfigEventsService } from '../config/plugin-config-events.service';
+import type { PluginProvenance } from '../events/plugin.events';
 import {
   HouseholdPluginConfigUpdatedEvent,
   HouseholdPluginEnabledEvent,
@@ -31,7 +26,6 @@ import {
   PluginUpdateRejectedEvent,
   UserPluginDisabledEvent,
   UserPluginReconsentRequestedEvent,
-  type PluginProvenance,
 } from '../events/plugin.events';
 import { PluginLifecycleListener, UNATTRIBUTED_LIFECYCLE_ACTOR } from './plugin-lifecycle.listener';
 
@@ -518,7 +512,7 @@ describe('PluginLifecycleListener', () => {
           status: PluginGrantStatus.Granted,
           decidedRiskLevel: RiskLevel.Medium,
         },
-        'permission-no-longer-requested',
+        'staged-update-rejected',
         { manifestVersion: '1.2.3', actId: 'act-1' },
         initiatedAt,
       );
@@ -536,7 +530,7 @@ describe('PluginLifecycleListener', () => {
           payload: {
             permissionSlug: 'read:public_content',
             decidedRiskLevel: RiskLevel.Medium,
-            reason: 'permission-no-longer-requested',
+            reason: 'staged-update-rejected',
             actId: 'act-1',
           },
         }),

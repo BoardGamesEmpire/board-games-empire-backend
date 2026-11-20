@@ -39,6 +39,7 @@ export function toParagraphs(phrasing: readonly PhrasingContent[]): Paragraph[] 
     if (children.length > 0) {
       paragraphs.push({ type: 'paragraph', children });
     }
+
     current = [];
   };
 
@@ -103,8 +104,10 @@ function trimLine(line: string, first: boolean, last: boolean): string {
   if (!first) {
     value = value.replace(/^[ \t]+/, '');
   }
+
   if (!last) {
     value = trimEndSpace(value);
   }
+
   return value;
 }

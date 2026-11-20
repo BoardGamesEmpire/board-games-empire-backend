@@ -1,11 +1,12 @@
-import { assertPluginUnit, type PluginUnit } from '@bge/actor-context';
+import type { PluginUnit } from '@bge/actor-context';
+import { assertPluginUnit } from '@bge/actor-context';
+import type { PluginUnitDormancy } from '@bge/database';
 import {
   DatabaseService,
   derivePluginUnitDormancy,
   isPluginUnitServed,
   loadPluginUnitEnablement,
   PluginScope,
-  type PluginUnitDormancy,
 } from '@bge/database';
 import { resolveLocalizedString } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable } from '@nestjs/common';
@@ -15,8 +16,10 @@ import { PluginConsentStandingService } from '../consent/plugin-consent-standing
 import type { ConsentOutstandingCheck, PluginConsentStanding } from '../consent/plugin-consent-standing.types';
 import { activeManifestOf } from '../manifest/active-manifest';
 import { revalidateStoredManifest } from '../manifest/stored-manifest';
-import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
-import { derivePluginUnitState, type PluginUnitStateCode } from '../units/plugin-unit-state';
+import type { PluginModuleOptions } from '../plugin-module.options';
+import { MODULE_OPTIONS_TOKEN } from '../plugin-module.options';
+import type { PluginUnitStateCode } from '../units/plugin-unit-state';
+import { derivePluginUnitState } from '../units/plugin-unit-state';
 import { PluginUnitScopeError } from '../units/unit.errors';
 import {
   PluginFeatureStateManifestError,
@@ -39,16 +42,17 @@ import {
 export type PluginFeatureBlockReason = 'denied' | 'pending';
 
 export interface PluginFeatureState {
-  /** Manifest `features[].name` — the stable identifier. */
-  readonly name: string;
-  /** Localized per the requested locale with the manifest fallback chain. */
-  readonly displayName: string;
-  readonly description: string;
-  readonly state: 'active' | 'disabled';
-  /** `null` exactly when `state` is `active`. */
-  readonly reason: PluginFeatureBlockReason | null;
   /** Canonical slugs of the bound checks blocking activation (empty when active). */
   readonly blockingSlugs: readonly string[];
+
+  readonly description: string;
+
+  /** Localized per the requested locale with the manifest fallback chain. */
+  readonly displayName: string;
+
+  /** Manifest `features[].name` — the stable identifier. */
+  readonly name: string;
+
   /**
    * Bound checks decided on a DIFFERENT unit axis, which this unit's
    * resolution never consumes (the read path's grant scoping, #60) and whose state is therefore
@@ -60,34 +64,17 @@ export interface PluginFeatureState {
    * A "degraded anywhere?" answer (#67) must ask the owning units.
    */
   readonly perUnitSlugs: readonly string[];
+
+  /** `null` exactly when `state` is `active`. */
+  readonly reason: PluginFeatureBlockReason | null;
+
+  readonly state: 'active' | 'disabled';
 }
 
 export interface PluginFeatureUnitState {
-  readonly plugin: {
-    readonly id: string;
-    readonly slug: string;
-  };
-  readonly unit: PluginUnit;
-  /**
-   * The full operational predicate: plugin enabled and not tombstoned, AND
-   * the unit's enablement is on with no dormancy. Consent never enters it: a
-   * unit owing a required permission keeps running on the grants it gave (the
-   * ability denies what it has not granted), so served is not what says a
-   * review is waiting (#1149).
-   */
-  readonly served: boolean;
-  /**
-   * The plugin's server switch. Reported beside `state` so a client can say
-   * why a switched-on unit reads `unavailable`: this, or its `dormancy`
-   * (#1149, #1151).
-   */
-  readonly serverEnabled: boolean;
-  /**
-   * The stable code for the unit's state: off, on, review_pending,
-   * needs_configuration or unavailable. Carries what the server switch,
-   * dormancy and consent each add.
-   */
-  readonly state: PluginUnitStateCode;
+  /** Required permissions the unit still owes and optional ones switched off. */
+  readonly consent: PluginConsentStanding;
+
   /**
    * What keeps the unit from running apart from the two switches, its own
    * and the Server switch (#1151): `unavailable` when the server cannot run it
@@ -102,9 +89,38 @@ export interface PluginFeatureUnitState {
    * is worked out.
    */
   readonly dormancy: PluginUnitDormancy | null;
-  /** Required permissions the unit still owes and optional ones switched off. */
-  readonly consent: PluginConsentStanding;
+
   readonly features: readonly PluginFeatureState[];
+
+  readonly plugin: {
+    readonly id: string;
+    readonly slug: string;
+  };
+
+  /**
+   * The full operational predicate: plugin enabled and not tombstoned, AND
+   * the unit's enablement is on with no dormancy. Consent never enters it: a
+   * unit owing a required permission keeps running on the grants it gave (the
+   * ability denies what it has not granted), so served is not what says a
+   * review is waiting (#1149).
+   */
+  readonly served: boolean;
+
+  /**
+   * The plugin's server switch. Reported beside `state` so a client can say
+   * why a switched-on unit reads `unavailable`: this, or its `dormancy`
+   * (#1149, #1151).
+   */
+  readonly serverEnabled: boolean;
+
+  /**
+   * The stable code for the unit's state: off, on, review_pending,
+   * needs_configuration or unavailable. Carries what the server switch,
+   * dormancy and consent each add.
+   */
+  readonly state: PluginUnitStateCode;
+
+  readonly unit: PluginUnit;
 }
 
 /**

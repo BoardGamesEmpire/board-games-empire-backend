@@ -1,6 +1,7 @@
 import { NotificationType } from '@bge/database';
 import type { NotificationsService } from '@bge/notifications-service';
-import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService } from '@bge/testing';
 import { Logger } from '@nestjs/common';
 import { AuditUnattributedNotifierService } from './audit-unattributed-notifier.service';
 

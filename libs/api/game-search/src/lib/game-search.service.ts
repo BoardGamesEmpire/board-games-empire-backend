@@ -1,9 +1,12 @@
 import { GatewayCoordinatorClientService } from '@bge/coordinator';
-import { Action, DatabaseService, type Prisma, ResourceType } from '@bge/database';
-import { type DataGatewayLink, gameListScope, GameService } from '@bge/game';
+import type { Prisma } from '@bge/database';
+import { Action, DatabaseService, ResourceType } from '@bge/database';
+import type { DataGatewayLink } from '@bge/game';
+import { gameListScope, GameService } from '@bge/game';
 import { t } from '@bge/i18n';
 import { AbilityService, everyAbilityCan, resolveScopeSubjectId, ScopeComposer } from '@bge/permissions';
-import { ResultStatus, type SearchGameResult } from '@boardgamesempire/proto-gateway';
+import type { SearchGameResult } from '@boardgamesempire/proto-gateway';
+import { ResultStatus } from '@boardgamesempire/proto-gateway';
 import { BadRequestException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import * as crypto from 'node:crypto';
 import { defer, forkJoin, from, merge, Observable, of, timer } from 'rxjs';
@@ -13,7 +16,8 @@ import type { WsGameSearchResult } from './dto/search-outbound.dto';
 import type { SearchQueryDto } from './dto/search-query.dto';
 import type { SearchResponseDto } from './dto/search-response.dto';
 import type { SearchGamesResponse } from './interfaces';
-import { type GameSearchFilter, localFilterConditions, toProtoSearchFilter } from './search-filter';
+import type { GameSearchFilter } from './search-filter';
+import { localFilterConditions, toProtoSearchFilter } from './search-filter';
 
 /**
  * Marks a `where` as {@link GameSearchService.localSearchScope}'s. Declared and
@@ -100,6 +104,7 @@ export class GameSearchService {
   localSearchScope(): LocalSearchScope {
     const userId = resolveScopeSubjectId(this.ability);
 
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- LocalSearchScope's brand is declared and never present at runtime; this is the one place that mints it (#472)
     return this.scopeComposer.compose(ResourceType.Game, Action.read, gameListScope(userId)) as LocalSearchScope;
   }
 
@@ -388,11 +393,15 @@ export class GameSearchService {
     if (externalResponse) {
       for (const result of externalResponse.results) {
         const source = result.gatewayId;
-        if (!source) continue;
+        if (!source) {
+          continue;
+        }
 
         switch (result.status) {
           case ResultStatus.RESULT_STATUS_RESULT: {
-            if (!result.game) break;
+            if (!result.game) {
+              break;
+            }
 
             if (!resultsBySource[source]) {
               resultsBySource[source] = [];

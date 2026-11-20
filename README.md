@@ -224,7 +224,17 @@ npm run db:generate                       # regenerate Prisma client after schem
 npm run proto:generate    # export .proto files and regenerate TypeScript types
 npm run proto:check       # lint and format check
 npm run proto:format      # auto-format .proto files
+npm run proto:deps        # move buf.lock to the newest upstream commits
 ```
+
+Every build reads its buf dependencies at the commits `libs/proto/gateway/buf.lock` pins, CI and the
+Docker image included. Nothing updates the lock but `npm run proto:deps`, so run it on purpose and review
+what changed in the lock (#733):
+
+- After adding or removing a dependency in `libs/proto/gateway/buf.yaml`, run it and commit the lock with
+  that change. A `.proto` file that imports from a dependency the lock doesn't list fails
+  `proto:generate`.
+- To move to newer upstream commits with no change to `buf.yaml`, commit the lock on its own.
 
 ---
 

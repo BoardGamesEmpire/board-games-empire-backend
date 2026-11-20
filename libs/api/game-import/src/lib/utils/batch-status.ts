@@ -30,6 +30,7 @@ export function deriveBatchStatus(statuses: readonly JobStatus[]): ImportBatchSt
   if (completed === statuses.length) {
     return ImportBatchStatus.Completed;
   }
+
   if (completed > 0) {
     return ImportBatchStatus.PartiallyCompleted;
   }

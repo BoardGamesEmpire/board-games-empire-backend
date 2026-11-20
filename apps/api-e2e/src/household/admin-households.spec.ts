@@ -1,10 +1,13 @@
 import { SystemRole } from '@bge/database';
-import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
+import type { Actors, SessionActor } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
-import { adminListEnvelope, type ListAdminHouseholdsEnvelope } from './household-wire';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
+import type { ListAdminHouseholdsEnvelope } from './household-wire';
+import { adminListEnvelope } from './household-wire';
 
 /**
  * The staff households list, `GET /api/admin/households` (#419), against the

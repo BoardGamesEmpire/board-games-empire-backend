@@ -1,8 +1,10 @@
 import { bootstrapLogging } from '@bge/logger';
-import { diag, type DiagLogger } from '@opentelemetry/api';
+import type { DiagLogger } from '@opentelemetry/api';
+import { diag } from '@opentelemetry/api';
 import type { Logger as PinoInstance } from 'pino';
 import { resolveDiagLogLevel } from '../init/diag-log-level';
-import { initOtel, type OtelBootstrapHandle } from '../init/init-otel';
+import type { OtelBootstrapHandle } from '../init/init-otel';
+import { initOtel } from '../init/init-otel';
 import type { OtelInitConfig } from '../init/otel.config';
 import { buildOtelPinoOptions } from '../pino/otel-pino.options';
 
@@ -33,7 +35,6 @@ import { buildOtelPinoOptions } from '../pino/otel-pino.options';
  * transport, so there is no double-shipping.
  */
 export interface BootstrapObservabilityResult {
-  readonly otel: OtelBootstrapHandle;
   /**
    * Runtime base logger. Pass this to
    * `LoggerModule.forRoot({ pinoHttp: { logger: baseLogger } })`.
@@ -41,6 +42,8 @@ export interface BootstrapObservabilityResult {
    * layer its own per-context bindings on top.
    */
   readonly baseLogger: PinoInstance;
+
+  readonly otel: OtelBootstrapHandle;
 }
 
 /**

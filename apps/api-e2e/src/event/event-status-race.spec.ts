@@ -6,13 +6,16 @@ import {
   NotificationType,
   OccurrenceStatus,
 } from '@bge/database';
-import { createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
+import type { Actors, AuthenticatedActor } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import request from 'supertest';
 import type { UnreadNotificationWire } from '../notification/notification-wire';
 import { unreadWhen } from '../notification/unread-poll';
 import { requireBaseUrl } from '../support/e2e-env';
-import { expectBackendsQueuedBehind, expectLockWaiter, withBarrier, type Barrier } from '../support/lock-barrier';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { Barrier } from '../support/lock-barrier';
+import { expectBackendsQueuedBehind, expectLockWaiter, withBarrier } from '../support/lock-barrier';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { arrangeListEntry, hoursFromNow } from './event-fixtures';
 import { createEventClient, EVENTS_PATH } from './event-request';
 import { nominationEnvelope } from './event-wire';
@@ -110,7 +113,7 @@ describe('status changes racing on one date or nomination (#621)', () => {
    * statuses, in firing order.
    */
   const race = (
-    row: { readonly sql: string; readonly lockedBy: RegExp },
+    row: { readonly lockedBy: RegExp; readonly sql: string },
     id: string,
     first: () => request.Test,
     second: () => request.Test,

@@ -1,22 +1,26 @@
-import { DatabaseService, DataGatewayCapability, InitiatorType, JobStatus, ResourceType } from '@bge/database';
-import { GatewayRegistryService, GatewayRoutingRefusedError } from '@bge/gateway-registry';
-import { wrapJobData, type JobActorMeta } from '@bge/queue-actor-context';
+import type { DatabaseService } from '@bge/database';
+import { DataGatewayCapability, InitiatorType, JobStatus, ResourceType } from '@bge/database';
+import type { GatewayRegistryService } from '@bge/gateway-registry';
+import { GatewayRoutingRefusedError } from '@bge/gateway-registry';
+import type { JobActorMeta } from '@bge/queue-actor-context';
+import { wrapJobData } from '@bge/queue-actor-context';
 import { WebhookEventType } from '@bge/webhooks';
 import { DataGatewayThrottledError } from '@boardgamesempire/gateway-driver-contract';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { NotFoundException } from '@nestjs/common';
-import { EventEmitter2 } from '@nestjs/event-emitter';
-import { Job } from 'bullmq';
+import type { EventEmitter2 } from '@nestjs/event-emitter';
+import type { Job } from 'bullmq';
 import { of, throwError } from 'rxjs';
 import { JobNames } from '../constants/queue.constants';
 import { ImportJobFailedEvent, ImportJobStartedEvent } from '../events/import.events';
-import { ImportJobOrigin, type GameFetchJobPayload } from '../interfaces/import-job.interface';
-import { ImportBatchCompletionService } from '../services/batch-completion.service';
+import type { GameFetchJobPayload } from '../interfaces/import-job.interface';
+import { ImportJobOrigin } from '../interfaces/import-job.interface';
+import type { ImportBatchCompletionService } from '../services/batch-completion.service';
 import { GameFetchProcessor } from './game-fetch.processor';
 
 describe('GameFetchProcessor', () => {
   let processor: GameFetchProcessor;
-  let db: { job: { updateMany: jest.Mock; update: jest.Mock; findFirst: jest.Mock } };
+  let db: { job: { findFirst: jest.Mock; update: jest.Mock; updateMany: jest.Mock } };
   let gatewayRegistry: jest.Mocked<Pick<GatewayRegistryService, 'resolve' | 'reportSuccess' | 'reportFailure'>>;
   let events: { emit: jest.Mock };
   let batchCompletion: { checkAndEmit: jest.Mock };
@@ -36,7 +40,7 @@ describe('GameFetchProcessor', () => {
   };
   const meta: JobActorMeta = { actor: { kind: 'user', userId: 'user-7' }, correlationId: 'corr-1' };
 
-  const makeJob = (over: { attemptsMade?: number; attempts?: number } = {}): Job<GameFetchJobPayload> =>
+  const makeJob = (over: { attempts?: number; attemptsMade?: number } = {}): Job<GameFetchJobPayload> =>
     ({
       name: 'GameFetch',
       id: '1',

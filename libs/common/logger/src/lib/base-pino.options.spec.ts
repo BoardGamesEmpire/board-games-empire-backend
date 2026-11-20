@@ -1,9 +1,11 @@
 import http from 'node:http';
 import { Writable } from 'node:stream';
-import pino, { type TransportTargetOptions } from 'pino';
+import type { TransportTargetOptions } from 'pino';
+import pino from 'pino';
 import pinoHttp from 'pino-http';
 import request from 'supertest';
-import { buildBasePinoOptions, resolvePinoLevel, type LogDestination } from './base-pino.options';
+import type { LogDestination } from './base-pino.options';
+import { buildBasePinoOptions, resolvePinoLevel } from './base-pino.options';
 
 /**
  * Narrows the loose `LoggerOptions['transport']` to the multi-target
@@ -17,6 +19,7 @@ const getTargets = (transport: unknown): TransportTargetOptions[] => {
       return targets as TransportTargetOptions[];
     }
   }
+
   throw new Error('expected transport to expose targets[]');
 };
 
@@ -126,6 +129,7 @@ describe('buildBasePinoOptions', () => {
       } else {
         process.env['LOG_LEVEL'] = originalLogLevel;
       }
+
       if (originalNodeEnv === undefined) {
         delete process.env['NODE_ENV'];
       } else {
@@ -159,6 +163,7 @@ describe('credential redaction (#748)', () => {
     if (!record) {
       throw new Error(`no log record with msg "${msg}"`);
     }
+
     return record;
   };
 
@@ -169,8 +174,10 @@ describe('credential redaction (#748)', () => {
       if (records().some((r) => r['msg'] === 'request completed')) {
         return;
       }
+
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
+
     throw new Error('the access line was never logged');
   };
 

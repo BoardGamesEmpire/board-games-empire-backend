@@ -57,8 +57,9 @@ const STUB_DESCRIPTION: proto.DescribeResponse = {
 interface Answers {
   /** What Describe answers. Over gRPC an unset field arrives missing, so a partial answer is cast. */
   description?: Partial<proto.DescribeResponse>;
-  version?: string;
+
   languages?: proto.GatewayLanguageEntry[];
+  version?: string;
 }
 
 /** A DataGateway that answers Ping with `version`, Describe with `description`, and ListLanguages with `languages`. */

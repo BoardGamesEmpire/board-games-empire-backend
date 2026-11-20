@@ -1,3 +1,4 @@
+import { emitAfterCommit } from '@bge/actor-context';
 import {
   constraintIdentity,
   DatabaseService,
@@ -32,6 +33,12 @@ import {
   OUTSTANDING_INVITE_UNIQUE_FIELDS,
   OUTSTANDING_INVITE_UNIQUE_INDEXES,
 } from './constants/invite.constants';
+import type {
+  InviteDomainEvent,
+  InviteSnapshot,
+  InviteTransitionEvent,
+  InviteTransitionEventClass,
+} from './events/invite.events';
 import {
   InviteAcceptedEvent,
   InviteApprovedEvent,
@@ -41,10 +48,6 @@ import {
   InviteRevokedEvent,
   InviteWithdrawnEvent,
   toInviteSnapshot,
-  type InviteDomainEvent,
-  type InviteSnapshot,
-  type InviteTransitionEvent,
-  type InviteTransitionEventClass,
 } from './events/invite.events';
 import type {
   ApproveInviteParams,
@@ -71,14 +74,8 @@ import type {
   WithdrawInviteParams,
 } from './interfaces';
 import { isOutstandingInviteStatus, withEffectiveInviteStatus } from './invite-expiry';
-import {
-  CONTEXT_INVITE_SELECT,
-  INVITE_SNAPSHOT_SELECT,
-  PARTY_INVITE_SELECT,
-  TRANSITION_SELECT,
-  type InvitePartyView,
-  type InviteTransitionRow,
-} from './read-shapes';
+import type { InvitePartyView, InviteTransitionRow } from './read-shapes';
+import { CONTEXT_INVITE_SELECT, INVITE_SNAPSHOT_SELECT, PARTY_INVITE_SELECT, TRANSITION_SELECT } from './read-shapes';
 
 /**
  * A client for a read that takes no lock. The party read runs on the lib's own
@@ -161,13 +158,14 @@ function project<Select extends Prisma.InviteSelect>(
   row: InviteTransitionRow,
   select: Select,
 ): Prisma.InviteGetPayload<{ select: Select }> {
-  const source = row as Record<string, unknown>;
+  const source: Record<string, unknown> = row;
   const view: Record<string, unknown> = {};
 
   for (const key of Object.keys(select)) {
     view[key] = source[key];
   }
 
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- the payload of a generic `Select` is a type TypeScript can't evaluate, so it can't check the key-by-key copy against it (#1321)
   return view as Prisma.InviteGetPayload<{ select: Select }>;
 }
 
@@ -181,25 +179,29 @@ function project<Select extends Prisma.InviteSelect>(
  * whatever row the id named, whoever was authorized over it.
  */
 type TransitionSpec<Select extends Prisma.InviteSelect, Event extends InviteTransitionEvent> = {
-  readonly target: InviteTarget;
   /**
    * Whether the actor is the one this transition needs, once the row is read:
    * the invitee, the inviter, or for a revoke anyone but the inviter. Throws 403.
    */
   readonly assertRole?: (row: InviteTransitionRow) => void;
+
   /** The statuses the transition may start from. Throws 409 otherwise; runs again on a guard miss. */
   readonly assertStatus: (row: InviteTransitionRow) => void;
+
   readonly data: (now: Date) => Prisma.InviteUncheckedUpdateManyInput;
-  readonly view: Select;
   readonly event: InviteTransitionEventClass<Event>;
+  readonly target: InviteTarget;
+  readonly view: Select;
 } & (
   | {
       /** The acting user when the transition is a party's. Scopes the read: a stranger gets a miss. */
       readonly partyOf: string;
-      /** An address the consumer vouches is the acting user's, normalized. Widens the read to invites by it. */
-      readonly vouchedEmail?: string | null;
+
       /** The type the consumer handles. Scopes the read: an invite of another type gets a miss. */
       readonly type: InviteType;
+
+      /** An address the consumer vouches is the acting user's, normalized. Widens the read to invites by it. */
+      readonly vouchedEmail?: string | null;
     }
   | {
       /** The context the caller's authority covers when the transition is a context authority's. Scopes the read: an id from another context gets a miss. */
@@ -320,6 +322,7 @@ export class InviteService {
       throw new Error(`Invite ${row.id} is a ${type} invite that names no ${type.toLowerCase()}`);
     }
 
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- a computed key looked up by the generic `Type` widens to a string index, which TypeScript can't relate to `InviteScopeOf<Type>` (#1321)
     return { [column]: contextId } as InviteScopeOf<Type>;
   }
 
@@ -749,22 +752,13 @@ export class InviteService {
    * by then the transition is committed, and surfacing a listener's failure as
    * the request's failure would report a 500 for an operation that succeeded.
    *
-   * A listener declared with `@OnEvent` is wrapped by Nest's loader, which
-   * awaits it and logs a throw or a rejection (`suppressErrors` defaults to
-   * true), so its failure never reaches the catch below. The catch is for a
-   * listener registered on the emitter directly (`onAny`, as the audit
-   * persistence listener is): `EventEmitterModule` runs without
-   * `ignoreErrors`, so its synchronous throw propagates out of `emit()`. It is
-   * logged and the remaining domain events still go out. Such a listener's
-   * rejected promise is its own to catch, as both in the app do.
+   * Each is emitted through `emitAfterCommit`, which logs a listener's throw
+   * rather than rethrowing it and says why, so the remaining domain events
+   * still go out.
    */
   emit(events: readonly InviteDomainEvent[]): void {
     for (const event of events) {
-      try {
-        this.events.emit(event.eventName, event);
-      } catch (error) {
-        this.logger.error(`Listener failed for ${event.eventName} (invite ${event.subjectId})`, error);
-      }
+      emitAfterCommit(this.events, this.logger, event.eventName, event, `invite ${event.subjectId}`);
     }
   }
 
@@ -856,7 +850,7 @@ export class InviteService {
   private async expireRivalsWithin(
     tx: Prisma.TransactionClient,
     context: Prisma.InviteWhereInput | null,
-    party: { readonly inviteeId: string | null; readonly inviteeEmail: string | null },
+    party: { readonly inviteeEmail: string | null; readonly inviteeId: string | null },
     now: Date,
   ): Promise<InviteExpiredEvent[]> {
     if (context === null) {
@@ -912,7 +906,7 @@ export class InviteService {
     event: InviteTransitionEventClass<Event>,
     now: Date,
     limit?: number,
-  ): Promise<{ events: Event[]; drained: boolean }> {
+  ): Promise<{ drained: boolean; events: Event[] }> {
     const events: Event[] = [];
     let drained = true;
 

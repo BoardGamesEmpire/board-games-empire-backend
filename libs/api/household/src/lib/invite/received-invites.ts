@@ -1,4 +1,5 @@
-import { InviteStatus, InviteType, Prisma, type DatabaseService } from '@bge/database';
+import type { DatabaseService, Prisma } from '@bge/database';
+import { InviteStatus, InviteType } from '@bge/database';
 import { receivedInviteWhere, unexpiredInviteWhere } from '@bge/invites';
 
 /**

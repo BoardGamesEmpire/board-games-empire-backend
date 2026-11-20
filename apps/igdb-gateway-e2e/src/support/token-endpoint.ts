@@ -4,11 +4,11 @@ import type { AddressInfo } from 'node:net';
 const TOKEN_PATH = '/oauth2/token';
 
 export interface TokenEndpoint {
-  /** The URL to hand the gateway as `IGDB_TOKEN_URL`. */
-  url(): string;
-
   /** The query of every token request received so far, in order. */
   requests(): readonly Record<string, string>[];
+
+  /** The URL to hand the gateway as `IGDB_TOKEN_URL`. */
+  url(): string;
 }
 
 export interface TokenEndpointOptions {

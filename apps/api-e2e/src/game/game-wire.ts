@@ -1,5 +1,6 @@
 import type { Game, Platform, PlatformGame } from '@bge/database';
-import { envelopeFailure, isRecord, type HttpResponseLike, type RequestDescription, type Wire } from '../support/wire';
+import type { HttpResponseLike, RequestDescription, Wire } from '../support/wire';
+import { envelopeFailure, isRecord } from '../support/wire';
 
 /**
  * Fail-loud parsers for the game envelopes (#472), on the pattern
@@ -24,15 +25,22 @@ export interface ExpansionLinkWire {
 /** The game at the far end of a link on `GET /api/games/:id` (#1069). */
 export type LinkedGameWire = Pick<GameWire, 'id' | 'title' | 'thumbnail' | 'contentType'>;
 
-/** One of `GET /api/games/:id`'s `game.expansions` (#1069). */
+/**
+ * One of `GET /api/games/:id`'s `game.expansions` (#1069), with the platforms
+ * the add-on link holds on (#1391).
+ */
 export interface LinkedExpansionWire extends ExpansionLinkWire {
   readonly game: LinkedGameWire;
   readonly platformIds: readonly string[];
 }
 
-/** One of `GET /api/games/:id`'s `game.baseGames` (#1069). */
+/**
+ * One of `GET /api/games/:id`'s `game.baseGames` (#1069), with the platforms
+ * the add-on link holds on (#1391).
+ */
 export interface LinkedBaseGameWire extends ExpansionLinkWire {
   readonly game: LinkedGameWire;
+  readonly platformIds: readonly string[];
 }
 
 export interface ListGamesEnvelope {
@@ -49,8 +57,8 @@ export interface RandomGamesEnvelope {
 }
 
 export interface GamePoolSampleEnvelope {
-  readonly games: readonly GameWire[];
   readonly gameCount: number;
+  readonly games: readonly GameWire[];
 }
 
 const fail = envelopeFailure('apps/api-e2e/src/game/game-wire.ts');
@@ -218,7 +226,7 @@ export function listRowBaseGames(
 export function gameExpansionLinks(
   response: HttpResponseLike,
   request: RequestDescription,
-): { readonly expansions: readonly LinkedExpansionWire[]; readonly baseGames: readonly LinkedBaseGameWire[] } {
+): { readonly baseGames: readonly LinkedBaseGameWire[]; readonly expansions: readonly LinkedExpansionWire[] } {
   const { game } = gameEnvelope(response, request);
   const { expansions, baseGames } = game as unknown as Record<string, unknown>;
   if (!Array.isArray(expansions)) {

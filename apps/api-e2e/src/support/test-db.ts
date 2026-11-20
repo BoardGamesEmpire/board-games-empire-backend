@@ -1,4 +1,5 @@
-import { openStandaloneClient, type PrismaClient } from '@bge/database';
+import type { PrismaClient } from '@bge/database';
+import { openStandaloneClient } from '@bge/database';
 
 /** The harness database's URL, set by the e2e globalSetup; the one every DB-only spec targets. */
 export function requireDatabaseUrl(): string {
@@ -6,14 +7,16 @@ export function requireDatabaseUrl(): string {
   if (!url) {
     throw new Error('DATABASE_URL is not set — did the e2e globalSetup run?');
   }
+
   return url;
 }
 
 export interface TestDatabase {
   readonly client: PrismaClient;
+  close(): Promise<void>;
+
   /** The schema this database URL targets — the scope `resetDatabase` sweeps. */
   readonly schema: string;
-  close(): Promise<void>;
 }
 
 /**

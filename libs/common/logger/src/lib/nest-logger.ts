@@ -2,12 +2,12 @@ import type { LoggerService } from '@nestjs/common';
 
 /** The slice of a pino instance this adapter needs; structural so tests need no pino. */
 export interface PinoLike {
-  trace(obj: object, msg?: string): void;
   debug(obj: object, msg?: string): void;
-  info(obj: object, msg?: string): void;
-  warn(obj: object, msg?: string): void;
   error(obj: object, msg?: string): void;
   fatal(obj: object, msg?: string): void;
+  info(obj: object, msg?: string): void;
+  trace(obj: object, msg?: string): void;
+  warn(obj: object, msg?: string): void;
 }
 
 type PinoLevel = keyof PinoLike;
@@ -52,7 +52,9 @@ function splitOptionalParams(level: PinoLevel, params: readonly unknown[]): Opti
   }
 
   const context = typeof last === 'string' ? last : undefined;
-  if (!carriesStack) return { context };
+  if (!carriesStack) {
+    return { context };
+  }
 
   const rest = context === undefined ? params : params.slice(0, -1);
   const stack = rest[rest.length - 1];
@@ -83,6 +85,7 @@ export function nestLoggerFromPino(pino: PinoLike): LoggerService {
     }
 
     if (typeof message === 'object' && message !== null) {
+      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Nest passes the message as `unknown`, and TypeScript has no narrowing from `object` to an indexable record; `msg` is checked below (#1321)
       const { msg, ...fields } = message as StructuredLogMessage;
       pino[level]({ ...base, ...fields }, typeof msg === 'string' ? msg : undefined);
       return;

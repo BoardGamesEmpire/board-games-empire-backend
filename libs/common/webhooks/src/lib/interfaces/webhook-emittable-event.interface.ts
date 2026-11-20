@@ -30,10 +30,10 @@
  * CLS (see MutationEvent) and the dispatcher captures them at enqueue.
  */
 export interface WebhookEmittableEvent<TData = unknown> {
-  readonly subjectId: string;
-  readonly householdId: string | null;
   readonly data: TData;
+  readonly householdId: string | null;
   readonly occurrenceId?: string;
+  readonly subjectId: string;
 }
 
 /**
@@ -44,11 +44,13 @@ export interface WebhookEmittableEvent<TData = unknown> {
  * subjects) instead of enforcing it by copy-paste.
  */
 export function webhookEnvelope<TData>(args: {
-  subjectId: string;
   data: TData;
+  householdId?: string | null;
+
   /** Stable id of this logical event occurrence — enables delivery dedup. */
   occurrenceId?: string;
-  householdId?: string | null;
+
+  subjectId: string;
 }): WebhookEmittableEvent<TData> {
   return {
     subjectId: args.subjectId,
@@ -69,10 +71,11 @@ export function isWebhookEmittableEvent(value: unknown): value is WebhookEmittab
     return false;
   }
 
-  const candidate = value as Record<string, unknown>;
   return (
-    typeof candidate['subjectId'] === 'string' &&
-    (typeof candidate['householdId'] === 'string' || candidate['householdId'] === null) &&
-    'data' in candidate
+    'subjectId' in value &&
+    typeof value.subjectId === 'string' &&
+    'householdId' in value &&
+    (typeof value.householdId === 'string' || value.householdId === null) &&
+    'data' in value
   );
 }

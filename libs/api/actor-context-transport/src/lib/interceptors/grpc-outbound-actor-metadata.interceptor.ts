@@ -1,6 +1,7 @@
 import { getActorSnapshotFromCls } from '@bge/actor-context';
 import { BGE_ACTOR_HEADER, CORRELATION_ID_HEADER } from '@bge/shared';
-import { InterceptingCall, type Interceptor, type InterceptorOptions, Metadata, type NextCall } from '@grpc/grpc-js';
+import type { Interceptor, InterceptorOptions, Metadata, NextCall } from '@grpc/grpc-js';
+import { InterceptingCall } from '@grpc/grpc-js';
 import { Logger } from '@nestjs/common';
 
 /**
@@ -73,8 +74,10 @@ export function createOutboundActorMetadataInterceptor(): Interceptor {
         try {
           injectActorContextMetadata(metadata);
         } catch (error) {
-          logger.warn(`Failed to inject actor context into outbound gRPC metadata: ${(error as Error).message}`);
+          const reason = error instanceof Error ? error.message : String(error);
+          logger.warn(`Failed to inject actor context into outbound gRPC metadata: ${reason}`);
         }
+
         next(metadata, listener);
       },
     });

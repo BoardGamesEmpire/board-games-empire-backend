@@ -59,7 +59,7 @@ export class StorageExceptionFilter extends BaseExceptionFilter {
   private toRefusal(
     exception: MappableStorageError,
     host: ArgumentsHost,
-  ): { readonly status: number; readonly message: I18nMessage } {
+  ): { readonly message: I18nMessage; readonly status: number } {
     if (exception instanceof InsufficientStorageError) {
       // Generic localized copy — never the driver's raw message (may leak keys).
       return { status: Http.InsufficientStorage, message: t('errors.storage.insufficient') };
@@ -69,6 +69,7 @@ export class StorageExceptionFilter extends BaseExceptionFilter {
       if (exception.retryable) {
         this.setRetryAfter(host);
       }
+
       return { status: Http.ServiceUnavailable, message: t('errors.storage.unavailable') };
     }
 

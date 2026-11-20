@@ -1,7 +1,8 @@
 import { PlatformType } from '@bge/database';
 import { TransformList } from '@bge/shared';
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { SEARCHABLE_CONTENT_TYPES, type SearchableContentType } from '../search-filter';
+import type { SearchableContentType } from '../search-filter';
+import { SEARCHABLE_CONTENT_TYPES } from '../search-filter';
 import { SearchFieldsDto } from './search-fields.dto';
 
 /**

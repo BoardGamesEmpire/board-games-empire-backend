@@ -1,5 +1,6 @@
 import { createFakeFetch } from '@boardgamesempire/gateway-driver-contract-testing';
-import { firstValueFrom, type Observable } from 'rxjs';
+import type { Observable } from 'rxjs';
+import { firstValueFrom } from 'rxjs';
 import { createBggClient } from '../client/bgg-client';
 import type { BggClientLike, BggSearchQueryParams, BggThingQueryParams } from '../client/bgg-client.interface';
 import { BggThingType, DEFAULT_BGG_SEARCH_TYPES } from '../constants';
@@ -417,13 +418,13 @@ describe('chunk', () => {
 
 interface MockClientFixture {
   client: BggClientLike;
-  thing: jest.Mock<Promise<BggThing[]>, [BggThingQueryParams, AbortSignal?]>;
   search: jest.Mock<Promise<BggSearchResult[]>, [BggSearchQueryParams, AbortSignal?]>;
+  thing: jest.Mock<Promise<BggThing[]>, [BggThingQueryParams, AbortSignal?]>;
 }
 
 function buildMockClient(options?: {
-  thingResults?: BggThing[];
   searchResults?: BggSearchResult[];
+  thingResults?: BggThing[];
 }): MockClientFixture {
   const thing = jest.fn<Promise<BggThing[]>, [BggThingQueryParams, AbortSignal?]>();
   const search = jest.fn<Promise<BggSearchResult[]>, [BggSearchQueryParams, AbortSignal?]>();

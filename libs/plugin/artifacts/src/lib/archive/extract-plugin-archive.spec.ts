@@ -7,7 +7,8 @@ import { join } from 'node:path';
 import { Writable } from 'node:stream';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { PluginArchiveRefusedError } from '../artifacts.errors';
-import { buildPluginTarball, type PluginTarballEntry } from '../testing/plugin-tarball';
+import type { PluginTarballEntry } from '../testing/plugin-tarball';
+import { buildPluginTarball } from '../testing/plugin-tarball';
 import { allocateIncoming } from '../workspace/incoming';
 import {
   boundedDecompressedLimit,
@@ -32,11 +33,13 @@ const withHeaderBytes = (tarball: Buffer, patch: Record<number, number>): Buffer
   for (const [offset, value] of Object.entries(patch)) {
     tar[Number(offset)] = value;
   }
+
   tar.fill(0x20, 148, 156);
   let sum = 0;
   for (let i = 0; i < 512; i += 1) {
     sum += tar[i];
   }
+
   tar.write(`${sum.toString(8).padStart(6, '0')}\0 `, 148, 'latin1');
   return gzipSync(tar);
 };
@@ -367,6 +370,7 @@ describe('extractPluginArchive (#1094)', () => {
     } finally {
       (fsPromises.mkdir as unknown as jest.Mock).mockImplementation(realMkdir);
     }
+
     expect(await exists(intoDir)).toBe(false);
   }, 10_000);
 
@@ -386,6 +390,7 @@ describe('extractPluginArchive (#1094)', () => {
     } finally {
       (fsPromises.mkdir as unknown as jest.Mock).mockImplementation(realMkdir);
     }
+
     expect(await readFile(join(intoDir, 'package.json'), 'utf8')).toBe('{}');
   }, 10_000);
 
@@ -452,6 +457,7 @@ describe('extractPluginArchive (#1094)', () => {
       const empty = JSON.stringify({ slug: 'demo-sink', pad: '' });
       return JSON.stringify({ slug: 'demo-sink', pad: 'x'.repeat(bytes - empty.length) });
     };
+
     await mkdir(intoDir, { recursive: true });
 
     await writeFile(join(intoDir, 'manifest.json'), manifestOf(PLUGIN_ARCHIVE_MAX_MANIFEST_BYTES));

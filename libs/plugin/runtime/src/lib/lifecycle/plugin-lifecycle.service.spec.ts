@@ -1,18 +1,16 @@
-import { PluginCategory, PluginExecutionMode, PluginScope, Prisma, type Plugin } from '@bge/database';
+import type { Plugin } from '@bge/database';
+import { PluginCategory, PluginExecutionMode, PluginScope, Prisma } from '@bge/database';
 import type { PluginLoadRecordRow } from '@bge/database/testing';
 import { fakePluginLoadRecords } from '@bge/database/testing';
-import { createMockDatabaseService, rawQueryText, type MockDatabaseService } from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService, rawQueryText } from '@bge/testing';
 import { PluginEvent } from '@boardgamesempire/plugin-contract';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { Logger } from '@nestjs/common';
 import { PluginConfigValidationError } from '../config/config-schema.errors';
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
-import {
-  PluginConfigUpdatedEvent,
-  PluginDisabledEvent,
-  PluginEnabledEvent,
-  PluginUninstalledEvent,
-} from '../events/plugin.events';
+import type { PluginDisabledEvent } from '../events/plugin.events';
+import { PluginConfigUpdatedEvent, PluginEnabledEvent, PluginUninstalledEvent } from '../events/plugin.events';
 import type { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
 import type { PluginInstanceRegistry } from '../loader/plugin-instance-registry';
 import type { ClaimedPluginRow } from '../manifest/manifest-move';
@@ -417,11 +415,33 @@ describe('PluginLifecycleService', () => {
       expect(event.after.config).toEqual({ webhookUrl: 'https://z.example.test' });
     });
 
+    // Compared with the document the claim read, in the transaction: key
+    // order is no change, and the row served is the one read there (#903).
+    it('a document equal to the stored one writes nothing and emits nothing (#903)', async () => {
+      const stored = { webhookUrl: 'https://same.example.test', retries: 2 };
+      db.plugin.findUnique.mockResolvedValue(makePlugin({ config: { webhookUrl: 'https://stale.example.test' } }));
+      db.$queryRaw.mockResolvedValue([claimedRow({ config: stored })] as never);
+      const current = makePlugin({ config: stored });
+      db.plugin.findUniqueOrThrow.mockResolvedValue(current);
+
+      const result = await service.updateConfig({
+        slug: 'demo-sink',
+        actorId: 'admin-1',
+        config: { retries: 2, webhookUrl: 'https://same.example.test' },
+      });
+
+      expect(db.plugin.update).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+      expect(result).toBe(current);
+      expect(db.plugin.findUniqueOrThrow).toHaveBeenCalledWith({ where: { id: 'plugin-1' } });
+    });
+
     describe('the plugin-row claim (#578)', () => {
       it('claims the plugin row FOR NO KEY UPDATE, comparing the plugin manifest it validated against, before the write', async () => {
         db.plugin.findUnique.mockResolvedValue(makePlugin());
 
-        await service.updateConfig({ slug: 'demo-sink', actorId: 'admin-1', config: {} });
+        // A document other than the stored `{}`, which would write nothing (#903).
+        await service.updateConfig({ slug: 'demo-sink', actorId: 'admin-1', config: { webhookUrl: 'https://x.test' } });
 
         const [strings, ...values] = db.$queryRaw.mock.calls[0] as unknown as [TemplateStringsArray, ...unknown[]];
         expect(rawQueryText(strings)).toBe(
@@ -506,7 +526,7 @@ describe('PluginLifecycleService', () => {
         );
         expect(db.plugin.update).not.toHaveBeenCalled();
 
-        await service.updateConfig({ slug: 'demo-sink', actorId: 'admin-1', config: {} });
+        await service.updateConfig({ slug: 'demo-sink', actorId: 'admin-1', config: { webhookUrl: 'https://x.test' } });
 
         expect(db.plugin.update).toHaveBeenCalledTimes(1);
         const [, ...retryValues] = db.$queryRaw.mock.calls[1] as unknown as [TemplateStringsArray, ...unknown[]];
@@ -645,6 +665,39 @@ describe('PluginLifecycleService', () => {
 
       expect(db.householdPlugin.deleteMany).toHaveBeenCalledWith({ where: { pluginId: 'plugin-1' } });
       expect(db.userPlugin.deleteMany).toHaveBeenCalledWith({ where: { pluginId: 'plugin-1' } });
+    });
+
+    it('switches every household and user unit enablement off, after reading the affected units, and keeps their configuration (#1328)', async () => {
+      await service.uninstall({ slug: 'demo-sink', actorId: 'admin-1' });
+
+      // Only `enabled` moves: each unit keeps its configuration, and a
+      // reinstall finds every unit off, so switching on again is a consent
+      // act under the new sha.
+      expect(db.householdPlugin.updateMany).toHaveBeenCalledWith({
+        where: { pluginId: 'plugin-1', enabled: true },
+        data: { enabled: false },
+      });
+      expect(db.userPlugin.updateMany).toHaveBeenCalledWith({
+        where: { pluginId: 'plugin-1', enabled: true },
+        data: { enabled: false },
+      });
+
+      // After both reads: switched off first, the units that were on would
+      // be missing from the uninstall event that announces them.
+      const lastRead = Math.max(
+        db.householdPlugin.findMany.mock.invocationCallOrder[0],
+        db.userPlugin.findMany.mock.invocationCallOrder[0],
+      );
+
+      expect(lastRead).toBeLessThan(db.householdPlugin.updateMany.mock.invocationCallOrder[0]);
+      expect(lastRead).toBeLessThan(db.userPlugin.updateMany.mock.invocationCallOrder[0]);
+    });
+
+    it('switches nothing off under purgeData, which deletes the unit enablements (#1328)', async () => {
+      await service.uninstall({ slug: 'demo-sink', actorId: 'admin-1', purgeData: true });
+
+      expect(db.householdPlugin.updateMany).not.toHaveBeenCalled();
+      expect(db.userPlugin.updateMany).not.toHaveBeenCalled();
     });
 
     it('snapshots the units AFTER the tombstone claim — a first enable racing this must not be purged unannounced', async () => {

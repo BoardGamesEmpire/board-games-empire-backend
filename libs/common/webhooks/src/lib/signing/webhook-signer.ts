@@ -2,10 +2,11 @@ import { Injectable } from '@nestjs/common';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
 export interface WebhookSignatureParts {
-  /** Unix epoch seconds at signing time. Sent as `X-BGE-Timestamp`. */
-  readonly timestamp: number;
   /** Hex HMAC-SHA256 over `${timestamp}.${body}`. Sent as `X-BGE-Signature`. */
   readonly signature: string;
+
+  /** Unix epoch seconds at signing time. Sent as `X-BGE-Timestamp`. */
+  readonly timestamp: number;
 }
 
 /**
@@ -47,6 +48,7 @@ export class WebhookSigner {
     if (expectedBuffer.length !== presentedBuffer.length) {
       return false;
     }
+
     return timingSafeEqual(expectedBuffer, presentedBuffer);
   }
 

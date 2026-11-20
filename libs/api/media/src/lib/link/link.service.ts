@@ -4,20 +4,21 @@ import type { ModelResourceType } from '@bge/permissions';
 import { AbilityService } from '@bge/permissions';
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { linkKey, mediaKindForMime } from '../constants/media-link.constants';
-import { type AttachContext, LINK_HANDLERS } from './link.registry';
+import type { AttachContext } from './link.registry';
+import { LINK_HANDLERS } from './link.registry';
 
 export interface AttachTarget {
-  subjectType: ModelResourceType;
-  subjectId: string;
   context?: AttachContext;
-  presentation?: { title?: string; caption?: string; altText?: string; thumbnailUrl?: string };
+  presentation?: { altText?: string; caption?: string; thumbnailUrl?: string; title?: string };
+  subjectId: string;
+  subjectType: ModelResourceType;
 }
 
 export interface LinkResult {
-  mediaId: string;
   attachmentId: string;
-  subjectType: ModelResourceType;
+  mediaId: string;
   subjectId: string;
+  subjectType: ModelResourceType;
 }
 
 @Injectable()
@@ -103,13 +104,14 @@ export class MediaLinkService {
           t('errors.media_link.subject_not_found', { subjectType: target.subjectType, subjectId: target.subjectId }),
         );
       }
+
       throw error;
     }
   }
 
   async detach(
     mediaObjectId: string,
-    target: { subjectType: ModelResourceType; subjectId: string },
+    target: { subjectId: string; subjectType: ModelResourceType },
   ): Promise<{ removed: number }> {
     const media = await this.db.mediaObject.findUnique({
       where: {
@@ -151,7 +153,7 @@ export class MediaLinkService {
     subjectId: string,
     client: Prisma.TransactionClient = this.db,
   ): Promise<void> {
-    // eslint-disable-next-line no-restricted-syntax -- single-row existence check on the link subject, not a collection read
+    // eslint-disable-next-line no-restricted-syntax, @typescript-eslint/consistent-type-assertions -- single-row existence check on the link subject, not a collection read; a subject type that isn't a model is refused below, a narrowing of the enum TypeScript can't make here (#1321)
     const AND = this.ability.getCurrentResourceConditions(subjectType as ModelResourceType, Action.read);
 
     let found: { id: string } | null;

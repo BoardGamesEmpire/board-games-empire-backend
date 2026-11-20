@@ -54,6 +54,7 @@ model LanguageTag {
   gameReleases    GameReleaseLanguage[]
   gatewayLinks    LanguageGatewayLink[]
   households      Household[]
+  privacyPolicy   PrivacyPolicy?
   userPreferences UserPreferences[]
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)

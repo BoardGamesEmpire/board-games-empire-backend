@@ -1,5 +1,5 @@
 import type { PermissionActionVerb } from './constants.js';
-import { BARE_PLUGIN_PERMISSION_SLUG_PATTERN, PLUGIN_SLUG_PATTERN } from './constants.js';
+import { BARE_PLUGIN_PERMISSION_SLUG_PATTERN, PERMISSION_ACTION_VERBS, PLUGIN_SLUG_PATTERN } from './constants.js';
 
 /**
  * Canonical plugin-permission envelope: `plugin|<pluginSlug>|<bare>`.
@@ -26,12 +26,15 @@ export const PLUGIN_PERMISSION_ENVELOPE_PREFIX = `plugin${PLUGIN_PERMISSION_DELI
 
 /** Structured view of a canonical `plugin|<pluginSlug>|<bare>` slug. */
 export interface ParsedPluginPermissionSlug {
-  /** The declaring plugin's slug — the collision-free namespace. */
-  readonly pluginSlug: string;
-  /** The author-written bare slug, e.g. `manage:digest`. */
-  readonly bareSlug: string;
   /** Leading `Action` verb of the bare slug — the CASL rule action. */
   readonly action: PermissionActionVerb;
+
+  /** The author-written bare slug, e.g. `manage:digest`. */
+  readonly bareSlug: string;
+
+  /** The declaring plugin's slug — the collision-free namespace. */
+  readonly pluginSlug: string;
+
   /** Bare slug minus the verb, e.g. `storage:cloud` — the CASL rule subject path. */
   readonly subjectPath: string;
 }
@@ -70,7 +73,7 @@ export const parsePluginPermissionSlug = (slug: string): ParsedPluginPermissionS
     throw new RangeError(`'${slug}' is not a canonical plugin permission slug (plugin|<pluginSlug>|<bare>)`);
   }
 
-  const [, pluginSlug, bareSlug] = segments as [string, string, string];
+  const [, pluginSlug, bareSlug] = segments;
 
   if (!PLUGIN_SLUG_PATTERN.test(pluginSlug)) {
     throw new RangeError(`'${slug}' carries an invalid plugin slug segment '${pluginSlug}'`);
@@ -81,11 +84,19 @@ export const parsePluginPermissionSlug = (slug: string): ParsedPluginPermissionS
   }
 
   const separatorIndex = bareSlug.indexOf(':');
+  const verb = bareSlug.slice(0, separatorIndex);
+  // The bare-slug pattern above admits only these verbs, so the lookup always
+  // finds one; looking it up lets the compiler check the type (#1321).
+  const action = PERMISSION_ACTION_VERBS.find((candidate) => candidate === verb);
+
+  if (action === undefined) {
+    throw new RangeError(`'${slug}' carries an unknown action verb '${verb}'`);
+  }
 
   return {
     pluginSlug,
     bareSlug,
-    action: bareSlug.slice(0, separatorIndex) as PermissionActionVerb,
+    action,
     subjectPath: bareSlug.slice(separatorIndex + 1),
   };
 };

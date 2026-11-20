@@ -1,12 +1,10 @@
 import { LanguageCodeFormat, LanguageLinkOrigin, LanguageLinkStatus, Prisma } from '@bge/database';
 import { t } from '@bge/i18n';
-import { batchTransactionCall, createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { batchTransactionCall, createTestingModuleWithDb } from '@bge/testing';
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
-import {
-  DEFAULT_REVIEW_STATUSES,
-  LanguageLinkReviewService,
-  type LanguageLinkView,
-} from './language-link-review.service';
+import type { LanguageLinkView } from './language-link-review.service';
+import { DEFAULT_REVIEW_STATUSES, LanguageLinkReviewService } from './language-link-review.service';
 import { LanguageLinkService } from './language-link.service';
 
 describe('LanguageLinkReviewService', () => {

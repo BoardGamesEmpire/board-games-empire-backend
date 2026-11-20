@@ -16,7 +16,8 @@ import type { ChildProcess } from 'node:child_process';
 import * as path from 'node:path';
 import { workerEnvOverrides } from './e2e-env';
 import { emptyQueue, registerDrain } from './queue-isolation';
-import { createTestQueue, type TestQueue } from './queues';
+import type { TestQueue } from './queues';
+import { createTestQueue } from './queues';
 import { requireDisposableRedis } from './redis-reset';
 
 /** Built by the e2e target's `worker:build` dependency. */

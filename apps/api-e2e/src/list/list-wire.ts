@@ -1,5 +1,6 @@
-import type { List, ListEntry } from '@bge/database';
-import { envelopeFailure, isRecord, type HttpResponseLike, type RequestDescription, type Wire } from '../support/wire';
+import type { ContentType, List, ListEntry } from '@bge/database';
+import type { HttpResponseLike, RequestDescription, Wire } from '../support/wire';
+import { envelopeFailure, isRecord } from '../support/wire';
 
 /**
  * Fail-loud parsers for the list and list entry envelopes (#1241), on the
@@ -14,9 +15,13 @@ export type ListWire = Wire<List> & { readonly entryCount: number };
 /** A list entry as the routes return it, with the game or platform game it names embedded. */
 export type ListEntryWire = Wire<ListEntry> & {
   readonly game: { readonly id: string; readonly title: string } | null;
+
   readonly platformGame: {
-    readonly id: string;
+    /** The platform game's own content type, null when the game's applies (#1391). */
+    readonly contentType: ContentType | null;
+
     readonly game: { readonly id: string; readonly title: string };
+    readonly id: string;
   } | null;
 };
 

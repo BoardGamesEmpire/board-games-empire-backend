@@ -4,24 +4,17 @@ import Joi from 'joi';
 
 export interface SecurityTxtConfig {
   /**
+   * URL to a page acknowledging researchers who have reported vulnerabilities.
+   * Optional — RFC 9116 §2.6.
+   */
+  acknowledgments: string;
+
+  /**
    * One or more contact methods for security disclosures.
    * Each value must be a `mailto:`, `https:`, or `tel:` URI.
    * If empty, /.well-known/security.txt returns 404.
    */
   contact: string[];
-
-  /**
-   * Explicit expiry date in ISO 8601 format.
-   * If not set, the service auto-computes one year from the current date.
-   * Must be a future date — RFC 9116 §2.5.
-   */
-  expires: string;
-
-  /**
-   * URL to the security disclosure policy for this server.
-   * Recommended per RFC 9116 §2.4.
-   */
-  policy: string;
 
   /**
    * URL to a PGP public key that security researchers should use
@@ -31,10 +24,23 @@ export interface SecurityTxtConfig {
   encryption: string;
 
   /**
-   * URL to a page acknowledging researchers who have reported vulnerabilities.
-   * Optional — RFC 9116 §2.6.
+   * Explicit expiry date in ISO 8601 format.
+   * If not set, the service auto-computes one year from the current date.
+   * Must be a future date — RFC 9116 §2.5.
    */
-  acknowledgments: string;
+  expires: string;
+
+  /**
+   * URL to security-relevant job postings.
+   * Optional — RFC 9116 §2.8.
+   */
+  hiring: string;
+
+  /**
+   * URL to the security disclosure policy for this server.
+   * Recommended per RFC 9116 §2.4.
+   */
+  policy: string;
 
   /**
    * BCP 47 language tags indicating preferred languages for reports.
@@ -42,12 +48,6 @@ export interface SecurityTxtConfig {
    * Optional — RFC 9116 §2.7.
    */
   preferredLanguages: string;
-
-  /**
-   * URL to security-relevant job postings.
-   * Optional — RFC 9116 §2.8.
-   */
-  hiring: string;
 }
 
 export default registerAs('security', () =>

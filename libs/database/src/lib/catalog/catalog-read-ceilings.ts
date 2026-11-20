@@ -83,6 +83,7 @@ export function deriveReadCeilings(
         byRole = new Map();
         bySubject.set(role, byRole);
       }
+
       byRole.set(slug, reachOf(entry));
     }
   }
@@ -108,10 +109,10 @@ export function deriveReadCeilings(
  * its owner's choice.
  */
 export interface ReadIgnoringReach {
-  slug: string;
-  role: string;
-  subject: string;
   reads: Exclude<ReadReach, `binds ${string}`>;
+  role: string;
+  slug: string;
+  subject: string;
 }
 
 /**

@@ -1,17 +1,17 @@
-import { IpFamily, parseIp, type ParsedIp } from './ip';
+import type { IpFamily, ParsedIp } from './ip';
+import { parseIp } from './ip';
 
 /**
  * A parsed CIDR notation entry. `family` lets callers skip mismatched-family
  * comparisons; `prefixLength` is the number of significant bits.
  */
 export interface ParsedCidr {
-  family: IpFamily;
-
   /**
    * Network base bytes, with all bits beyond `prefixLength` zeroed.
    */
   baseBytes: Uint8Array;
 
+  family: IpFamily;
   prefixLength: number;
 }
 
@@ -27,18 +27,26 @@ export interface ParsedCidr {
  */
 export function parseCidr(input: string): ParsedCidr | null {
   const slashIndex = input.indexOf('/');
-  if (slashIndex === -1) return null;
+  if (slashIndex === -1) {
+    return null;
+  }
 
   const addrPart = input.slice(0, slashIndex);
   const prefixPart = input.slice(slashIndex + 1);
   const prefixLength = Number.parseInt(prefixPart, 10);
-  if (!Number.isInteger(prefixLength) || prefixLength < 0) return null;
+  if (!Number.isInteger(prefixLength) || prefixLength < 0) {
+    return null;
+  }
 
   const ip = parseIp(addrPart);
-  if (!ip) return null;
+  if (!ip) {
+    return null;
+  }
 
   const maxPrefix = ip.family === 4 ? 32 : 128;
-  if (prefixLength > maxPrefix) return null;
+  if (prefixLength > maxPrefix) {
+    return null;
+  }
 
   const baseBytes = applyPrefixMask(ip.bytes, prefixLength);
   return { family: ip.family, baseBytes, prefixLength };
@@ -50,12 +58,17 @@ export function parseCidr(input: string): ParsedCidr | null {
  * CIDR even if the bit pattern would match).
  */
 export function cidrContains(cidr: ParsedCidr, ip: ParsedIp): boolean {
-  if (cidr.family !== ip.family) return false;
+  if (cidr.family !== ip.family) {
+    return false;
+  }
 
   const masked = applyPrefixMask(ip.bytes, cidr.prefixLength);
   for (let i = 0; i < masked.length; i++) {
-    if (masked[i] !== cidr.baseBytes[i]) return false;
+    if (masked[i] !== cidr.baseBytes[i]) {
+      return false;
+    }
   }
+
   return true;
 }
 
@@ -68,8 +81,11 @@ export function parseCidrList(input: readonly string[]): ParsedCidr[] {
   const result: ParsedCidr[] = [];
   for (const entry of input) {
     const parsed = parseCidr(entry);
-    if (parsed) result.push(parsed);
+    if (parsed) {
+      result.push(parsed);
+    }
   }
+
   return result;
 }
 
@@ -79,8 +95,11 @@ export function parseCidrList(input: readonly string[]): ParsedCidr[] {
  */
 export function findContainingCidr(cidrs: readonly ParsedCidr[], ip: ParsedIp): ParsedCidr | null {
   for (const cidr of cidrs) {
-    if (cidrContains(cidr, ip)) return cidr;
+    if (cidrContains(cidr, ip)) {
+      return cidr;
+    }
   }
+
   return null;
 }
 
@@ -97,14 +116,17 @@ function applyPrefixMask(bytes: Uint8Array, prefixLength: number): Uint8Array {
       bitsRemaining -= 8;
       continue;
     }
+
     if (bitsRemaining === 0) {
       masked[i] = 0;
       continue;
     }
+
     // Keep the top `bitsRemaining` bits, zero the rest.
     const mask = (0xff << (8 - bitsRemaining)) & 0xff;
     masked[i] = masked[i] & mask;
     bitsRemaining = 0;
   }
+
   return masked;
 }

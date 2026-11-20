@@ -1,4 +1,4 @@
-import { CallHandler, ExecutionContext } from '@nestjs/common';
+import type { CallHandler, ExecutionContext } from '@nestjs/common';
 import { of } from 'rxjs';
 import { SnakeCaseInterceptor, toSnakeCase, transformKeysToSnakeCase } from './snakecase.interceptor';
 

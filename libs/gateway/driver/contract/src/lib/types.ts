@@ -8,11 +8,6 @@
  */
 export interface GatewayInboundEvent {
   /**
-   * Manifest-declared topic name, e.g. `igdb.game.updated`.
-   */
-  topic: string;
-
-  /**
    * Upstream entity identifier, when the event concerns a single entity.
    */
   externalId?: string;
@@ -32,4 +27,9 @@ export interface GatewayInboundEvent {
    * When the host ingress accepted the delivery.
    */
   receivedAt: Date;
+
+  /**
+   * Manifest-declared topic name, e.g. `igdb.game.updated`.
+   */
+  topic: string;
 }

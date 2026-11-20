@@ -1,3 +1,4 @@
+import { changedKeys, pickSnapshot } from '@bge/actor-context';
 import {
   Action,
   createOrReplay,
@@ -23,7 +24,7 @@ import {
   resolveScopeSubjectId,
   ScopeComposer,
 } from '@bge/permissions';
-import { type DefaultPaginationQueryDto, type PaginatedRows } from '@bge/shared';
+import type { DefaultPaginationQueryDto, PaginatedRows } from '@bge/shared';
 import { webhookEnvelope, WebhookEventType } from '@bge/webhooks';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -34,11 +35,8 @@ import { assertInvitable } from './attendee/invitable';
 import { browseEventScope } from './browse-event-scope';
 import { ATTENDEE_ORDER } from './constants/attendee-order.constant';
 import { ATTENDEE_USER_AND_ROLE_INCLUDE } from './constants/attendee-user-and-role.constant';
-import {
-  EVENT_CREATE_ATTENDEE_INCLUDE,
-  EVENT_CREATE_INCLUDE,
-  type CreatedEvent,
-} from './constants/event-create-include.constant';
+import type { CreatedEvent } from './constants/event-create-include.constant';
+import { EVENT_CREATE_ATTENDEE_INCLUDE, EVENT_CREATE_INCLUDE } from './constants/event-create-include.constant';
 import { NOT_REMOVED } from './constants/not-removed.constant';
 import { OCCURRENCE_ORDER } from './constants/occurrence-order.constant';
 import type { CreateEventDto } from './dto/create-event.dto';
@@ -53,19 +51,19 @@ import {
   toEventPolicyViewOrNull,
 } from './policy/policy-ceiling';
 import { assertPolicyReferencesExist, policyListsCreateData } from './policy/policy-lists';
-import { POLICY_VIEW_INCLUDE, type EventPolicyView, type OccurrencePolicyView } from './policy/policy-view';
+import type { EventPolicyView, OccurrencePolicyView } from './policy/policy-view';
+import { POLICY_VIEW_INCLUDE } from './policy/policy-view';
+import type { EventAttendance, EventListRow, OwnAttendeeWhere } from './utils/event-attendance.util';
 import {
   EVENT_ATTENDANCE_SELECT,
   readEventAttendance,
   toEventAttendance,
   withEventAttendance,
-  type EventAttendance,
-  type EventListRow,
-  type OwnAttendeeWhere,
 } from './utils/event-attendance.util';
-import { EVENT_STATUS_DATE_SELECT, withEventStatus, type EventWithStatus } from './utils/event-status.util';
+import type { EventWithStatus } from './utils/event-status.util';
+import { EVENT_STATUS_DATE_SELECT, withEventStatus } from './utils/event-status.util';
 import { lockLiveEvent } from './utils/lock-live-event.util';
-import { changedKeys, pickSnapshot } from './utils/pick-snapshot.util';
+import { rsvpDateFor } from './utils/rsvp-date.util';
 import { pageUpcomingEvents } from './utils/upcoming-events.util';
 
 @Injectable()
@@ -495,10 +493,12 @@ export class EventService {
 
               attendees: {
                 create: [
-                  // The creator joins as the event's host
+                  // The creator joins as the event's host, who has answered by
+                  // creating it, so the answer is dated (#1027)
                   {
                     user: { connect: { id: userId } },
                     status: EventParticipationStatus.Attending,
+                    rsvpDate: rsvpDateFor(EventParticipationStatus.Attending, initiatedAt),
                     role: {
                       create: {
                         role: { connect: { name: SystemRole.EventHost } },
@@ -726,6 +726,7 @@ export class EventService {
       // The audit row records only the columns whose values changed, before
       // and after, and a patch that re-sends stored values changes none, so it
       // emits no event and no webhook (#728).
+      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Object.keys returns string[]; the dto is the update's data, so its keys are Event columns (#1321)
       const changed = changedKeys(existing, updated, Object.keys(dto) as (keyof Event)[]);
       if (changed.length > 0) {
         this.eventEmitter.emit(
@@ -876,16 +877,18 @@ export function eventWebhookIds(event: Pick<Event, 'id' | 'householdId'>): {
  */
 export type EventDetail = Prisma.EventGetPayload<{
   include: {
-    occurrences: true;
     attendees: { include: typeof ATTENDEE_USER_AND_ROLE_INCLUDE };
+    occurrences: true;
   };
 }> & {
-  policy: EventPolicyView | null;
+  attendance: EventAttendance | null;
+
   /**
    * Each served date that has a policy row, under the event policy's ceiling; a date without one inherits
    * everything. `[]` when `policy` is `null` (#1211).
    */
   occurrencePolicies: OccurrencePolicyView[];
+
+  policy: EventPolicyView | null;
   status: EventStatus;
-  attendance: EventAttendance | null;
 };

@@ -1,6 +1,7 @@
 import type { PermissionSeedDefinition } from '@bge/database';
 import { PERMISSION_CATALOG, Prisma, probeConditions, ResourceType } from '@bge/database';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 
 /**
  * The entry check's probe against a real database (#772).
@@ -80,6 +81,7 @@ describe('the entry check probe against Postgres', () => {
         for (const permission of PERMISSION_CATALOG) {
           found.push(...(await probeConditions(tx, permission)));
         }
+
         return found;
       },
       { timeout: 60_000 },

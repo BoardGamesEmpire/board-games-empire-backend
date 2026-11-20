@@ -1,9 +1,16 @@
 /**
- * Join table representing the relationship between a base game and its expansions.
- * Each record indicates that a particular Game (the expansion) is an expansion of another Game (the base game).
- * This allows for many-to-many relationships, as some games have multiple expansions and some expansions are compatible with multiple base games.
- * Replaces the previous GameExpansion table - Expansions are now first-class Game records with their own GameSources, mechanics, etc., and this join table
- * captures the relationship and any adjustments (e.g. player count changes) that come with the expansion.
+ * An add-on link: an add-on (the expansion game) and one base game it adds to
+ * (#1391). An add-on can link to several base games, and a base game to many
+ * add-ons. Only a game of an add-on content type gets one; a game of any other
+ * content type (a remake, remaster, port, expanded edition or bundle) names its
+ * original on its DataGateway link alone (#658).
+ * The link has no kind of its own: the add-on's content type is its kind, so
+ * `isStandalone` on the wire follows it: the platform game's own where one
+ * platform is in view (a collection or offered-game row), else the game's. So
+ * all of one add-on's links carry the same value, on a row and wherever no
+ * platform is in view (#1391). Add-ons are games in the game catalog with their
+ * own DataGateway links, mechanics, etc.; this table carries the link and the
+ * adjustments (e.g. player count changes) the add-on brings.
  */
 model GameExpansion {
   id String @id @default(cuid(2))
@@ -24,9 +31,6 @@ model GameExpansion {
 
   expansionGame   Game   @relation("ExpansionGame", fields: [expansionGameId], references: [id], onDelete: Cascade)
   expansionGameId String @map("expansion_game_id")
-
-  expansionType ExpansionType @default(Expansion) @map("expansion_type")
-  isStandalone  Boolean       @default(false) @map("is_standalone")
 
   // ─── Player count adjustments ──────────────────────────────────────────────
   // Use modifier for simple additive changes (+1 player slot).

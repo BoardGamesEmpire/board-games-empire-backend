@@ -24,12 +24,15 @@ export type EntryOf<K extends VocabularyKind> = K extends 'platform' ? PlatformE
 export interface LoadSummary {
   /** No record matched, so one was made, with its link. */
   created: number;
-  /** Linked to a record of the same slug or a similar name. */
-  matched: number;
-  /** Matched nothing while review was on, so it waits for an admin. */
-  pending: number;
+
   /** Already linked, in any status, and left as it was. */
   kept: number;
+
+  /** Linked to a record of the same slug or a similar name. */
+  matched: number;
+
+  /** Matched nothing while review was on, so it waits for an admin. */
+  pending: number;
 }
 
 /** How an admin's accept of a Pending link went (#715). */
@@ -45,17 +48,21 @@ export interface VocabularyRecordView {
 
 /** A platform, category or mechanic link as the review routes return it (#715, #718). */
 export interface VocabularyLinkView {
-  id: string;
-  gatewayId: string;
+  createdAt: Date;
   externalId: string;
-  status: VocabularyLinkStatus;
+  gatewayId: string;
+  id: string;
   origin: VocabularyLinkOrigin;
   record: VocabularyRecordView | null;
-  suppliedName: string;
+  status: VocabularyLinkStatus;
+
   /** Platforms only. */
   suppliedAbbreviation: string | null;
+
+  suppliedName: string;
+
   /** Platforms only. */
   suppliedPlatformType: PlatformType | null;
-  createdAt: Date;
+
   updatedAt: Date;
 }

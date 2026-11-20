@@ -1,8 +1,10 @@
 import type { AuditContextService } from '@bge/actor-context';
-import { isI18nMessage, type I18nMessage, type I18nTranslations } from '@bge/i18n-core';
+import type { I18nMessage, I18nTranslations } from '@bge/i18n-core';
+import { isI18nMessage } from '@bge/i18n-core';
 import { HttpException, Logger } from '@nestjs/common';
-import { I18nService } from 'nestjs-i18n';
-import { errorEnvelope, reasonPhrase, type ErrorEnvelope } from './error-envelope';
+import type { I18nService } from 'nestjs-i18n';
+import type { ErrorEnvelope } from './error-envelope';
+import { errorEnvelope, reasonPhrase } from './error-envelope';
 import { FALLBACK_LOCALE } from './locale.constants';
 
 const logger = new Logger('translateException');
@@ -96,6 +98,7 @@ export function renderErrorBody(
   }
 
   if (body !== null && typeof body === 'object') {
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- TypeScript has no narrowing from `object` to an indexable record, and the rest takes every other field (#1321)
     const { message, ...fields } = body as Record<string, unknown>;
     return errorEnvelope(status, renderMessage(status, message, i18n, locale), fields);
   }

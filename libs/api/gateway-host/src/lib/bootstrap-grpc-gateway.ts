@@ -1,15 +1,29 @@
 import { registerLoggerShutdown } from '@bge/logger';
 import { PROTO_PACKAGE_NAME } from '@boardgamesempire/proto-gateway';
 import type { Type } from '@nestjs/common';
-import { bootstrapGrpcMicroservice, type GrpcAddressConfig } from './bootstrap-grpc-microservice';
+import type { GrpcAddressConfig } from './bootstrap-grpc-microservice';
+import { bootstrapGrpcMicroservice } from './bootstrap-grpc-microservice';
 import type { GatewayLoggers } from './gateway-logger';
 
 /** Proto walk skips the coordinator package — gateways serve only their own. */
 const COORDINATOR_PROTO_EXCLUSION = /(^|[/\\])coordinator([/\\]|$)/;
 
 export interface GrpcGatewayBootstrapConfig {
+  /**
+   * The gateway's config for the address it listens on, its `gatewayConfig`.
+   * See {@link GrpcMicroserviceBootstrapConfig.addressConfig}.
+   */
+  readonly addressConfig: GrpcAddressConfig;
+
   /** The gateway app's root Nest module. */
   readonly appModule: Type<unknown>;
+
+  /**
+   * The `bootstrap`-tagged child logger from {@link createGatewayLogger},
+   * shared with the app's `LoggerModule` so pre-Nest and shutdown lines
+   * flow through the same transport.
+   */
+  readonly bootstrapLogger: GatewayLoggers['bootstrapLogger'];
 
   /**
    * Human-readable name for the startup banner,
@@ -18,24 +32,11 @@ export interface GrpcGatewayBootstrapConfig {
   readonly displayName: string;
 
   /**
-   * The gateway's config for the address it listens on, its `gatewayConfig`.
-   * See {@link GrpcMicroserviceBootstrapConfig.addressConfig}.
-   */
-  readonly addressConfig: GrpcAddressConfig;
-
-  /**
    * Absolute directory the app's `.proto` assets are copied into at build.
    * Pass `path.join(__dirname, 'proto')` from the app's `main.ts` so
    * `__dirname` resolves against the app's own bundle, not this library.
    */
   readonly protoDir: string;
-
-  /**
-   * The `bootstrap`-tagged child logger from {@link createGatewayLogger},
-   * shared with the app's `LoggerModule` so pre-Nest and shutdown lines
-   * flow through the same transport.
-   */
-  readonly bootstrapLogger: GatewayLoggers['bootstrapLogger'];
 }
 
 /**

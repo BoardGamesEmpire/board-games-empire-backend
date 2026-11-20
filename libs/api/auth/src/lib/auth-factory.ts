@@ -6,7 +6,8 @@ import type { PrismaClient } from '@bge/database';
 import { isTrue, splitTrimFilter } from '@bge/env';
 import type { I18nTranslations } from '@bge/i18n';
 import type { MailDispatcherService } from '@bge/queue-mail';
-import { Logger, type LoggerService } from '@nestjs/common';
+import type { LoggerService } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { EventEmitter2 } from '@nestjs/event-emitter';
 import { betterAuth } from 'better-auth';
@@ -31,12 +32,8 @@ import { appSignIn } from './app-sign-in';
 import type { CompleteAuthStorage } from './auth-storage';
 import { createBanFlagGate } from './ban-flag-gate';
 import { betterAuthLogger } from './better-auth-logger';
-import {
-  idsAllowingUnverifiedEmail,
-  type OidcProviderConfig,
-  readOidcProviders,
-  unlistedOidcVariables,
-} from './configuration/oidc-providers';
+import type { OidcProviderConfig } from './configuration/oidc-providers';
+import { idsAllowingUnverifiedEmail, readOidcProviders, unlistedOidcVariables } from './configuration/oidc-providers';
 import { AUTH_BASE_PATH, AUTH_CLIENT_IP_HEADER, AUTH_COOKIE_PREFIX, SESSION_FRESH_AGE_SECONDS } from './constants';
 import { UserCreatedEvent } from './events/auth.events';
 import { createIdTokenGate } from './id-token-gate';
@@ -53,14 +50,16 @@ import { createUserRemovalGate, userRemovalGateDeps } from './user-removal-gate'
 import { createUsernameVariants } from './username-variant';
 
 interface UserCreatedHookDeps {
-  eventEmitter?: EventEmitter2;
   auditContext?: AuditContextService;
-  systemActorScope?: SystemActorScope;
+  eventEmitter?: EventEmitter2;
+
   /**
    * The username a sign-in asked for when it was replaced by a variant (#912),
    * read with the endpoint context `user.create.before` saw.
    */
   requestedUsername?: (context: object | null) => string | null;
+
+  systemActorScope?: SystemActorScope;
 }
 
 /**
@@ -96,15 +95,16 @@ export function createUserCreatedHook(
 
     // better-auth surfaces the DB `username` column as `name` (see the
     // `user.fields` mapping below); `isAnonymous` comes from the anonymous
-    // plugin. Tolerate both shapes.
-    const record = user as User & { username?: string; isAnonymous?: boolean | null };
+    // plugin. Tolerate both shapes; neither is on better-auth's `User` type.
+    const username = 'username' in user && typeof user.username === 'string' ? user.username : undefined;
+    const isAnonymous = 'isAnonymous' in user && typeof user.isAnonymous === 'boolean' ? user.isAnonymous : undefined;
 
     const event = new UserCreatedEvent(
       {
         id: user.id,
-        username: record.username ?? user.name,
+        username: username ?? user.name,
         email: user.email,
-        isAnonymous: record.isAnonymous ?? false,
+        isAnonymous: isAnonymous ?? false,
       },
       initiatedAt,
       requestedUsername?.(context ?? null) ?? null,

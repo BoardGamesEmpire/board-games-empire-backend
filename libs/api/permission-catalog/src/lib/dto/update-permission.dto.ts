@@ -2,16 +2,8 @@ import { RiskLevel } from '@bge/database';
 import { i18nValidationMessage } from '@bge/i18n';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import {
-  IsBoolean,
-  IsEnum,
-  IsObject,
-  IsString,
-  NotContains,
-  ValidateBy,
-  ValidateIf,
-  type ValidationOptions,
-} from 'class-validator';
+import type { ValidationOptions } from 'class-validator';
+import { IsBoolean, IsEnum, IsObject, IsString, NotContains, ValidateBy, ValidateIf } from 'class-validator';
 
 /**
  * The value as the request sent it, not as the global pipe's implicit
@@ -20,7 +12,7 @@ import {
  * copies an object key by key. Left as sent, a value of the wrong kind fails
  * its validator, and a condition reaches the check exactly as written.
  */
-export const asSent = ({ obj, key }: { obj: Record<string, unknown>; key: string }): unknown => obj[key];
+export const asSent = ({ obj, key }: { key: string; obj: Record<string, unknown> }): unknown => obj[key];
 
 const NUL = '\u0000';
 

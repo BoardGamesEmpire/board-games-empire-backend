@@ -1,14 +1,10 @@
 import { BasePluginRegistry } from './base-plugin-registry.js';
-import {
-  DuplicatePluginRegistrationError,
-  PluginDisabledError,
-  PluginNotRegisteredError,
-  PluginRegistryError,
-} from './registry.errors.js';
+import type { PluginRegistryError } from './registry.errors.js';
+import { DuplicatePluginRegistrationError, PluginDisabledError, PluginNotRegisteredError } from './registry.errors.js';
 
 interface TestDriver {
-  readonly seed: number;
   ping(): string;
+  readonly seed: number;
 }
 
 const createTestDriver = (seed: number): TestDriver => ({

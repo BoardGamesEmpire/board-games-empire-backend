@@ -1,10 +1,11 @@
-import { request as httpRequest, type ClientRequest, type IncomingHttpHeaders } from 'node:http';
+import type { ClientRequest, IncomingHttpHeaders } from 'node:http';
+import { request as httpRequest } from 'node:http';
 import { requireBaseUrl } from '../support/e2e-env';
 
 interface Answer {
-  readonly status: number;
-  readonly headers: IncomingHttpHeaders;
   readonly body: string;
+  readonly headers: IncomingHttpHeaders;
+  readonly status: number;
 }
 
 const KIB = 1024;

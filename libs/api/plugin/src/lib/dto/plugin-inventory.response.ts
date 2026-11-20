@@ -1,3 +1,4 @@
+import type { PluginProcessRole, PluginUnitDormancy } from '@bge/database';
 import {
   PLUGIN_PROCESS_ROLES,
   PLUGIN_UNIT_DORMANCY_CODES,
@@ -5,8 +6,6 @@ import {
   PluginExecutionMode,
   PluginScope,
   RiskLevel,
-  type PluginProcessRole,
-  type PluginUnitDormancy,
 } from '@bge/database';
 import type {
   ConsentOutstandingCheck,

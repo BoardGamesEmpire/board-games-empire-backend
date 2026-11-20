@@ -1,5 +1,6 @@
 import type { AuditContextService, SystemActorScope } from '@bge/actor-context';
-import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService } from '@bge/testing';
 import { Logger } from '@nestjs/common';
 import type { InviteService } from '../invite.service';
 import { InviteExpirySweepService } from './sweep.service';
@@ -11,7 +12,7 @@ describe('InviteExpirySweepService', () => {
   const tx = { name: 'the batch transaction' };
 
   let db: MockDatabaseService;
-  let invites: { expireOutstandingWithin: jest.Mock; emit: jest.Mock };
+  let invites: { emit: jest.Mock; expireOutstandingWithin: jest.Mock };
   let audit: { getActorOrThrow: jest.Mock };
   let systemActorScope: { run: jest.Mock };
   let logged: jest.SpyInstance;
@@ -127,6 +128,7 @@ describe('InviteExpirySweepService', () => {
     for (const call of invites.expireOutstandingWithin.mock.calls) {
       expect(call).toEqual([tx, { limit: BATCH }]);
     }
+
     // Each emit carries the batch it followed, not a running total.
     expect(invites.emit.mock.calls.map(([events]) => events.length)).toEqual([BATCH, BATCH, 7]);
   });

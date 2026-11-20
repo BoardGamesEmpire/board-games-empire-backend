@@ -23,23 +23,6 @@ export interface PermissionSeedDefinition {
   action: Action;
 
   /**
-   * ResourceType for domain permissions; literal 'all' for the global wildcards.
-   */
-  subject: ResourceType | 'all';
-
-  /**
-   * Stable code-side identifier, e.g. 'read:game'.
-   */
-  slug: string;
-
-  /**
-   * Consent-surface risk classification (#60 canonical rubric).
-   */
-  riskLevel: RiskLevel;
-
-  reason: string;
-
-  /**
    * Mustache-templated ABAC conditions, rendered by the ability factory. A
    * Prisma `where` clause for `subject` with placeholders in its values;
    * `permission()` checks the paths against the subject's `WhereInput`, and
@@ -52,6 +35,23 @@ export interface PermissionSeedDefinition {
    * checks each against the subject's scalar-field enum.
    */
   fields?: readonly string[];
+
+  reason: string;
+
+  /**
+   * Consent-surface risk classification (#60 canonical rubric).
+   */
+  riskLevel: RiskLevel;
+
+  /**
+   * Stable code-side identifier, e.g. 'read:game'.
+   */
+  slug: string;
+
+  /**
+   * ResourceType for domain permissions; literal 'all' for the global wildcards.
+   */
+  subject: ResourceType | 'all';
 }
 
 /**
@@ -60,8 +60,8 @@ export interface PermissionSeedDefinition {
  * the reconciler leaves any role it does not own alone.
  */
 export interface RoleSeedDefinition {
-  name: SystemRole;
   description: string;
+  name: SystemRole;
 }
 
 /**

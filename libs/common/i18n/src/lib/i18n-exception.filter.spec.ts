@@ -1,6 +1,7 @@
 /* eslint-disable bge/no-uncoded-exception-body -- these cases hand the renderer a coded body no producer may build, to pin that it completes any body into the envelope (#1260) */
 import { t } from '@bge/i18n-core';
-import { ArgumentsHost, ConflictException, HttpException, NotFoundException } from '@nestjs/common';
+import type { ArgumentsHost } from '@nestjs/common';
+import { ConflictException, HttpException, NotFoundException } from '@nestjs/common';
 import { BaseExceptionFilter } from '@nestjs/core';
 import { I18nExceptionFilter } from './i18n-exception.filter';
 

@@ -16,10 +16,11 @@ import { FeedbackService } from './feedback.service';
 import { FeedbackSubmissionThrottle } from './throttling/feedback-throttler';
 
 interface SubmitFeedbackResponse {
+  readonly feedbackReport: FeedbackReceiptDto;
+
   // Wire contract is a plain string; the return site assigns an I18nMessage marker
   // that I18nResponseInterceptor renders to a localized string before serialization.
   readonly message: string;
-  readonly feedbackReport: FeedbackReceiptDto;
 }
 
 @ApiBearerAuth()
@@ -69,6 +70,7 @@ export class FeedbackController {
         ),
       ),
       map((report) => ({
+        // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- an I18nMessage marker the response interceptor renders to a string; the marker type shares nothing with string, so the cast goes through unknown (#1321)
         message: t('success.feedback.submitted') as unknown as string,
         feedbackReport: FeedbackReceiptDto.fromEntity(report),
       })),

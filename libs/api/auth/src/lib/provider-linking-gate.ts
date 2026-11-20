@@ -1,4 +1,5 @@
-import { type PrismaClient, ProviderLinkingPolicy } from '@bge/database';
+import type { PrismaClient } from '@bge/database';
+import { ProviderLinkingPolicy } from '@bge/database';
 import type { I18nPath } from '@bge/i18n';
 
 /**
@@ -14,10 +15,12 @@ const EMAIL_UNVERIFIED: I18nPath = 'errors.auth.provider_link_email_unverified';
 const LINK_ACCOUNT = 'link-account';
 
 export interface ProviderLinkingGateDeps {
-  /** The row's policy, or null when the row is missing. */
-  readonly readPolicy: () => Promise<ProviderLinkingPolicy | null>;
   /** better-auth's OAuth state for this request: getOAuthState from 'better-auth/api'. */
   readonly readOAuthState: () => Promise<{ readonly link?: unknown } | null>;
+
+  /** The row's policy, or null when the row is missing. */
+  readonly readPolicy: () => Promise<ProviderLinkingPolicy | null>;
+
   readonly render: (key: I18nPath) => string;
 }
 
@@ -57,8 +60,8 @@ export interface ProviderLinkingGateDeps {
 export function createProviderLinkingGate(
   deps: ProviderLinkingGateDeps,
 ): (data: {
-  readonly user: { readonly emailVerified?: unknown };
   readonly source: { readonly action: string };
+  readonly user: { readonly emailVerified?: unknown };
 }) => Promise<{ error: string; errorDescription: string } | undefined> {
   const refusal = (message: I18nPath) => ({ error: NOT_LINKED, errorDescription: deps.render(message) });
 

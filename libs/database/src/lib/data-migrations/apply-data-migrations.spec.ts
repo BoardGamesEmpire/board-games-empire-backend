@@ -1,6 +1,7 @@
 import type { Logger } from '@nestjs/common';
 import { Prisma } from '../client';
-import { applyDataMigrations, DataMigrationRevisionError, type DataMigrationsClient } from './apply-data-migrations';
+import type { DataMigrationsClient } from './apply-data-migrations';
+import { applyDataMigrations, DataMigrationRevisionError } from './apply-data-migrations';
 import type { DataMigrationEntry, DataMigrationLedgerRow } from './data-migration-entry';
 
 // The apply loop over a fake client: one transaction per entry, the entry's
@@ -12,8 +13,8 @@ const FIRST = '20260901000000_first_backfill';
 const SECOND = '20260902000000_second_remap';
 
 interface FakeTx {
+  readonly created: Array<{ durationMs: number; name: string; revision: number }>;
   readonly id: number;
-  readonly created: Array<{ name: string; revision: number; durationMs: number }>;
 }
 
 /** Records every transaction and what was created inside it; `run` sees the same object the row is written on. */

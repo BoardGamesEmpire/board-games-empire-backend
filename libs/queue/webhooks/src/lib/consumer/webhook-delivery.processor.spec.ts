@@ -1,5 +1,5 @@
 import { Test } from '@nestjs/testing';
-import { Job } from 'bullmq';
+import type { Job } from 'bullmq';
 import { WEBHOOK_DELIVERY_ATTEMPTS } from '../constants/webhook-queue.constants';
 import type { WebhookDeliveryJob } from '../interfaces/webhook-delivery-job.interface';
 import { WebhookDeliveryProcessor } from './webhook-delivery.processor';

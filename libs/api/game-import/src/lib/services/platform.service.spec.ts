@@ -1,7 +1,8 @@
 import type { GameRelease } from '@bge/database';
 import { PlatformType } from '@bge/database';
 import { LanguageLinkService } from '@bge/language';
-import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { createTestingModuleWithDb } from '@bge/testing';
 import { VocabularyLinkService } from '@bge/vocabulary';
 import type { GameData, PlatformData } from '@boardgamesempire/proto-gateway';
 import * as proto from '@boardgamesempire/proto-gateway';

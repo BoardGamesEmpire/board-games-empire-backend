@@ -5,11 +5,13 @@ import {
   CORRELATION_ID_CLS_KEY,
   SOURCE_CLS_KEY,
 } from '@bge/actor-context';
-import { AuthService, type AuthUser } from '@bge/auth';
+import type { AuthUser } from '@bge/auth';
+import { AuthService } from '@bge/auth';
 import { I18nMessage, t } from '@bge/i18n';
 import { buildBasePinoOptions } from '@bge/logger';
 import { ForbiddenException, Logger, UnauthorizedException } from '@nestjs/common';
-import { Test, type TestingModule } from '@nestjs/testing';
+import type { TestingModule } from '@nestjs/testing';
+import { Test } from '@nestjs/testing';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
 import type { NextFunction, Request, Response } from 'express';
 import { ClsModule, ClsService } from 'nestjs-cls';
@@ -22,7 +24,7 @@ type AuthMock = jest.Mocked<
 >;
 
 /** A key's owner as `findUserById` returns one; unbanned unless the test says otherwise. */
-const owner = (ban: { banned?: boolean; banExpires?: Date | null } = {}): AuthUser =>
+const owner = (ban: { banExpires?: Date | null; banned?: boolean } = {}): AuthUser =>
   ({ id: 'user-9', banned: false, banExpires: null, ...ban }) as unknown as AuthUser;
 
 const buildAuthMock = (): AuthMock =>
@@ -41,8 +43,8 @@ const buildResponse = (): Response => ({}) as unknown as Response;
 interface Captured {
   readonly actor: unknown;
   readonly correlationId: unknown;
-  readonly source: unknown;
   readonly nextArg: unknown;
+  readonly source: unknown;
 }
 
 describe('HttpActorMiddleware', () => {

@@ -5,12 +5,15 @@ import { OTLPMetricExporter as OtlpHttpMetricExporter } from '@opentelemetry/exp
 import { OTLPTraceExporter as OtlpGrpcTraceExporter } from '@opentelemetry/exporter-trace-otlp-grpc';
 import { OTLPTraceExporter as OtlpHttpTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { resourceFromAttributes } from '@opentelemetry/resources';
-import { PeriodicExportingMetricReader, type MetricReader } from '@opentelemetry/sdk-metrics';
+import type { MetricReader } from '@opentelemetry/sdk-metrics';
+import { PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics';
 import { NodeSDK } from '@opentelemetry/sdk-node';
-import { BatchSpanProcessor, type SpanExporter, type SpanProcessor } from '@opentelemetry/sdk-trace';
+import type { SpanExporter, SpanProcessor } from '@opentelemetry/sdk-trace';
+import { BatchSpanProcessor } from '@opentelemetry/sdk-trace';
 import { ActorSpanProcessor } from '../processors/actor-span.processor';
 import { OTEL_LOG_LEVEL_ENV, resolveDiagLogLevel } from './diag-log-level';
 import { metricsExportEnabled } from './metrics-enabled';
+import type { OtelInitConfig } from './otel.config';
 import {
   DEFAULT_SERVICE_NAMESPACE,
   OTEL_BSP_EXPORT_TIMEOUT_ENV,
@@ -24,7 +27,6 @@ import {
   OTEL_METRICS_EXPORTER_ENV,
   OTEL_OTLP_PROTOCOL_GRPC,
   OTEL_OTLP_PROTOCOL_HTTP,
-  type OtelInitConfig,
 } from './otel.config';
 
 /**
@@ -46,6 +48,7 @@ const resolveTraceExporter = (env: NodeJS.ProcessEnv): SpanExporter | undefined 
   if (!env[OTEL_EXPORTER_OTLP_ENDPOINT_ENV]) {
     return undefined;
   }
+
   const protocol = env[OTEL_EXPORTER_OTLP_PROTOCOL_ENV] ?? OTEL_OTLP_PROTOCOL_HTTP;
   return protocol === OTEL_OTLP_PROTOCOL_GRPC ? new OtlpGrpcTraceExporter() : new OtlpHttpTraceExporter();
 };
@@ -141,6 +144,7 @@ const defaultSignalExporters = (env: NodeJS.ProcessEnv): void => {
   if (env[OTEL_METRICS_EXPORTER_ENV] === undefined) {
     env[OTEL_METRICS_EXPORTER_ENV] = OTEL_EXPORTER_NONE;
   }
+
   if (env[OTEL_LOGS_EXPORTER_ENV] === undefined) {
     env[OTEL_LOGS_EXPORTER_ENV] = OTEL_EXPORTER_NONE;
   }

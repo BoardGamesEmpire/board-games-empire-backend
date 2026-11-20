@@ -6,14 +6,11 @@
  * here are two versions of the plugin.
  */
 export interface FixtureBuild {
-  /** The version its manifest names, and its driver reports on Ping. */
-  readonly version: string;
-
-  /** The one game its search returns and its fetch finds. */
-  readonly game: {
-    readonly externalId: string;
-    readonly title: string;
-  };
+  /**
+   * FetchGame of this external ID answers with the actor the plugin's code
+   * ran as, as JSON in the answer's `message`.
+   */
+  readonly actorProbeExternalId: string;
 
   /**
    * The batch limit it declares for FetchGames: an interview answer, which
@@ -21,11 +18,14 @@ export interface FixtureBuild {
    */
   readonly fetchGamesMaxIds: number;
 
-  /**
-   * FetchGame of this external ID answers with the actor the plugin's code
-   * ran as, as JSON in the answer's `message`.
-   */
-  readonly actorProbeExternalId: string;
+  /** The one game its search returns and its fetch finds. */
+  readonly game: {
+    readonly externalId: string;
+    readonly title: string;
+  };
+
+  /** The version its manifest names, and its driver reports on Ping. */
+  readonly version: string;
 }
 
 /** The build a spec places unless it is telling two builds apart. */

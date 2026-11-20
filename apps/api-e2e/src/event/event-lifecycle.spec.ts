@@ -1,10 +1,12 @@
 import { EventSchedulingMode, EventStatus, NotificationType, OccurrenceStatus, SystemRole } from '@bge/database';
-import { createActors, type Actors, type AuthenticatedActor, type SessionActor } from '@bge/testing-e2e';
+import type { Actors, AuthenticatedActor, SessionActor } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import request from 'supertest';
 import type { UnreadNotificationWire } from '../notification/notification-wire';
 import { unreadWhen } from '../notification/unread-poll';
 import { requireBaseUrl } from '../support/e2e-env';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { hoursFromNow } from './event-fixtures';
 import { createEventClient, EVENTS_PATH } from './event-request';
 import { eventEnvelope, listEventsEnvelope, occurrenceEnvelope } from './event-wire';

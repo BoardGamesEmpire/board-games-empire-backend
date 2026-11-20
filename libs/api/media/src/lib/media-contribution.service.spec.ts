@@ -1,6 +1,7 @@
 import { Action, ContributionOrigin, MediaContributionStatus, Prisma, Reach, ResourceType } from '@bge/database';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
 import { ServiceAccountService } from '@bge/services';
+import type { MockAbilityService, MockDatabaseService } from '@bge/testing';
 import {
   batchTransactionCall,
   createMockAbilityService,
@@ -9,8 +10,6 @@ import {
   MOCK_RESOURCE_CONDITION,
   shippedReadReaches,
   unwrapTransaction,
-  type MockAbilityService,
-  type MockDatabaseService,
 } from '@bge/testing';
 import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -348,7 +347,7 @@ describe('MediaContributionService', () => {
   });
 
   describe('list (#372)', () => {
-    const query = (init: Partial<{ status: MediaContributionStatus; page: number; limit: number }> = {}) =>
+    const query = (init: Partial<{ limit: number; page: number; status: MediaContributionStatus }> = {}) =>
       plainToInstance(ListContributionsQueryDto, init, { enableImplicitConversion: true });
 
     beforeEach(() => {

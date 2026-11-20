@@ -1,6 +1,8 @@
-import { NotificationType, SystemRole, type GameShareSnapshot } from '@bge/database';
+import type { GameShareSnapshot } from '@bge/database';
+import { NotificationType, SystemRole } from '@bge/database';
 import { NotificationsService } from '@bge/notifications-service';
-import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
+import type { MockDatabaseService } from '@bge/testing';
+import { createTestingModuleWithDb } from '@bge/testing';
 import { Logger } from '@nestjs/common';
 import { GameShareNotificationListener } from './game-share-notification.listener';
 import { GameShareCreatedEvent } from './game-share.events';
@@ -40,9 +42,9 @@ const toHouseholdWaiting = () => created({ householdId: HOUSEHOLD_ID, approvedAt
 /** What the listener reads of the stored share: the game, the sharer's name and the household. */
 interface ShareRow {
   approvedAt: Date | null;
-  game: { title: string; deletedAt: Date | null };
-  sharedBy: { username: string; profile: { displayName: string | null } | null } | null;
-  household: { name: string; deletedAt: Date | null } | null;
+  game: { deletedAt: Date | null; title: string };
+  household: { deletedAt: Date | null; name: string } | null;
+  sharedBy: { profile: { displayName: string | null } | null; username: string } | null;
 }
 
 const RILEY = { username: 'riley', profile: { displayName: 'Riley' } };

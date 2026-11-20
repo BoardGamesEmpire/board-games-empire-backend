@@ -1,20 +1,13 @@
+import type { BootstrapLogger, Migrator } from '@bge/bootstrap';
 import {
   PgAdvisoryLock,
   PrismaSchemaLedger,
   RegistryDataMigrations,
   runBootstrapSequence,
   RunSeedsSeeder,
-  type BootstrapLogger,
-  type Migrator,
 } from '@bge/bootstrap';
-import {
-  CATALOG_MANIFEST,
-  DATA_MIGRATIONS,
-  MIGRATION_NAMES,
-  reconcileCatalog,
-  SystemRole,
-  type DataMigrationEntry,
-} from '@bge/database';
+import type { DataMigrationEntry } from '@bge/database';
+import { CATALOG_MANIFEST, DATA_MIGRATIONS, MIGRATION_NAMES, reconcileCatalog, SystemRole } from '@bge/database';
 import { PERMISSIONS_CACHE_NAMESPACE, PermissionsService } from '@bge/permissions';
 import { createCacheStore, RedisKeyFlush } from '@bge/redis';
 import type { Logger } from '@nestjs/common';
@@ -22,7 +15,8 @@ import Redis from 'iovalkey';
 import { API_CACHE_NAMESPACE, apiCacheKey, permissionsCacheKey } from '../support/api-cache';
 import type { StartedRedisServer } from '../support/redis-server';
 import { selectRedisServer, startRedisServer } from '../support/redis-server';
-import { createTestDatabase, requireDatabaseUrl, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase, requireDatabaseUrl } from '../support/test-db';
 
 /**
  * The cache flush through the real DML phases (#236). A catalog reconcile

@@ -19,16 +19,33 @@ export type PluginCheckDecisionState = ConsentCheckDecision | 'per-unit';
 
 /** One manifest check, enriched for a consent surface (#60). */
 export interface PluginCheckPresentation {
-  /** Canonical slug: the `plugin|<slug>|<bare>` envelope for own-namespace checks, the core slug otherwise. */
-  readonly slug: string;
-  readonly origin: PermissionCheckOrigin;
-  readonly required: boolean;
   readonly consentScope: PluginConsentScopeValue;
-  /** Manifest `features[].name` the check is bound to; `null` for plugin-wide checks. */
-  readonly feature: string | null;
+
   /** True when the presented unit is the principal that decides this check (exact scope-axis match). */
   readonly decidableByUnit: boolean;
+
+  /** Risk recorded on the addressable deciding row (`Granted` or `Denied`); `null` when no row exists or the decision is per-unit. */
+  readonly decidedRiskLevel: RiskLevel | null;
+
   readonly decision: PluginCheckDecisionState;
+
+  /** Manifest `features[].name` the check is bound to; `null` for plugin-wide checks. */
+  readonly feature: string | null;
+
+  /**
+   * Whether consent at this requested permission's consent scope could ever
+   * confer it (#1150). `true` for a permission another unit axis decides
+   * (`per-unit`): this surface cannot judge another unit's binding.
+   */
+  readonly grantable: boolean;
+
+  readonly origin: PermissionCheckOrigin;
+
+  /** The author's justification, localized per the requested locale with fallback provenance. */
+  readonly reason: ResolvedLocalizedString;
+
+  readonly required: boolean;
+
   /**
    * Today's catalog risk. For an own-namespace check whose `PluginPermission`
    * row does not exist yet (a pending update's new declare), this is the
@@ -38,35 +55,30 @@ export interface PluginCheckPresentation {
    * grant over it confers nothing.
    */
   readonly riskLevel: RiskLevel | null;
-  /** Risk recorded on the addressable deciding row (`Granted` or `Denied`); `null` when no row exists or the decision is per-unit. */
-  readonly decidedRiskLevel: RiskLevel | null;
-  /**
-   * A `Granted` row exists whose `decidedRiskLevel` no longer covers today's
-   * risk (#59): `decision` reports `pending` — the consent on record was
-   * given for a different classification — and re-consent re-stamps it.
-   */
-  readonly staleRisk: boolean;
-  /**
-   * Whether consent at this requested permission's consent scope could ever
-   * confer it (#1150). `true` for a permission another unit axis decides
-   * (`per-unit`): this surface cannot judge another unit's binding.
-   */
-  readonly grantable: boolean;
+
+  /** Canonical slug: the `plugin|<slug>|<bare>` envelope for own-namespace checks, the core slug otherwise. */
+  readonly slug: string;
+
   /**
    * Staged surface only: the active manifest does not request this permission
    * at this consent scope, so the only consent it can have is a pre-consent
    * to this staged update (#1150). Always `false` on the active surface.
    */
   readonly stagedOnly: boolean;
-  /** The author's justification, localized per the requested locale with fallback provenance. */
-  readonly reason: ResolvedLocalizedString;
+
+  /**
+   * A `Granted` row exists whose `decidedRiskLevel` no longer covers today's
+   * risk (#59): `decision` reports `pending` — the consent on record was
+   * given for a different classification — and re-consent re-stamps it.
+   */
+  readonly staleRisk: boolean;
 }
 
 /** One manifest `features[]` declaration, localized — the grouping context for checks carrying its name. */
 export interface PluginFeaturePresentation {
-  readonly name: string;
-  readonly displayName: ResolvedLocalizedString;
   readonly description: ResolvedLocalizedString;
+  readonly displayName: ResolvedLocalizedString;
+  readonly name: string;
 }
 
 /**
@@ -81,28 +93,11 @@ export interface PluginFeaturePresentation {
  * features, which no other surface can provide.
  */
 export interface PluginConsentPresentation {
-  readonly plugin: {
-    readonly id: string;
-    readonly slug: string;
-    /**
-     * The kill switch, surfaced for context only: consent is decidable while
-     * a plugin is disabled (`enabled` gates when consent is ACTIONABLE, not
-     * whether it can be given), so presentation does not gate on it either.
-     */
-    readonly enabled: boolean;
-  };
-  /** Version of the manifest whose checks are presented — the staged version when `source` is `'staged'`. */
-  readonly manifestVersion: string;
-  /** Which stored manifest the surface came from: the active version or a staged update awaiting approval. */
-  readonly source: ConsentManifestSource;
-  /**
-   * The artifact sha of the manifest presented: the installed artifact's on
-   * the active surface, the staged artifact's on a staged surface. A consent
-   * act names it, so consent is tied to what the unit was shown (#1150).
-   */
-  readonly manifestSha256: string;
-  /** On the active surface: the staged update a unit may pre-consent to, or null. Always null on a staged surface (#1150). */
-  readonly stagedUpdate: { readonly manifestVersion: string; readonly manifestSha256: string } | null;
+  readonly checks: readonly PluginCheckPresentation[];
+  readonly description: ResolvedLocalizedString;
+  readonly displayName: ResolvedLocalizedString;
+  readonly features: readonly PluginFeaturePresentation[];
+
   /**
    * The one server locale the surface was rendered in: the request's
    * resolved locale, a tag this server supports. A consent write sends it
@@ -112,9 +107,34 @@ export interface PluginConsentPresentation {
    * locale.
    */
   readonly locale: string;
+
+  /**
+   * The artifact sha of the manifest presented: the installed artifact's on
+   * the active surface, the staged artifact's on a staged surface. A consent
+   * act names it, so consent is tied to what the unit was shown (#1150).
+   */
+  readonly manifestSha256: string;
+
+  /** Version of the manifest whose checks are presented — the staged version when `source` is `'staged'`. */
+  readonly manifestVersion: string;
+
+  readonly plugin: {
+    /**
+     * The kill switch, surfaced for context only: consent is decidable while
+     * a plugin is disabled (`enabled` gates when consent is ACTIONABLE, not
+     * whether it can be given), so presentation does not gate on it either.
+     */
+    readonly enabled: boolean;
+
+    readonly id: string;
+    readonly slug: string;
+  };
+
+  /** Which stored manifest the surface came from: the active version or a staged update awaiting approval. */
+  readonly source: ConsentManifestSource;
+
+  /** On the active surface: the staged update a unit may pre-consent to, or null. Always null on a staged surface (#1150). */
+  readonly stagedUpdate: { readonly manifestSha256: string; readonly manifestVersion: string } | null;
+
   readonly unit: PluginUnit;
-  readonly displayName: ResolvedLocalizedString;
-  readonly description: ResolvedLocalizedString;
-  readonly features: readonly PluginFeaturePresentation[];
-  readonly checks: readonly PluginCheckPresentation[];
 }

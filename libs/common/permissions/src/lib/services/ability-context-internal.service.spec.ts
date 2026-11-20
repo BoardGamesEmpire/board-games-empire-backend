@@ -1,5 +1,6 @@
 import { createPrismaAbility } from '@casl/prisma';
-import { Test, type TestingModule } from '@nestjs/testing';
+import type { TestingModule } from '@nestjs/testing';
+import { Test } from '@nestjs/testing';
 import { ClsService } from 'nestjs-cls';
 import type { AppAbility } from '../interfaces';
 import { ABILITIES_CLS_KEY, AbilityContextInternalService } from './ability-context-internal.service';

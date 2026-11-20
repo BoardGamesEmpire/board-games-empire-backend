@@ -1,10 +1,6 @@
 import { MutationEvent } from '@bge/actor-context';
-import {
-  ResourceType,
-  type PermissionSnapshotRow,
-  type RolePermissionSnapshotRow,
-  type RoleSnapshotRow,
-} from '@bge/database';
+import type { PermissionSnapshotRow, RolePermissionSnapshotRow, RoleSnapshotRow } from '@bge/database';
+import { ResourceType } from '@bge/database';
 import { PermissionCatalogEvents } from '../constants/permission-catalog-events.constant';
 
 /**
@@ -22,10 +18,8 @@ export type PermissionSnapshot = Readonly<
  */
 export class PermissionUpdatedEvent extends MutationEvent<PermissionSnapshot> {
   static readonly eventName = PermissionCatalogEvents.PermissionUpdated;
-
   declare readonly before: PermissionSnapshot;
   declare readonly after: PermissionSnapshot;
-
   readonly subject = ResourceType.Permission;
 
   constructor(
@@ -45,10 +39,8 @@ export type RoleSnapshot = Readonly<Pick<RoleSnapshotRow, 'name' | 'description'
 /** The Owner edited a role's description (#772). Audited by default. */
 export class RoleUpdatedEvent extends MutationEvent<RoleSnapshot> {
   static readonly eventName = PermissionCatalogEvents.RoleUpdated;
-
   declare readonly before: RoleSnapshot;
   declare readonly after: RoleSnapshot;
-
   readonly subject = ResourceType.Role;
 
   constructor(
@@ -75,7 +67,6 @@ export type GrantSnapshot = Readonly<
  */
 export class RolePermissionChangedEvent extends MutationEvent<GrantSnapshot> {
   static readonly eventName = PermissionCatalogEvents.RolePermissionChanged;
-
   readonly subject = ResourceType.RolePermission;
 
   constructor(

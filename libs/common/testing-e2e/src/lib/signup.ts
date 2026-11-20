@@ -25,13 +25,15 @@ export const SIGN_IN_ANONYMOUS_PATH = '/api/auth/sign-in/anonymous';
 export const SET_AUTH_TOKEN_HEADER = 'set-auth-token';
 
 export interface SignupOptions {
-  readonly username?: string;
   readonly email?: string;
-  readonly password?: string;
   readonly firstName?: string;
-  readonly lastName?: string;
+
   /** better-auth's own sign-up field. Sent as given, so a test can prove it is dropped (#695). */
   readonly image?: string;
+
+  readonly lastName?: string;
+  readonly password?: string;
+  readonly username?: string;
 }
 
 /**
@@ -40,19 +42,19 @@ export interface SignupOptions {
  * and `firstName`/`lastName` are the configured `additionalFields`.
  */
 export interface SignupRequestBody {
-  readonly name: string;
   readonly email: string;
-  readonly password: string;
   readonly firstName?: string;
-  readonly lastName?: string;
   readonly image?: string;
+  readonly lastName?: string;
+  readonly name: string;
+  readonly password: string;
 }
 
 export interface PreparedSignup {
   readonly body: SignupRequestBody;
-  readonly username: string;
   readonly email: string;
   readonly password: string;
+  readonly username: string;
 }
 
 /**
@@ -161,11 +163,11 @@ export function signupFailureMessage(status: number, bodyText: string): string {
 }
 
 export interface SignupResult {
-  readonly userId: string;
-  readonly token: string;
-  readonly username: string;
   readonly email: string;
   readonly password: string;
+  readonly token: string;
+  readonly userId: string;
+  readonly username: string;
 }
 
 function trimTrailingSlash(url: string): string {
@@ -232,8 +234,8 @@ export async function performSignup(
 }
 
 export interface AnonymousSignInResult {
-  readonly userId: string;
   readonly token: string;
+  readonly userId: string;
 }
 
 /**

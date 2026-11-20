@@ -13,28 +13,28 @@
 
 /** A load record as far as `hasLivePluginLoad` reads one. */
 export interface PluginLoadRecordRow {
-  slug: string;
-  processRole: string;
-  installedAt: Date;
-  ready: boolean;
   heartbeatAt: Date;
+  installedAt: Date;
+  processRole: string;
+  ready: boolean;
+  slug: string;
 }
 
 /** The filter `hasLivePluginLoad` sends. */
 interface PluginLoadLookupWhere {
-  slug: string;
-  processRole: string;
-  installedAt: Date;
-  ready: boolean;
   heartbeatAt: { gt: Date };
+  installedAt: Date;
+  processRole: string;
+  ready: boolean;
+  slug: string;
 }
 
 export interface FakePluginLoadRecords {
-  /** The table; a spec sets or replaces it before asking. */
-  rows: PluginLoadRecordRow[];
-
   /** Stands in for `pluginProcessLoad.findFirst`. */
   findFirst(args: { where: PluginLoadLookupWhere }): Promise<{ slug: string } | null>;
+
+  /** The table; a spec sets or replaces it before asking. */
+  rows: PluginLoadRecordRow[];
 }
 
 export function fakePluginLoadRecords(): FakePluginLoadRecords {

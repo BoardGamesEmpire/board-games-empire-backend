@@ -247,7 +247,10 @@ describe('LocalDiskDriver mount check — auto', () => {
 
   it('degrades to off when the parent directory cannot be stat-ed', async () => {
     mockStatSync.mockImplementation((p) => {
-      if (p === ROOT) return dirStats(10);
+      if (p === ROOT) {
+        return dirStats(10);
+      }
+
       throw errno('EACCES'); // parent (/srv) unreadable
     });
     const driver = makeDriver({ mountCheck: 'auto' });
@@ -269,7 +272,10 @@ describe('LocalDiskDriver mount check — sentinel', () => {
 
   it('throws StorageMisconfiguredError at boot when the sentinel is missing', () => {
     mockStatSync.mockImplementation((p) => {
-      if (p === ROOT) return dirStats(1);
+      if (p === ROOT) {
+        return dirStats(1);
+      }
+
       throw errno('ENOENT'); // sentinel absent
     });
     expect(() => makeDriver({ mountCheck: 'sentinel' })).toThrow(StorageMisconfiguredError);
@@ -277,7 +283,10 @@ describe('LocalDiskDriver mount check — sentinel', () => {
 
   it('boot error names the exact touch command to run', () => {
     mockStatSync.mockImplementation((p) => {
-      if (p === ROOT) return dirStats(1);
+      if (p === ROOT) {
+        return dirStats(1);
+      }
+
       throw errno('ENOENT');
     });
     expect(() => makeDriver({ mountCheck: 'sentinel' })).toThrow(`touch ${SENTINEL}`);
@@ -293,7 +302,10 @@ describe('LocalDiskDriver mount check — sentinel', () => {
 
   it('boot distinguishes a permission failure from a missing sentinel (no touch hint)', () => {
     mockStatSync.mockImplementation((p) => {
-      if (p === ROOT) return dirStats(1);
+      if (p === ROOT) {
+        return dirStats(1);
+      }
+
       throw errno('EACCES'); // sentinel present but unreadable
     });
     const err = (() => {

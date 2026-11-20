@@ -1,4 +1,5 @@
-import { Injectable, Logger, type OnApplicationBootstrap, type OnApplicationShutdown } from '@nestjs/common';
+import type { OnApplicationBootstrap, OnApplicationShutdown } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { DiscoveryService } from '@nestjs/core';
 import { Queue } from 'bullmq';
 import { metricsExportEnabled } from '../init/metrics-enabled';
@@ -85,7 +86,7 @@ export class BullMQQueueDepthRecorder implements OnApplicationBootstrap, OnAppli
   private discoverQueues(): Queue[] {
     return this.discovery
       .getProviders()
-      .map((wrapper) => wrapper.instance as unknown)
+      .map((wrapper): unknown => wrapper.instance)
       .filter((instance): instance is Queue => instance instanceof Queue);
   }
 }

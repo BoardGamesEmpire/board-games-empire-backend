@@ -1,4 +1,5 @@
-import { indent, type PlanReport } from '../catalog/catalog-plan-report';
+import type { PlanReport } from '../catalog/catalog-plan-report';
+import { indent } from '../catalog/catalog-plan-report';
 import type { MigrationState } from './migration-state';
 
 /**
@@ -64,6 +65,7 @@ function behindLines({ pending, unknown }: MigrationState): string[] {
       DEVELOPMENT_DATABASE_RESET_LINE,
     );
   }
+
   lines.push(
     '',
     'The catalog and the data migrations are not planned here: the boot plans them over the migrated schema, and ' +

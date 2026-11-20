@@ -1,6 +1,8 @@
-import { AuditContextModule, SystemActorScope } from '@bge/actor-context';
+import type { SystemActorScope } from '@bge/actor-context';
+import { AuditContextModule } from '@bge/actor-context';
 import { createTestingModuleWithDb } from '@bge/testing';
-import { ClientGrpcProxy, type ClientGrpc } from '@nestjs/microservices';
+import type { ClientGrpc } from '@nestjs/microservices';
+import { ClientGrpcProxy } from '@nestjs/microservices';
 import { ClsModule } from 'nestjs-cls';
 import { firstValueFrom, of } from 'rxjs';
 import { COORDINATOR_SERVICE_TOKEN } from './constants';

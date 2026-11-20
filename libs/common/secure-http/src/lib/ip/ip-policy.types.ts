@@ -12,9 +12,9 @@ export interface IpPolicyAllow {
   allowed: true;
 
   /**
-   * The IP address the connection MUST be made to (closes the rebind window).
+   * The hostname originally resolved, for the `Host` header on the pinned request.
    */
-  pinnedIp: string;
+  hostname: string;
 
   /**
    * Family of `pinnedIp`. Lets the caller configure the right Agent at connect time.
@@ -22,14 +22,13 @@ export interface IpPolicyAllow {
   pinnedFamily: IpFamily;
 
   /**
-   * The hostname originally resolved, for the `Host` header on the pinned request.
+   * The IP address the connection MUST be made to (closes the rebind window).
    */
-  hostname: string;
+  pinnedIp: string;
 }
 
 export interface IpPolicyReject {
   allowed: false;
-  reason: SsrfRejectionReason;
 
   /**
    * The hostname under evaluation. Always present.
@@ -40,6 +39,8 @@ export interface IpPolicyReject {
    * The resolved IP that triggered the rejection. Absent when rejection is at the hostname/scheme layer.
    */
   ip?: string;
+
+  reason: SsrfRejectionReason;
 
   /**
    * Human-readable rule label for logs/audit. Examples:

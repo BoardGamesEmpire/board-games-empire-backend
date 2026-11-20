@@ -12,7 +12,8 @@ import { t } from '@bge/i18n';
 import { AbilityService, resolveScopeSubjectId, ScopeComposer } from '@bge/permissions';
 import type { QuotaSoftOverageEvent } from '@bge/quota';
 import { QuotaExceededException, QuotaService } from '@bge/quota';
-import { PaginationQueryDto, type PaginatedRows } from '@bge/shared';
+import type { PaginatedRows } from '@bge/shared';
+import { PaginationQueryDto } from '@bge/shared';
 import type { MediaConfig } from '@bge/storage';
 import { MediaUrlSigner, StorageService } from '@bge/storage';
 import type { StorageLocator, StoredObject } from '@boardgamesempire/storage-contract';
@@ -87,6 +88,7 @@ export class MediaObjectService {
     if (!ALLOWED_UPLOAD_MIME_TYPES.has(file.mimetype)) {
       throw new UnsupportedMediaTypeException(t('errors.media_object.unsupported_type', { mimeType: file.mimetype }));
     }
+
     // Fail fast before writing bytes: a type that can't link to the subject can never be approved.
     if (!this.mediaLink.canLink(file.mimetype, dto.subjectType)) {
       throw new BadRequestException(
@@ -128,7 +130,7 @@ export class MediaObjectService {
   private async writeBytes(
     file: UploadedMediaFile,
     userId: string,
-  ): Promise<{ id: string; key: string; stored: StoredObject; dimensions: { width: number; height: number } | null }> {
+  ): Promise<{ dimensions: { height: number; width: number } | null; id: string; key: string; stored: StoredObject }> {
     const id = createId();
     const key = `users/${userId}/${id}`;
     const stored = await this.storage.put(key, file.buffer, {
@@ -146,12 +148,12 @@ export class MediaObjectService {
   private async storeOwnedObjectWithin(
     tx: Prisma.TransactionClient,
     params: {
+      dimensions: { height: number; width: number } | null;
       id: string;
       key: string;
-      userId: string;
-      stored: StoredObject;
-      dimensions: { width: number; height: number } | null;
       originalName: string | null;
+      stored: StoredObject;
+      userId: string;
     },
   ): Promise<{ media: MediaObject; softOverages: readonly QuotaSoftOverageEvent[] }> {
     const { id, key, userId, stored, dimensions, originalName } = params;
@@ -329,9 +331,11 @@ export class MediaObjectService {
       if (error instanceof SignatureExpiredError) {
         throw new GoneException(t('errors.media_object.signed_url_expired'));
       }
+
       if (error instanceof SignatureInvalidError) {
         throw new ForbiddenException(t('errors.media_object.invalid_signature'));
       }
+
       throw error;
     }
 
@@ -346,9 +350,11 @@ export class MediaObjectService {
         this.logger.error(`Media ${slug}/${key} references unregistered driver '${error.slug}'`, error);
         throw new NotFoundException(t('errors.media_object.not_found_generic'));
       }
+
       if (error instanceof ObjectNotFoundError) {
         throw new NotFoundException(t('errors.media_object.not_found_generic'));
       }
+
       throw error;
     }
 
@@ -398,7 +404,7 @@ export class MediaObjectService {
     }
   }
 
-  private probeImageDimensions(file: UploadedMediaFile): { width: number; height: number } | null {
+  private probeImageDimensions(file: UploadedMediaFile): { height: number; width: number } | null {
     if (!file.mimetype.startsWith('image/')) {
       return null;
     }

@@ -1,6 +1,7 @@
 import { AuditContextService, SystemActorScope } from '@bge/actor-context';
 import { ContributionOrigin, DatabaseService, MediaContributionStatus } from '@bge/database';
-import { type JobActorMeta, wrapJobData } from '@bge/queue-actor-context';
+import type { JobActorMeta } from '@bge/queue-actor-context';
+import { wrapJobData } from '@bge/queue-actor-context';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Injectable, Logger } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
@@ -89,6 +90,7 @@ export class MediaContributionSweepService {
     if (eligible.length > 0) {
       this.logger.log(`Enqueued ${eligible.length} contribution purge job(s)`);
     }
+
     return { enqueued: eligible.length };
   }
 }

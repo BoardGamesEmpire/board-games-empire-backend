@@ -1,6 +1,7 @@
 import type { Actor, AuditContextService } from '@bge/actor-context';
 import { CodedHttpException, t } from '@bge/i18n';
-import { HttpException, type ExecutionContext } from '@nestjs/common';
+import type { ExecutionContext } from '@nestjs/common';
+import { HttpException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import {
   AllowAnonymous,

@@ -5,11 +5,13 @@ import { join } from 'node:path';
 export const INCOMING_DIRNAME = '.incoming';
 
 export interface IncomingWorkspace {
-  readonly id: string;
   readonly archivePath: string;
-  readonly extractDir: string;
+
   /** Removes both paths; a path that is not there is fine. */
   cleanup(): Promise<void>;
+
+  readonly extractDir: string;
+  readonly id: string;
 }
 
 /**

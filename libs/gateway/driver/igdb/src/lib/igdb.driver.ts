@@ -1,12 +1,9 @@
-import {
-  unsupportedOperation,
-  type DataGatewayDriver,
-  type DriverLogger,
-  type UpstreamFetch,
-} from '@boardgamesempire/gateway-driver-contract';
+import type { DataGatewayDriver, DriverLogger, UpstreamFetch } from '@boardgamesempire/gateway-driver-contract';
+import { unsupportedOperation } from '@boardgamesempire/gateway-driver-contract';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { randomUUID } from 'node:crypto';
-import { defer, EMPTY, from, merge, Observable, of } from 'rxjs';
+import type { Observable } from 'rxjs';
+import { defer, EMPTY, from, merge, of } from 'rxjs';
 import { catchError, endWith, expand, filter, map, mergeMap, reduce, shareReplay, tap } from 'rxjs/operators';
 import type { IgdbRequest } from './client/igdb-client.interface';
 import { IgdbCaller } from './igdb-caller';
@@ -25,10 +22,22 @@ import { IGDB_LIST_PAGE_SIZE, listGenresRequest, listPlatformsRequest } from './
 import type { IgdbGame } from './types';
 
 export interface IgdbDriverOptions {
-  /** How the driver reaches IGDB and Twitch; it has no other way (#1082). */
-  fetch: UpstreamFetch;
+  /** IGDB's API. Defaults to `https://api.igdb.com/v4`. */
+  baseUrl?: string;
+
   clientId: string;
   clientSecret: string;
+
+  /** How the driver reaches IGDB and Twitch; it has no other way (#1082). */
+  fetch: UpstreamFetch;
+
+  logger: DriverLogger;
+
+  /** The driver's waits, which tests shorten. */
+  timing?: {
+    /** The wait before retrying a 429. Defaults to 1 second. */
+    rateLimitRetryMs?: number;
+  };
 
   /** Where the access token comes from. Defaults to Twitch's endpoint. */
   tokenUrl?: string;
@@ -39,16 +48,6 @@ export interface IgdbDriverOptions {
    * is interviewed again.
    */
   version: string;
-  logger: DriverLogger;
-
-  /** IGDB's API. Defaults to `https://api.igdb.com/v4`. */
-  baseUrl?: string;
-
-  /** The driver's waits, which tests shorten. */
-  timing?: {
-    /** The wait before retrying a 429. Defaults to 1 second. */
-    rateLimitRetryMs?: number;
-  };
 }
 
 /**

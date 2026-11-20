@@ -1,4 +1,5 @@
-import { wrapJobData, type JobActorMeta } from '@bge/queue-actor-context';
+import type { JobActorMeta } from '@bge/queue-actor-context';
+import { wrapJobData } from '@bge/queue-actor-context';
 import type { FlowJob, JobsOptions } from 'bullmq';
 import { JobNames, QueueNames } from '../constants/queue.constants';
 import type { ExpansionImportJobPayload, GameImportJobPayload } from '../interfaces/import-job.interface';
@@ -41,7 +42,7 @@ export const FETCH_JOB_OPTS: JobsOptions = {
  * retries (idempotent re-add) and `bullmqJobId` equals the row id.
  */
 function buildImportFlow(
-  names: { readonly import: JobNames; readonly fetch: JobNames },
+  names: { readonly fetch: JobNames; readonly import: JobNames },
   payload: GameImportJobPayload,
   meta: JobActorMeta,
 ): FlowJob {

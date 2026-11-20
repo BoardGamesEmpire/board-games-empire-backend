@@ -1,7 +1,9 @@
 import { ResourceType, SystemRole } from '@bge/database';
 import { PermissionsService } from '@bge/permissions';
-import { WEBHOOK_QUEUE_NAME, type WebhookDeliveryJob } from '@bge/queue-webhooks';
-import { createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
+import type { WebhookDeliveryJob } from '@bge/queue-webhooks';
+import { WEBHOOK_QUEUE_NAME } from '@bge/queue-webhooks';
+import type { Actors, AuthenticatedActor } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import { WebhookEventType } from '@bge/webhooks';
 import request from 'supertest';
 import { createEventClient, EVENTS_PATH } from '../event/event-request';
@@ -10,7 +12,8 @@ import { permissionsCacheHas } from '../support/api-cache';
 import { requireBaseUrl } from '../support/e2e-env';
 import { isolateQueue } from '../support/queue-isolation';
 import { waitForStableJobCount } from '../support/queues';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { subscriptionEnvelope } from './webhook-wire';
 
 const SUBSCRIPTIONS_PATH = '/api/webhooks/subscriptions';
@@ -65,7 +68,7 @@ describe('webhook dispatch from the API (#538)', () => {
   };
 
   /** The one waiting delivery, once the count has held at one. */
-  const onlyDelivery = async (): Promise<{ id: string | undefined; data: WebhookDeliveryJob }> => {
+  const onlyDelivery = async (): Promise<{ data: WebhookDeliveryJob; id: string | undefined }> => {
     await waitForStableJobCount(webhookQueue(), 1);
     const [job] = await webhookQueue().getJobs(['waiting']);
 
@@ -125,6 +128,31 @@ describe('webhook dispatch from the API (#538)', () => {
       subjectId: householdId,
       payload: { data: { householdId, newOwnerUserId: heir.user.id, previousOwnerUserId: owner.user.id } },
     });
+  });
+
+  it('enqueues a delivery to a member when their household is deleted (#245)', async () => {
+    // The emit follows the soft delete, and the delete evicts every member's
+    // graph, so this is the household type that needs the deleted row checked:
+    // a live-row check refuses every subscriber. The watcher is no owner, so
+    // no restore window lends them a read.
+    const { owner, watcher, householdId } = await householdToTransfer();
+    const subscriptionId = await subscribe(watcher, {
+      resourceType: ResourceType.Household,
+      resourceId: householdId,
+      eventTypes: [WebhookEventType.HouseholdDeleted],
+    });
+
+    await request(baseUrl).delete(`/api/households/${householdId}`).set(owner.headers).expect(200);
+
+    const delivery = await onlyDelivery();
+
+    expect(delivery.data).toMatchObject({
+      subscriptionId,
+      eventType: WebhookEventType.HouseholdDeleted,
+      subjectId: householdId,
+    });
+    // Ids only: the restore windows stay in the audit entry.
+    expect(delivery.data.payload.data).toEqual({ householdId });
   });
 
   it('enqueues a delivery for a subscriber whose only read arrived after their graph was cached (#732)', async () => {

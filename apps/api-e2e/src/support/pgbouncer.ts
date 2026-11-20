@@ -1,4 +1,5 @@
-import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers';
+import type { StartedTestContainer } from 'testcontainers';
+import { GenericContainer, Wait } from 'testcontainers';
 import { E2E_DATABASE_CONTAINER_ADDRESS_VAR } from './e2e-env';
 
 /**
@@ -14,6 +15,7 @@ const PGBOUNCER_PORT = 6432;
 export interface PgBouncerOptions {
   /** The harness database's URL; its user and password are the ones the pooler logs in with. */
   readonly databaseUrl: string;
+
   /** Server connections per database and user: fewer than the clients is what makes them shared. */
   readonly serverConnections: number;
 }
@@ -21,6 +23,7 @@ export interface PgBouncerOptions {
 export interface PgBouncer {
   /** `databaseUrl` with the pooler's host and port in place of the database's. */
   pooled(databaseUrl: string): string;
+
   stop(): Promise<void>;
 }
 
@@ -40,6 +43,7 @@ export async function startPgBouncer(options: PgBouncerOptions): Promise<PgBounc
         'starts; with BGE_E2E_DATABASE_URL, set it to the host:port a container reaches that database at.',
     );
   }
+
   // Parsed as a URL's authority, so an IPv6 address in brackets keeps its colons.
   const postgres = new URL(`postgres://${address}`);
   const url = new URL(options.databaseUrl);

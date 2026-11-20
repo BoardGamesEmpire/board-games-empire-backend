@@ -2,11 +2,13 @@ import { Logger } from '@nestjs/common';
 import { Http } from '@status/codes';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import type { IncomingMessage, Server, ServerResponse } from 'node:http';
+import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Agent, MockAgent, type Dispatcher, type Interceptable } from 'undici';
+import type { Dispatcher, Interceptable } from 'undici';
+import { Agent, MockAgent } from 'undici';
 import type { DnsResolver, ResolvedAddress } from './dns/dns-resolver.interface';
 import { DnsResolutionError } from './dns/dns-resolver.interface';
 import {
@@ -58,7 +60,10 @@ class FakeDnsResolver implements DnsResolver {
 
   async resolveAll(hostname: string): Promise<ResolvedAddress[]> {
     const entry = this.responses.get(hostname);
-    if (!entry) throw new DnsResolutionError(hostname, new Error('NXDOMAIN'));
+    if (!entry) {
+      throw new DnsResolutionError(hostname, new Error('NXDOMAIN'));
+    }
+
     return entry;
   }
 }
@@ -78,6 +83,7 @@ class FakeDispatcherFactory implements HttpDispatcherFactory {
         if (prop === 'close' || prop === 'destroy') {
           return async () => undefined;
         }
+
         const value = Reflect.get(target, prop, target);
         return typeof value === 'function' ? value.bind(target) : value;
       },
@@ -88,11 +94,11 @@ class FakeDispatcherFactory implements HttpDispatcherFactory {
 // ─── Wire-up ────────────────────────────────────────────────────────────────
 
 function buildService(opts: {
-  snapshot?: SafeHttpPolicySnapshot;
   dns?: FakeDnsResolver;
   mockAgent: MockAgent;
   observer?: OutboundHttpObserver;
-}): { service: SecureHttpService; pool: Interceptable } {
+  snapshot?: SafeHttpPolicySnapshot;
+}): { pool: Interceptable; service: SecureHttpService } {
   const dns = opts.dns ?? new FakeDnsResolver();
   const policy = new StubPolicyService(opts.snapshot ?? buildSnapshot());
   const ipPolicy = new IpPolicyService(dns);
@@ -817,7 +823,10 @@ describe('SecureHttpService', () => {
 
     function dnsFor(...hosts: Array<[string, string]>): FakeDnsResolver {
       const dns = new FakeDnsResolver();
-      for (const [host, ip] of hosts) dns.set(host, [v4(ip)]);
+      for (const [host, ip] of hosts) {
+        dns.set(host, [v4(ip)]);
+      }
+
       return dns;
     }
 
@@ -1053,7 +1062,10 @@ describe('SecureHttpService', () => {
       });
 
       afterEach(async () => {
-        for (const res of held) res.destroy();
+        for (const res of held) {
+          res.destroy();
+        }
+
         await agent.close();
         server.closeAllConnections();
         await new Promise((resolve) => server.close(resolve));
@@ -1154,6 +1166,7 @@ describe('SecureHttpService', () => {
             res.end('moved');
             return;
           }
+
           res.end('plugin');
         });
 

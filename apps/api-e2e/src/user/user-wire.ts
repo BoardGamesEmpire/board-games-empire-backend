@@ -1,4 +1,5 @@
-import { envelopeFailure, isRecord, type HttpResponseLike, type RequestDescription } from '../support/wire';
+import type { HttpResponseLike, RequestDescription } from '../support/wire';
+import { envelopeFailure, isRecord } from '../support/wire';
 
 /**
  * Fail-loud parsers for `GET /api/users/search` and the profile routes, on
@@ -11,8 +12,8 @@ export interface SearchedUserWire {
 }
 
 export interface UserSearchPageWire {
-  readonly users: readonly SearchedUserWire[];
   readonly total: number;
+  readonly users: readonly SearchedUserWire[];
 }
 
 const fail = envelopeFailure('apps/api-e2e/src/user/user-wire.ts');

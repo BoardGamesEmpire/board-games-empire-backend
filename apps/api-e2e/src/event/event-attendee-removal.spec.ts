@@ -7,13 +7,17 @@ import {
   OccurrenceStatus,
   VoteType,
 } from '@bge/database';
-import { createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
+import type { Actors, AuthenticatedActor } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
-import { expectBackendsQueuedBehind, expectLockWaiter, withBarrier, type Barrier } from '../support/lock-barrier';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { Barrier } from '../support/lock-barrier';
+import { expectBackendsQueuedBehind, expectLockWaiter, withBarrier } from '../support/lock-barrier';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import { arrangeListEntry } from './event-fixtures';
 import { createEventClient, EVENTS_PATH } from './event-request';
+import type { NominationWire } from './event-wire';
 import {
   attendeeEnvelope,
   availabilitySummaryEnvelope,
@@ -22,7 +26,6 @@ import {
   nominationEnvelope,
   occurrenceEnvelope,
   resolutionEnvelope,
-  type NominationWire,
 } from './event-wire';
 
 /**
@@ -503,10 +506,10 @@ describe('leaving an event', () => {
       const REQUEST_REACHES_LOCK_MS = 20_000;
 
       interface Arrangement {
-        readonly leaver: AuthenticatedActor;
-        readonly eventId: string;
-        readonly leaverId: string;
         readonly entryId: string;
+        readonly eventId: string;
+        readonly leaver: AuthenticatedActor;
+        readonly leaverId: string;
       }
 
       /** The barrier's own backends, which are never the request under test. */
@@ -565,7 +568,18 @@ describe('leaving an event', () => {
         const occurrenceId = await confirmedDate(eventId, new Date(Date.now() - DAY));
         const entry = await arrangeListEntry(db.client, eventId, leaver.user.id);
 
-        const { moved, left, gameId } = await withBarrier(async (barrier) => {
+        // Added before the move holds the event's row: a direct add takes it
+        // as a share, which a date write's lock holds off (#1065).
+        const { id: gameId } = eventGameEnvelope(
+          await request(baseUrl)
+            .post(`${EVENTS_PATH}/${eventId}/nominations/direct-add`)
+            .set(host.headers)
+            .send({ ...entry, occurrenceId })
+            .expect(201),
+          'POST /api/events/:eventId/nominations/direct-add as the host',
+        );
+
+        const { moved, left } = await withBarrier(async (barrier) => {
           const { holder } = barrier;
 
           await holder.begin();
@@ -590,15 +604,6 @@ describe('leaving an event', () => {
           });
           expect(moving.query).toMatch(/UPDATE[\s\S]*event_occurrences/);
 
-          const { id: gameId } = eventGameEnvelope(
-            await request(baseUrl)
-              .post(`${EVENTS_PATH}/${eventId}/nominations/direct-add`)
-              .set(host.headers)
-              .send({ ...entry, occurrenceId })
-              .expect(201),
-            'POST /api/events/:eventId/nominations/direct-add as the host',
-          );
-
           const leaving = fire(() => send({ leaver, eventId, leaverId, entryId: entry.suppliedById }));
 
           // Queued on the event's row behind the move, which is queued behind
@@ -617,7 +622,7 @@ describe('leaving an event', () => {
           // budget, and an expired budget surfaces as a 500.
           await holder.rollback();
 
-          return { moved: await move.settled, left: await leaving.settled, gameId };
+          return { moved: await move.settled, left: await leaving.settled };
         });
 
         expect(moved.status).toBe(200);

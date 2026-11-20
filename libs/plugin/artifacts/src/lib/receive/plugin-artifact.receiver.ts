@@ -1,4 +1,6 @@
-import { DatabaseService, type PluginArtifact } from '@bge/database';
+import type { PluginArtifact } from '@bge/database';
+import { DatabaseService } from '@bge/database';
+import type { PluginInstallAssessment, PluginModuleOptions, PluginUpdateAssessment } from '@bge/plugin';
 import {
   MODULE_OPTIONS_TOKEN,
   PluginDirectoryNotFoundError,
@@ -7,9 +9,6 @@ import {
   PluginInstallAuthorityError,
   PluginInstallerService,
   PluginUpdateService,
-  type PluginInstallAssessment,
-  type PluginModuleOptions,
-  type PluginUpdateAssessment,
 } from '@bge/plugin';
 import {
   InvalidRequestUrlError,
@@ -21,12 +20,8 @@ import {
   SecureHttpService,
   SsrfRejectionError,
 } from '@bge/secure-http';
-import {
-  PLUGIN_MANIFEST_FILENAME,
-  PLUGIN_PACKAGE_JSON_FILENAME,
-  type PluginArtifactDirectory,
-  type PluginArtifactSha256,
-} from '@boardgamesempire/plugin-contract';
+import type { PluginArtifactDirectory, PluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
+import { PLUGIN_MANIFEST_FILENAME, PLUGIN_PACKAGE_JSON_FILENAME } from '@boardgamesempire/plugin-contract';
 import { PLUGIN_ARCHIVE_MAX_COMPRESSED_BYTES } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { rm } from 'node:fs/promises';
@@ -42,7 +37,8 @@ import {
 } from '../artifacts.errors';
 import { placePluginArtifact } from '../placement/place-plugin-artifact';
 import { PluginArtifactStore } from '../store/plugin-artifact.store';
-import { allocateIncoming, INCOMING_DIRNAME, type IncomingWorkspace } from '../workspace/incoming';
+import type { IncomingWorkspace } from '../workspace/incoming';
+import { allocateIncoming, INCOMING_DIRNAME } from '../workspace/incoming';
 import { parseRequestedSha256 } from './requested-sha256';
 
 /**
@@ -61,8 +57,9 @@ export const PLUGIN_ARTIFACT_DOWNLOAD_TIMEOUT_MS = 15 * 60 * 1000;
  */
 export interface PluginArtifactReceipt {
   readonly artifact: PluginArtifact;
-  readonly directory: PluginArtifactDirectory;
   readonly assessment: PluginInstallAssessment;
+  readonly directory: PluginArtifactDirectory;
+
   /** The plugin row with the artifact's slug, if any; `version` is that row's. */
   readonly installedPlugin: {
     readonly state: 'none' | 'installed' | 'uninstalled';
@@ -78,21 +75,27 @@ export interface PluginArtifactReceipt {
 }
 
 export interface ReceivePluginArtifactByLinkInput {
-  readonly url: string;
+  readonly actorId: string;
+
   /** The checksum the server admin expects, in either case, with or without spaces around it. */
   readonly expectedSha256: string;
-  readonly actorId: string;
+
+  readonly url: string;
 }
 
 export interface ReceivePluginArtifactUploadInput {
+  readonly actorId: string;
+
   /** Where the upload storage wrote the archive. Once called, the receiver owns it and removes it. */
   readonly archivePath: string;
-  /** The archive's checksum and size, which the upload storage counted as the bytes arrived. */
-  readonly sha256: string;
+
   readonly bytes: number;
+
   /** The checksum the server admin expects, in either case, with or without spaces around it. */
   readonly expectedSha256: string;
-  readonly actorId: string;
+
+  /** The archive's checksum and size, which the upload storage counted as the bytes arrived. */
+  readonly sha256: string;
 }
 
 /**
@@ -114,8 +117,9 @@ export const normalizeExpectedSha256 = (raw: string): PluginArtifactSha256 => {
 /** A received archive, once its bytes are counted. */
 interface ReceivedArchive {
   readonly archivePath: string;
-  readonly sha256: string;
   readonly bytes: number;
+  readonly sha256: string;
+
   /** The link it came from; null for an upload. */
   readonly url: string | null;
 }
@@ -205,24 +209,31 @@ const artifactDownloadError = (err: unknown): unknown => {
   if (unresolvable(err)) {
     return new PluginArtifactDownloadFailedError('unreachable', null, options);
   }
+
   if (err instanceof InvalidRequestUrlError) {
     return new PluginArtifactLinkRefusedError('invalid-link', options);
   }
+
   if (err instanceof SsrfRejectionError) {
     return new PluginArtifactLinkRefusedError('blocked-by-policy', options);
   }
+
   if (err instanceof RedirectToDisallowedTargetError) {
     return new PluginArtifactLinkRefusedError('redirect-blocked', options);
   }
+
   if (err instanceof RedirectLimitExceededError) {
     return new PluginArtifactLinkRefusedError('too-many-redirects', options);
   }
+
   if (err instanceof RequestTimeoutError) {
     return new PluginArtifactDownloadFailedError('timeout', null, options);
   }
+
   if (err instanceof OutboundNetworkError) {
     return new PluginArtifactDownloadFailedError('unreachable', null, options);
   }
+
   if (err instanceof ResponseTooLargeError) {
     return new PluginArtifactTooLargeError(err.limitBytes, options);
   }
@@ -390,7 +401,7 @@ export class PluginArtifactReceiver {
   private async download(
     url: string,
     destination: string,
-  ): Promise<{ readonly sha256: string; readonly bytes: number }> {
+  ): Promise<{ readonly bytes: number; readonly sha256: string }> {
     const result = await this.http
       .download(url, {
         destination,
@@ -506,13 +517,16 @@ export class PluginArtifactReceiver {
       if (!(value instanceof Error)) {
         return 'a non-error value';
       }
-      const { code, reason } = value as { code?: unknown; reason?: unknown };
+
+      const code = 'code' in value ? value.code : undefined;
+      const reason = 'reason' in value ? value.reason : undefined;
       const details = [
         typeof code === 'string' ? `code ${code}` : null,
         typeof reason === 'string' ? `reason ${reason}` : null,
       ].filter((detail) => detail !== null);
       return details.length > 0 ? `${value.name} (${details.join(', ')})` : value.name;
     };
+
     const inner = cause instanceof Error && cause.cause !== undefined ? `, caused by ${named(cause.cause)}` : '';
     const hasUpstreamStatus = mapped instanceof PluginArtifactDownloadFailedError && mapped.upstreamStatus !== null;
     const detail =

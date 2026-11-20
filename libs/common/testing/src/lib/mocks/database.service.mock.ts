@@ -1,4 +1,4 @@
-import { DatabaseService } from '@bge/database';
+import type { DatabaseService } from '@bge/database';
 import * as jest from 'jest-mock';
 
 /**
@@ -186,6 +186,7 @@ export function createMockDatabaseService(): MockDatabaseService {
     pluginLifecycleEvent: mockDelegate(),
     pluginPermission: mockDelegate(),
     pluginProcessLoad: mockDelegate(),
+    privacyPolicy: mockDelegate(),
     publisher: mockDelegate(),
     publisherGatewayLink: mockDelegate(),
     quota: mockDelegate(),

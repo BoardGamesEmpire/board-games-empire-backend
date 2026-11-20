@@ -25,6 +25,7 @@ const shippedEntry = (slug: string): PermissionSeedDefinition => {
   if (entry === undefined) {
     throw new Error(`The permission catalog has no '${slug}'`);
   }
+
   return entry;
 };
 

@@ -81,7 +81,9 @@ function problemIn(workspaceRoot, file) {
   }
 
   const sourceMaps = config?.sourceMaps;
-  if (sourceMaps === REQUIRED_SOURCE_MAPS) return null;
+  if (sourceMaps === REQUIRED_SOURCE_MAPS) {
+    return null;
+  }
 
   const found = sourceMaps === undefined ? 'not set' : JSON.stringify(sourceMaps);
 

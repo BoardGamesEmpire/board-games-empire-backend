@@ -1,5 +1,6 @@
 import * as proto from '@boardgamesempire/proto-gateway';
-import { EMPTY, lastValueFrom, Observable, of, throwError, toArray } from 'rxjs';
+import type { Observable } from 'rxjs';
+import { EMPTY, lastValueFrom, of, throwError, toArray } from 'rxjs';
 import { GRPC_STATUS_INVALID_ARGUMENT } from './driver-observables.js';
 import { fetchEachGame } from './fetch-each-game.js';
 
@@ -23,12 +24,15 @@ function fakeFetchGame({
     if (failing.includes(externalId)) {
       return throwError(() => new Error(`upstream failed on ${externalId}`));
     }
+
     if (externalId in throttled) {
       return of({ correlationId, status: RATE_LIMITED, retryAfterMs: throttled[externalId] });
     }
+
     if (found.includes(externalId)) {
       return of({ correlationId, status: RESULT, game: game(externalId) });
     }
+
     return of({ correlationId, status: ERROR, message: `No game found for externalId ${externalId}` });
   });
 }

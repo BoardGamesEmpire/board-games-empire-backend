@@ -3,16 +3,17 @@ import { registerAs } from '@nestjs/config';
 import Joi from 'joi';
 
 export interface PrometheusConfig {
+  collectDefaultMetrics: boolean;
+
   defaultMetrics: {
     enabled: boolean;
     prefix: string;
     timeout: number;
   };
-  collectDefaultMetrics: boolean;
 }
 
 export default registerAs('prometheus', () =>
-  env.provideMany(
+  env.provideMany<PrometheusConfig>(
     [
       {
         key: 'PROMETHEUS_DEFAULT_METRICS_ENABLED',
@@ -38,15 +39,14 @@ export default registerAs('prometheus', () =>
         mutators: isTrue,
       },
     ],
-    (record) =>
-      <PrometheusConfig>{
-        defaultMetrics: {
-          enabled: record.enabled,
-          prefix: record.prefix,
-          timeout: record.timeout,
-        },
-        collectDefaultMetrics: record.collectDefaultMetrics,
+    (record) => ({
+      defaultMetrics: {
+        enabled: record.enabled,
+        prefix: record.prefix,
+        timeout: record.timeout,
       },
+      collectDefaultMetrics: record.collectDefaultMetrics,
+    }),
   ),
 );
 

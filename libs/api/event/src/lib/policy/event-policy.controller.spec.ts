@@ -1,6 +1,7 @@
 import { Action, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
-import { CHECK_POLICIES_KEY, PoliciesGuard, type AppAbility } from '@bge/permissions';
+import type { AppAbility } from '@bge/permissions';
+import { CHECK_POLICIES_KEY, PoliciesGuard } from '@bge/permissions';
 import { createTestingModuleWithDb, makeEventOccurrencePolicy, makeEventPolicy } from '@bge/testing';
 import 'reflect-metadata';
 import { firstValueFrom } from 'rxjs';

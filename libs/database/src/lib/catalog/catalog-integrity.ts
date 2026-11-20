@@ -75,6 +75,7 @@ function assertJsonValue(value: unknown, slug: string, path: string): void {
     for (const [index, item] of value.entries()) {
       assertJsonValue(item, slug, `${path}[${index}]`);
     }
+
     return;
   }
 
@@ -82,6 +83,7 @@ function assertJsonValue(value: unknown, slug: string, path: string): void {
     for (const [key, member] of Object.entries(value)) {
       assertJsonValue(member, slug, `${path}.${key}`);
     }
+
     return;
   }
 
@@ -101,7 +103,7 @@ function describeValue(value: unknown): string {
   if (typeof value === 'object' && value !== null) {
     // A prototype chain that never reaches Object.prototype has no
     // `constructor`; the message must not throw on the value it reports.
-    const name: unknown = (value as { constructor?: { name?: unknown } }).constructor?.name;
+    const name: unknown = value.constructor?.name;
     return typeof name === 'string' && name !== '' ? name : 'object';
   }
 
@@ -151,6 +153,7 @@ export function assertEveryRoleSeeded(roles: readonly RoleSeedDefinition[]): voi
     if (seeded.has(name)) {
       throw new Error(`Role catalog seeds role '${name}' more than once`);
     }
+
     seeded.add(name);
   }
 

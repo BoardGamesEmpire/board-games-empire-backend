@@ -1,13 +1,6 @@
 import { SystemActorScope } from '@bge/actor-context';
-import {
-  DatabaseService,
-  DataGatewayCapability,
-  PluginCategory,
-  type ContentFormat,
-  type ContentType,
-  type PlatformType,
-  type SearchFilterAxis,
-} from '@bge/database';
+import type { ContentFormat, ContentType, PlatformType, SearchFilterAxis } from '@bge/database';
+import { DatabaseService, DataGatewayCapability, PluginCategory } from '@bge/database';
 import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
 import {
   Inject,
@@ -21,17 +14,15 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { FAILURE_THRESHOLD, FAILURE_WINDOW_MS } from './constants/gateway-registry.constants';
 import { RemoteGatewayDriverFactory } from './drivers/remote-gateway-driver.factory';
-import { GatewayRoutingRefusedError, type GatewayRefusalReason } from './errors/gateway-routing-refused.error';
-import { GatewayDisabledEvent, type GatewayAutoDisableReason } from './events/gateway-registry.events';
+import type { GatewayRefusalReason } from './errors/gateway-routing-refused.error';
+import { GatewayRoutingRefusedError } from './errors/gateway-routing-refused.error';
+import type { GatewayAutoDisableReason } from './events/gateway-registry.events';
+import { GatewayDisabledEvent } from './events/gateway-registry.events';
 import { GatewayConfigEventsService } from './gateway-config-events.service';
 import { GatewayInterviewService } from './gateway-interview.service';
 import type { GatewayConfigEvent, GatewayConnectionOptions } from './interfaces';
-import {
-  PLUGIN_DRIVER_SOURCE,
-  ROUTED_PLUGIN_FIELDS,
-  type PluginDriverSource,
-  type RoutedPlugin,
-} from './plugin-driver-source';
+import type { PluginDriverSource, RoutedPlugin } from './plugin-driver-source';
+import { PLUGIN_DRIVER_SOURCE, ROUTED_PLUGIN_FIELDS } from './plugin-driver-source';
 import type { CoverageFilter } from './utils/coverage-filter';
 import { hashGatewayConfig } from './utils/hash-config';
 import { remoteConnectionOptions } from './utils/remote-connection-options';
@@ -50,23 +41,24 @@ import { remoteConnectionOptions } from './utils/remote-connection-options';
 type DriverOrigin = 'remote' | 'registered' | 'plugin';
 
 interface CachedDriver {
-  gatewayId: string;
-  driver: DataGatewayDriver;
   configHash: string;
-  origin: DriverOrigin;
+  driver: DataGatewayDriver;
+  gatewayId: string;
 
   /**
    * For a driver the plugin driver source built, the install of the plugin
    * it was built from: its `installedAt`, which a reinstall rewrites (#1083).
    */
   installedAt?: Date;
+
+  origin: DriverOrigin;
 }
 
 interface FailureTrack {
   consecutiveFailures: number;
   firstFailureAt: Date;
-  lastFailureAt: Date;
   lastError: string;
+  lastFailureAt: Date;
 }
 
 /**
@@ -74,16 +66,16 @@ interface FailureTrack {
  * DataGateway, of its plugin beside it (#1083).
  */
 interface RoutingRow {
-  enabled: boolean;
-  pluginId: string | null;
-  plugin: RoutedPlugin | null;
-  firstInterviewedAt: Date | null;
   capabilities: DataGatewayCapability[];
-  disabledCapabilities: DataGatewayCapability[];
-  coveragePlatformTypes: PlatformType[];
-  coverageContentTypes: ContentType[];
-  filterableAxes: SearchFilterAxis[];
   contentFormat: ContentFormat | null;
+  coverageContentTypes: ContentType[];
+  coveragePlatformTypes: PlatformType[];
+  disabledCapabilities: DataGatewayCapability[];
+  enabled: boolean;
+  filterableAxes: SearchFilterAxis[];
+  firstInterviewedAt: Date | null;
+  plugin: RoutedPlugin | null;
+  pluginId: string | null;
 }
 
 const ROUTING_FIELDS = {
@@ -110,22 +102,22 @@ export type StoredCoverage = Pick<RoutingRow, 'coveragePlatformTypes' | 'coverag
 export type SearchRoute =
   | { readonly routable: false }
   | {
-      readonly routable: true;
+      /** The content format its results' summaries arrive in, null when it declared none. */
+      readonly contentFormat: ContentFormat | null;
 
       /** Whether its coverage overlaps the search's filter. One that doesn't isn't asked. */
       readonly covers: boolean;
-
-      /** The search filters its search narrows by. The filter it's sent carries only these. */
-      readonly filterableAxes: readonly SearchFilterAxis[];
-
-      /** The content format its results' summaries arrive in, null when it declared none. */
-      readonly contentFormat: ContentFormat | null;
 
       /**
        * Its driver, connecting it first if this process hasn't, for a search
        * that must ask it after all. Its row isn't read again.
        */
       readonly driver: () => Promise<DataGatewayDriver>;
+
+      /** The search filters its search narrows by. The filter it's sent carries only these. */
+      readonly filterableAxes: readonly SearchFilterAxis[];
+
+      readonly routable: true;
     };
 
 /**
@@ -133,8 +125,8 @@ export type SearchRoute =
  * text arrives in, null when it declared none.
  */
 export interface GatewayResolution {
-  readonly driver: DataGatewayDriver;
   readonly contentFormat: ContentFormat | null;
+  readonly driver: DataGatewayDriver;
 }
 
 /** A DataGateway a search will ask, and the search filters its search narrows by. */
@@ -269,9 +261,11 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
   private readonly logger = new Logger(GatewayRegistryService.name);
   private readonly clients = new Map<string, CachedDriver>();
   private readonly failures = new Map<string, FailureTrack>();
+
   // In-flight lazy connects, keyed by gatewayId, so concurrent callers for the
   // same gateway share one connect attempt instead of stampeding the gateway.
   private readonly connecting = new Map<string, Promise<void>>();
+
   // Per-gateway invalidation counter. connect() captures this before its async
   // ping, as connectPlugin() does before a plugin DataGateway's build, and
   // refuses to cache the freshly-built driver if it changed meanwhile
@@ -300,9 +294,11 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
   // version. Held in memory: a process that missed the change goes by the
   // version and the answers' age, as before.
   private readonly connectionChanged = new Set<string>();
+
   // Set once shutdown disposes the drivers. A connect still awaiting its ping
   // then discards its driver rather than caching one nothing will dispose.
   private shuttingDown = false;
+
   private configUpdateUnsubscribe?: () => Promise<void>;
 
   constructor(
@@ -718,6 +714,7 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
       if (!this.clients.has(gatewayId)) {
         throw new Error(`DataGateway ${gatewayId}'s interview was abandoned: its connect was invalidated`);
       }
+
       return;
     }
 
@@ -795,6 +792,7 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
     }
 
     // routingRefusal refuses an absent row, so there is one.
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- refusalFor's verdict on an absent row is a link between two values TypeScript can't follow (#1321)
     return row as RoutingRow;
   }
 
@@ -987,6 +985,7 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
       // connect() resolved without populating the cache — defensive guard.
       throw new Error(`No connection established for gateway ${gatewayId}.`);
     }
+
     return connected.driver;
   }
 
@@ -1315,6 +1314,7 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
         this.logger.log(`Gateway ${event.gatewayId} ${event.changeType} elsewhere; invalidating local client`);
         this.disconnect(event.gatewayId);
       }
+
       this.failures.delete(event.gatewayId);
       return;
     }
@@ -1327,6 +1327,7 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
       if (cached) {
         this.disconnect(event.gatewayId);
       }
+
       this.failures.delete(event.gatewayId);
 
       try {
@@ -1338,6 +1339,7 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
           `Reconnect for gateway ${event.gatewayId} failed: ${err instanceof Error ? err.message : err}`,
         );
       }
+
       return;
     }
 

@@ -22,22 +22,32 @@ import type { InviteContextView, InvitePartyView } from '../read-shapes';
  * the lib stores what it is given.
  */
 export interface CreateInviteParams {
-  readonly type: InviteType;
-  readonly inviterId: string;
-  /** The invitee's user id, when they are a registered user. */
-  readonly inviteeId?: string | null;
-  /** Where to reach an invitee, registered or not. Trimmed and lower-cased before storage. */
-  readonly inviteeEmail?: string | null;
-  readonly inviteeName?: string | null;
-  /** Required when `type` is `Household`. */
-  readonly householdId?: string | null;
   /** Required when `type` is `Event`. */
   readonly eventId?: string | null;
-  readonly roleId?: string | null;
+
+  /** Defaults to `DEFAULT_INVITE_TTL_MS` after now. Must be in the future. */
+  readonly expiresAt?: Date;
+
+  /** Required when `type` is `Household`. */
+  readonly householdId?: string | null;
+
+  /** Where to reach an invitee, registered or not. Trimmed and lower-cased before storage. */
+  readonly inviteeEmail?: string | null;
+
+  /** The invitee's user id, when they are a registered user. */
+  readonly inviteeId?: string | null;
+
+  readonly inviteeName?: string | null;
+  readonly inviterId: string;
   readonly message?: string | null;
   readonly metadata?: Prisma.InputJsonValue;
+
   /** Opens the invite as `AwaitingApproval` instead of `Pending` (#166). */
   readonly needsApproval?: boolean;
+
+  readonly roleId?: string | null;
+  readonly type: InviteType;
+
   /**
    * Marks an invite that a block or the invitee's preference refused, where
    * refusing it outright would tell the inviter so (#278). It is stored and
@@ -46,8 +56,6 @@ export interface CreateInviteParams {
    * `inviteeId`, since that invitee would reach the invite by id.
    */
   readonly withheld?: boolean;
-  /** Defaults to `DEFAULT_INVITE_TTL_MS` after now. Must be in the future. */
-  readonly expiresAt?: Date;
 }
 
 /**
@@ -63,8 +71,9 @@ export type InviteTarget = { readonly inviteId: string } | { readonly token: str
 
 /** A party naming an invite of theirs: the read, and accept or decline. */
 export interface InvitePartyLookup {
-  readonly target: InviteTarget;
   readonly actingUserId: string;
+  readonly target: InviteTarget;
+
   /**
    * An address the consumer vouches belongs to the acting user (#163). With
    * it, an invite by address to that address is the actor's to answer by id,
@@ -88,8 +97,8 @@ export interface RespondToInviteParams extends InvitePartyLookup {
 
 /** Withdraw: the inviter acts. `type` binds the read as it does for a response. */
 export interface WithdrawInviteParams {
-  readonly inviteId: string;
   readonly actingUserId: string;
+  readonly inviteId: string;
   readonly type: InviteType;
 }
 
@@ -138,15 +147,17 @@ export interface RevokeInviteParams {
  * over that context, and the lib confirms the invite is in it.
  */
 export interface ApproveInviteParams {
-  readonly inviteId: string;
   readonly approverId: string;
-  readonly scope: InviteContextScope;
+
   /**
    * When the invitee's window to answer closes, set at approval so the wait
    * for an approver does not come out of it. Unset keeps the one the invite
    * was opened with. Must be in the future.
    */
   readonly expiresAt?: Date;
+
+  readonly inviteId: string;
+  readonly scope: InviteContextScope;
 }
 
 /**
@@ -157,8 +168,8 @@ export interface ApproveInviteParams {
  * uses for its soft overages.
  */
 export interface InviteOutcome<View, Event> {
-  readonly invite: View;
   readonly event: Event;
+  readonly invite: View;
 }
 
 /**
@@ -187,13 +198,15 @@ export type InviteApproval = InviteOutcome<InviteContextView, InviteApprovedEven
 export interface InviteOffer {
   readonly id: string;
   readonly inviterId: string;
-  readonly role: { readonly id: string; readonly name: string } | null;
+
   /**
    * Whether it was sent to wait for an approver (#166), as the row stores it.
    * An invite the accept may take has left `AwaitingApproval`, so one with
    * this set has been approved.
    */
   readonly needsApproval: boolean;
+
+  readonly role: { readonly id: string; readonly name: string } | null;
 }
 
 /** A bulk revoke: how many rows moved, and one domain event per row for the caller to emit after commit. */
@@ -219,7 +232,7 @@ export interface ExpireOutstandingInvitesParams {
 /** A bulk expiry: how many rows moved, and one domain event per row for the caller to emit after commit. */
 export interface OutstandingInviteExpiry {
   readonly count: number;
-  readonly events: readonly InviteExpiredEvent[];
+
   /**
    * Whether every status's read came back under the limit, so nothing overdue
    * was left when it ran. `false` means another call may find more, even when
@@ -227,4 +240,6 @@ export interface OutstandingInviteExpiry {
    * the update.
    */
   readonly drained: boolean;
+
+  readonly events: readonly InviteExpiredEvent[];
 }

@@ -1,7 +1,9 @@
 // The subpath, for the reason given in global-setup, which imports this file.
 import { pollUntil } from '@bge/testing-e2e/poll';
-import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers';
-import { MAILPIT_IMAGE, requireMailpit, type MailpitEndpoint } from './e2e-env';
+import type { StartedTestContainer } from 'testcontainers';
+import { GenericContainer, Wait } from 'testcontainers';
+import type { MailpitEndpoint } from './e2e-env';
+import { MAILPIT_IMAGE, requireMailpit } from './e2e-env';
 
 /** Mailpit's SMTP port inside its container. */
 const MAILPIT_SMTP_PORT = 1025;
@@ -46,13 +48,18 @@ export async function startMailpit(): Promise<StartedMailpit> {
 export interface MailpitMessage {
   readonly id: string;
   readonly subject: string;
+
   /** The plain-text body. */
   readonly text: string;
+
   /** The SMTP user the sender signed in as, or `''` when it sent none. */
   readonly username: string;
 }
 
 export interface MailpitClient {
+  /** Deletes every message Mailpit holds. */
+  clear(): Promise<void>;
+
   /** Every message Mailpit holds addressed to `address`, newest first. */
   messagesTo(address: string): Promise<MailpitMessage[]>;
 
@@ -61,9 +68,6 @@ export interface MailpitClient {
    * On timeout it throws, naming the address.
    */
   waitForMessagesTo(address: string, timeoutMs: number): Promise<MailpitMessage[]>;
-
-  /** Deletes every message Mailpit holds. */
-  clear(): Promise<void>;
 }
 
 async function requireOk(response: Response, what: string): Promise<Response> {

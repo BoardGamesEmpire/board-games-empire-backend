@@ -1,10 +1,12 @@
 import type { Actor } from '@bge/actor-context';
 import { AuditContextInternalService } from '@bge/actor-context';
-import { AuthService, type AuthUser } from '@bge/auth';
+import type { AuthUser } from '@bge/auth';
+import { AuthService } from '@bge/auth';
 import { t } from '@bge/i18n';
 import { CORRELATION_ID_HEADER, TRACEPARENT_HEADER } from '@bge/shared';
 import { firstValue, resolveCorrelationId, sessionImpersonatorId } from '@bge/utils';
-import { ForbiddenException, Injectable, Logger, UnauthorizedException, type NestMiddleware } from '@nestjs/common';
+import type { NestMiddleware } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import type { NextFunction, Request, Response } from 'express';
 import type { AnonymousUserSession } from '../interfaces';
 
@@ -102,6 +104,7 @@ export class HttpActorMiddleware implements NestMiddleware {
       if (this.authService.hasSessionCredential(req.headers)) {
         this.logger.warn(`Request carries both '${API_KEY_HEADER}' and a session credential; preferring API key`);
       }
+
       return this.actorFromApiKey(apiKey);
     }
 
@@ -145,6 +148,7 @@ export class HttpActorMiddleware implements NestMiddleware {
       return null;
     }
 
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- better-auth's inference over this instance's plugin list leaves out the anonymous plugin's isAnonymous (#1321)
     const user = session.user as AnonymousUserSession;
 
     const impersonatorId = sessionImpersonatorId(session);

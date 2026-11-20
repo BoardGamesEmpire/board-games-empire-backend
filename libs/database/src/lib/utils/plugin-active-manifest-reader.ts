@@ -12,9 +12,10 @@ export const PLUGIN_ACTIVE_MANIFEST_READER = Symbol('PLUGIN_ACTIVE_MANIFEST_READ
 
 /** One permission the active manifest requests, at the decision scope its consent scope maps to. */
 export interface PluginRequestedPermission {
+  readonly scopeType: PluginGrantScope;
+
   /** The canonical slug, as grant rows carry it. */
   readonly slug: string;
-  readonly scopeType: PluginGrantScope;
 }
 
 /**
@@ -31,9 +32,9 @@ export type PluginConfigVerdict = 'conforms' | 'rejected' | 'schema-unusable';
  * here because the readers that consume it cannot import the runtime.
  */
 export interface PluginActiveManifest {
-  readonly requested: readonly PluginRequestedPermission[];
   /** False when the manifest's scope is `server`: no household can hold a unit enablement under it. */
   readonly householdSurface: boolean;
+
   /**
    * Judges a document against the manifest's `config.schema`. A schema that
    * cannot be used is `'schema-unusable'` whatever the document is; otherwise
@@ -43,12 +44,14 @@ export interface PluginActiveManifest {
    * makes it throw, since both are answers, and every read of the unit asks.
    */
   judgeConfig(document: unknown): PluginConfigVerdict;
+
+  readonly requested: readonly PluginRequestedPermission[];
 }
 
 /** What the reader answers for one plugin row: the active manifest, or why its stored JSON cannot be read. */
 export type PluginActiveManifestReading =
-  | { readonly valid: true; readonly manifest: PluginActiveManifest }
-  | { readonly valid: false; readonly detail: string };
+  | { readonly manifest: PluginActiveManifest; readonly valid: true }
+  | { readonly detail: string; readonly valid: false };
 
 /**
  * Reads a plugin's ACTIVE manifest, re-validating the stored JSON rather than
@@ -58,21 +61,22 @@ export type PluginActiveManifestReading =
  */
 export interface PluginActiveManifestReader {
   read(row: {
+    readonly manifestJson: unknown;
     readonly slug: string;
     readonly version: string;
-    readonly manifestJson: unknown;
   }): PluginActiveManifestReading;
 }
 
 /**
  * The manifest bound (#577): whether the active manifest, as `requested`
  * lists it, requests a decision's permission at that decision's scope. Shared
- * by the plugin ability read and the permission catalog's count of the
- * consent decisions an edit affects (#772), so the two cannot disagree.
+ * by the plugin ability read, the permission catalog's count of the consent
+ * decisions an edit affects (#772) and the update comparator's risk check
+ * (#1152), so none of them can disagree.
  */
 export function requestedByManifest(
   requested: readonly PluginRequestedPermission[],
-): (decision: { readonly scopeType: PluginGrantScope; readonly permissionSlug: string }) => boolean {
+): (decision: { readonly permissionSlug: string; readonly scopeType: PluginGrantScope }) => boolean {
   const keys = new Set(requested.map(({ slug, scopeType }) => `${scopeType}|${slug}`));
 
   return ({ scopeType, permissionSlug }) => keys.has(`${scopeType}|${permissionSlug}`);

@@ -1,7 +1,10 @@
-import { CACHE_REDIS_CLIENT, type Redis } from '@bge/redis';
+import type { Redis } from '@bge/redis';
+import { CACHE_REDIS_CLIENT } from '@bge/redis';
 import { Inject, Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { z } from 'zod';
 import { GATEWAY_CONFIG_UPDATE_CHANNEL } from './constants/gateway-registry.constants';
 import type { GatewayConfigEvent } from './interfaces/gateway-config-event.interface';
+import { gatewayConfigEventSchema } from './interfaces/gateway-config-event.interface';
 
 type ConfigEventHandler = (event: GatewayConfigEvent) => Promise<void> | void;
 
@@ -72,10 +75,16 @@ export class GatewayConfigEventsService implements OnModuleDestroy {
     await this.subscriberConnection.subscribe(GATEWAY_CONFIG_UPDATE_CHANNEL);
 
     this.subscriberConnection.on('message', async (channel, message) => {
-      if (channel !== GATEWAY_CONFIG_UPDATE_CHANNEL) return;
+      if (channel !== GATEWAY_CONFIG_UPDATE_CHANNEL) {
+        return;
+      }
+
+      const event = this.decode(message);
+      if (!event) {
+        return;
+      }
 
       try {
-        const event = JSON.parse(message) as GatewayConfigEvent;
         await handler(event);
       } catch (err) {
         this.logger.error(`Failed to handle config update message: ${err instanceof Error ? err.message : err}`);
@@ -87,5 +96,35 @@ export class GatewayConfigEventsService implements OnModuleDestroy {
     return async () => {
       await this.onModuleDestroy();
     };
+  }
+
+  /**
+   * Parses a message from the channel, or returns `undefined` after logging
+   * one error line that names the channel. A message is outside data until
+   * its schema accepts it, so invalid JSON and a failed schema are both
+   * dropped the same way, without reaching the handler (#1322).
+   */
+  private decode(message: string): GatewayConfigEvent | undefined {
+    let payload: unknown;
+    try {
+      payload = JSON.parse(message);
+    } catch (err) {
+      this.logger.error(
+        `Dropped a message on ${GATEWAY_CONFIG_UPDATE_CHANNEL} that is not JSON: ${err instanceof Error ? err.message : err}`,
+      );
+
+      return undefined;
+    }
+
+    const parsed = gatewayConfigEventSchema.safeParse(payload);
+    if (!parsed.success) {
+      this.logger.error(
+        `Dropped a message on ${GATEWAY_CONFIG_UPDATE_CHANNEL} that fails its schema: ${z.prettifyError(parsed.error)}`,
+      );
+
+      return undefined;
+    }
+
+    return parsed.data;
   }
 }

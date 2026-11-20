@@ -1,7 +1,8 @@
-import { ProviderLinkingPolicy, type SystemSetting } from '@bge/database';
+import type { SystemSetting } from '@bge/database';
+import { ProviderLinkingPolicy } from '@bge/database';
 import { createTestingModuleWithDb } from '@bge/testing';
 import { ConfigService } from '@nestjs/config';
-import { AUTH_BASE_PATH, authPath, AuthStrategyType, SERVER_DISCOVERY_PATH } from './constants';
+import { AUTH_BASE_PATH, authPath, AuthStrategyType, PRIVACY_POLICY_PATH, SERVER_DISCOVERY_PATH } from './constants';
 import { EmailAndPasswordStrategyDto } from './dto/email-and-password-strategy.dto';
 import { OidcStrategyDto } from './dto/oidc-strategy.dto';
 import { transformKeysToSnakeCase } from './interceptors/snakecase.interceptor';
@@ -26,6 +27,7 @@ const DOCUMENTED_WIRE_KEYS = [
   'bge_session_endpoint',
   'bge_sign_out_endpoint',
   'bge_server_discovery_endpoint',
+  'bge_privacy_policy_endpoint',
   'bge_passkey_supported',
   'bge_two_factor_supported',
   'bge_anonymous_auth_supported',
@@ -40,19 +42,19 @@ const AUTH_BASE = AUTH_BASE_PATH;
 
 /** A sign-in provider as the auth config holds it, secret included, as discovery receives it (#912). */
 interface ProviderConfig {
-  id: string;
-  discoveryUrl: string;
   clientId: string;
   clientSecret: string;
+  discoveryUrl: string;
   displayName: string;
+  id: string;
 }
 
 interface MockAuthConfig {
+  maxClientVersion?: string;
+  minClientVersion?: string;
+  oidcProviders?: ProviderConfig[];
   url?: string;
   useEmailPasswordAuth?: boolean;
-  oidcProviders?: ProviderConfig[];
-  minClientVersion?: string;
-  maxClientVersion?: string;
 }
 
 function buildMockConfigService(config: MockAuthConfig): Pick<ConfigService, 'get' | 'getOrThrow'> {
@@ -188,6 +190,15 @@ describe('StrategyService', () => {
 
         expect(discovery.bgeServerDiscoveryEndpoint).toBe(SERVER_DISCOVERY_PATH);
         expect(discovery.bgeServerDiscoveryEndpoint.startsWith('/')).toBe(true);
+      });
+
+      it('points at the privacy policy with a root-relative path (#934)', async () => {
+        const service = await createService({ url: 'https://bge.myserver.io' });
+
+        const discovery = await service.getDiscovery();
+
+        expect(discovery.bgePrivacyPolicyEndpoint).toBe(PRIVACY_POLICY_PATH);
+        expect(discovery.bgePrivacyPolicyEndpoint.startsWith('/')).toBe(true);
       });
     });
 

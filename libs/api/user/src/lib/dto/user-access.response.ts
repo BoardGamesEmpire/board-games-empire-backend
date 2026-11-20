@@ -1,5 +1,6 @@
 import type { ResourceType } from '@bge/database';
-import { ACCESS_EXTENTS, type AccessExtent, type ResourceTypeAccess } from '@bge/permissions';
+import type { AccessExtent, ResourceTypeAccess } from '@bge/permissions';
+import { ACCESS_EXTENTS } from '@bge/permissions';
 import { ApiExtraModels, ApiProperty, getSchemaPath } from '@nestjs/swagger';
 
 /**

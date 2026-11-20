@@ -35,19 +35,21 @@ import { InviteEvents } from '../constants/invite-events.constant';
  * with no reader.
  */
 export interface InviteSnapshot {
+  readonly eventId: string | null;
+  readonly expiresAt: Date;
+  readonly householdId: string | null;
   readonly id: string;
-  readonly type: InviteType;
-  readonly status: InviteStatus;
-  readonly inviterId: string;
-  readonly inviteeId: string | null;
-  readonly inviteeName: string | null;
+
   /** Stripped from persisted audit rows; in-process listeners still receive it. */
   readonly inviteeEmail: string | null;
-  readonly householdId: string | null;
-  readonly eventId: string | null;
-  readonly roleId: string | null;
-  readonly expiresAt: Date;
+
+  readonly inviteeId: string | null;
+  readonly inviteeName: string | null;
+  readonly inviterId: string;
   readonly respondedAt: Date | null;
+  readonly roleId: string | null;
+  readonly status: InviteStatus;
+  readonly type: InviteType;
 }
 
 /**
@@ -90,6 +92,7 @@ export function toInviteSnapshot(row: InviteSnapshot): InviteSnapshot {
 
   // Every field of the interface is in the list (pinned by the spec), so the
   // partial is whole by the time it is returned.
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- TypeScript can't tell that a loop over the field list filled every field of the partial (#1321)
   return snapshot as InviteSnapshot;
 }
 
@@ -109,10 +112,8 @@ const INVITE_AUDIT_EXCLUDED = ['inviteeEmail'] satisfies readonly (keyof InviteS
 export class InviteCreatedEvent extends MutationEvent<InviteSnapshot> {
   static readonly eventName = InviteEvents.Created;
   readonly eventName = InviteCreatedEvent.eventName;
-
   declare readonly before: null;
   declare readonly after: InviteSnapshot;
-
   readonly subject = ResourceType.Invite;
   readonly subjectId: string;
 
@@ -130,10 +131,8 @@ export class InviteCreatedEvent extends MutationEvent<InviteSnapshot> {
  */
 export abstract class InviteTransitionEvent extends MutationEvent<InviteSnapshot> {
   abstract readonly eventName: InviteEvents;
-
   declare readonly before: InviteSnapshot;
   declare readonly after: InviteSnapshot;
-
   readonly subject = ResourceType.Invite;
   readonly subjectId: string;
 

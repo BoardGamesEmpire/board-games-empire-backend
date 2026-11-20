@@ -1,5 +1,6 @@
 import { MutationEvent } from '@bge/actor-context';
-import { ResourceType, type EventAvailabilityVote, type EventOccurrence } from '@bge/database';
+import type { EventAvailabilityVote, EventOccurrence } from '@bge/database';
+import { ResourceType } from '@bge/database';
 import { OccurrenceEvents } from '../constants';
 
 /**
@@ -19,10 +20,8 @@ type OccurrenceAddedSnapshot = Readonly<
 
 export class OccurrenceAddedEvent extends MutationEvent<EventOccurrence> {
   static readonly eventName = OccurrenceEvents.OccurrenceAdded;
-
   declare readonly before: null;
   declare readonly after: OccurrenceAddedSnapshot;
-
   readonly subject = ResourceType.EventOccurrence;
   readonly subjectId: string;
 
@@ -37,10 +36,8 @@ type OccurrenceUpdatedSnapshot = Readonly<Partial<EventOccurrence> & Pick<EventO
 /** before/after carry the changed subset only (plus `id`). */
 export class OccurrenceUpdatedEvent extends MutationEvent<EventOccurrence> {
   static readonly eventName = OccurrenceEvents.OccurrenceUpdated;
-
   declare readonly before: OccurrenceUpdatedSnapshot;
   declare readonly after: OccurrenceUpdatedSnapshot;
-
   readonly subject = ResourceType.EventOccurrence;
   readonly subjectId: string;
 
@@ -60,10 +57,8 @@ type OccurrenceRemovedSnapshot = Readonly<
  */
 export class OccurrenceRemovedEvent extends MutationEvent<EventOccurrence> {
   static readonly eventName = OccurrenceEvents.OccurrenceRemoved;
-
   declare readonly before: OccurrenceRemovedSnapshot;
   declare readonly after: null;
-
   readonly subject = ResourceType.EventOccurrence;
   readonly subjectId: string;
 
@@ -86,10 +81,8 @@ type OccurrenceStatusSnapshot = Readonly<Pick<EventOccurrence, 'id' | 'eventId' 
 export class OccurrenceStatusChangedEvent extends MutationEvent<EventOccurrence> {
   declare readonly before: OccurrenceStatusSnapshot;
   declare readonly after: OccurrenceStatusSnapshot;
-
   readonly subject = ResourceType.EventOccurrence;
   readonly subjectId: string;
-
   readonly occurrenceLabel: string | null;
   readonly actingUserId: string | null;
 
@@ -100,7 +93,7 @@ export class OccurrenceStatusChangedEvent extends MutationEvent<EventOccurrence>
      * Context for listeners, kept out of the audit entry: the date's label, and
      * the user who acted, or `null` when the actor is not a user (#802).
      */
-    context: { occurrenceLabel: string | null; actingUserId: string | null },
+    context: { actingUserId: string | null; occurrenceLabel: string | null },
     initiatedAt: Date,
   ) {
     super(before, after, initiatedAt);
@@ -119,10 +112,8 @@ type AvailabilityVoteSnapshot = Readonly<Partial<EventAvailabilityVote> & Pick<E
  */
 export class AvailabilityVoteSubmittedEvent extends MutationEvent<EventAvailabilityVote> {
   static readonly eventName = OccurrenceEvents.AvailabilityVoteSubmitted;
-
   declare readonly before: AvailabilityVoteSnapshot | null;
   declare readonly after: AvailabilityVoteSnapshot;
-
   readonly subject = ResourceType.EventAvailabilityVote;
   readonly subjectId: string;
 

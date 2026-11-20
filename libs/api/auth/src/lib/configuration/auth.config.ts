@@ -1,7 +1,8 @@
 import { env, isTrue, splitTrimFilter } from '@bge/env';
 import { registerAs } from '@nestjs/config';
 import Joi from 'joi';
-import { readOidcProviders, type OidcProviderConfig } from './oidc-providers';
+import type { OidcProviderConfig } from './oidc-providers';
+import { readOidcProviders } from './oidc-providers';
 
 export interface AuthConfig {
   disableOriginCheck: boolean;

@@ -1,4 +1,4 @@
-import { Prisma } from '@bge/database';
+import type { Prisma } from '@bge/database';
 
 /** What {@link shownName} reads of a user. */
 export const SHOWN_NAME_SELECT = {

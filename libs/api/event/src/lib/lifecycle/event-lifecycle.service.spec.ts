@@ -1,6 +1,8 @@
-import { Action, EventStatus, OccurrenceStatus, Prisma, ResourceType, type Event } from '@bge/database';
+import type { Event } from '@bge/database';
+import { Action, EventStatus, OccurrenceStatus, Prisma, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService } from '@bge/permissions';
+import type { MockAbilityService, MockDatabaseService } from '@bge/testing';
 import {
   createMockAbilityService,
   createMockDatabaseService,
@@ -8,8 +10,6 @@ import {
   makeEvent,
   MOCK_ACTING_USER_ID,
   rawQueryText,
-  type MockAbilityService,
-  type MockDatabaseService,
 } from '@bge/testing';
 import { WebhookEventType } from '@bge/webhooks';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';

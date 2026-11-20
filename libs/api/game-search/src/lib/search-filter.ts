@@ -1,4 +1,5 @@
-import { ContentType, type PlatformType, type Prisma } from '@bge/database';
+import type { PlatformType, Prisma } from '@bge/database';
+import { ContentType } from '@bge/database';
 import { toProtoContentType, toProtoPlatformType } from '@bge/gateway-registry';
 import * as proto from '@boardgamesempire/proto-gateway';
 
@@ -22,17 +23,17 @@ export const SEARCHABLE_CONTENT_TYPES: readonly SearchableContentType[] = Object
  * is set.
  */
 export interface GameSearchFilter {
-  platformTypes?: PlatformType[] | null;
   contentTypes?: SearchableContentType[] | null;
-  publishYearMin?: number | null;
-  publishYearMax?: number | null;
-  publishYearIncludeUnknown?: boolean | null;
-  playerCountMin?: number | null;
-  playerCountMax?: number | null;
+  platformTypes?: PlatformType[] | null;
   playerCountIncludeUnknown?: boolean | null;
-  playTimeMin?: number | null;
-  playTimeMax?: number | null;
+  playerCountMax?: number | null;
+  playerCountMin?: number | null;
   playTimeIncludeUnknown?: boolean | null;
+  playTimeMax?: number | null;
+  playTimeMin?: number | null;
+  publishYearIncludeUnknown?: boolean | null;
+  publishYearMax?: number | null;
+  publishYearMin?: number | null;
 }
 
 /** A range's bounds as a proto range, or undefined when it gives neither. */

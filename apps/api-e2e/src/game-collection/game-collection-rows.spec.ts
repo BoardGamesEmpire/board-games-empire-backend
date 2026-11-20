@@ -1,21 +1,20 @@
-import { ContentType, GameMedium, ListKind, Reach, ResourceType, type Prisma } from '@bge/database';
-import { createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
+import type { Prisma } from '@bge/database';
+import { ContentType, GameMedium, ListKind, PlatformType, Reach, ResourceType } from '@bge/database';
+import type { Actors, AuthenticatedActor } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import { setTimeout } from 'node:timers/promises';
 import request from 'supertest';
 import { arrangeList, arrangePlatformGame as arrangeSiblingPlatformGame, findWishlist } from '../list/list-fixtures';
-import { mintApiKey, type Caller } from '../support/api-key';
+import type { Caller } from '../support/api-key';
+import { mintApiKey } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import { tabletopPlatform } from '../support/seeded-platforms';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
 import type { HttpResponseLike, RequestDescription } from '../support/wire';
-import {
-  collectionRowPlatformGame,
-  listCollectionsEnvelope,
-  readCollectionEnvelope,
-  type CollectionRowPlatformGameWire,
-  type PlayerAndPlayTimeField,
-} from './game-collection-wire';
+import type { CollectionRowPlatformGameWire, PlayerAndPlayTimeField } from './game-collection-wire';
+import { collectionRowPlatformGame, listCollectionsEnvelope, readCollectionEnvelope } from './game-collection-wire';
 
 /**
  * What a collection row embeds of its game and platform game (#1070), against
@@ -46,11 +45,16 @@ describe('collection rows (#1070)', () => {
   interface PlatformGameOptions {
     /** The game's own values, its reach included. */
     readonly game?: Partial<Prisma.GameUncheckedCreateInput>;
-    /** The platform game's overrides of the game's players and play time. */
-    readonly platformGame?: Pick<Prisma.PlatformGameUncheckedCreateInput, PlayerAndPlayTimeField>;
+
+    /**
+     * The platform game's overrides of the game's players, play time and
+     * content type, and its platform when not the seeded Tabletop one (#1391).
+     */
+    readonly platformGame?: Pick<Prisma.PlatformGameUncheckedCreateInput, PlayerAndPlayTimeField> &
+      Partial<Pick<Prisma.PlatformGameUncheckedCreateInput, 'contentType' | 'platformId'>>;
   }
 
-  /** A game of its own and its platform game on the seeded Tabletop platform. */
+  /** A game of its own and its platform game, on the seeded Tabletop platform unless the options name another. */
   const arrangePlatformGame = async (options: PlatformGameOptions = {}) => {
     const tabletop = await tabletopPlatform(db.client);
     const game = await db.client.game.create({
@@ -111,11 +115,46 @@ describe('collection rows (#1070)', () => {
     embeddedIn(await readEntry(owner, entryId).expect(200), `GET ${COLLECTIONS_PATH}/:id as the owner`),
   ];
 
-  const arrangeGame = (createdById: string, reach: Reach, title: string, deletedAt: Date | null = null) =>
-    db.client.game.create({ data: { title, reach, createdById, deletedAt }, select: { id: true } });
+  interface BaseGameOptions {
+    readonly deletedAt?: Date | null;
 
-  const arrangeLink = (baseGameId: string, expansionGameId: string, isStandalone: boolean) =>
-    db.client.gameExpansion.create({ data: { baseGameId, expansionGameId, isStandalone }, select: { id: true } });
+    /**
+     * The platforms the game has a platform game on: the seeded Tabletop one
+     * unless given. A row lists a base game only when it has a platform game
+     * on the row's platform (#1391).
+     */
+    readonly platformIds?: readonly string[];
+  }
+
+  /** A game of `createdById`'s, with a platform game on each of its platforms. */
+  const arrangeGame = async (
+    createdById: string,
+    reach: Reach,
+    title: string,
+    { deletedAt = null, platformIds }: BaseGameOptions = {},
+  ) => {
+    const game = await db.client.game.create({ data: { title, reach, createdById, deletedAt }, select: { id: true } });
+    const onPlatforms = platformIds ?? [(await tabletopPlatform(db.client)).id];
+    await db.client.platformGame.createMany({
+      data: onPlatforms.map((platformId) => ({ gameId: game.id, platformId })),
+    });
+
+    return game;
+  };
+
+  const arrangeLink = (baseGameId: string, expansionGameId: string) =>
+    db.client.gameExpansion.create({ data: { baseGameId, expansionGameId }, select: { id: true } });
+
+  /** A PC platform of this test's own, beside the seeded Tabletop one (#1391). */
+  const arrangePcPlatform = async () => {
+    const slug = `e2e-pc-${token()}`;
+    const platform = await db.client.platform.create({
+      data: { name: slug, slug, platformType: PlatformType.PC },
+      select: { id: true },
+    });
+
+    return platform.id;
+  };
 
   it("sends the game's and platform game's list facts on every collection row (#1070)", async () => {
     // Actors first, rows before anyone's first authenticated request (#256
@@ -131,7 +170,14 @@ describe('collection rows (#1070)', () => {
         minPlayTime: 30,
         maxPlayTime: 60,
       },
-      platformGame: { minPlayers: 1, maxPlayers: 5, minPlayTime: 20, maxPlayTime: 90 },
+      // The platform game's content type overrides the game's (#1391).
+      platformGame: {
+        contentType: ContentType.StandaloneExpansion,
+        minPlayers: 1,
+        maxPlayers: 5,
+        minPlayTime: 20,
+        maxPlayTime: 90,
+      },
     });
     const bare = await arrangeRow(owner.user.id, { reach: Reach.Private });
     const { platformType } = await tabletopPlatform(db.client);
@@ -146,12 +192,20 @@ describe('collection rows (#1070)', () => {
         minPlayTime: 30,
         maxPlayTime: 60,
       });
-      expect(platformGame).toMatchObject({ minPlayers: 1, maxPlayers: 5, minPlayTime: 20, maxPlayTime: 90 });
+      expect(platformGame).toMatchObject({
+        contentType: ContentType.StandaloneExpansion,
+        minPlayers: 1,
+        maxPlayers: 5,
+        minPlayTime: 20,
+        maxPlayTime: 90,
+      });
       expect(platformGame.platform.platformType).toBe(platformType);
     }
 
     // A fact the game or platform game leaves unset is sent as null, never left
     // off: a client reading an absent key cannot tell "unknown" from "not sent".
+    // A platform game with no content type of its own sends null, and the
+    // client falls back to the game's (#1391).
     for (const platformGame of await embeddedEverywhere(owner, bare.entryId)) {
       expect(platformGame.game).toMatchObject({
         id: bare.gameId,
@@ -162,7 +216,13 @@ describe('collection rows (#1070)', () => {
         minPlayTime: null,
         maxPlayTime: null,
       });
-      expect(platformGame).toMatchObject({ minPlayers: null, maxPlayers: null, minPlayTime: null, maxPlayTime: null });
+      expect(platformGame).toMatchObject({
+        contentType: null,
+        minPlayers: null,
+        maxPlayers: null,
+        minPlayTime: null,
+        maxPlayTime: null,
+      });
     }
   });
 
@@ -277,10 +337,11 @@ describe('collection rows (#1070)', () => {
 
   /**
    * An expansion's base games on a row (#1070): the ones that are live and that
-   * the viewer could open by id, the rule `GET /games/:id` uses. Each denial is
-   * paired with a control on the same row, so it cannot pass because the links
-   * were never there or reached no one. No route writes a link yet, so links
-   * are arranged directly.
+   * the viewer could open by id, the rule `GET /games/:id` uses, and that have
+   * a platform game on the row's platform (#1391). Each denial is paired with a
+   * control on the same row, so it cannot pass because the links were never
+   * there or reached no one. No route writes a link yet, so links are arranged
+   * directly.
    */
   describe("an expansion's base games", () => {
     it("names the owner's Private base game on the owner's row and on no one else's (#1070)", async () => {
@@ -289,12 +350,14 @@ describe('collection rows (#1070)', () => {
       const anonymousUser = await actors.anonymous();
       const privateBase = await arrangeGame(owner.user.id, Reach.Private, `A private base ${token()}`);
       const publicBase = await arrangeGame(owner.user.id, Reach.Public, `B public base ${token()}`);
+      // A standalone expansion, so every link reads `isStandalone: true`, the
+      // add-on's own value (#1391).
       const expansion = await arrangeRow(owner.user.id, {
         reach: Reach.Public,
-        game: { reach: Reach.Public, createdById: owner.user.id, contentType: ContentType.Expansion },
+        game: { reach: Reach.Public, createdById: owner.user.id, contentType: ContentType.StandaloneExpansion },
       });
-      await arrangeLink(privateBase.id, expansion.gameId, false);
-      await arrangeLink(publicBase.id, expansion.gameId, true);
+      await arrangeLink(privateBase.id, expansion.gameId);
+      await arrangeLink(publicBase.id, expansion.gameId);
 
       // The control: the owner's row names both, in base game title order.
       const owners = embeddedOnPage(
@@ -303,7 +366,7 @@ describe('collection rows (#1070)', () => {
         `GET ${COLLECTIONS_PATH} as the owner`,
       );
       expect(owners.game.baseGames).toEqual([
-        { gameId: privateBase.id, isStandalone: false },
+        { gameId: privateBase.id, isStandalone: true },
         { gameId: publicBase.id, isStandalone: true },
       ]);
 
@@ -336,7 +399,7 @@ describe('collection rows (#1070)', () => {
         reach: Reach.Private,
         game: { contentType: ContentType.Expansion },
       });
-      await arrangeLink(base.id, expansion.gameId, false);
+      await arrangeLink(base.id, expansion.gameId);
       const collectionRead = { slugs: ['read:game_collection'], resourceType: ResourceType.GameCollection };
       const collectionOnly = await mintApiKey(baseUrl, db.client, owner, collectionRead);
       const withGameRead = await mintApiKey(baseUrl, db.client, owner, [
@@ -364,13 +427,15 @@ describe('collection rows (#1070)', () => {
     it('leaves a soft-deleted base game off a row even for staff, who can still open it by id (#1070)', async () => {
       const admin = await actors.admin();
       const liveBase = await arrangeGame(admin.user.id, Reach.Public, `e2e live base ${token()}`);
-      const deletedBase = await arrangeGame(admin.user.id, Reach.Public, `e2e deleted base ${token()}`, new Date());
+      const deletedBase = await arrangeGame(admin.user.id, Reach.Public, `e2e deleted base ${token()}`, {
+        deletedAt: new Date(),
+      });
       const expansion = await arrangeRow(admin.user.id, {
         reach: Reach.Private,
         game: { contentType: ContentType.Expansion },
       });
-      await arrangeLink(liveBase.id, expansion.gameId, false);
-      await arrangeLink(deletedBase.id, expansion.gameId, false);
+      await arrangeLink(liveBase.id, expansion.gameId);
+      await arrangeLink(deletedBase.id, expansion.gameId);
 
       const admins = embeddedOnPage(
         await listOwn(admin).expect(200),
@@ -388,9 +453,10 @@ describe('collection rows (#1070)', () => {
     it('names the base game on the rows POST, PATCH and DELETE return (#1070)', async () => {
       const owner = await actors.user();
       const base = await arrangeGame(owner.user.id, Reach.Public, `e2e base ${token()}`);
-      // No entry yet: the POST makes it.
-      const expansion = await arrangePlatformGame({ game: { contentType: ContentType.Expansion } });
-      await arrangeLink(base.id, expansion.gameId, true);
+      // No entry yet: the POST makes it. A standalone expansion, so the link
+      // reads `isStandalone: true`, the add-on's own value (#1391).
+      const expansion = await arrangePlatformGame({ game: { contentType: ContentType.StandaloneExpansion } });
+      await arrangeLink(base.id, expansion.gameId);
       const expected = [{ gameId: base.id, isStandalone: true }];
 
       const created = await request(baseUrl)
@@ -410,6 +476,75 @@ describe('collection rows (#1070)', () => {
 
       const removed = await request(baseUrl).delete(`${COLLECTIONS_PATH}/${entryId}`).set(owner.headers).expect(200);
       expect(embeddedIn(removed, `DELETE ${COLLECTIONS_PATH}/:id`).game.baseGames).toEqual(expected);
+    });
+
+    // A row shows one platform game, and a DLC on PC adds nothing to a base
+    // game the user can only have on the table. The same DLC's Tabletop row
+    // is the control: the link is there and the owner can open the base game,
+    // so the PC row's empty list is the platform's doing (#1391).
+    it('a DLC on PC whose base game is only on Tabletop has no base game on its row (#1391)', async () => {
+      const owner = await actors.user();
+      const pc = await arrangePcPlatform();
+      const base = await arrangeGame(owner.user.id, Reach.Public, `e2e tabletop base ${token()}`);
+      const onPc = await arrangeRow(owner.user.id, {
+        reach: Reach.Private,
+        game: { contentType: ContentType.DLC },
+        platformGame: { platformId: pc },
+      });
+      await arrangeLink(base.id, onPc.gameId);
+      const { id: tabletopPlatformGameId } = await db.client.platformGame.create({
+        data: { gameId: onPc.gameId, platformId: (await tabletopPlatform(db.client)).id },
+        select: { id: true },
+      });
+      const onTabletop = await db.client.gameCollection.create({
+        data: {
+          userId: owner.user.id,
+          platformGameId: tabletopPlatformGameId,
+          medium: GameMedium.Physical,
+          reach: Reach.Private,
+        },
+        select: { id: true },
+      });
+
+      for (const platformGame of await embeddedEverywhere(owner, onPc.entryId)) {
+        expect(platformGame.game.baseGames).toEqual([]);
+      }
+
+      const tabletopRow = embeddedOnPage(
+        await listOwn(owner).expect(200),
+        onTabletop.id,
+        `GET ${COLLECTIONS_PATH} as the owner`,
+      );
+      expect(tabletopRow.game.baseGames).toEqual([{ gameId: base.id, isStandalone: false }]);
+    });
+
+    // The offered-games filters read a row's content type from its platform
+    // game where it has one, so a DLC game's platform game that is a base game
+    // counts as a base game there, and its row lists no base game of its own.
+    // A second DLC with no override, linked to the same base game, is the
+    // control (#1391).
+    it('a DLC whose platform game is a base game has no base game on its row (#1391)', async () => {
+      const owner = await actors.user();
+      const base = await arrangeGame(owner.user.id, Reach.Public, `e2e base ${token()}`);
+      const overridden = await arrangeRow(owner.user.id, {
+        reach: Reach.Private,
+        game: { contentType: ContentType.DLC },
+        platformGame: { contentType: ContentType.BaseGame },
+      });
+      const control = await arrangeRow(owner.user.id, {
+        reach: Reach.Private,
+        game: { contentType: ContentType.DLC },
+      });
+      await arrangeLink(base.id, overridden.gameId);
+      await arrangeLink(base.id, control.gameId);
+
+      for (const platformGame of await embeddedEverywhere(owner, overridden.entryId)) {
+        expect(platformGame.game.baseGames).toEqual([]);
+      }
+
+      for (const platformGame of await embeddedEverywhere(owner, control.entryId)) {
+        expect(platformGame.game.baseGames).toEqual([{ gameId: base.id, isStandalone: false }]);
+      }
     });
   });
 
@@ -449,14 +584,18 @@ describe('collection rows (#1070)', () => {
       const owner = await actors.user();
       const linked = await arrangeRow(owner.user.id, { reach: Reach.Private });
       const linkedBase = await arrangeGame(owner.user.id, Reach.Public, `e2e base ${token()}`);
-      await arrangeLink(linkedBase.id, linked.gameId, false);
-      const unlinked = await arrangeRow(owner.user.id, { reach: Reach.Private });
+      await arrangeLink(linkedBase.id, linked.gameId);
+      // A standalone expansion, so its new link reads `isStandalone: true` (#1391).
+      const unlinked = await arrangeRow(owner.user.id, {
+        reach: Reach.Private,
+        game: { contentType: ContentType.StandaloneExpansion },
+      });
       const untouched = await arrangeRow(owner.user.id, { reach: Reach.Private });
 
       const since = await startOfChanges();
       await db.client.game.update({ where: { id: linkedBase.id }, data: { title: `e2e renamed base ${token()}` } });
       const newBase = await arrangeGame(owner.user.id, Reach.Public, `e2e new base ${token()}`);
-      await arrangeLink(newBase.id, unlinked.gameId, true);
+      await arrangeLink(newBase.id, unlinked.gameId);
 
       const drained = await drainedRows(owner, since);
 
@@ -466,6 +605,33 @@ describe('collection rows (#1070)', () => {
         { gameId: newBase.id, isStandalone: true },
       ]);
       expect(drained.map((row) => row.id)).not.toContain(untouched.entryId);
+    });
+
+    // A row lists a base game only once it has a platform game on the row's
+    // platform, so that platform game's arrival resends the row (#1391). The
+    // first read is the control: the link is there, and the base game is
+    // missing from the row only for want of the platform game.
+    it("a base game that gains a platform game on the row's platform resends the row through `updatedSince` (#1391)", async () => {
+      const owner = await actors.user();
+      const pc = await arrangePcPlatform();
+      const base = await arrangeGame(owner.user.id, Reach.Public, `e2e pc base ${token()}`, { platformIds: [pc] });
+      const row = await arrangeRow(owner.user.id, { reach: Reach.Private, game: { contentType: ContentType.DLC } });
+      await arrangeLink(base.id, row.gameId);
+      const untouched = await arrangeRow(owner.user.id, { reach: Reach.Private });
+
+      expect(
+        embeddedIn(await readEntry(owner, row.entryId).expect(200), `GET ${COLLECTIONS_PATH}/:id`).game.baseGames,
+      ).toEqual([]);
+
+      const since = await startOfChanges();
+      await db.client.platformGame.create({
+        data: { gameId: base.id, platformId: (await tabletopPlatform(db.client)).id },
+      });
+
+      const drained = await drainedRows(owner, since);
+
+      expect(drained).toEqual([{ id: row.entryId, baseGames: [{ gameId: base.id, isStandalone: false }] }]);
+      expect(drained.map((drainedRow) => drainedRow.id)).not.toContain(untouched.entryId);
     });
 
     // The release is embedded too, and a re-import rewrites it in place.
@@ -501,7 +667,7 @@ describe('collection rows (#1070)', () => {
       const owner = await actors.user();
       const row = await arrangeRow(owner.user.id, { reach: Reach.Private });
       const base = await arrangeGame(owner.user.id, Reach.Public, `e2e base ${token()}`);
-      await arrangeLink(base.id, row.gameId, false);
+      await arrangeLink(base.id, row.gameId);
 
       const since = await startOfChanges();
       await db.client.game.delete({ where: { id: base.id } });

@@ -15,13 +15,15 @@ import type { StartedRedisServer } from './redis-server';
  * `BGE_E2E_REDIS_URL`) is in use.
  */
 export interface E2EGlobalState {
-  readonly postgres?: StartedPostgreSqlContainer;
-  readonly redis?: StartedRedisServer;
-  readonly mailpit?: StartedMailpit;
   readonly api?: ChildProcess;
-  readonly signInProvider?: FakeSignInProvider;
+  readonly mailpit?: StartedMailpit;
+
   /** The plugins root the API was given (#1094), which teardown removes. */
   readonly pluginsRoot?: string;
+
+  readonly postgres?: StartedPostgreSqlContainer;
+  readonly redis?: StartedRedisServer;
+  readonly signInProvider?: FakeSignInProvider;
 }
 
 interface E2EGlobalCarrier {

@@ -1,4 +1,7 @@
+import eslintComments from '@eslint-community/eslint-plugin-eslint-comments';
 import nx from '@nx/eslint-plugin';
+import stylistic from '@stylistic/eslint-plugin';
+import perfectionist from 'eslint-plugin-perfectionist';
 
 // Repo-wide `no-restricted-imports` paths, keyed so individual libs can compose
 // their own narrowly-scoped exceptions (see actor-context-transport) instead of
@@ -146,10 +149,14 @@ const FUNCTION_NODES = new Set(['ArrowFunctionExpression', 'FunctionDeclaration'
 
 /** The name a call's receiver goes by: `scopeComposer` for both `scopeComposer.x()` and `this.scopeComposer.x()`. */
 function receiverName(object) {
-  if (object.type === 'Identifier') return object.name;
+  if (object.type === 'Identifier') {
+    return object.name;
+  }
+
   if (object.type === 'MemberExpression' && !object.computed && object.property.type === 'Identifier') {
     return object.property.name;
   }
+
   return undefined;
 }
 
@@ -158,26 +165,45 @@ function ceilingCallName(callee) {
   if (callee.type === 'Identifier') {
     return CEILING_CALLS.has(callee.name) ? callee.name : undefined;
   }
+
   if (callee.type !== 'MemberExpression' || callee.computed || callee.property.type !== 'Identifier') {
     return undefined;
   }
 
   const name = callee.property.name;
-  if (CEILING_CALLS.has(name)) return name;
-  if (name === 'compose' && /composer$/i.test(receiverName(callee.object) ?? '')) return name;
+  if (CEILING_CALLS.has(name)) {
+    return name;
+  }
+
+  if (name === 'compose' && /composer$/i.test(receiverName(callee.object) ?? '')) {
+    return name;
+  }
+
   return undefined;
 }
 
 function propertyKeyName(property) {
-  if (property.key.type === 'Identifier' && !property.computed) return property.key.name;
-  if (property.key.type === 'Literal' && typeof property.key.value === 'string') return property.key.value;
+  if (property.key.type === 'Identifier' && !property.computed) {
+    return property.key.name;
+  }
+
+  if (property.key.type === 'Literal' && typeof property.key.value === 'string') {
+    return property.key.value;
+  }
+
   return undefined;
 }
 
 /** The name a value is bound to: `include` in `const include = ...`, or in `args.include = ...`. */
 function bindingName(node) {
-  if (node.type === 'VariableDeclarator' && node.id.type === 'Identifier') return node.id.name;
-  if (node.type === 'AssignmentExpression') return receiverName(node.left);
+  if (node.type === 'VariableDeclarator' && node.id.type === 'Identifier') {
+    return node.id.name;
+  }
+
+  if (node.type === 'AssignmentExpression') {
+    return receiverName(node.left);
+  }
+
   return undefined;
 }
 
@@ -206,11 +232,18 @@ const noNestedCeiling = {
     return {
       CallExpression(node) {
         const name = ceilingCallName(node.callee);
-        if (!name) return;
+        if (!name) {
+          return;
+        }
 
         for (let child = node, ancestor = node.parent; ancestor; child = ancestor, ancestor = ancestor.parent) {
-          if (FUNCTION_NODES.has(ancestor.type)) return;
-          if (ancestor.type === 'CallExpression' && ancestor.arguments.includes(child)) return;
+          if (FUNCTION_NODES.has(ancestor.type)) {
+            return;
+          }
+
+          if (ancestor.type === 'CallExpression' && ancestor.arguments.includes(child)) {
+            return;
+          }
 
           const key = relationKey(ancestor);
           if (key) {
@@ -245,11 +278,18 @@ const noUncodedExceptionBody = {
   },
   create(context) {
     const check = (node, exceptionClass) => {
-      if (exceptionClass?.type !== 'Identifier' || !exceptionClass.name.endsWith('Exception')) return;
-      if (EXCEPTIONS_THAT_MAY_NAME_A_CODE.has(exceptionClass.name)) return;
+      if (exceptionClass?.type !== 'Identifier' || !exceptionClass.name.endsWith('Exception')) {
+        return;
+      }
+
+      if (EXCEPTIONS_THAT_MAY_NAME_A_CODE.has(exceptionClass.name)) {
+        return;
+      }
 
       const [body] = node.arguments;
-      if (body?.type !== 'ObjectExpression') return;
+      if (body?.type !== 'ObjectExpression') {
+        return;
+      }
 
       if (body.properties.some((property) => property.type === 'Property' && propertyKeyName(property) === 'code')) {
         context.report({ node, messageId: 'uncoded' });
@@ -265,15 +305,221 @@ const noUncodedExceptionBody = {
         while (ancestor && ancestor.type !== 'ClassDeclaration' && ancestor.type !== 'ClassExpression') {
           ancestor = ancestor.parent;
         }
+
         check(node, ancestor?.superClass);
       },
     };
   },
 };
 
+// #1318: blank lines between the members of an interface, an object type
+// literal, or a class's property list are set by the members alone. A member
+// is special when it carries a leading comment of any kind (a line comment
+// too, or the fix would pull a `//`-commented member up against the one above)
+// or spans more than one line, decorators included. A blank line goes before a
+// special member and before the member after one; between two plain one-line
+// members there is none. The first member is never checked. With members
+// sorted (#1374), the same body always gets the same layout.
+//
+// In a class body only property pairs are checked: a method on either side
+// leaves the pair alone, since class methods are out of scope. Members that
+// share a line are Prettier's business, so a gap without a newline is skipped.
+const CLASS_PROPERTY_TYPES = new Set(['PropertyDefinition', 'TSAbstractPropertyDefinition', 'TSIndexSignature']);
+
+const memberBlankLines = {
+  meta: {
+    type: 'layout',
+    fixable: 'whitespace',
+    schema: [],
+    messages: {
+      blankLineRequired:
+        'Put one blank line before this member: it or the member above carries a comment or spans more than one line (#1318).',
+      blankLineForbidden:
+        'Remove the blank line before this member: neither it nor the member above carries a comment or spans more than one line (#1318).',
+    },
+  },
+  create(context) {
+    const sourceCode = context.sourceCode;
+
+    // Comments before a member that start below the token ahead of it. A
+    // comment on that token's own line trails the member above instead.
+    const leadingComments = (member) => {
+      const tokenBefore = sourceCode.getTokenBefore(member);
+      const afterLine = tokenBefore ? tokenBefore.loc.end.line : 0;
+
+      return sourceCode.getCommentsBefore(member).filter((comment) => comment.loc.start.line > afterLine);
+    };
+
+    const startLine = (member) => Math.min(member.loc.start.line, member.decorators?.[0]?.loc.start.line ?? Infinity);
+
+    const isSpecial = (member) => leadingComments(member).length > 0 || member.loc.end.line > startLine(member);
+
+    const checkPair = (prev, cur) => {
+      const [firstComment] = leadingComments(cur);
+      const firstOfCur = firstComment ?? sourceCode.getFirstToken(cur);
+      const before = sourceCode.getTokenBefore(firstOfCur, { includeComments: true });
+      const gap = sourceCode.text.slice(before.range[1], firstOfCur.range[0]);
+      const newlines = gap.split('\n').length - 1;
+
+      if (newlines === 0) {
+        return;
+      }
+
+      const wanted = isSpecial(prev) || isSpecial(cur) ? 2 : 1;
+
+      if (newlines === wanted) {
+        return;
+      }
+
+      const indent = gap.slice(gap.lastIndexOf('\n') + 1);
+
+      context.report({
+        node: cur,
+        messageId: wanted === 2 ? 'blankLineRequired' : 'blankLineForbidden',
+        fix: (fixer) => fixer.replaceTextRange([before.range[1], firstOfCur.range[0]], '\n'.repeat(wanted) + indent),
+      });
+    };
+
+    const checkList = (members, inScope = () => true) => {
+      for (let index = 1; index < members.length; index++) {
+        const prev = members[index - 1];
+        const cur = members[index];
+
+        if (inScope(prev) && inScope(cur)) {
+          checkPair(prev, cur);
+        }
+      }
+    };
+
+    return {
+      TSInterfaceBody(node) {
+        checkList(node.body);
+      },
+      TSTypeLiteral(node) {
+        checkList(node.members);
+      },
+      ClassBody(node) {
+        checkList(node.body, (member) => CLASS_PROPERTY_TYPES.has(member.type));
+      },
+    };
+  },
+};
+
+// #1317: a name imported only as a type goes in an `import type` statement of
+// its own. `@typescript-eslint/consistent-type-imports` never reports a
+// specifier that already says `type`, so this rule moves inline `type`
+// specifiers out of a value import into an `import type` statement above it.
+// An inline specifier is already erased, so the move is safe even in a file
+// whose decorators emit metadata. organize-imports merges a duplicate
+// `import type` statement afterwards. A comment inside the braces is reported
+// but not fixed, since the rebuilt statements would drop it.
+const topLevelTypeImports = {
+  meta: {
+    type: 'suggestion',
+    fixable: 'code',
+    schema: [],
+    messages: {
+      inlineTypeSpecifier:
+        'Import types in an `import type { … }` statement of their own, not as inline `type` specifiers (#1317).',
+    },
+  },
+  create(context) {
+    const sourceCode = context.sourceCode;
+
+    return {
+      ImportDeclaration(node) {
+        if (node.importKind !== 'value') {
+          return;
+        }
+
+        const named = node.specifiers.filter((specifier) => specifier.type === 'ImportSpecifier');
+        const typeSpecifiers = named.filter((specifier) => specifier.importKind === 'type');
+
+        if (typeSpecifiers.length === 0) {
+          return;
+        }
+
+        const hasInnerComment = sourceCode.getCommentsInside(node).length > 0;
+
+        context.report({
+          node,
+          messageId: 'inlineTypeSpecifier',
+          fix: hasInnerComment
+            ? null
+            : (fixer) => {
+                // The source, any import attributes and the semicolon, as written.
+                const tail = sourceCode.text.slice(node.source.range[0], node.range[1]);
+                const withoutType = (specifier) => sourceCode.getText(specifier).replace(/^type\s+/, '');
+                const typeStatement = `import type { ${typeSpecifiers.map(withoutType).join(', ')} } from ${tail}`;
+
+                const defaultSpecifier = node.specifiers.find(
+                  (specifier) => specifier.type === 'ImportDefaultSpecifier',
+                );
+                const valueNamed = named.filter((specifier) => specifier.importKind !== 'type');
+                const valueParts = [
+                  ...(defaultSpecifier ? [sourceCode.getText(defaultSpecifier)] : []),
+                  ...(valueNamed.length > 0
+                    ? [`{ ${valueNamed.map((specifier) => sourceCode.getText(specifier)).join(', ')} }`]
+                    : []),
+                ];
+
+                if (valueParts.length === 0) {
+                  return fixer.replaceText(node, typeStatement);
+                }
+
+                return fixer.replaceText(node, `${typeStatement}\nimport ${valueParts.join(', ')} from ${tail}`);
+              },
+        });
+      },
+    };
+  },
+};
+
+// The decorator settings most tsconfigs here turn on. No ESLint config sets
+// `parserOptions.project`, so the parser learns them from `parserOptions` alone.
+// Without them `@typescript-eslint/consistent-type-imports` checks files that
+// contain a decorator too, and its autofix turns a constructor-injected class
+// into `import type`: the emitted metadata becomes `Object`, and Nest DI fails
+// at runtime (#1317). With them the rule skips those files entirely.
+export const decoratorParserOptions = { emitDecoratorMetadata: true, experimentalDecorators: true };
+
+// Test code may cast; everything else states or drops its casts (#1321). The
+// list is spec files, the e2e apps and test support: the image smoke test,
+// @bge/testing, the e2e harness in testing-e2e, the DataGateway driver
+// contract tests, and fixtures.
+export const castExemptFiles = [
+  '**/*.spec.ts',
+  '**/*.e2e-spec.ts',
+  'apps/*-e2e/**',
+  'apps/image-smoke/**',
+  'libs/common/testing/**',
+  'libs/common/testing-e2e/**',
+  'libs/gateway/driver/contract-testing/**',
+  '**/*.fixture.ts',
+];
+
+// Interface and type-literal members sort alphabetically (#1374): natural
+// order (field2 before field10), case-insensitive, one list per body. Blank
+// lines neither partition the sort nor get touched by it; bge/member-blank-lines
+// sets them from the sorted order (#1318). The sort is stable, so overloads of
+// one name keep their order, and call and construct signatures stay put; the
+// rule spec in libs/scripts pins both. Class properties, enums and object
+// literals are out of scope: their order reaches runtime or the API's output.
+export const sortedMemberOptions = {
+  type: 'natural',
+  ignoreCase: true,
+  partitionByNewLine: false,
+  newlinesBetween: 'ignore',
+};
+
 export const bgePlugin = {
   meta: { name: 'bge' },
-  rules: { 'no-nested-ceiling': noNestedCeiling, 'no-uncoded-exception-body': noUncodedExceptionBody },
+  rules: {
+    'member-blank-lines': memberBlankLines,
+    'no-nested-ceiling': noNestedCeiling,
+    'no-uncoded-exception-body': noUncodedExceptionBody,
+    'top-level-type-imports': topLevelTypeImports,
+  },
 };
 
 // #145: CI guardrail against NEW hardcoded user-facing strings in libs already
@@ -335,6 +581,10 @@ export default [
     ignores: [
       '**/dist',
       '**/out-tsc',
+      // Jest's coverage report and other test runs write here, and it's
+      // gitignored. CI runs the tests before lint, so the report's scripts,
+      // which open with a bare `/* eslint-disable */`, would reach ESLint (#1321).
+      '**/test-output',
       // Generated by the nestjs-i18n CLI and gitignored as of #260 — but still on
       // disk in any workspace that has typechecked or built, so it still reaches
       // ESLint and this entry is still required. Carries its own
@@ -342,6 +592,22 @@ export default [
       // rule doesn't warn on the generated header.
       '**/i18n.generated.ts',
     ],
+  },
+  {
+    // Must follow the Nx spreads, which set the parser (#1317).
+    files: ['**/*.ts', '**/*.tsx', '**/*.cts', '**/*.mts'],
+    languageOptions: { parserOptions: decoratorParserOptions },
+    rules: {
+      // A name imported only as a type goes in an `import type` statement of
+      // its own (#1317). Files with a decorator are skipped, per the flags above.
+      // `typeof import('x')` annotations stay allowed: #1317 is about import
+      // statements, and specs use them in `jest.requireActual<…>()`.
+      '@typescript-eslint/consistent-type-imports': [
+        'error',
+        { prefer: 'type-imports', fixStyle: 'separate-type-imports', disallowTypeAnnotations: false },
+      ],
+      'bge/top-level-type-imports': 'error',
+    },
   },
   {
     files: ['**/*.ts', '**/*.tsx', '**/*.js', '**/*.jsx'],
@@ -370,10 +636,49 @@ export default [
   },
   {
     files: ['**/*.ts', '**/*.tsx', '**/*.cts', '**/*.mts', '**/*.js', '**/*.jsx', '**/*.cjs', '**/*.mjs'],
-    plugins: { bge: bgePlugin },
+    plugins: {
+      bge: bgePlugin,
+      '@stylistic': stylistic,
+      perfectionist,
+      '@eslint-community/eslint-comments': eslintComments,
+    },
     rules: {
+      // Every if/else/for/while/do body takes braces (#1320). This block comes
+      // after the Nx spreads, which pull in eslint-config-prettier's `curly: 0`,
+      // so it wins; the 'all' option is one Prettier can print.
+      curly: ['error', 'all'],
+      // A blank line after every block-like statement, so the end of a block
+      // reads as the end of a step (#1319).
+      '@stylistic/padding-line-between-statements': ['error', { blankLine: 'always', prev: 'block-like', next: '*' }],
+      'perfectionist/sort-interfaces': ['error', sortedMemberOptions],
+      'perfectionist/sort-object-types': ['error', sortedMemberOptions],
+      // Every eslint-disable comment says why, after ` -- ` (#1321).
+      '@eslint-community/eslint-comments/require-description': ['error', { ignore: [] }],
+      'bge/member-blank-lines': 'error',
       'bge/no-nested-ceiling': 'error',
       'bge/no-uncoded-exception-body': 'error',
     },
+  },
+  {
+    // Outside tests, a value is made to match a type with `satisfies` or an
+    // annotation, which the compiler checks, not a cast (#1321). `as const` is
+    // not a cast and stays allowed. A cast that has to stay carries a disable
+    // comment with its reason.
+    //
+    // Each project lints through its own config, which spreads this one, and a
+    // glob matches relative to the config that loads it. `basePath` anchors this
+    // block's globs at the repo root, so `apps/*-e2e/**` means the same thing
+    // from every project.
+    basePath: import.meta.dirname,
+    files: ['**/*.ts', '**/*.tsx', '**/*.cts', '**/*.mts'],
+    ignores: castExemptFiles,
+    rules: { '@typescript-eslint/consistent-type-assertions': ['error', { assertionStyle: 'never' }] },
+  },
+  {
+    // Generated and gitignored: Prisma's client and the proto stubs open with a
+    // bare `/* eslint-disable */` that every generate rewrites, so they can't
+    // carry a reason (#1321). Last, so it wins over the block that turns the rule on.
+    files: ['**/src/lib/generated/**', '**/src/gen/**'],
+    rules: { '@eslint-community/eslint-comments/require-description': 'off' },
   },
 ];
