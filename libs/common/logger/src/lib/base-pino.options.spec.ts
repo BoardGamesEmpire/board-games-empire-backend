@@ -5,7 +5,7 @@ import pino from 'pino';
 import pinoHttp from 'pino-http';
 import request from 'supertest';
 import type { LogDestination } from './base-pino.options';
-import { buildBasePinoOptions, resolvePinoLevel } from './base-pino.options';
+import { buildBasePinoOptions, buildRequestSerializer, resolvePinoLevel } from './base-pino.options';
 
 /**
  * Narrows the loose `LoggerOptions['transport']` to the multi-target
@@ -248,5 +248,89 @@ describe('credential redaction (#748)', () => {
     expect(req.headers).not.toHaveProperty('authorization');
     expect(req.headers).not.toHaveProperty('cookie');
     expect(req.headers).not.toHaveProperty('x-api-key');
+  });
+});
+
+describe('buildRequestSerializer (#935)', () => {
+  type LogRecord = { msg?: string; req: { query?: unknown; url: string } };
+
+  const RETURN_PATH = '/api/users/me/upstream-accounts/steam/return';
+  const STEAM_ID = '76561197960287930';
+  const QUERY = `openid.claimed_id=https%3A%2F%2Fsteamcommunity.com%2Fopenid%2Fid%2F${STEAM_ID}&state=spent-state`;
+
+  let server: http.Server;
+  let lines: string[];
+
+  const accessLine = async (): Promise<LogRecord> => {
+    for (let attempt = 0; attempt < 100; attempt++) {
+      const record = lines
+        .join('')
+        .split('\n')
+        .filter((line) => line.length > 0)
+        .map((line): LogRecord => JSON.parse(line))
+        .find((r) => r.msg === 'request completed');
+      if (record) {
+        return record;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    throw new Error('the access line was never logged');
+  };
+
+  beforeEach(() => {
+    const { transport: _transport, ...options } = buildBasePinoOptions({ LOG_LEVEL: 'debug' });
+    lines = [];
+    const sink = new Writable({
+      write(chunk, _encoding, done) {
+        lines.push(String(chunk));
+        done();
+      },
+    });
+    const httpLogger = pinoHttp({
+      logger: pino(options, sink),
+      serializers: { req: buildRequestSerializer({ pathsWithoutQuery: [RETURN_PATH] }) },
+    });
+
+    server = http.createServer((req, res) => {
+      // Express sets `query`; the bare http server stands in for it.
+      Object.assign(req, { query: Object.fromEntries(new URL(req.url ?? '/', 'http://localhost').searchParams) });
+      httpLogger(req, res);
+      res.end();
+    });
+  });
+
+  afterEach(() => {
+    server.close();
+  });
+
+  it('logs only the path for a listed route, so the SteamID stays out of the logs', async () => {
+    await request(server).get(`${RETURN_PATH}?${QUERY}`);
+
+    const { req } = await accessLine();
+
+    expect(req.url).toBe(RETURN_PATH);
+    expect(req).not.toHaveProperty('query');
+    expect(lines.join('')).not.toContain(STEAM_ID);
+    expect(lines.join('')).not.toContain('spent-state');
+  });
+
+  it('matches the listed route however Express would, ignoring case and a trailing slash', async () => {
+    await request(server).get(`${RETURN_PATH.toUpperCase()}/?${QUERY}`);
+
+    const { req } = await accessLine();
+
+    expect(req.url).toBe(`${RETURN_PATH.toUpperCase()}/`);
+    expect(lines.join('')).not.toContain(STEAM_ID);
+  });
+
+  it('logs the full URL and query for any other route', async () => {
+    await request(server).get('/api/games?search=catan');
+
+    const { req } = await accessLine();
+
+    expect(req.url).toBe('/api/games?search=catan');
+    expect(req.query).toEqual({ search: 'catan' });
   });
 });

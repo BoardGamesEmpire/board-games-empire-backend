@@ -1,4 +1,10 @@
-export { buildBasePinoOptions, resolvePinoLevel, type LogDestination } from './lib/base-pino.options';
+export {
+  buildBasePinoOptions,
+  buildRequestSerializer,
+  resolvePinoLevel,
+  type LogDestination,
+  type RequestSerializerOptions,
+} from './lib/base-pino.options';
 export { bootstrapLogging, type BootstrapLoggingConfig } from './lib/bootstrap-logging';
 export * from './lib/nest-logger';
 export {

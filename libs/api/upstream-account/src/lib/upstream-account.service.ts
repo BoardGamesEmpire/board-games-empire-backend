@@ -203,6 +203,24 @@ export class UpstreamAccountService {
   }
 
   /**
+   * Refuses with 409 `UPSTREAM_ACCOUNT_ALREADY_LINKED`, the answer `create`
+   * would give, when the user already has an account at `upstream`: a link
+   * that starts by sending the user to the upstream checks first, so they
+   * aren't sent there for nothing (#935). `create` still decides, since an
+   * account can be linked in between.
+   */
+  async assertNotLinked(userId: string, upstream: Upstream): Promise<void> {
+    const existing = await this.db.upstreamAccount.findUnique({
+      where: { userId_upstream: { userId, upstream } },
+      select: { id: true },
+    });
+
+    if (existing) {
+      throw this.alreadyLinked(upstream);
+    }
+  }
+
+  /**
    * The privacy policy a user is shown before linking an upstream account
    * (#934): the language and date of the policy `GET /api/privacy-policy`
    * would serve them, chosen as that route chooses it, by their stored

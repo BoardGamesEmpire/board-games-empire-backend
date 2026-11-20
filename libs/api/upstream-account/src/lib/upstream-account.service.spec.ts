@@ -346,6 +346,29 @@ describe('UpstreamAccountService', () => {
     });
   });
 
+  describe('assertNotLinked', () => {
+    // Starting a link while linked is refused before the user is sent to the
+    // upstream, with the same answer the insert would give (#935).
+    it('answers UPSTREAM_ACCOUNT_ALREADY_LINKED when the user has an account at that upstream', async () => {
+      db.upstreamAccount.findUnique.mockResolvedValue({ id: 'ua-1' } as never);
+
+      const error = await refusal(service.assertNotLinked(ME, Upstream.Steam));
+
+      expect(error.getStatus()).toBe(Http.Conflict);
+      expect(error.code).toBe(UpstreamAccountErrorCode.AlreadyLinked);
+      expect(db.upstreamAccount.findUnique).toHaveBeenCalledWith({
+        where: { userId_upstream: { userId: ME, upstream: Upstream.Steam } },
+        select: { id: true },
+      });
+    });
+
+    it('resolves when the user has no account at that upstream', async () => {
+      db.upstreamAccount.findUnique.mockResolvedValue(null);
+
+      await expect(service.assertNotLinked(ME, Upstream.Steam)).resolves.toBeUndefined();
+    });
+  });
+
   describe('privacyPolicy', () => {
     // The policy a link shows, in the user's stored language before the
     // request's, as `GET /api/privacy-policy` chooses it (#934).

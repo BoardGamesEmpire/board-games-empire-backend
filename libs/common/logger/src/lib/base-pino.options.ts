@@ -1,4 +1,4 @@
-import type { LoggerOptions, TransportTargetOptions } from 'pino';
+import type { LoggerOptions, SerializedRequest, TransportTargetOptions } from 'pino';
 
 /**
  * Default log level when `NODE_ENV === 'production'` and `LOG_LEVEL`
@@ -123,5 +123,52 @@ export function buildBasePinoOptions(
     transport: {
       targets: transportTargets,
     },
+  };
+}
+
+/**
+ * Options for {@link buildRequestSerializer}.
+ */
+export interface RequestSerializerOptions {
+  /**
+   * Request paths, global prefix included (`/api/...`), whose query string
+   * never reaches a log line. The caller supplies them, so this lib imports
+   * no feature lib.
+   */
+  readonly pathsWithoutQuery: readonly string[];
+}
+
+/**
+ * Express matches routes case-insensitively and ignores a trailing slash, so
+ * the comparison does too: any spelling that reaches the route matches here.
+ */
+const normalizePath = (path: string): string => path.toLowerCase().replace(/\/+$/, '') || '/';
+
+/**
+ * Returns a pino-http `req` serializer that logs only the path, with no
+ * `query` object, for a request to one of `pathsWithoutQuery`; every other
+ * request is logged unchanged. pino-http logs `req.url` as the original URL,
+ * query string included, so a route whose query carries an identifier the
+ * user can later delete (the Steam sign-in answer carries the SteamID, and
+ * unlinking deletes it) keeps it out of the logs this way (#935).
+ */
+export function buildRequestSerializer({
+  pathsWithoutQuery,
+}: RequestSerializerOptions): (req: SerializedRequest) => SerializedRequest {
+  const unlogged = new Set(pathsWithoutQuery.map(normalizePath));
+
+  return (req) => {
+    if (typeof req.url !== 'string') {
+      return req;
+    }
+
+    const [path = req.url] = req.url.split('?', 1);
+    if (!unlogged.has(normalizePath(path))) {
+      return req;
+    }
+
+    req.url = path;
+    Reflect.deleteProperty(req, 'query');
+    return req;
   };
 }

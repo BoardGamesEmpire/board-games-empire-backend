@@ -19,6 +19,12 @@ export const PRIVACY_POLICY_PATH = '/api/privacy-policy';
  * tell them apart (#935). An object of string literals rather than an enum, as
  * `PrivacyPolicyErrorCode` is: `CodedHttpException` takes an upper-case string,
  * and an enum member is not one to the compiler.
+ *
+ * A link through an upstream's sign-in ends with the browser sent back to the
+ * client, so most of its refusals reach the client as the `error` of that
+ * redirect rather than as an error answer: `SessionMismatch`, `Cancelled`,
+ * `NotVerified` and `Unreachable` only ever arrive that way, and
+ * `AlreadyLinked` and `Taken` can.
  */
 export const UpstreamAccountErrorCode = {
   NotLinkable: 'UPSTREAM_NOT_LINKABLE',
@@ -26,6 +32,12 @@ export const UpstreamAccountErrorCode = {
   Taken: 'UPSTREAM_ACCOUNT_TAKEN',
   NotFound: 'UPSTREAM_ACCOUNT_NOT_FOUND',
   UnknownUpstream: 'UPSTREAM_UNKNOWN',
+  ReturnAddressRefused: 'UPSTREAM_LINK_RETURN_ADDRESS_REFUSED',
+  Expired: 'UPSTREAM_LINK_EXPIRED',
+  SessionMismatch: 'UPSTREAM_LINK_SESSION_MISMATCH',
+  Cancelled: 'UPSTREAM_LINK_CANCELLED',
+  NotVerified: 'UPSTREAM_LINK_NOT_VERIFIED',
+  Unreachable: 'UPSTREAM_UNREACHABLE',
 } as const;
 
 export type UpstreamAccountErrorCode = (typeof UpstreamAccountErrorCode)[keyof typeof UpstreamAccountErrorCode];
