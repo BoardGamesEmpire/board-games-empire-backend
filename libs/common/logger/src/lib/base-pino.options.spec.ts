@@ -1,4 +1,6 @@
 import http from 'node:http';
+import type { AddressInfo } from 'node:net';
+import net from 'node:net';
 import { Writable } from 'node:stream';
 import type { LoggerOptions, TransportTargetOptions } from 'pino';
 import pino from 'pino';
@@ -335,6 +337,31 @@ describe('buildRequestSerializer (#935)', () => {
 
     expect(req.url).toBe(`${RETURN_PATH.toUpperCase()}/`);
     expect(lines.join('')).not.toContain(STEAM_ID);
+  });
+
+  // An absolute-form target reaches the same route through Express, and Node
+  // passes it through as `req.url`, scheme, host and query included (#935).
+  it('logs only the path for a listed route requested in absolute form', async () => {
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address() as AddressInfo;
+
+    await new Promise<void>((resolve, reject) => {
+      const socket = net.connect(port, '127.0.0.1', () => {
+        socket.end(
+          `GET http://api.example${RETURN_PATH}?${QUERY} HTTP/1.1\r\nHost: api.example\r\nConnection: close\r\n\r\n`,
+        );
+      });
+      socket.on('error', reject);
+      socket.on('close', () => resolve());
+      socket.resume();
+    });
+
+    const { req } = await accessLine();
+
+    expect(req.url).toBe(RETURN_PATH);
+    expect(req).not.toHaveProperty('query');
+    expect(lines.join('')).not.toContain(STEAM_ID);
+    expect(lines.join('')).not.toContain('spent-state');
   });
 
   // The serializer replaces pino-http's own, so the base options' redaction

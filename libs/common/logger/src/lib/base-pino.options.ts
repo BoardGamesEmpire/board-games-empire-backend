@@ -165,7 +165,11 @@ export function buildRequestSerializer({
       return req;
     }
 
-    const [path = req.url] = req.url.split('?', 1);
+    // Node passes an absolute-form request target (`GET http://host/path`)
+    // through as `req.url`, and Express still routes it by its path, so the
+    // scheme and host go before the match, as `@bge/otel` does for spans.
+    const [target = req.url] = req.url.split('?', 1);
+    const path = URL.canParse(target) ? new URL(target).pathname : target;
     if (!unlogged.has(normalizeRequestPath(path))) {
       return req;
     }

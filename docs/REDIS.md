@@ -502,7 +502,9 @@ cache connection keeps it until Steam sends the browser back (#935). Two keys:
   return address, start time). It lives **30 minutes** and is removed when the
   return takes it, so a state works once.
 - `bge:upstream-link:steam:user:<userId>` holds that user's current state, so
-  starting again deletes the earlier one. It carries the same 30 minutes.
+  starting again deletes the earlier one. A return is honoured only for the
+  state this key names, so an earlier state the delete missed stays unusable.
+  It carries the same 30 minutes.
 
 `FLUSHDB` on the cache database drops pending sign-ins; the user starts the
 link again. The store needs `GETDEL` and `SET … GET`, which both need Redis 6.2

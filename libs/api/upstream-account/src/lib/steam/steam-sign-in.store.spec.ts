@@ -1,12 +1,17 @@
 import type { Redis } from '@bge/redis';
 import { STEAM_SIGN_IN_LIFETIME_MS, SteamSignInStore } from './steam-sign-in.store';
 
-/** An in-memory stand-in for the four cache commands the store uses. */
+/** An in-memory stand-in for the cache commands the store uses. */
 function fakeRedis() {
   const values = new Map<string, string>();
   const commands: unknown[][] = [];
+  const failures = { del: 0 };
 
   const redis = {
+    async get(key: string) {
+      commands.push(['get', key]);
+      return values.get(key) ?? null;
+    },
     async set(key: string, value: string, ...options: unknown[]) {
       commands.push(['set', key, value, ...options]);
       const previous = values.get(key) ?? null;
@@ -21,11 +26,16 @@ function fakeRedis() {
     },
     async del(key: string) {
       commands.push(['del', key]);
+      if (failures.del > 0) {
+        failures.del -= 1;
+        throw new Error('Connection is closed.');
+      }
+
       return values.delete(key) ? 1 : 0;
     },
   };
 
-  return { redis: redis as unknown as Redis, values, commands };
+  return { redis: redis as unknown as Redis, values, commands, failures };
 }
 
 const pending = { userId: 'user-1', returnTo: 'https://client.example/settings' };
@@ -64,6 +74,37 @@ describe('SteamSignInStore (#935)', () => {
 
     await expect(store.take(first.state)).resolves.toBeNull();
     await expect(store.take(second.state)).resolves.toMatchObject(pending);
+  });
+
+  // Deleting the displaced state is a separate command from the pointer swap,
+  // so it can fail, or lose a race to the earlier sign-in's return. The
+  // pointer decides, so a displaced state stays unusable either way (#935).
+  it('refuses a displaced state whose delete failed, also after a retry succeeds (#935)', async () => {
+    const { redis, values, failures } = fakeRedis();
+    const store = new SteamSignInStore(redis);
+    const first = await store.start(pending);
+
+    failures.del = 1;
+    await expect(store.start(pending)).rejects.toThrow('Connection is closed.');
+    expect(values.has(`bge:upstream-link:steam:state:${first.state}`)).toBe(true);
+
+    const retry = await store.start(pending);
+
+    await expect(store.take(first.state)).resolves.toBeNull();
+    await expect(store.take(retry.state)).resolves.toMatchObject(pending);
+  });
+
+  it("refuses a stored state its user's pointer does not name (#935)", async () => {
+    const { redis, values } = fakeRedis();
+    const store = new SteamSignInStore(redis);
+    const state = 'a'.repeat(32);
+    values.set(
+      `bge:upstream-link:steam:state:${state}`,
+      JSON.stringify({ ...pending, createdAt: new Date().toISOString() }),
+    );
+
+    await expect(store.take(state)).resolves.toBeNull();
+    expect(values.has(`bge:upstream-link:steam:state:${state}`)).toBe(false);
   });
 
   it("leaves another user's pending sign-in alone (#935)", async () => {

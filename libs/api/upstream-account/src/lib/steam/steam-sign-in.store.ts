@@ -63,7 +63,8 @@ function parsePending(raw: string): PendingSteamSignIn | null {
  * The pending Steam sign-ins (#935), in the cache Redis. The `state` is a
  * single-use secret: it travels in Steam's return address, and taking it
  * removes it. Each user has at most one live state, so starting again
- * replaces the earlier sign-in. A state lives {@link STEAM_SIGN_IN_LIFETIME_MS}.
+ * replaces the earlier sign-in: a take honours only the state the user's
+ * pointer names. A state lives {@link STEAM_SIGN_IN_LIFETIME_MS}.
  */
 @Injectable()
 export class SteamSignInStore {
@@ -74,8 +75,10 @@ export class SteamSignInStore {
    *
    * The user's pointer is swapped with one `SET … GET`, which writes the new
    * state and returns the one it displaced. Concurrent starts for a user each
-   * displace a different predecessor, so each deletes the state before it and
-   * only the last swap's state stays takeable, with no script or transaction.
+   * displace a different predecessor, so only the last swap's state is named,
+   * with no script or transaction. Deleting the displaced state only tidies
+   * up: {@link take} refuses a state the pointer no longer names, so one left
+   * behind, because the delete has not run yet or failed, stays unusable.
    */
   async start(pending: Omit<PendingSteamSignIn, 'createdAt'>): Promise<{ expiresAt: Date; state: string }> {
     const state = generateRandomString(STATE_LENGTH);
@@ -101,7 +104,8 @@ export class SteamSignInStore {
 
   /**
    * The pending sign-in `state` stands for, once. A second take, an expired or
-   * unknown state, or a malformed one finds nothing.
+   * unknown state, or a malformed one finds nothing, and so does a state its
+   * user's pointer no longer names: one a later start displaced (#935).
    */
   async take(state: string): Promise<PendingSteamSignIn | null> {
     if (!STATE_PATTERN.test(state)) {
@@ -109,6 +113,13 @@ export class SteamSignInStore {
     }
 
     const raw = await this.redis.getdel(`${STATE_KEY_PREFIX}${state}`);
-    return raw === null ? null : parsePending(raw);
+    const pending = raw === null ? null : parsePending(raw);
+    if (pending === null) {
+      return null;
+    }
+
+    const current = await this.redis.get(`${USER_KEY_PREFIX}${pending.userId}`);
+
+    return current === state ? pending : null;
   }
 }
