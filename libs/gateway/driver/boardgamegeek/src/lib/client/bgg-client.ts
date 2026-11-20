@@ -1,9 +1,14 @@
 import type { UpstreamFetch } from '@boardgamesempire/gateway-driver-contract';
 import { discardBody } from '@boardgamesempire/gateway-driver-contract';
 import { setTimeout as wait } from 'node:timers/promises';
-import type { BggClientLike, BggSearchQueryParams, BggThingQueryParams } from './bgg-client.interface';
+import type {
+  BggClientLike,
+  BggSearchQueryParams,
+  BggThingQueryParams,
+  BggUserQueryParams,
+} from './bgg-client.interface';
 import { BggHttpError } from './bgg-http.error';
-import { parseSearch, parseThings } from './bgg-xml';
+import { parseSearch, parseThings, parseUser } from './bgg-xml';
 
 export const BGG_BASE_URL = 'https://boardgamegeek.com/xmlapi2';
 
@@ -96,6 +101,10 @@ export function createBggClient(options: BggClientOptions): BggClientLike {
       query: async (params: BggSearchQueryParams, signal?: AbortSignal) => [
         parseSearch(await get('search', { ...params }, signal)),
       ],
+    },
+    user: {
+      query: async (params: BggUserQueryParams, signal?: AbortSignal) =>
+        parseUser(await get('user', { ...params }, signal)),
     },
   };
 }

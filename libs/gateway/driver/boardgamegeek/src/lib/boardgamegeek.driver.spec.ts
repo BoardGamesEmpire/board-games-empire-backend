@@ -76,7 +76,7 @@ describe('BoardGameGeekDriver', () => {
       expect((await describeOnce({})).correlationId).toEqual(expect.any(String));
     });
 
-    it('declares search, fetch, fetch expansions and the lists of languages, platforms, categories and mechanics', async () => {
+    it('declares search, fetch, fetch expansions, the lists of languages, platforms, categories and mechanics, and finding an upstream account', async () => {
       expect(new Set((await describeOnce({})).capabilities)).toEqual(
         new Set([
           proto.Capability.CAPABILITY_SEARCH,
@@ -86,6 +86,7 @@ describe('BoardGameGeekDriver', () => {
           proto.Capability.CAPABILITY_LIST_PLATFORMS,
           proto.Capability.CAPABILITY_LIST_CATEGORIES,
           proto.Capability.CAPABILITY_LIST_MECHANICS,
+          proto.Capability.CAPABILITY_FIND_UPSTREAM_ACCOUNT,
         ]),
       );
     });
@@ -182,16 +183,6 @@ describe('BoardGameGeekDriver', () => {
       await expect(
         firstValueFrom(driver.fetchGames({ correlationId: 'corr-fetch-games', externalIds: ['126163'] })),
       ).rejects.toMatchObject({ code: 12, message: 'FetchGames is not served by this DataGateway' });
-    });
-  });
-
-  // Describe doesn't declare the lookup until BoardGameGeek serves it, so the
-  // server never asks (#1226).
-  describe('findUpstreamAccount', () => {
-    it('answers UNIMPLEMENTED', async () => {
-      await expect(
-        firstValueFrom(driver.findUpstreamAccount({ correlationId: 'corr-find-account', username: 'ada' })),
-      ).rejects.toMatchObject({ code: 12, message: 'FindUpstreamAccount is not served by this DataGateway' });
     });
   });
 

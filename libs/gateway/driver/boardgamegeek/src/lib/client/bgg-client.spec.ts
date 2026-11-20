@@ -55,6 +55,16 @@ describe('createBggClient', () => {
     ]);
   });
 
+  it('asks /user for a name, encoded, and reads the answer', async () => {
+    const fetch = createFakeFetch(() => ({ body: '<user id="1" name="Mary Ann" termsofuse=""></user>' }));
+    const client = createBggClient({ fetch, apiKey: 'key-1' });
+
+    await expect(client.user.query({ name: 'Mary Ann' })).resolves.toEqual({ id: '1', name: 'Mary Ann' });
+
+    expect(fetch.requests[0].url.href).toBe('https://boardgamegeek.com/xmlapi2/user?name=Mary%20Ann');
+    expect(fetch.requests[0].headers).toEqual({ Authorization: 'Bearer key-1' });
+  });
+
   it('reads the search answer it gets', async () => {
     const fetch = createFakeFetch(() => ({ body: NO_RESULTS }));
 

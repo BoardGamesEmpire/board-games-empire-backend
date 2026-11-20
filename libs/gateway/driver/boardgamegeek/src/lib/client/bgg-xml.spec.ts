@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { parseSearch, parseThings } from './bgg-xml';
+import { parseSearch, parseThings, parseUser } from './bgg-xml';
 
 /**
  * A live `thing` answer from 2026-10-22, trimmed to one game (Tzolk'in): its
@@ -165,5 +165,35 @@ describe('parseSearch', () => {
       items: undefined,
     });
     expect(parseSearch('<items></items>')).toEqual({ total: 0, items: undefined });
+  });
+});
+
+// The answers are built from BGG's documented `user` shape, not recorded (#1226).
+describe('parseUser', () => {
+  const userXml = (attributes: string) =>
+    `<?xml version="1.0" encoding="utf-8"?><user ${attributes} termsofuse="https://boardgamegeek.com/xmlapi/termsofuse"><firstname value="Ada" /></user>`;
+
+  it('reads the id and the name as BGG wrote them', () => {
+    expect(parseUser(userXml('id="1234567" name="BGFan"'))).toEqual({ id: '1234567', name: 'BGFan' });
+  });
+
+  it('keeps text as sent: no number conversion, no entity decoding', () => {
+    expect(parseUser(userXml('id="007" name="A&amp;B"'))).toEqual({ id: '007', name: 'A&amp;B' });
+  });
+
+  it('reads a user element with an empty id as no user', () => {
+    expect(parseUser(userXml('id=""'))).toBeUndefined();
+  });
+
+  it('reads a user element with no id as no user', () => {
+    expect(parseUser(userXml(''))).toBeUndefined();
+  });
+
+  it('reads a user element with an id and no name as no user', () => {
+    expect(parseUser(userXml('id="5"'))).toBeUndefined();
+  });
+
+  it('fails on an answer with no user element, so a proxy page never reads as an unknown user', () => {
+    expect(() => parseUser('<html><body>Please wait</body></html>')).toThrow('BGG answered without a <user> document');
   });
 });

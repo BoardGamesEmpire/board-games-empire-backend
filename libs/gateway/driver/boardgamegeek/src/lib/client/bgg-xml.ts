@@ -1,6 +1,15 @@
 import { XMLParser } from 'fast-xml-parser';
 import { BggNameType } from '../constants';
-import type { BggLink, BggName, BggRatings, BggSearchItem, BggSearchResult, BggThing, BggVersion } from '../types';
+import type {
+  BggLink,
+  BggName,
+  BggRatings,
+  BggSearchItem,
+  BggSearchResult,
+  BggThing,
+  BggUser,
+  BggVersion,
+} from '../types';
 
 /** An element as the parser hands it over: attributes under `@_`, children by tag. */
 type XmlElement = Record<string, unknown>;
@@ -177,4 +186,31 @@ export function parseSearch(xml: string): BggSearchResult {
     total: toNumber(attribute(items, 'total')) ?? 0,
     items: found === undefined ? undefined : elements(found).map(toSearchItem),
   };
+}
+
+/**
+ * A `/user` answer: the user, or undefined when BGG doesn't know the name,
+ * which it answers with a `<user>` whose `id` is empty. An answer without a
+ * `<user>` element, such as a proxy's HTML page sent as 200, fails, so it
+ * never reads as an unknown user (#1226).
+ */
+export function parseUser(xml: string): BggUser | undefined {
+  const document = asElement(parser.parse(xml));
+  const user = document?.['user'];
+
+  // A `<user>` with no attributes or children parses as empty text.
+  if (user === '') {
+    return undefined;
+  }
+
+  const element = asElement(user);
+
+  if (element === undefined) {
+    throw new Error('BGG answered without a <user> document');
+  }
+
+  const id = attribute(element, 'id');
+  const name = attribute(element, 'name');
+
+  return id && name ? { id, name } : undefined;
 }

@@ -38,6 +38,7 @@ runDataGatewayDriverContract('BoardGameGeekDriver', () => ({
     proto.Capability.CAPABILITY_LIST_PLATFORMS,
     proto.Capability.CAPABILITY_LIST_CATEGORIES,
     proto.Capability.CAPABILITY_LIST_MECHANICS,
+    proto.Capability.CAPABILITY_FIND_UPSTREAM_ACCOUNT,
   ],
   filterableAxes: [
     proto.SearchFilterAxis.SEARCH_FILTER_AXIS_CONTENT_TYPE,
@@ -47,6 +48,8 @@ runDataGatewayDriverContract('BoardGameGeekDriver', () => ({
   knownExternalId: '126163',
   unknownExternalId: '999999999',
   searchQuery: "Tzolk'in",
+  knownUsername: 'bgfan',
+  unknownUsername: 'nobody-by-this-name',
 }));
 
 // When nothing listens any more, such as a search the api gave up on, the

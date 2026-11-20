@@ -22,6 +22,7 @@ describe('BggCaller', () => {
     mockClient = {
       thing: { query: jest.fn() },
       search: { query: jest.fn() },
+      user: { query: jest.fn() },
     };
     logger = { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() };
 
