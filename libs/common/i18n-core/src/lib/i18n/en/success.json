@@ -96,7 +96,8 @@
     "set": "Quota set"
   },
   "upstream_account": {
-    "unlinked": "Your {upstream} account is unlinked. Its sync history is deleted, and the games already in your collection stay."
+    "unlinked": "Your {upstream} account is unlinked. Its sync history is deleted, and the games already in your collection stay.",
+    "linked_by_username": "Your {upstream} account is linked. It is marked unverified, because {upstream} has no way to confirm an account is yours."
   },
   "webhook_subscription": {
     "created": "Webhook subscription created",

@@ -1,4 +1,4 @@
-import type { Prisma, Upstream, UpstreamAccount } from '@bge/database';
+import type { DataGatewayCapability, Prisma, Upstream, UpstreamAccount } from '@bge/database';
 import {
   constraintIdentity,
   DatabaseService,
@@ -67,6 +67,24 @@ const VERIFIED_EXTERNAL_ID_SPELLINGS = [
 ] as const;
 
 /**
+ * The DataGateways a link at `upstream` can go through (#935, #1226): enabled,
+ * undeleted and declaring the upstream, and, when the link asks the
+ * DataGateway something, serving that capability ({@link
+ * UPSTREAMS_WITH_LINK_METHOD}) with an admin not having switched it off.
+ */
+function usableForLink(upstream: Upstream, capability: DataGatewayCapability | null): Prisma.DataGatewayWhereInput {
+  return {
+    enabled: true,
+    deletedAt: null,
+    upstream,
+    ...(capability !== null && {
+      capabilities: { has: capability },
+      NOT: { disabledCapabilities: { has: capability } },
+    }),
+  };
+}
+
+/**
  * A user's upstream accounts (#935): which upstreams can be linked, the
  * user's own accounts, unlinking one, and storing one a link has proved. Each
  * link and unlink is audited through its event.
@@ -83,20 +101,40 @@ export class UpstreamAccountService {
 
   /**
    * The upstreams a user can link an account at now: those this server has a
-   * way to link ({@link UPSTREAMS_WITH_LINK_METHOD}) that an enabled,
-   * undeleted DataGateway declares. Ordered as the `Upstream` enum is.
+   * way to link ({@link UPSTREAMS_WITH_LINK_METHOD}) with a DataGateway usable
+   * for the link, the rule {@link linkDataGateway} picks one by. Ordered as
+   * the `Upstream` enum is.
    */
   async linkableUpstreams(): Promise<Upstream[]> {
-    const declared = await this.db.dataGateway.findMany({
-      where: { enabled: true, deletedAt: null, upstream: { not: null } },
+    const usable = await this.db.dataGateway.findMany({
+      where: {
+        OR: [...UPSTREAMS_WITH_LINK_METHOD].map(([upstream, capability]) => usableForLink(upstream, capability)),
+      },
       select: { upstream: true },
       distinct: ['upstream'],
       orderBy: { upstream: 'asc' },
     });
 
-    return declared
-      .map(({ upstream }) => upstream)
-      .filter((upstream): upstream is Upstream => upstream !== null && UPSTREAMS_WITH_LINK_METHOD.has(upstream));
+    return usable.map(({ upstream }) => upstream).filter((upstream): upstream is Upstream => upstream !== null);
+  }
+
+  /**
+   * The DataGateway a link at `upstream` goes through (#1226): of those usable
+   * for it, by the rule {@link linkableUpstreams} lists upstreams by, the one
+   * added first, so the same one answers while it stays usable. Null when none
+   * is usable, or this server has no way to link at `upstream`.
+   */
+  async linkDataGateway(upstream: Upstream): Promise<{ id: string } | null> {
+    const capability = UPSTREAMS_WITH_LINK_METHOD.get(upstream);
+    if (capability === undefined) {
+      return null;
+    }
+
+    return this.db.dataGateway.findFirst({
+      where: usableForLink(upstream, capability),
+      select: { id: true },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    });
   }
 
   /**
@@ -168,7 +206,8 @@ export class UpstreamAccountService {
    * pass a check made first: a user who already has an account at the
    * upstream gets 409 `UPSTREAM_ACCOUNT_ALREADY_LINKED`, and a verified
    * external id another user holds gets 409 `UPSTREAM_ACCOUNT_TAKEN`, whose
-   * message names no one.
+   * message names no one. An unverified account is never refused as taken:
+   * any number of users may claim the same external id (#1226).
    */
   async create(input: CreateUpstreamAccountInput): Promise<UpstreamAccount> {
     const initiatedAt = new Date();
@@ -244,8 +283,12 @@ export class UpstreamAccountService {
       return this.taken(input.upstream);
     }
 
+    // The index holding a verified external id to one user covers only
+    // verified rows, so an unverified insert can only hit the user's own
+    // unique. Answering TAKEN there would tell the user that someone else
+    // linked the same username (#1226).
     if (identity.source === 'unknown') {
-      return (await this.hasAccountAt(input.userId, input.upstream))
+      return !input.verified || (await this.hasAccountAt(input.userId, input.upstream))
         ? this.alreadyLinked(input.upstream)
         : this.taken(input.upstream);
     }

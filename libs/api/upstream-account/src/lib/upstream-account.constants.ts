@@ -1,12 +1,22 @@
-import { Upstream } from '@bge/database';
+import { DataGatewayCapability, Upstream } from '@bge/database';
 
 /**
- * The upstreams this server has a way to link an upstream account at (#935).
- * An upstream is linkable while it is here and an enabled DataGateway declares
- * it; offering one with no way to link it would offer a link every attempt
- * refuses.
+ * The upstreams this server has a way to link an upstream account at (#935),
+ * each with the capability a DataGateway declaring it must also serve for the
+ * link to go through it, or null when the link asks the DataGateway nothing.
+ * Steam's link is Steam sign-in, which needs only a DataGateway declaring
+ * Steam; a BoardGameGeek link looks the username up through a DataGateway
+ * (#1226). An upstream is linkable while it is here and a DataGateway usable
+ * for its link exists; offering one with no way to link it would offer a link
+ * every attempt refuses.
  */
-export const UPSTREAMS_WITH_LINK_METHOD: ReadonlySet<Upstream> = new Set([Upstream.Steam]);
+export const UPSTREAMS_WITH_LINK_METHOD: ReadonlyMap<Upstream, DataGatewayCapability | null> = new Map<
+  Upstream,
+  DataGatewayCapability | null
+>([
+  [Upstream.BoardGameGeek, DataGatewayCapability.FindUpstreamAccount],
+  [Upstream.Steam, null],
+]);
 
 /**
  * The stable codes the upstream account routes' errors carry, so a client can
@@ -22,9 +32,15 @@ export const UPSTREAMS_WITH_LINK_METHOD: ReadonlySet<Upstream> = new Set([Upstre
  * A link through an upstream's sign-in ends with the browser sent back to the
  * client, so most of its refusals reach the client as the `error` of that
  * redirect rather than as an error answer: `SessionMismatch`, `Cancelled`,
- * `NotVerified`, `Unreachable` and `Failed` only ever arrive that way, and
- * `AlreadyLinked` and `Taken` can. The redirect carries the code alone, so a
+ * `NotVerified` and `Failed` only ever arrive that way, and `AlreadyLinked`,
+ * `Taken` and `Unreachable` can. The redirect carries the code alone, so a
  * client supplies the words for those.
+ *
+ * A link by username answers every refusal as an error answer, with its
+ * message (#1226): `UnknownUsername` when the upstream has no user by the
+ * name, `Throttled`, with the wait in `retryAfterMs`, when the DataGateway's
+ * upstream budget is spent, and `Unreachable` when the lookup failed or
+ * didn't answer in time.
  */
 export const UpstreamAccountErrorCode = {
   NotLinkable: 'UPSTREAM_NOT_LINKABLE',
@@ -40,6 +56,8 @@ export const UpstreamAccountErrorCode = {
   NotVerified: 'UPSTREAM_LINK_NOT_VERIFIED',
   Unreachable: 'UPSTREAM_UNREACHABLE',
   Failed: 'UPSTREAM_LINK_FAILED',
+  UnknownUsername: 'UPSTREAM_ACCOUNT_UNKNOWN_USERNAME',
+  Throttled: 'UPSTREAM_THROTTLED',
 } as const;
 
 export type UpstreamAccountErrorCode = (typeof UpstreamAccountErrorCode)[keyof typeof UpstreamAccountErrorCode];

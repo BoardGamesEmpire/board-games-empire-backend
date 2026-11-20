@@ -1,3 +1,6 @@
+export * from './lib/boardgamegeek/bgg-link.controller';
+export * from './lib/boardgamegeek/bgg-link.service';
+export * from './lib/boardgamegeek/dto/link-by-username.dto';
 export * from './lib/dto/upstream-account.dto';
 export * from './lib/dto/upstream-accounts-response.dto';
 export * from './lib/steam/dto/start-steam-sign-in.dto';
