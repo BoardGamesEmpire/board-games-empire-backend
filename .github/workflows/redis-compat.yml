@@ -5,7 +5,7 @@ name: redis-compat
 # on an operator's server (#462). `ci.yml` already covers Redis itself;
 # this covers the others.
 #
-# Never a PR gate. Each run is every setup's full suite, split in two shards,
+# Never a PR gate. Each run is every setup's full suite, split in three shards,
 # and CI runtime is already a cost (#1313). A pull request's author also can't act
 # on a regression in an upstream Redis-compatible server, so a red check there
 # would only block work it can't fix. It runs weekly, and on demand through
@@ -37,7 +37,7 @@ permissions:
 
 jobs:
   e2e:
-    name: e2e (${{ matrix.server }} ${{ matrix.shard }}/2)
+    name: e2e (${{ matrix.server }} ${{ matrix.shard }}/3)
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -50,9 +50,9 @@ jobs:
         # has no `inputs.server` (an empty string), and a dispatch of `all`
         # takes the same full list.
         server: ${{ fromJSON((inputs.server && inputs.server != 'all') && format('["{0}"]', inputs.server) || '["valkey","keydb","dragonfly-undeclared-keys","dragonfly-hashtags"]') }}
-        # The literal 2, not `strategy.job-total`: that counts every server
+        # The literal 3, not `strategy.job-total`: that counts every server
         # times every shard here, and Jest's `--shard` wants only the shards.
-        shard: [1, 2]
+        shard: [1, 2, 3]
     # Hard stop for the whole job, setup included. Same budget as `ci.yml`'s
     # e2e job: npm ci, generation and the build land before the suite starts,
     # and the suite step below has its own 20-minute cap inside this one.
@@ -98,5 +98,5 @@ jobs:
         timeout-minutes: 20
         run: >-
           npx nx run @boardgamesempire/api-e2e:e2e
-          --shard=${{ matrix.shard }}/2
+          --shard=${{ matrix.shard }}/3
           --outputStyle=stream-without-prefixes

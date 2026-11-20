@@ -1,8 +1,9 @@
 import { EventSchedulingMode, EventType, Reach } from '@bge/database';
 import { i18nValidationMessage } from '@bge/i18n';
 import { ClientRequestIdProperty, ReachProperty } from '@bge/shared';
+import { applyDecorators } from '@nestjs/common';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
@@ -11,6 +12,7 @@ import {
   IsOptional,
   IsString,
   IsUrl,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { CreateEventOccurrenceDto } from '../occurrence/dto/create-event-occurrence.dto';
@@ -52,9 +54,49 @@ export function EventReachProperty(defaultReach?: EventReach): PropertyDecorator
   });
 }
 
+/**
+ * An event's title: trimmed, and refused when that leaves it empty, so no
+ * event is stored without a title (#1404).
+ *
+ * Shared with `UpdateEventDto`, which passes `optional`. That DTO can't
+ * inherit `title` through `PartialType`, whose `IsOptional` lets `null`
+ * through to the non-nullable column as a 500 (#1404).
+ */
+export function EventTitleProperty({ optional = false }: { optional?: boolean } = {}): PropertyDecorator {
+  const description = 'Trimmed. Refused when empty.';
+
+  return applyDecorators(
+    ...(optional
+      ? [ApiPropertyOptional({ description }), ValidateIf((_, value) => value !== undefined)]
+      : [ApiProperty({ description })]),
+    Transform(({ value }) => (typeof value === 'string' ? value.trim() : value)),
+    IsString({ message: i18nValidationMessage('validation.isString') }),
+    IsNotEmpty({ message: i18nValidationMessage('validation.isNotEmpty') }),
+  );
+}
+
+/**
+ * An enum field an event can leave out but never clear: `type` and
+ * `schedulingMode`. Shared with `UpdateEventDto`, which names no default.
+ *
+ * `ValidateIf` rather than `IsOptional`, which skips null as well as
+ * undefined: left out, the column default applies on a create and the stored
+ * value stays on an update, but `null` is refused here instead of reaching the
+ * non-nullable column as a 500 (#1404).
+ */
+export function EventEnumProperty<TEnum extends Record<string, string>>(
+  enumType: TEnum,
+  defaultValue?: TEnum[keyof TEnum],
+): PropertyDecorator {
+  return applyDecorators(
+    ApiPropertyOptional({ enum: enumType, ...(defaultValue === undefined ? {} : { default: defaultValue }) }),
+    ValidateIf((_, value) => value !== undefined),
+    IsEnum(enumType, { message: i18nValidationMessage('validation.isEnum') }),
+  );
+}
+
 export class CreateEventDto {
-  @ApiProperty()
-  @IsString({ message: i18nValidationMessage('validation.isString') })
+  @EventTitleProperty()
   title!: string;
 
   @ApiPropertyOptional({
@@ -89,17 +131,13 @@ export class CreateEventDto {
   @IsOptional()
   url?: string;
 
-  @ApiPropertyOptional({ enum: EventType, default: EventType.CasualGathering })
-  @IsEnum(EventType, { message: i18nValidationMessage('validation.isEnum') })
-  @IsOptional()
+  @EventEnumProperty(EventType, EventType.CasualGathering)
   type?: EventType;
 
   @EventReachProperty(Reach.Friends)
   reach?: EventReach;
 
-  @ApiPropertyOptional({ enum: EventSchedulingMode, default: EventSchedulingMode.Fixed })
-  @IsEnum(EventSchedulingMode, { message: i18nValidationMessage('validation.isEnum') })
-  @IsOptional()
+  @EventEnumProperty(EventSchedulingMode, EventSchedulingMode.Fixed)
   schedulingMode?: EventSchedulingMode;
 
   @ApiPropertyOptional({

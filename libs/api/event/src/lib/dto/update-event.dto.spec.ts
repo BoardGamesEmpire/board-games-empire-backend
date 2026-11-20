@@ -28,6 +28,31 @@ describe('UpdateEventDto', () => {
     await expect(propertiesWithErrors({ reach })).resolves.toEqual(['reach']);
   });
 
+  // PartialType's IsOptional skips null as well as a missing key, so a null
+  // for a non-nullable column passed the pipe and answered 500 at the database
+  // (#1404).
+  it.each([['title'], ['type'], ['schedulingMode']])('rejects a null %s (#1404)', async (field) => {
+    await expect(propertiesWithErrors({ [field]: null })).resolves.toEqual([field]);
+  });
+
+  it.each([[''], ['   ']])('rejects the blank title %p (#1404)', async (title) => {
+    await expect(propertiesWithErrors({ title })).resolves.toEqual(['title']);
+  });
+
+  it('trims the title (#1404)', async () => {
+    const dto = plainToInstance(UpdateEventDto, { title: '  Renamed ' });
+
+    await expect(validate(dto, { whitelist: true, forbidNonWhitelisted: true })).resolves.toEqual([]);
+    expect(dto.title).toBe('Renamed');
+  });
+
+  // The nullable columns keep null, which clears them.
+  it('accepts null for description, image, location and url, which clears them (#1404)', async () => {
+    await expect(propertiesWithErrors({ description: null, image: null, location: null, url: null })).resolves.toEqual(
+      [],
+    );
+  });
+
   // An event's household is set when it is created and never after (#454).
   // Moving it would hand the event to one household's managers and take it
   // from another's, and neither side's consent is a grant a PATCH can check.
