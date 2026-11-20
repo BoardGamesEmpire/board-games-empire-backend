@@ -8,14 +8,18 @@ import { resourceFromAttributes } from '@opentelemetry/resources';
 import type { MetricReader } from '@opentelemetry/sdk-metrics';
 import { PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics';
 import { NodeSDK } from '@opentelemetry/sdk-node';
-import type { SpanExporter, SpanProcessor } from '@opentelemetry/sdk-trace-base';
-import { BatchSpanProcessor } from '@opentelemetry/sdk-trace-base';
+import type { SpanExporter, SpanProcessor } from '@opentelemetry/sdk-trace';
+import { BatchSpanProcessor } from '@opentelemetry/sdk-trace';
 import { ActorSpanProcessor } from '../processors/actor-span.processor';
 import { OTEL_LOG_LEVEL_ENV, resolveDiagLogLevel } from './diag-log-level';
 import { metricsExportEnabled } from './metrics-enabled';
 import type { OtelInitConfig } from './otel.config';
 import {
   DEFAULT_SERVICE_NAMESPACE,
+  OTEL_BSP_EXPORT_TIMEOUT_ENV,
+  OTEL_BSP_MAX_EXPORT_BATCH_SIZE_ENV,
+  OTEL_BSP_MAX_QUEUE_SIZE_ENV,
+  OTEL_BSP_SCHEDULE_DELAY_ENV,
   OTEL_EXPORTER_NONE,
   OTEL_EXPORTER_OTLP_ENDPOINT_ENV,
   OTEL_EXPORTER_OTLP_PROTOCOL_ENV,
@@ -48,6 +52,43 @@ const resolveTraceExporter = (env: NodeJS.ProcessEnv): SpanExporter | undefined 
   const protocol = env[OTEL_EXPORTER_OTLP_PROTOCOL_ENV] ?? OTEL_OTLP_PROTOCOL_HTTP;
   return protocol === OTEL_OTLP_PROTOCOL_GRPC ? new OtlpGrpcTraceExporter() : new OtlpHttpTraceExporter();
 };
+
+/**
+ * Reads one of the spec's numeric SDK variables. Unset, blank, non-numeric
+ * and non-positive values all yield `undefined`, so the processor keeps its
+ * own default; a value that is set but unusable is reported through `diag`,
+ * as NodeSDK reports its own.
+ */
+const positiveNumberFromEnv = (env: NodeJS.ProcessEnv, name: string): number | undefined => {
+  const raw = env[name]?.trim();
+  if (!raw) {
+    return undefined;
+  }
+
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) {
+    diag.warn(`${name} (${raw}) is invalid, expected a number greater than 0; using the default.`);
+    return undefined;
+  }
+
+  return value;
+};
+
+/**
+ * Builds the batch span processor with the spec's `OTEL_BSP_*` tuning
+ * variables. Up to sdk-trace-base 2.x the processor read them itself; from
+ * sdk-trace 3 it takes only what it is given, and NodeSDK reads them only
+ * for processors it builds, not for ones passed in `spanProcessors`. Reading
+ * them here keeps an operator's tuning working across the upgrade (#957).
+ */
+const createBatchSpanProcessor = (exporter: SpanExporter, env: NodeJS.ProcessEnv): BatchSpanProcessor =>
+  new BatchSpanProcessor({
+    exporter,
+    exportTimeoutMillis: positiveNumberFromEnv(env, OTEL_BSP_EXPORT_TIMEOUT_ENV),
+    maxExportBatchSize: positiveNumberFromEnv(env, OTEL_BSP_MAX_EXPORT_BATCH_SIZE_ENV),
+    maxQueueSize: positiveNumberFromEnv(env, OTEL_BSP_MAX_QUEUE_SIZE_ENV),
+    scheduledDelayMillis: positiveNumberFromEnv(env, OTEL_BSP_SCHEDULE_DELAY_ENV),
+  });
 
 /**
  * Resolves the metric reader based on opt-in env-var configuration.
@@ -89,7 +130,7 @@ const resolveMetricReader = (env: NodeJS.ProcessEnv): MetricReader | undefined =
  * - Metrics: the BGE metric infrastructure is opt-in via
  *   `OTEL_METRICS_EXPORTER=otlp`; in that case {@link resolveMetricReader}
  *   provides an explicit reader. NodeSDK's auto-setup is bypassed by
- *   passing our own `metricReader` AND we still default the env to
+ *   passing our own `metricReaders` AND we still default the env to
  *   `'none'` so any code path that introspects the env sees an
  *   unambiguous "no auto-setup" state.
  * - Logs: `pino-opentelemetry-transport` ships logs from a pino worker
@@ -161,7 +202,7 @@ export const initOtel = (config: OtelInitConfig): OtelBootstrapHandle => {
 
   const exporter = resolveTraceExporter(process.env);
   if (exporter) {
-    spanProcessors.push(new BatchSpanProcessor(exporter));
+    spanProcessors.push(createBatchSpanProcessor(exporter, process.env));
   }
 
   const metricReader = resolveMetricReader(process.env);
@@ -169,7 +210,10 @@ export const initOtel = (config: OtelInitConfig): OtelBootstrapHandle => {
     resource,
     spanProcessors,
     instrumentations: [getNodeAutoInstrumentations()],
-    ...(metricReader && { metricReader }),
+    // `metricReaders`, plural: sdk-node 0.301 no longer reads the singular
+    // `metricReader`, and a spread is not excess-property checked, so the
+    // old key would compile and silently register no reader (#957).
+    ...(metricReader && { metricReaders: [metricReader] }),
   });
 
   // NodeSDK.start() is synchronous and returns void in @opentelemetry/sdk-node 0.46+.
