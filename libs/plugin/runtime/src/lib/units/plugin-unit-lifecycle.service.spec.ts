@@ -499,6 +499,22 @@ describe('PluginUnitLifecycleService', () => {
       expect(emittedEvents().map(({ event }) => event.constructor)).toEqual([HouseholdPluginConfigUpdatedEvent]);
     });
 
+    // A write that changes nothing emits nothing. Key order is not a change:
+    // the stored jsonb keeps no order to compare (#903).
+    it('a document equal to the stored one writes nothing and emits nothing (#903)', async () => {
+      const before = makeHouseholdRow({ config: { webhookUrl: 'https://z', retries: 2 } });
+      db.householdPlugin.findUnique.mockResolvedValue(before);
+
+      const row = await service.updateHouseholdConfig({
+        ...enableInput,
+        config: { retries: 2, webhookUrl: 'https://z' },
+      });
+
+      expect(db.householdPlugin.update).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+      expect(row).toBe(before);
+    });
+
     it('rejects a schema violation with issues[] before any transaction', async () => {
       await expect(
         service.updateHouseholdConfig({ ...enableInput, config: { webhookUrl: 42 } }),

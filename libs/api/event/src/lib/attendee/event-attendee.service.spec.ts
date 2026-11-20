@@ -234,6 +234,23 @@ describe('EventAttendeeService', () => {
       );
     });
 
+    it('dates an attendee added with an answer, and not one added as invited (#1027)', async () => {
+      db.event.findUnique.mockResolvedValue({ id: 'event-1', householdId: null } as Event);
+      abilityService.getActingUserId.mockReturnValue('user-host');
+      db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-host' } as EventAttendee);
+      db.eventAttendee.create.mockResolvedValue(
+        makeEventAttendee({ id: 'att-1', eventId: 'event-1', userId: 'user-2' }),
+      );
+
+      await service.addAttendee('event-1', { userId: 'user-2', status: EventParticipationStatus.Maybe });
+      await service.addAttendee('event-1', { userId: 'user-3' });
+
+      const [answered, invited] = db.eventAttendee.create.mock.calls.map(([args]) => args.data);
+      expect(answered.rsvpDate).toBeInstanceOf(Date);
+      expect(invited.status).toBe(EventParticipationStatus.Invited);
+      expect(invited.rsvpDate).toBeNull();
+    });
+
     // An organizer's or moderator's delete names the roles they may remove,
     // so this clause is what refuses them the host's row.
     describe('removeAttendee', () => {
@@ -595,7 +612,7 @@ describe('EventAttendeeService', () => {
       // After the event's row, which comes first (#1065).
       const [, [attendeeLock]] = db.$queryRaw.mock.calls;
       expect(rawQueryText(attendeeLock)).toMatch(
-        /^SELECT status, removed_at AS "removedAt" FROM event_attendees WHERE id = \? FOR NO KEY UPDATE$/,
+        /^SELECT status, notes, removed_at AS "removedAt" FROM event_attendees WHERE id = \? FOR NO KEY UPDATE$/,
       );
       expect((attendeeLock as unknown as Prisma.Sql).values).toEqual(['att-1']);
       expect(db.$queryRaw.mock.invocationCallOrder[1]).toBeLessThan(
@@ -646,6 +663,135 @@ describe('EventAttendeeService', () => {
 
       const [, emitted] = emitter.emit.mock.calls[0];
       expect(emitted.actingUserId).toBe(MOCK_ACTING_USER_ID);
+    });
+
+    // `rsvpDate` dates the current answer, and moves only when the answer
+    // does (#1027). A send that changes neither the status nor the notes
+    // emits nothing (#903); the update still runs, so its ceiling still
+    // refuses one the caller may not make.
+    describe('updateStatus (#1027, #903)', () => {
+      const send = (status: EventParticipationStatus, notes?: string) =>
+        service.updateStatus('event-1', 'att-1', notes === undefined ? { status } : { status, notes });
+
+      const written = () => db.eventAttendee.update.mock.calls[0][0].data;
+
+      const statusEvents = () =>
+        emitter.emit.mock.calls.filter(([name]) => name === AttendeeStatusUpdatedEvent.eventName).map(([, e]) => e);
+
+      beforeEach(() => {
+        db.event.count.mockResolvedValue(1);
+        db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1', userId: 'user-1' } as EventAttendee);
+        db.eventAttendee.update.mockResolvedValue(attendeeRow({ status: EventParticipationStatus.Attending }));
+      });
+
+      it('Invited → Maybe dates the answer', async () => {
+        lockedAttendee({ status: EventParticipationStatus.Invited, notes: null, removedAt: null });
+
+        await send(EventParticipationStatus.Maybe);
+
+        expect(written().rsvpDate).toBeInstanceOf(Date);
+      });
+
+      it('Attending → Maybe re-dates it', async () => {
+        lockedAttendee({ status: EventParticipationStatus.Attending, notes: null, removedAt: null });
+
+        await send(EventParticipationStatus.Maybe);
+
+        expect(written().rsvpDate).toBeInstanceOf(Date);
+      });
+
+      it('Maybe → Invited clears it', async () => {
+        lockedAttendee({ status: EventParticipationStatus.Maybe, notes: null, removedAt: null });
+
+        await send(EventParticipationStatus.Invited);
+
+        expect(written().rsvpDate).toBeNull();
+      });
+
+      it('the same status again leaves the date and emits nothing', async () => {
+        lockedAttendee({ status: EventParticipationStatus.Attending, notes: null, removedAt: null });
+
+        await send(EventParticipationStatus.Attending);
+
+        expect(written().rsvpDate).toBeUndefined();
+        expect(statusEvents()).toEqual([]);
+      });
+
+      // With no column to write, Prisma reads the row through the ceiling
+      // rather than writing it, so updatedAt does not move (#903).
+      it('a send that changes nothing writes no column', async () => {
+        lockedAttendee({ status: EventParticipationStatus.Attending, notes: 'a', removedAt: null });
+
+        await send(EventParticipationStatus.Attending, 'a');
+
+        expect(JSON.parse(JSON.stringify(written()))).toEqual({});
+      });
+
+      it('a notes-only edit writes the notes and not the status', async () => {
+        lockedAttendee({ status: EventParticipationStatus.Attending, notes: 'a', removedAt: null });
+
+        await send(EventParticipationStatus.Attending, 'b');
+
+        expect(written().status).toBeUndefined();
+        expect(written().notes).toBe('b');
+      });
+
+      it('a notes-only edit keeps the date and emits with notes in the snapshot', async () => {
+        lockedAttendee({ status: EventParticipationStatus.Attending, notes: 'a', removedAt: null });
+        db.eventAttendee.update.mockResolvedValue(
+          attendeeRow({ status: EventParticipationStatus.Attending, notes: 'b' }),
+        );
+
+        await send(EventParticipationStatus.Attending, 'b');
+
+        expect(written().rsvpDate).toBeUndefined();
+        const [emitted] = statusEvents();
+        expect(emitted.before).toEqual(
+          expect.objectContaining({ status: EventParticipationStatus.Attending, notes: 'a' }),
+        );
+        expect(emitted.after).toEqual(
+          expect.objectContaining({ status: EventParticipationStatus.Attending, notes: 'b' }),
+        );
+      });
+
+      it('a status change without a notes change carries no notes in the snapshot', async () => {
+        lockedAttendee({ status: EventParticipationStatus.Invited, notes: 'a', removedAt: null });
+
+        await send(EventParticipationStatus.Attending, 'a');
+
+        const [emitted] = statusEvents();
+        expect('notes' in emitted.before).toBe(false);
+        expect('notes' in emitted.after).toBe(false);
+      });
+
+      it('notes left out are unchanged, not cleared', async () => {
+        lockedAttendee({ status: EventParticipationStatus.Attending, notes: 'a', removedAt: null });
+
+        await send(EventParticipationStatus.Attending);
+
+        expect(written().notes).toBeUndefined();
+        expect(statusEvents()).toEqual([]);
+      });
+
+      it('compares against the row read under the lock, not the read before it', async () => {
+        db.eventAttendee.findUnique.mockResolvedValue({
+          id: 'att-1',
+          userId: 'user-1',
+          status: EventParticipationStatus.Maybe,
+        } as EventAttendee);
+        lockedAttendee({ status: EventParticipationStatus.Attending, notes: null, removedAt: null });
+
+        await send(EventParticipationStatus.Attending);
+
+        expect(statusEvents()).toEqual([]);
+      });
+
+      it('a same-status send outside the update ceiling still answers 403', async () => {
+        lockedAttendee({ status: EventParticipationStatus.Attending, notes: null, removedAt: null });
+        db.eventAttendee.update.mockRejectedValue(recordNotFound());
+
+        await expect(send(EventParticipationStatus.Attending)).rejects.toThrow(ForbiddenException);
+      });
     });
 
     it('throws NotFound when removing a non-existent attendee', async () => {
@@ -887,6 +1033,15 @@ describe('EventAttendeeService', () => {
       const removedGame = emitter.emit.mock.calls.find(([name]) => name === GameRemovedFromEventEvent.eventName)?.[1];
       expect(removedGame.reason).toBe(LineupRemovalReason.SupplierLeft);
       expect(removedGame.actingUserId).toBe('user-actor');
+    });
+
+    it('a revived row takes the date of the status it is revived with (#1027)', async () => {
+      await service.addAttendee('event-1', { userId: 'user-2', status: EventParticipationStatus.Attending });
+      await service.addAttendee('event-1', { userId: 'user-2', status: EventParticipationStatus.Invited });
+
+      const [attending, invited] = db.eventAttendee.update.mock.calls.map(([args]) => args.data);
+      expect(attending.rsvpDate).toBeInstanceOf(Date);
+      expect(invited.rsvpDate).toBeNull();
     });
 
     it("evicts the revived user's cached permission graph", async () => {

@@ -235,13 +235,18 @@ jobs:
   # Jest gives each spec file to a shard by a hash of its path, which balances
   # the shards by file count, not by duration. Off Nx Cloud, the shards don't
   # count against its free plan's 10 concurrent CI connections.
+  #
+  # Three shards, not two: at two, each shard's suites took 13 to 19 minutes,
+  # so a runner about 12% slower than usual ran a shard into the suite step's
+  # 20-minute cap with every test still passing. Add a shard when one
+  # reaches about 15 minutes again, rather than raising the cap.
   e2e:
     name: e2e (${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3]
     # Hard stop for the whole job, setup included: npm ci, generation and the
     # affected build all land before the suites start. Those take a few
     # minutes even cold, so a suite step that runs into its own 20-minute cap

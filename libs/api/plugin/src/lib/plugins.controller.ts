@@ -297,7 +297,9 @@ export class PluginsController {
     summary: 'Replace the server-scope plugin configuration',
     description:
       "Validates the payload against the manifest's config.schema (422 with issues[] on violation), persists it, " +
-      'and triggers the config hot-reload. Last-writer-wins between two writes; a plugin manifest replaced ' +
+      'and triggers the config hot-reload. The document the plugin already holds, in any key order, changes ' +
+      'nothing: it is not written and triggers no reload (#903). Last-writer-wins between two writes; a plugin ' +
+      'manifest replaced ' +
       'mid-request is refused with 409.',
   })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })

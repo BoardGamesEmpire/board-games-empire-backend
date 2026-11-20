@@ -723,6 +723,32 @@ describe('PluginConsentActService', () => {
         expect(emitter.emit).not.toHaveBeenCalled();
       });
 
+      // A document equal to the stored one is no document: the switch-on
+      // answers as one that sent none (#903).
+      it('a switch-on resent with the stored document answers changed: false and records no act (#903)', async () => {
+        householdRow = makeHouseholdRow({ enabled: true, config: { webhookUrl: 'https://same.test' } });
+
+        const result = await service.switchOn({ ...householdSwitchOn, config: { webhookUrl: 'https://same.test' } });
+
+        expect(result).toEqual({ act: null, changed: false, unit: householdRow, switchedOff: false });
+        expectNothingWritten();
+        expect(emitter.emit).not.toHaveBeenCalled();
+      });
+
+      it('switching on with the stored document records the act and emits no config event (#903)', async () => {
+        householdRow = makeHouseholdRow({ enabled: false, config: { webhookUrl: 'https://same.test' } });
+
+        const result = await service.switchOn({ ...householdSwitchOn, config: { webhookUrl: 'https://same.test' } });
+
+        expect(result.changed).toBe(true);
+        expect(db.pluginConsentAct.create).toHaveBeenCalled();
+        const [[{ update }]] = db.householdPlugin.upsert.mock.calls as unknown as [
+          [{ update: Record<string, unknown> }],
+        ];
+        expect(update).toEqual({ enabled: true });
+        expect(emitted().map(({ event }) => event.constructor)).toEqual([HouseholdPluginEnabledEvent]);
+      });
+
       it('switches on with a supplied document and writes only the switch and the document (#1151)', async () => {
         householdRow = makeHouseholdRow({ enabled: false, config: { webhookUrl: 42 } });
 
