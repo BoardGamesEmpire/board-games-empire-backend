@@ -4,8 +4,10 @@ import { createActors } from '@bge/testing-e2e';
 import type { Response } from 'supertest';
 import request from 'supertest';
 import { mintApiKey } from '../support/api-key';
+import { postToAuth } from '../support/auth-routes';
 import { API_CONFIGURED_SERVER_NAME, requireBaseUrl } from '../support/e2e-env';
 import { expectErrorEnvelope } from '../support/error-envelope';
+import { sessionCookieOf } from '../support/sign-in-provider';
 import type { TestDatabase } from '../support/test-db';
 import { createTestDatabase } from '../support/test-db';
 
@@ -18,10 +20,13 @@ import { createTestDatabase } from '../support/test-db';
  * fake Steam; here, each return is refused before any request leaves the
  * server.
  *
- * The browser comes back from Steam with its session cookie. These requests
- * send the same session as a bearer token instead, which the api resolves to
- * the same signed-in user. Redis is not swept between tests, but every
- * pending sign-in belongs to a user minted for its test.
+ * The browser comes back from Steam with its session cookie, the return's
+ * only credential in production. The forged-answer control and the
+ * return in another user's session sends a cookie from an email-and-password sign-in,
+ * and nothing else; the other returns send the session as a bearer token,
+ * which the api resolves to the same signed-in user. Redis is not swept
+ * between tests, but every pending sign-in belongs to a user minted for its
+ * test.
  */
 describe('linking a Steam account (#935)', () => {
   const baseUrl = requireBaseUrl(process.env);
@@ -82,13 +87,29 @@ describe('linking a Steam account (#935)', () => {
     return { response, steam, returnUrl, state };
   };
 
-  /** Steam's return to this server, with `state` and the answer's fields, in `user`'s session or none. */
-  const returnFromSteam = (state: string, fields: Record<string, string>, user?: SessionActor) => {
-    const call = request(baseUrl)
+  /** Steam's return to this server, with `state` and the answer's fields, sending `headers` (none: signed out). */
+  const returnFromSteam = (
+    state: string,
+    fields: Record<string, string>,
+    headers: Readonly<Record<string, string>> = {},
+  ) =>
+    request(baseUrl)
       .get(RETURN)
-      .query({ state, ...fields });
+      .query({ state, ...fields })
+      .set(headers);
 
-    return user === undefined ? call : call.set(user.headers);
+  /**
+   * `user`'s session as a browser sends it: the cookie an email-and-password
+   * sign-in sets, as the only credential.
+   */
+  const browserSessionOf = async (user: SessionActor): Promise<{ Cookie: string }> => {
+    const signIn = await postToAuth(baseUrl, '/api/auth/sign-in/email')
+      .send({ email: user.user.email, password: user.password })
+      .expect(200);
+    const cookie = sessionCookieOf(signIn.headers['set-cookie']);
+    expect(cookie).not.toBe('');
+
+    return { Cookie: cookie };
   };
 
   /** Asserts the return sent the browser on to `RETURN_TO`, its query kept, with `outcome` added. */
@@ -190,8 +211,11 @@ describe('linking a Steam account (#935)', () => {
 
       // An API key acts for its owner but is not the owner's browser
       // session. This one holds the grants to read and link the owner's
-      // upstream accounts: the list answers it, so the start's 403 is the
-      // start's own refusal of a key.
+      // upstream accounts; the list answering it shows the key works and
+      // carries the read grant, not that the create grant would pass the
+      // permission check, since no route takes a key's create on upstream
+      // accounts. That the 403 is the start's own refusal of a key, past the
+      // permission check, is pinned by the controller's unit spec.
       const key = await mintApiKey(baseUrl, db.client, user, {
         resourceType: ResourceType.UpstreamAccount,
         slugs: ['create:upstream_account:own', 'read:upstream_account:own'],
@@ -199,8 +223,9 @@ describe('linking a Steam account (#935)', () => {
       await request(baseUrl).get(LIST).set(key.headers).expect(200);
       await start(key.headers).expect(403);
 
-      // An anonymous user's identity is only temporary, and someone not
-      // signed in has none.
+      // An anonymous user holds no upstream_account permission, so the
+      // permission check answers 403 before the start is reached; someone
+      // not signed in gets 401.
       const anonymous = await actors.anonymous();
       await start(anonymous.headers).expect(403);
       expectErrorEnvelope(await start({}), { status: 401, code: 'UNAUTHORIZED' });
@@ -229,8 +254,8 @@ describe('linking a Steam account (#935)', () => {
       const user = await actors.user();
 
       // Of a state's form, but never issued; then malformed; then missing.
-      expectExpired(await returnFromSteam('a'.repeat(32), CANCELLED, user));
-      expectExpired(await returnFromSteam('not-a-state', CANCELLED, user));
+      expectExpired(await returnFromSteam('a'.repeat(32), CANCELLED, user.headers));
+      expectExpired(await returnFromSteam('not-a-state', CANCELLED, user.headers));
       expectExpired(await request(baseUrl).get(RETURN).query(CANCELLED).set(user.headers));
     });
 
@@ -247,13 +272,14 @@ describe('linking a Steam account (#935)', () => {
       const [user, intruder] = await Promise.all([actors.user(), actors.user()]);
       const { state, returnUrl } = await startSignIn(user);
 
-      expectSentBack(await returnFromSteam(state, forgedAnswer(returnUrl), intruder), {
+      // The intruder's browser, with its own session cookie.
+      expectSentBack(await returnFromSteam(state, forgedAnswer(returnUrl), await browserSessionOf(intruder)), {
         error: 'UPSTREAM_LINK_SESSION_MISMATCH',
       });
 
       // The refused arrival ended the sign-in: the user who started it can't
       // finish it now.
-      expectExpired(await returnFromSteam(state, forgedAnswer(returnUrl), user));
+      expectExpired(await returnFromSteam(state, forgedAnswer(returnUrl), user.headers));
       await expect(steamAccounts()).resolves.toBe(0);
     });
 
@@ -268,16 +294,18 @@ describe('linking a Steam account (#935)', () => {
         error: 'UPSTREAM_LINK_SESSION_MISMATCH',
       });
 
-      expectExpired(await returnFromSteam(state, forgedAnswer(returnUrl), user));
+      expectExpired(await returnFromSteam(state, forgedAnswer(returnUrl), user.headers));
       await expect(steamAccounts()).resolves.toBe(0);
     });
 
+    // The bearer case: a session sent as a bearer token reaches the answer
+    // as the cookie does.
     it('sends a cancelled sign-in back with UPSTREAM_LINK_CANCELLED (#935)', async () => {
       await seedSteamDataGateway();
       const user = await actors.user();
       const { state } = await startSignIn(user);
 
-      expectSentBack(await returnFromSteam(state, CANCELLED, user), { error: 'UPSTREAM_LINK_CANCELLED' });
+      expectSentBack(await returnFromSteam(state, CANCELLED, user.headers), { error: 'UPSTREAM_LINK_CANCELLED' });
       await expect(steamAccounts()).resolves.toBe(0);
     });
 
@@ -285,14 +313,17 @@ describe('linking a Steam account (#935)', () => {
     // the session of the user who started, gets past the session check to the
     // verifier, which refuses it before asking anyone, since it names a server
     // other than Steam's. So the two mismatch tests' refusals come from the
-    // session check, not from the answer.
+    // session check, not from the answer. The session is the browser's
+    // cookie alone, as Steam's redirect brings it, so reaching the verifier
+    // also shows the cookie resolves to the user who started.
     it('refuses a forged answer naming another OpenID server (#935)', async () => {
       await seedSteamDataGateway();
       const user = await actors.user();
       const { state, returnUrl } = await startSignIn(user);
+      const browser = await browserSessionOf(user);
 
       const began = Date.now();
-      const response = await returnFromSteam(state, forgedAnswer(returnUrl), user);
+      const response = await returnFromSteam(state, forgedAnswer(returnUrl), browser);
 
       expect(Date.now() - began).toBeLessThan(REFUSED_WITHOUT_ASKING_MS);
       expectSentBack(response, { error: 'UPSTREAM_LINK_NOT_VERIFIED' });
@@ -309,10 +340,12 @@ describe('linking a Steam account (#935)', () => {
       const second = await startSignIn(user);
 
       expect(second.state).not.toBe(first.state);
-      expectExpired(await returnFromSteam(first.state, CANCELLED, user));
+      expectExpired(await returnFromSteam(first.state, CANCELLED, user.headers));
 
       // The second still reaches the session check and Steam's answer.
-      expectSentBack(await returnFromSteam(second.state, CANCELLED, user), { error: 'UPSTREAM_LINK_CANCELLED' });
+      expectSentBack(await returnFromSteam(second.state, CANCELLED, user.headers), {
+        error: 'UPSTREAM_LINK_CANCELLED',
+      });
     });
   });
 });

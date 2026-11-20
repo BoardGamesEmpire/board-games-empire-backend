@@ -1,6 +1,6 @@
 import http from 'node:http';
 import { Writable } from 'node:stream';
-import type { TransportTargetOptions } from 'pino';
+import type { LoggerOptions, TransportTargetOptions } from 'pino';
 import pino from 'pino';
 import pinoHttp from 'pino-http';
 import request from 'supertest';
@@ -25,6 +25,25 @@ const getTargets = (transport: unknown): TransportTargetOptions[] => {
 
 // Passed explicitly so no assertion depends on whether Jest itself runs on a terminal.
 const TERMINAL = { isTTY: true };
+
+/**
+ * The base options at debug, without their transport, for a logger writing to
+ * a stream the spec reads: pino refuses a destination stream alongside a
+ * transport.
+ */
+const optionsWithoutTransport = (): LoggerOptions => {
+  const options = buildBasePinoOptions({ LOG_LEVEL: 'debug' });
+  delete options.transport;
+
+  return options;
+};
+
+/** Headers carrying a credential of each kind the base options redact. */
+const CREDENTIAL_HEADERS = {
+  Authorization: 'Bearer bearer-secret',
+  Cookie: 'bge.session=cookie-secret',
+  'X-API-Key': 'key-secret',
+};
 
 describe('resolvePinoLevel', () => {
   it('uses LOG_LEVEL when set', () => {
@@ -142,12 +161,6 @@ describe('buildBasePinoOptions', () => {
 describe('credential redaction (#748)', () => {
   type LogRecord = Record<string, any>;
 
-  const CREDENTIAL_HEADERS = {
-    Authorization: 'Bearer bearer-secret',
-    Cookie: 'bge.session=cookie-secret',
-    'X-API-Key': 'key-secret',
-  };
-
   let server: http.Server;
   let lines: string[];
 
@@ -182,8 +195,7 @@ describe('credential redaction (#748)', () => {
   };
 
   beforeEach(() => {
-    // Strip the transport: pino refuses a destination stream alongside one.
-    const { transport: _transport, ...options } = buildBasePinoOptions({ LOG_LEVEL: 'debug' });
+    const options = optionsWithoutTransport();
     lines = [];
     const sink = new Writable({
       write(chunk, _encoding, done) {
@@ -252,7 +264,7 @@ describe('credential redaction (#748)', () => {
 });
 
 describe('buildRequestSerializer (#935)', () => {
-  type LogRecord = { msg?: string; req: { query?: unknown; url: string } };
+  type LogRecord = { msg?: string; req: { headers: Record<string, unknown>; query?: unknown; url: string } };
 
   const RETURN_PATH = '/api/users/me/upstream-accounts/steam/return';
   const STEAM_ID = '76561197960287930';
@@ -280,7 +292,7 @@ describe('buildRequestSerializer (#935)', () => {
   };
 
   beforeEach(() => {
-    const { transport: _transport, ...options } = buildBasePinoOptions({ LOG_LEVEL: 'debug' });
+    const options = optionsWithoutTransport();
     lines = [];
     const sink = new Writable({
       write(chunk, _encoding, done) {
@@ -323,6 +335,22 @@ describe('buildRequestSerializer (#935)', () => {
 
     expect(req.url).toBe(`${RETURN_PATH.toUpperCase()}/`);
     expect(lines.join('')).not.toContain(STEAM_ID);
+  });
+
+  // The serializer replaces pino-http's own, so the base options' redaction
+  // must still reach the request it returns (#748).
+  it('still redacts the credentials on a listed route', async () => {
+    await request(server).get(`${RETURN_PATH}?${QUERY}`).set(CREDENTIAL_HEADERS);
+
+    const { req } = await accessLine();
+
+    expect(req.headers['authorization']).toBe('[Redacted]');
+    expect(req.headers['cookie']).toBe('[Redacted]');
+    expect(req.headers['x-api-key']).toBe('[Redacted]');
+    const output = lines.join('');
+    expect(output).not.toContain('bearer-secret');
+    expect(output).not.toContain('cookie-secret');
+    expect(output).not.toContain('key-secret');
   });
 
   it('logs the full URL and query for any other route', async () => {

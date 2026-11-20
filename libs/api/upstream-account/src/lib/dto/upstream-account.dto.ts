@@ -1,10 +1,7 @@
 import type { UpstreamAccount } from '@bge/database';
 import { ApiProperty } from '@nestjs/swagger';
 import type { UpstreamKey } from '../upstream-keys';
-import { UPSTREAM_KEYS } from '../upstream-keys';
-
-/** Every well-known upstream key, for the answers' Swagger enums. */
-export const UPSTREAM_KEY_VALUES = Object.values(UPSTREAM_KEYS);
+import { UPSTREAM_KEY_VALUES, UPSTREAM_KEYS } from '../upstream-keys';
 
 /**
  * One of the user's own upstream accounts, as `users/me/upstream-accounts`

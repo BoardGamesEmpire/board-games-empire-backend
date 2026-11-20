@@ -2,9 +2,13 @@ import type { Redis } from '@bge/redis';
 import { CACHE_REDIS_CLIENT } from '@bge/redis';
 import { Inject, Injectable } from '@nestjs/common';
 import { generateRandomString } from 'better-auth/crypto';
+import { z } from 'zod';
 
-/** How long a pending Steam sign-in lasts: thirty minutes (#935). */
-export const STEAM_SIGN_IN_LIFETIME_MS = 30 * 60 * 1000;
+/** How long a pending Steam sign-in lasts, in minutes (#935). */
+export const STEAM_SIGN_IN_LIFETIME_MINUTES = 30;
+
+/** How long a pending Steam sign-in lasts, in milliseconds: {@link STEAM_SIGN_IN_LIFETIME_MINUTES}. */
+export const STEAM_SIGN_IN_LIFETIME_MS = STEAM_SIGN_IN_LIFETIME_MINUTES * 60 * 1000;
 
 /** Random characters in a state: 192 bits from better-auth's 64-character alphabet. */
 const STATE_LENGTH = 32;
@@ -15,17 +19,32 @@ const STATE_PATTERN = new RegExp(`^[a-zA-Z0-9_-]{${STATE_LENGTH}}$`);
 const STATE_KEY_PREFIX = 'bge:upstream-link:steam:state:';
 const USER_KEY_PREFIX = 'bge:upstream-link:steam:user:';
 
+/**
+ * A Steam sign-in the server started and Steam has not yet answered (#935),
+ * as the cache keeps it. A record read back is data from outside the process,
+ * so it is parsed through this schema (#1322).
+ */
+const pendingSteamSignInSchema = z
+  .object({
+    /** When the sign-in started, as an ISO 8601 timestamp. */
+    createdAt: z.iso.datetime(),
+
+    /**
+     * Where the client asked to be sent once the upstream account is linked:
+     * an absolute http or https address, since the browser is redirected
+     * there. A bare host, an IP address or a port is fine: a self-hosted
+     * client often has no domain name.
+     */
+    returnTo: z.url({ protocol: /^https?$/ }),
+
+    userId: z.string().min(1),
+  })
+  .readonly();
+
 /** A Steam sign-in the server started and Steam has not yet answered (#935). */
-export interface PendingSteamSignIn {
-  /** When the sign-in started, as an ISO 8601 timestamp. */
-  createdAt: string;
+export type PendingSteamSignIn = z.infer<typeof pendingSteamSignInSchema>;
 
-  /** Where the client asked to be sent once the upstream account is linked. */
-  returnTo: string;
-
-  userId: string;
-}
-
+/** The pending sign-in a cache record holds, or null when it holds none. */
 function parsePending(raw: string): PendingSteamSignIn | null {
   let record: unknown;
 
@@ -35,19 +54,9 @@ function parsePending(raw: string): PendingSteamSignIn | null {
     return null;
   }
 
-  if (typeof record !== 'object' || record === null) {
-    return null;
-  }
+  const parsed = pendingSteamSignInSchema.safeParse(record);
 
-  const userId: unknown = Reflect.get(record, 'userId');
-  const returnTo: unknown = Reflect.get(record, 'returnTo');
-  const createdAt: unknown = Reflect.get(record, 'createdAt');
-
-  if (typeof userId !== 'string' || typeof returnTo !== 'string' || typeof createdAt !== 'string') {
-    return null;
-  }
-
-  return { userId, returnTo, createdAt };
+  return parsed.success ? parsed.data : null;
 }
 
 /**
@@ -90,7 +99,10 @@ export class SteamSignInStore {
     return { state, expiresAt: new Date(now + STEAM_SIGN_IN_LIFETIME_MS) };
   }
 
-  /** The pending sign-in `state` stands for, once. A second take, an expired or unknown state, or a malformed one finds nothing. */
+  /**
+   * The pending sign-in `state` stands for, once. A second take, an expired or
+   * unknown state, or a malformed one finds nothing.
+   */
   async take(state: string): Promise<PendingSteamSignIn | null> {
     if (!STATE_PATTERN.test(state)) {
       return null;

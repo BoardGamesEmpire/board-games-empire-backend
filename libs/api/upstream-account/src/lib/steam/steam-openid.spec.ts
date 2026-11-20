@@ -82,7 +82,7 @@ function libraryAlone(query: Query): Promise<{ authenticated: boolean | undefine
   });
 }
 
-describe('steamSignInUrl', () => {
+describe('steamSignInUrl (#935)', () => {
   it('builds a checkid_setup address with identifier_select, the return address and the realm (#935)', () => {
     const address = new URL(steamSignInUrl(RETURN_URL, APP));
 
@@ -115,7 +115,7 @@ describe('steamSignInUrl', () => {
  * (#935). A stub library would not show which addresses the library contacts,
  * and that is what the checks before it are for.
  */
-describe('SteamOpenIdVerifier', () => {
+describe('SteamOpenIdVerifier (#935)', () => {
   const running: FakeSteamOpenIdServer[] = [];
   let steam: FakeSteamOpenIdServer;
   let libraryVerify: jest.SpyInstance;

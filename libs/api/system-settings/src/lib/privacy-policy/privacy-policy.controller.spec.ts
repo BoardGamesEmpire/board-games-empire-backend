@@ -1,7 +1,6 @@
 import type { Actor } from '@bge/actor-context';
 import { AuditContextService } from '@bge/actor-context';
 import { Action, ResourceType } from '@bge/database';
-import { LocaleResolutionService } from '@bge/i18n';
 import type { AppAbility } from '@bge/permissions';
 import { CHECK_POLICIES_KEY, PoliciesGuard } from '@bge/permissions';
 import { CACHE_RESPONSE_KEY } from '@bge/shared';
@@ -31,24 +30,21 @@ const policy: PrivacyPolicyDto = {
 
 describe('PrivacyPolicyController (#934)', () => {
   let controller: PrivacyPolicyController;
-  const read = jest.fn();
+  const readFor = jest.fn();
   const put = jest.fn();
   const remove = jest.fn();
   const getActor = jest.fn<Actor | undefined, []>();
-  const storedLanguage = jest.fn<Promise<string | null>, [string]>();
 
   beforeEach(async () => {
     getActor.mockReset().mockReturnValue(undefined);
-    storedLanguage.mockReset().mockResolvedValue(null);
-    read.mockReset().mockResolvedValue(policy);
+    readFor.mockReset().mockResolvedValue(policy);
     put.mockReset().mockResolvedValue(policy);
     remove.mockReset().mockResolvedValue(undefined);
     const { module } = await createTestingModuleWithDb({
       controllers: [PrivacyPolicyController],
       providers: [
-        { provide: PrivacyPolicyService, useValue: { put, read, remove } },
+        { provide: PrivacyPolicyService, useValue: { put, readFor, remove } },
         { provide: AuditContextService, useValue: { getActor } },
-        { provide: LocaleResolutionService, useValue: { storedLanguage } },
       ],
       overrideGuards: [PoliciesGuard],
     });
@@ -70,8 +66,7 @@ describe('PrivacyPolicyController (#934)', () => {
       controller.read({ lang: 'de' }, 'fr-CH, fr;q=0.9', { setHeader, vary } as unknown as Response),
     ).resolves.toEqual({ privacyPolicy: policy });
 
-    expect(read).toHaveBeenCalledWith({ acceptLanguage: 'fr-CH, fr;q=0.9', lang: 'de', storedLanguage: null });
-    expect(storedLanguage).not.toHaveBeenCalled();
+    expect(readFor).toHaveBeenCalledWith({ userId: null, acceptLanguage: 'fr-CH, fr;q=0.9', lang: 'de' });
     expect(setHeader).toHaveBeenCalledWith('Content-Language', 'de');
     expect(vary).toHaveBeenCalledWith('Accept-Language');
     expect(Reflect.getMetadata(HEADERS_METADATA, PrivacyPolicyController.prototype.read)).toContainEqual({
@@ -80,15 +75,14 @@ describe('PrivacyPolicyController (#934)', () => {
     });
   });
 
-  // So a client needn't send a signed-in reader's language as `lang` (#934).
-  it("passes a signed-in reader's stored language to the read", async () => {
+  // So a client needn't send a signed-in reader's language as `lang`: the
+  // read tries it for them (#934).
+  it('names a signed-in reader to the read', async () => {
     getActor.mockReturnValue({ kind: 'user', userId: 'user-1' } as Actor);
-    storedLanguage.mockResolvedValue('fr-CA');
 
     await controller.read({}, undefined, { setHeader: jest.fn(), vary: jest.fn() } as unknown as Response);
 
-    expect(storedLanguage).toHaveBeenCalledWith('user-1');
-    expect(read).toHaveBeenCalledWith({ acceptLanguage: undefined, lang: undefined, storedLanguage: 'fr-CA' });
+    expect(readFor).toHaveBeenCalledWith({ userId: 'user-1', acceptLanguage: undefined, lang: undefined });
   });
 
   // A server admin re-reads the policy after an edit, and a cached read would

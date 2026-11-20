@@ -1,6 +1,5 @@
 import { actorUserId, AuditContextService } from '@bge/actor-context';
 import { Action, ResourceType } from '@bge/database';
-import { LocaleResolutionService } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import {
   Body,
@@ -55,7 +54,6 @@ export class PrivacyPolicyController {
   constructor(
     private readonly privacyPolicyService: PrivacyPolicyService,
     private readonly auditContext: AuditContextService,
-    private readonly localeResolution: LocaleResolutionService,
   ) {}
 
   /**
@@ -99,13 +97,11 @@ export class PrivacyPolicyController {
     @Headers('accept-language') acceptLanguage: string | undefined,
     @Res({ passthrough: true }) res: Response,
   ): Promise<PrivacyPolicyResponseDto> {
-    // A signed-in reader's stored language, so a client needn't send it as
-    // `lang`. Not the request's interface language: that is matched against
-    // the catalogs, and a policy can exist in a language they don't (#934).
+    // A signed-in reader's stored language is tried for them, so a client
+    // needn't send it as `lang` (#934).
     const actor = this.auditContext.getActor();
     const userId = actor ? actorUserId(actor) : null;
-    const storedLanguage = userId ? await this.localeResolution.storedLanguage(userId) : null;
-    const privacyPolicy = await this.privacyPolicyService.read({ acceptLanguage, lang: query.lang, storedLanguage });
+    const privacyPolicy = await this.privacyPolicyService.readFor({ userId, acceptLanguage, lang: query.lang });
     res.setHeader('Content-Language', privacyPolicy.language);
     // The language depends on Accept-Language; `vary` appends, keeping the Vary values CORS and compression set.
     res.vary('Accept-Language');

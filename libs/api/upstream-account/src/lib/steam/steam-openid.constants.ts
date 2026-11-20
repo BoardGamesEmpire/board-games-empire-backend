@@ -39,6 +39,9 @@ export const STEAM_OPENID_ENDPOINTS: SteamOpenIdEndpoints = {
   claimedIdPrefix: 'https://steamcommunity.com/openid/id/',
 };
 
+/** A Steam account's profile address is this followed by its SteamID (#935). */
+export const STEAM_PROFILE_URL_PREFIX = 'https://steamcommunity.com/profiles/';
+
 /**
  * How long checking Steam's answer may take before the link answers that Steam
  * could not be reached (#935). The `openid` library's requests have no timeout

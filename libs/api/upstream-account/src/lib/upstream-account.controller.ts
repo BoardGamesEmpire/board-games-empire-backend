@@ -14,11 +14,11 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { Http } from '@status/codes';
-import { toUpstreamAccountDto, UPSTREAM_KEY_VALUES } from './dto/upstream-account.dto';
+import { toUpstreamAccountDto } from './dto/upstream-account.dto';
 import { UpstreamAccountsResponseDto } from './dto/upstream-accounts-response.dto';
 import { UpstreamAccountErrorCode } from './upstream-account.constants';
 import { UpstreamAccountService } from './upstream-account.service';
-import { UPSTREAM_KEYS, upstreamFromKey } from './upstream-keys';
+import { UPSTREAM_KEY_VALUES, UPSTREAM_KEYS, upstreamFromKey } from './upstream-keys';
 
 /**
  * The user's own upstream accounts (#935), self-addressed under `/users/me`
@@ -79,8 +79,9 @@ export class UpstreamAccountController {
   @ApiOperation({
     summary: 'Unlink your upstream account',
     description:
-      'Deletes your account at the upstream, with its sync history. The games already in your collection stay. ' +
-      'An account can be unlinked whether or not its upstream can still be linked.',
+      "Deletes this server's record of your upstream account, with its sync history. Nothing changes at the " +
+      'upstream: your account there stays as it is. The games already in your collection stay. An account can be ' +
+      'unlinked whether or not its upstream can still be linked.',
   })
   @ApiParam({
     name: 'upstream',

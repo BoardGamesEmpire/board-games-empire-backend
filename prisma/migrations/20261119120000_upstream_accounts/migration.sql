@@ -1,6 +1,8 @@
--- #935: a user's upstream account (their account at Steam, BoardGameGeek, ...)
--- replaces the never-used user_gateway_connections sketch. Nothing is deployed,
--- so the old tables are dropped, not migrated.
+-- #935: creates upstream_accounts, a user's account at an upstream (Steam,
+-- BoardGameGeek, ...), with upstream_account_sync_logs, and adds the
+-- UpstreamAccount resource type. Drops user_gateway_connections,
+-- user_gateway_sync_logs and the sync_directions enum. Nothing is deployed,
+-- so the dropped tables' rows are not carried over.
 --
 -- Hand-written in one way: Prisma cannot model a partial unique index, so
 -- `upstream_accounts_verified_external_id` is deliberately absent from

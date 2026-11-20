@@ -1,5 +1,7 @@
+import { Auditable, AuditExclude } from '@bge/actor-context';
 import type { UpstreamAccount } from '@bge/database';
 import { ResourceType, Upstream } from '@bge/database';
+import { Reflector } from '@nestjs/core';
 import {
   UpstreamAccountLinkedEvent,
   upstreamAccountSnapshot,
@@ -46,4 +48,22 @@ describe('upstream account events (#935)', () => {
     expect(UpstreamAccountUnlinkedEvent.eventName).toBe('upstream_account.unlinked');
     expect(event).toMatchObject({ action: 'delete', subject: ResourceType.UpstreamAccount, subjectId: 'ua-1' });
   });
+
+  // Unlinking deletes the SteamID and the profile address that carries it, as
+  // the privacy policy says (#935), so no audit row keeps either. In-process
+  // listeners still get both.
+  it.each([UpstreamAccountLinkedEvent, UpstreamAccountUnlinkedEvent])(
+    '%p leaves the external id and the profile address out of its audit row',
+    (cls) => {
+      const reflector = new Reflector();
+      const denylist = reflector.get(AuditExclude, cls) ?? [];
+      const audited = Object.fromEntries(
+        Object.entries(upstreamAccountSnapshot(row)).filter(([key]) => !denylist.includes(key)),
+      );
+
+      expect(reflector.get(Auditable, cls)).not.toBe(false);
+      expect(denylist).toEqual(['externalId', 'profileUrl']);
+      expect(JSON.stringify(audited)).not.toContain(row.externalId);
+    },
+  );
 });

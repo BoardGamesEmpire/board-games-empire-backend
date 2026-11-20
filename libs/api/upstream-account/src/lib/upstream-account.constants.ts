@@ -9,12 +9,6 @@ import { Upstream } from '@bge/database';
 export const UPSTREAMS_WITH_LINK_METHOD: ReadonlySet<Upstream> = new Set([Upstream.Steam]);
 
 /**
- * Where a client reads the privacy policy that linking an upstream account
- * shows (#934, #935).
- */
-export const PRIVACY_POLICY_PATH = '/api/privacy-policy';
-
-/**
  * The stable codes the upstream account routes' errors carry, so a client can
  * tell them apart (#935). An object of string literals rather than an enum, as
  * `PrivacyPolicyErrorCode` is: `CodedHttpException` takes an upper-case string,
@@ -23,8 +17,9 @@ export const PRIVACY_POLICY_PATH = '/api/privacy-policy';
  * A link through an upstream's sign-in ends with the browser sent back to the
  * client, so most of its refusals reach the client as the `error` of that
  * redirect rather than as an error answer: `SessionMismatch`, `Cancelled`,
- * `NotVerified` and `Unreachable` only ever arrive that way, and
- * `AlreadyLinked` and `Taken` can.
+ * `NotVerified`, `Unreachable` and `Failed` only ever arrive that way, and
+ * `AlreadyLinked` and `Taken` can. The redirect carries the code alone, so a
+ * client supplies the words for those.
  */
 export const UpstreamAccountErrorCode = {
   NotLinkable: 'UPSTREAM_NOT_LINKABLE',
@@ -38,6 +33,7 @@ export const UpstreamAccountErrorCode = {
   Cancelled: 'UPSTREAM_LINK_CANCELLED',
   NotVerified: 'UPSTREAM_LINK_NOT_VERIFIED',
   Unreachable: 'UPSTREAM_UNREACHABLE',
+  Failed: 'UPSTREAM_LINK_FAILED',
 } as const;
 
 export type UpstreamAccountErrorCode = (typeof UpstreamAccountErrorCode)[keyof typeof UpstreamAccountErrorCode];

@@ -15,9 +15,20 @@ import { isUserActor } from '../types';
  * anonymous guest and a missing actor are refused too.
  */
 export function requireSessionUserId(actor: Actor | null): string {
-  if (!actor || !isUserActor(actor)) {
+  const userId = sessionUserId(actor);
+  if (userId === null) {
     throw new ForbiddenException(t('common.forbidden.action'));
   }
 
-  return actor.userId;
+  return userId;
+}
+
+/**
+ * The id of the person signed in as themself, or null for any other actor:
+ * the check {@link requireSessionUserId} makes, for a route that settles the
+ * request either way, such as the Steam sign-in's return (#935), which sends
+ * the browser back with a code rather than a 403.
+ */
+export function sessionUserId(actor: Actor | null): string | null {
+  return actor && isUserActor(actor) ? actor.userId : null;
 }

@@ -1,7 +1,9 @@
+import { readFileSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createServer } from 'node:http';
+import { join } from 'node:path';
 import type { SteamOpenIdEndpoints } from '../steam-openid.constants';
-import { OPENID_2_NAMESPACE } from '../steam-openid.constants';
+import { OPENID_2_NAMESPACE, STEAM_OPENID_ENDPOINTS } from '../steam-openid.constants';
 
 /** A request the fake Steam received, in the order it arrived. */
 export interface FakeSteamRequest {
@@ -46,27 +48,39 @@ export interface FakeSteamOpenIdServer {
 const CLAIMED_ID_PATH = /^\/openid\/id\/\d+$/;
 
 /**
+ * The content type Steam serves a claimed id's Yadis document with, recorded
+ * with the document itself.
+ */
+const STEAM_XRDS_CONTENT_TYPE = 'application/xrds+xml;charset=utf-8';
+
+/**
  * The Yadis document Steam serves at a claimed id: one OpenID 2.0 sign-on
- * service, at its login endpoint.
+ * service, at its login endpoint. Recorded on 2026-11-19 from Steam's answer
+ * to a GET of `https://steamcommunity.com/openid/id/76561197960287930` (a
+ * public SteamID) with `Accept: application/xrds+xml`, the type the `openid`
+ * library's discovery asks for first (#935). Steam answered 200 with the
+ * document itself, no redirect and no HTML, so it is the first and only
+ * thing the library fetches for a claimed id. Kept byte for byte, whitespace
+ * included.
+ */
+const STEAM_XRDS = readFileSync(join(__dirname, 'fixtures', 'steam-claimed-id.xml'), 'utf8');
+
+/**
+ * Steam's recorded Yadis document, naming `endpoint` where it names Steam's
+ * own login endpoint and nothing else changed.
  */
 function xrdsFor(endpoint: string): string {
-  return [
-    '<?xml version="1.0" encoding="UTF-8"?>',
-    '<xrds:XRDS xmlns:xrds="xri://$xrds" xmlns="xri://$xrd*($v*2.0)">',
-    '<XRD>',
-    '<Service priority="0">',
-    '<Type>http://specs.openid.net/auth/2.0/signon</Type>',
-    `<URI>${endpoint}</URI>`,
-    '</Service>',
-    '</XRD>',
-    '</xrds:XRDS>',
-  ].join('\n');
+  if (!STEAM_XRDS.includes(STEAM_OPENID_ENDPOINTS.endpoint)) {
+    throw new Error("The recorded Steam Yadis document no longer names Steam's login endpoint");
+  }
+
+  return STEAM_XRDS.replace(STEAM_OPENID_ENDPOINTS.endpoint, endpoint);
 }
 
 /**
  * Starts a fake Steam on 127.0.0.1 and a port the system picks. It answers a
- * GET of a claimed id (`/openid/id/<digits>`) with the Yadis document naming
- * its own `/openid/login`, and a POST to `/openid/login` (the
+ * GET of a claimed id (`/openid/id/<digits>`) with Steam's recorded Yadis
+ * document, naming its own `/openid/login`, and a POST to `/openid/login` (the
  * `check_authentication` the `openid` library sends) with the verdict its
  * switches set. It checks no signature: the verdict is the switch.
  */
@@ -79,7 +93,7 @@ export async function startFakeSteamOpenIdServer(
 
   const answer = (request: IncomingMessage, response: ServerResponse, pathname: string): void => {
     if (request.method === 'GET' && CLAIMED_ID_PATH.test(pathname)) {
-      response.writeHead(200, { 'content-type': 'application/xrds+xml' });
+      response.writeHead(200, { 'content-type': STEAM_XRDS_CONTENT_TYPE });
       response.end(xrdsFor(`${base}/openid/login`));
       return;
     }

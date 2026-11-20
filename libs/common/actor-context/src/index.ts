@@ -40,7 +40,7 @@ export { AuditExclude, Auditable, MutationEvent, type MutationAction } from './l
 export { AuditContextService } from './lib/services/audit-context.service';
 
 // The floor for an act only a signed-in user may take in person.
-export { requireSessionUserId } from './lib/services/require-session-user-id';
+export { requireSessionUserId, sessionUserId } from './lib/services/require-session-user-id';
 
 // Public CLS reader (static, non-DI). For consumers that cannot receive
 // DI — most notably the `ActorSpanProcessor` in `@bge/otel`, which is

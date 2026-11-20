@@ -30,7 +30,7 @@ function fakeRedis() {
 
 const pending = { userId: 'user-1', returnTo: 'https://client.example/settings' };
 
-describe('SteamSignInStore', () => {
+describe('SteamSignInStore (#935)', () => {
   it('keeps a pending sign-in for 30 minutes (#935)', async () => {
     const { redis, commands } = fakeRedis();
     const store = new SteamSignInStore(redis);
@@ -114,5 +114,39 @@ describe('SteamSignInStore', () => {
       values.set(`bge:upstream-link:steam:state:${state}`, JSON.stringify(record));
       await expect(store.take(state)).resolves.toBeNull();
     }
+  });
+
+  // A record is data from outside the process, parsed through its schema
+  // (#1322): the browser is redirected to `returnTo`, so a record whose
+  // address is not an absolute http or https one is read as nothing (#935).
+  it.each([
+    ['a relative return address', { returnTo: '/settings' }],
+    ['a javascript: return address', { returnTo: 'javascript:alert(1)' }],
+    ["an app's own scheme", { returnTo: 'bge://upstream-accounts' }],
+    ['an empty user id', { userId: '' }],
+    ['a start time that is not a timestamp', { createdAt: 'yesterday' }],
+  ])('reads a record with %s as nothing (#935)', async (_, change) => {
+    const { redis, values } = fakeRedis();
+    const store = new SteamSignInStore(redis);
+    const state = 'a'.repeat(32);
+    const record = { ...pending, createdAt: new Date().toISOString(), ...change };
+    values.set(`bge:upstream-link:steam:state:${state}`, JSON.stringify(record));
+
+    await expect(store.take(state)).resolves.toBeNull();
+  });
+
+  // zod's `httpUrl()` wants a dotted hostname with a letter TLD, which a
+  // self-hoster's own client address often lacks (#935).
+  it.each([
+    'http://localhost:4200/settings',
+    'http://127.0.0.1:4200/settings',
+    'http://192.168.1.10:8080/settings',
+    'http://nas:8080/settings',
+    'http://[::1]:4200/settings',
+  ])('stores and takes back a return address of %s (#935)', async (returnTo) => {
+    const store = new SteamSignInStore(fakeRedis().redis);
+    const { state } = await store.start({ ...pending, returnTo });
+
+    await expect(store.take(state)).resolves.toMatchObject({ returnTo });
   });
 });

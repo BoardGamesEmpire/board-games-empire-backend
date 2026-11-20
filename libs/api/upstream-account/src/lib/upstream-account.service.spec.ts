@@ -1,7 +1,7 @@
 import type { UpstreamAccount } from '@bge/database';
 import { Prisma, ResourceType, Upstream } from '@bge/database';
 import { uniqueViolation, uniqueViolationWithoutMeta } from '@bge/database/testing';
-import { CodedHttpException, LocaleResolutionService } from '@bge/i18n';
+import { CodedHttpException } from '@bge/i18n';
 import type { PrivacyPolicyDto } from '@bge/system-settings';
 import { PrivacyPolicyService } from '@bge/system-settings';
 import type { MockDatabaseService } from '@bge/testing';
@@ -83,24 +83,21 @@ async function refusal(promise: Promise<unknown>): Promise<CodedHttpException> {
   return error as CodedHttpException;
 }
 
-describe('UpstreamAccountService', () => {
+describe('UpstreamAccountService (#935)', () => {
   let service: UpstreamAccountService;
   let db: MockDatabaseService;
   const emit = jest.fn();
-  const read = jest.fn<Promise<PrivacyPolicyDto>, [unknown]>();
-  const storedLanguage = jest.fn<Promise<string | null>, [string]>();
+  const readFor = jest.fn<Promise<PrivacyPolicyDto>, [unknown]>();
 
   beforeEach(async () => {
     emit.mockReset();
-    read.mockReset().mockResolvedValue(policy);
-    storedLanguage.mockReset().mockResolvedValue(null);
+    readFor.mockReset().mockResolvedValue(policy);
 
     const ctx = await createTestingModuleWithDb({
       providers: [
         UpstreamAccountService,
         { provide: EventEmitter2, useValue: { emit } },
-        { provide: PrivacyPolicyService, useValue: { read } },
-        { provide: LocaleResolutionService, useValue: { storedLanguage } },
+        { provide: PrivacyPolicyService, useValue: { readFor } },
       ],
     });
 
@@ -370,19 +367,16 @@ describe('UpstreamAccountService', () => {
   });
 
   describe('privacyPolicy', () => {
-    // The policy a link shows, in the user's stored language before the
-    // request's, as `GET /api/privacy-policy` chooses it (#934).
-    it("reads the policy in the user's stored language, and answers its address, language and date", async () => {
-      storedLanguage.mockResolvedValue('de');
-
+    // The policy a link shows, chosen by the read `GET /api/privacy-policy`
+    // makes, so the user sees the same policy in both (#934).
+    it('reads the policy for the user, and answers its address, language and date', async () => {
       await expect(service.privacyPolicy(ME, 'fr-CH, fr;q=0.9')).resolves.toEqual({
         url: '/api/privacy-policy',
         language: 'de',
         updatedAt: '2026-11-18T00:00:00.000Z',
       });
 
-      expect(storedLanguage).toHaveBeenCalledWith(ME);
-      expect(read).toHaveBeenCalledWith({ acceptLanguage: 'fr-CH, fr;q=0.9', storedLanguage: 'de' });
+      expect(readFor).toHaveBeenCalledWith({ userId: ME, acceptLanguage: 'fr-CH, fr;q=0.9' });
     });
   });
 });

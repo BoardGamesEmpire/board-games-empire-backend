@@ -1,4 +1,4 @@
-import { MutationEvent } from '@bge/actor-context';
+import { AuditExclude, MutationEvent } from '@bge/actor-context';
 import type { UpstreamAccount } from '@bge/database';
 import { ResourceType } from '@bge/database';
 
@@ -31,6 +31,17 @@ export function upstreamAccountSnapshot(account: UpstreamAccount): UpstreamAccou
 }
 
 /**
+ * The snapshot fields audit rows leave out: the upstream's id for the account
+ * and the profile address that carries it. Unlinking deletes both, as the
+ * privacy policy says (#935), so an audit row that outlives the account keeps
+ * neither. In-process listeners still get them.
+ */
+const UPSTREAM_ACCOUNT_AUDIT_EXCLUDED = [
+  'externalId',
+  'profileUrl',
+] satisfies readonly (keyof UpstreamAccountSnapshot)[];
+
+/**
  * EventEmitter2 names for upstream accounts: the INTERNAL domain-event names
  * (audit and in-process listeners), not webhook wire names.
  */
@@ -40,6 +51,7 @@ export enum UpstreamAccountEvents {
 }
 
 /** Emitted once, after the write, when a user links an upstream account. */
+@AuditExclude(UPSTREAM_ACCOUNT_AUDIT_EXCLUDED)
 export class UpstreamAccountLinkedEvent extends MutationEvent<UpstreamAccountSnapshot> {
   static readonly eventName = UpstreamAccountEvents.Linked;
   declare readonly before: null;
@@ -57,6 +69,7 @@ export class UpstreamAccountLinkedEvent extends MutationEvent<UpstreamAccountSna
  * Emitted once, after the delete, when a user unlinks an upstream account. Its
  * sync logs go with it.
  */
+@AuditExclude(UPSTREAM_ACCOUNT_AUDIT_EXCLUDED)
 export class UpstreamAccountUnlinkedEvent extends MutationEvent<UpstreamAccountSnapshot> {
   static readonly eventName = UpstreamAccountEvents.Unlinked;
   declare readonly before: UpstreamAccountSnapshot;

@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { UpstreamPrivacyPolicyDto } from '../../dto/upstream-accounts-response.dto';
+import { STEAM_SIGN_IN_LIFETIME_MINUTES } from '../steam-sign-in.store';
 
 /** A Steam sign-in started (#935): where to send the browser, until when, and the policy to show first. */
 export class SteamSignInDto {
@@ -16,7 +17,8 @@ export class SteamSignInDto {
     type: String,
     format: 'date-time',
     description:
-      'When the sign-in stops being usable, in ISO 8601: 30 minutes after it starts. Starting again replaces it.',
+      `When the sign-in stops being usable, in ISO 8601: ${STEAM_SIGN_IN_LIFETIME_MINUTES} minutes after it starts. ` +
+      'Starting again replaces it.',
     example: '2026-11-19T12:30:00.000Z',
   })
   expiresAt!: string;

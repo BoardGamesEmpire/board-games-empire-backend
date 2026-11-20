@@ -1,7 +1,8 @@
+import { PRIVACY_POLICY_PATH } from '@bge/system-settings';
 import { ApiProperty } from '@nestjs/swagger';
-import { PRIVACY_POLICY_PATH } from '../upstream-account.constants';
 import type { UpstreamKey } from '../upstream-keys';
-import { UPSTREAM_KEY_VALUES, UpstreamAccountDto } from './upstream-account.dto';
+import { UPSTREAM_KEY_VALUES } from '../upstream-keys';
+import { UpstreamAccountDto } from './upstream-account.dto';
 
 /**
  * The privacy policy a client shows before a user links an upstream account

@@ -6,17 +6,13 @@ import {
   isPrismaDependentRecordNotFoundError,
   isPrismaUniqueConstraintError,
 } from '@bge/database';
-import { CodedHttpException, LocaleResolutionService, t } from '@bge/i18n';
-import { PrivacyPolicyService } from '@bge/system-settings';
+import { CodedHttpException, t } from '@bge/i18n';
+import { PRIVACY_POLICY_PATH, PrivacyPolicyService } from '@bge/system-settings';
 import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Http } from '@status/codes';
 import type { UpstreamPrivacyPolicyDto } from './dto/upstream-accounts-response.dto';
-import {
-  PRIVACY_POLICY_PATH,
-  UpstreamAccountErrorCode,
-  UPSTREAMS_WITH_LINK_METHOD,
-} from './upstream-account.constants';
+import { UpstreamAccountErrorCode, UPSTREAMS_WITH_LINK_METHOD } from './upstream-account.constants';
 import type { UpstreamAccountSnapshot } from './upstream-account.events';
 import {
   UpstreamAccountLinkedEvent,
@@ -83,7 +79,6 @@ export class UpstreamAccountService {
     private readonly db: DatabaseService,
     private readonly eventEmitter: EventEmitter2,
     private readonly privacyPolicyService: PrivacyPolicyService,
-    private readonly localeResolution: LocaleResolutionService,
   ) {}
 
   /**
@@ -210,12 +205,7 @@ export class UpstreamAccountService {
    * account can be linked in between.
    */
   async assertNotLinked(userId: string, upstream: Upstream): Promise<void> {
-    const existing = await this.db.upstreamAccount.findUnique({
-      where: { userId_upstream: { userId, upstream } },
-      select: { id: true },
-    });
-
-    if (existing) {
+    if (await this.hasAccountAt(userId, upstream)) {
       throw this.alreadyLinked(upstream);
     }
   }
@@ -227,8 +217,7 @@ export class UpstreamAccountService {
    * language and then `acceptLanguage`.
    */
   async privacyPolicy(userId: string, acceptLanguage: string | undefined): Promise<UpstreamPrivacyPolicyDto> {
-    const storedLanguage = await this.localeResolution.storedLanguage(userId);
-    const policy = await this.privacyPolicyService.read({ acceptLanguage, storedLanguage });
+    const policy = await this.privacyPolicyService.readFor({ userId, acceptLanguage });
 
     return { url: PRIVACY_POLICY_PATH, language: policy.language, updatedAt: policy.updatedAt };
   }
@@ -256,12 +245,9 @@ export class UpstreamAccountService {
     }
 
     if (identity.source === 'unknown') {
-      const existing = await this.db.upstreamAccount.findUnique({
-        where: { userId_upstream: { userId: input.userId, upstream: input.upstream } },
-        select: { id: true },
-      });
-
-      return existing ? this.alreadyLinked(input.upstream) : this.taken(input.upstream);
+      return (await this.hasAccountAt(input.userId, input.upstream))
+        ? this.alreadyLinked(input.upstream)
+        : this.taken(input.upstream);
     }
 
     this.logger.error(
@@ -269,6 +255,16 @@ export class UpstreamAccountService {
       error.stack,
     );
     return error;
+  }
+
+  /** Whether the user has an account at `upstream`, read outside any transaction. */
+  private async hasAccountAt(userId: string, upstream: Upstream): Promise<boolean> {
+    const existing = await this.db.upstreamAccount.findUnique({
+      where: { userId_upstream: { userId, upstream } },
+      select: { id: true },
+    });
+
+    return existing !== null;
   }
 
   private alreadyLinked(upstream: Upstream): CodedHttpException {

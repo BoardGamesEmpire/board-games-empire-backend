@@ -11,3 +11,7 @@ trim_trailing_whitespace = true
 [*.md]
 max_line_length = off
 trim_trailing_whitespace = false
+
+[libs/api/upstream-account/src/lib/steam/testing/fixtures/*.xml]
+insert_final_newline = false
+trim_trailing_whitespace = false

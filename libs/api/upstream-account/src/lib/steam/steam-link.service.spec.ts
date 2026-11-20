@@ -354,24 +354,52 @@ describe('SteamLinkService (#935)', () => {
       });
     });
 
-    it('lets any other coded refusal from storing the account through', async () => {
-      const refused = new CodedHttpException(
-        Http.NotFound,
-        UpstreamAccountErrorCode.NotFound,
-        t('errors.upstream_account.not_found', { upstream: Upstream.Steam }),
-      );
-      create.mockRejectedValue(refused);
-      const state = await started();
+    // Once the state is taken the browser has somewhere to go, so a fault
+    // past that point sends it back to the client with a code rather than
+    // leaving it on an error answer from this server (#935).
+    it.each([
+      [
+        'a coded refusal the return has no code of its own for',
+        new CodedHttpException(
+          Http.NotFound,
+          UpstreamAccountErrorCode.NotFound,
+          t('errors.upstream_account.not_found', { upstream: Upstream.Steam }),
+        ),
+      ],
+      ['a database fault', new Error('connection reset')],
+    ])(
+      'redirects with UPSTREAM_LINK_FAILED when storing the account fails with %s, and logs it',
+      async (_, failure) => {
+        const error = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
 
-      await expect(service.finishSignIn({ state, query: answerQuery(state), sessionUserId: ME })).rejects.toBe(refused);
-    });
+        try {
+          create.mockRejectedValue(failure);
+          const state = await started();
 
-    it('lets any other failure to store the account through', async () => {
-      const failure = new Error('connection reset');
-      create.mockRejectedValue(failure);
-      const state = await started();
+          const address = await service.finishSignIn({ state, query: answerQuery(state), sessionUserId: ME });
 
-      await expect(service.finishSignIn({ state, query: answerQuery(state), sessionUserId: ME })).rejects.toBe(failure);
+          expect(queryOf(address)).toEqual({ tab: 'links', upstreamAccount: 'steam', error: 'UPSTREAM_LINK_FAILED' });
+          expect(error).toHaveBeenCalledWith(expect.stringContaining(failure.message), failure.stack);
+        } finally {
+          error.mockRestore();
+        }
+      },
+    );
+
+    it('redirects with UPSTREAM_LINK_FAILED when verifying the answer throws', async () => {
+      const error = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+
+      try {
+        verify.mockRejectedValue(new Error('socket hang up'));
+        const state = await started();
+
+        const address = await service.finishSignIn({ state, query: answerQuery(state), sessionUserId: ME });
+
+        expect(queryOf(address)).toEqual({ tab: 'links', upstreamAccount: 'steam', error: 'UPSTREAM_LINK_FAILED' });
+        expect(create).not.toHaveBeenCalled();
+      } finally {
+        error.mockRestore();
+      }
     });
 
     it.each([
@@ -418,10 +446,21 @@ describe('SteamLinkService (#935)', () => {
         verify.mockResolvedValue({ ok: false, reason: 'not-verified' });
         await service.finishSignIn({ state: refused, query: answerQuery(refused), sessionUserId: ME });
         await refusal(service.finishSignIn({ state: refused, query: answerQuery(refused), sessionUserId: ME }));
+        const failed = await started();
+        verify.mockResolvedValue({ ok: true, steamId: STEAM_ID });
+        create.mockRejectedValue(new Error('connection reset'));
+        await service.finishSignIn({ state: failed, query: answerQuery(failed), sessionUserId: ME });
+        // A Prisma validation error's message and stack print the call's arguments.
+        const invalid = await started();
+        const validation = new Error(`Invalid create() invocation: externalId: "${STEAM_ID}"`);
+        validation.name = 'PrismaClientValidationError';
+        create.mockRejectedValue(validation);
+        await service.finishSignIn({ state: invalid, query: answerQuery(invalid), sessionUserId: ME });
 
         const logged = JSON.stringify([...warn.mock.calls, ...error.mock.calls]);
         expect(warn).toHaveBeenCalled();
-        for (const secret of [mismatched, refused, STEAM_ID, RETURN_TO, 'app.example']) {
+        expect(error).toHaveBeenCalled();
+        for (const secret of [mismatched, refused, failed, invalid, STEAM_ID, RETURN_TO, 'app.example']) {
           expect(logged).not.toContain(secret);
         }
       } finally {

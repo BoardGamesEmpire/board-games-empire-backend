@@ -1,5 +1,5 @@
 import type { Prisma } from '@bge/database';
-import { AuthType, ResourceType, SyncStatus, Upstream } from '@bge/database';
+import { AuthType, constraintIdentity, ResourceType, SyncStatus, Upstream } from '@bge/database';
 import type { Actors, SessionActor } from '@bge/testing-e2e';
 import { createActors, pollUntil } from '@bge/testing-e2e';
 import request from 'supertest';
@@ -78,6 +78,9 @@ describe('upstream accounts (#935)', () => {
   };
 
   const failureOf = (attempt: Promise<unknown>) => attempt.then(() => undefined).catch((err: unknown) => err);
+
+  /** The SQLSTATE Postgres reports a unique violation with. */
+  const SQLSTATE_UNIQUE_VIOLATION = '23505';
 
   describe('the list', () => {
     // The first read is the control for the second: without a DataGateway
@@ -161,8 +164,11 @@ describe('upstream accounts (#935)', () => {
       );
 
     it('unlinks the user’s own account, deletes its sync logs, and audits it (#935)', async () => {
-      const user = await actors.user();
+      const [user, other] = await Promise.all([actors.user(), actors.user()]);
       const account = await seedAccount(user);
+      // Another user's claim to the same SteamID, at the same upstream: the
+      // unlink must leave it.
+      const othersAccount = await seedAccount(other, { verified: false });
       await db.client.upstreamAccountSyncLog.create({
         data: { accountId: account.id, startedAt: new Date(), status: SyncStatus.Success },
       });
@@ -172,17 +178,24 @@ describe('upstream accounts (#935)', () => {
       expect(response.body).toEqual({ message: expect.stringContaining('Steam') });
       await expect(db.client.upstreamAccount.count({ where: { id: account.id } })).resolves.toBe(0);
       await expect(db.client.upstreamAccountSyncLog.count({ where: { accountId: account.id } })).resolves.toBe(0);
-      await expect(auditEntriesOnceOneIs(account.id, UNLINKED)).resolves.toEqual([
+      await expect(db.client.upstreamAccount.count({ where: { id: othersAccount.id } })).resolves.toBe(1);
+      const entries = await auditEntriesOnceOneIs(account.id, UNLINKED);
+
+      expect(entries).toEqual([
         expect.objectContaining({
           action: 'delete',
           actorUserId: user.user.id,
           event: UNLINKED,
           payload: {
-            before: expect.objectContaining({ id: account.id, upstream: Upstream.Steam, externalId: STEAM_ID }),
+            before: expect.objectContaining({ id: account.id, upstream: Upstream.Steam, verified: true }),
             after: null,
           },
         }),
       ]);
+      // Unlinking deletes the SteamID, as the privacy policy says, so the
+      // audit entry that outlives the account keeps neither it nor the
+      // profile address that carries it (#935).
+      expect(JSON.stringify(entries[0].payload)).not.toContain(STEAM_ID);
 
       // Nothing is left to unlink.
       expectErrorEnvelope(await request(baseUrl).delete(STEAM_PATH).set(user.headers), {
@@ -228,6 +241,14 @@ describe('upstream accounts (#935)', () => {
       const failure = await failureOf(seedAccount(second));
 
       expect(failure).toMatchObject({ code: 'P2002' });
+      // The identity `UpstreamAccountService` reads to answer
+      // UPSTREAM_ACCOUNT_TAKEN: the index name the migration gives it, as the
+      // driver adapter reports it on this stack.
+      expect(constraintIdentity(failure)).toEqual({
+        source: 'driverAdapterError.index',
+        names: ['upstream_accounts_verified_external_id'],
+        sqlState: SQLSTATE_UNIQUE_VIOLATION,
+      });
 
       // Unverified accounts are claims: the same id may sit beside the
       // verified one, and beside each other.
@@ -244,6 +265,13 @@ describe('upstream accounts (#935)', () => {
       const failure = await failureOf(seedAccount(user, { externalId: '76561197960287931', verified: false }));
 
       expect(failure).toMatchObject({ code: 'P2002' });
+      // The identity `UpstreamAccountService` reads to answer
+      // UPSTREAM_ACCOUNT_ALREADY_LINKED: the name Prisma gives the unique.
+      expect(constraintIdentity(failure)).toEqual({
+        source: 'driverAdapterError.index',
+        names: ['upstream_accounts_user_id_upstream_key'],
+        sqlState: SQLSTATE_UNIQUE_VIOLATION,
+      });
 
       // The control: the same user at another upstream.
       await seedAccount(user, { upstream: Upstream.BoardGameGeek, externalId: 'boardgamer', profileUrl: null });

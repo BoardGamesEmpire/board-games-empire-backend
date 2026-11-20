@@ -515,7 +515,7 @@ export const PERMISSION_CATALOG = [
   }),
   // --- Upstream accounts ---
   // A user manages only their own upstream accounts (#935); staff read them
-  // through `read:all`.
+  // through `read:public_content`, their read on every type.
   permission({
     action: Action.create,
     subject: ResourceType.UpstreamAccount,

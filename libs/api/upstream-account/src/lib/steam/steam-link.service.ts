@@ -10,20 +10,15 @@ import { UPSTREAM_KEYS } from '../upstream-keys';
 import type { SteamSignInDto } from './dto/steam-sign-in-response.dto';
 import type { SteamVerification } from './steam-openid';
 import { SteamOpenIdVerifier, steamSignInUrl } from './steam-openid';
+import { STEAM_PROFILE_URL_PREFIX } from './steam-openid.constants';
 import type { PendingSteamSignIn } from './steam-sign-in.store';
-import { STEAM_SIGN_IN_LIFETIME_MS, SteamSignInStore } from './steam-sign-in.store';
+import { STEAM_SIGN_IN_LIFETIME_MINUTES, SteamSignInStore } from './steam-sign-in.store';
 
 /**
  * Where Steam sends the browser back to: `SteamLinkController`'s return route,
  * under the api's global prefix (#935).
  */
 export const STEAM_RETURN_PATH = '/api/users/me/upstream-accounts/steam/return';
-
-/** A Steam account's profile address is this followed by its SteamID (#935). */
-const STEAM_PROFILE_URL_PREFIX = 'https://steamcommunity.com/profiles/';
-
-/** A pending sign-in's lifetime, in the minutes its expiry message names. */
-const SIGN_IN_LIFETIME_MINUTES = STEAM_SIGN_IN_LIFETIME_MS / 60_000;
 
 /** What Steam's return brought back, as the return route received it (#935). */
 export interface SteamSignInReturn {
@@ -37,9 +32,12 @@ export interface SteamSignInReturn {
   state: string | null;
 }
 
+/** A return whose state was found: the pending sign-in it ends is known. */
+type TakenSteamSignInReturn = SteamSignInReturn & { state: string };
+
 /** The codes a return can send the browser back with. */
 type SteamLinkRefusalCode = (typeof UpstreamAccountErrorCode)[
-  'AlreadyLinked' | 'Cancelled' | 'NotVerified' | 'SessionMismatch' | 'Taken' | 'Unreachable'];
+  'AlreadyLinked' | 'Cancelled' | 'Failed' | 'NotVerified' | 'SessionMismatch' | 'Taken' | 'Unreachable'];
 
 /** How a return was settled: linked, or the code of why not. */
 type SteamLinkOutcome = { error: SteamLinkRefusalCode } | { result: 'linked' };
@@ -109,7 +107,10 @@ function httpAddress(returnTo: string): URL | null {
  * in the session of the user who started it: the state alone could have been
  * handed to someone else, and the session alone could be handed someone
  * else's Steam answer. Only then is Steam's answer verified and the account
- * stored, verified, since Steam's signature proves the SteamID.
+ * stored, verified, since Steam's signature proves the SteamID. Once the state
+ * is used up, every outcome sends the browser back to the client: a fault the
+ * return has no code of its own for is logged and sent back as
+ * `UPSTREAM_LINK_FAILED`.
  */
 @Injectable()
 export class SteamLinkService {
@@ -164,19 +165,43 @@ export class SteamLinkService {
    * Settles Steam's return and answers the address to send the browser to:
    * the pending sign-in's `returnTo`, with the result. A return whose state is
    * missing, unknown, expired or already used has no `returnTo` to go to, and
-   * answers 400 `UPSTREAM_LINK_EXPIRED` instead.
+   * answers 400 `UPSTREAM_LINK_EXPIRED` instead. Any other failure, once the
+   * state is used up, is logged and sent back as `UPSTREAM_LINK_FAILED`: the
+   * browser is never left on an error answer from this server.
    */
-  async finishSignIn({ query, sessionUserId, state }: SteamSignInReturn): Promise<string> {
+  async finishSignIn(signInReturn: SteamSignInReturn): Promise<string> {
+    const { state } = signInReturn;
     const pending = state === null ? null : await this.signIns.take(state);
     if (state === null || pending === null) {
       throw new CodedHttpException(
         Http.BadRequest,
         UpstreamAccountErrorCode.Expired,
-        t('errors.upstream_account.link_expired', { upstream: Upstream.Steam, minutes: SIGN_IN_LIFETIME_MINUTES }),
+        t('errors.upstream_account.link_expired', {
+          upstream: Upstream.Steam,
+          minutes: STEAM_SIGN_IN_LIFETIME_MINUTES,
+        }),
       );
     }
 
-    const outcome = await this.settle(pending, state, query, sessionUserId);
+    let outcome: SteamLinkOutcome;
+    try {
+      outcome = await this.settle(pending, { ...signInReturn, state });
+    } catch (error) {
+      // The state, the SteamID and the return address stay out of the log. A
+      // Prisma error's message and stack print the call's arguments, so it is
+      // logged by name and code only.
+      const fault = error instanceof Error ? error : new Error(String(error));
+      const failed = `A Steam sign-in's return for user ${pending.userId} failed, so nothing was linked`;
+
+      if (fault.name.startsWith('PrismaClient')) {
+        const code = 'code' in fault && typeof fault.code === 'string' ? ` (${fault.code})` : '';
+        this.logger.error(`${failed}: ${fault.name}${code}`);
+      } else {
+        this.logger.error(`${failed}: ${fault.message}`, fault.stack);
+      }
+
+      outcome = { error: UpstreamAccountErrorCode.Failed };
+    }
 
     return linkResultAddress(pending.returnTo, outcome);
   }
@@ -184,9 +209,7 @@ export class SteamLinkService {
   /** The checks a return passes, in order, once its state is used up. */
   private async settle(
     pending: PendingSteamSignIn,
-    state: string,
-    query: Readonly<Record<string, unknown>>,
-    sessionUserId: string | null,
+    { query, sessionUserId, state }: TakenSteamSignInReturn,
   ): Promise<SteamLinkOutcome> {
     if (sessionUserId !== pending.userId) {
       this.logger.warn(
@@ -202,7 +225,9 @@ export class SteamLinkService {
       return { error: VERIFICATION_REFUSAL_CODES[verification.reason] };
     }
 
-    // The DataGateway is not re-checked here on purpose: disabling one leaves existing upstream accounts linked, so a sign-in finishing within its lifetime is consistent with that (#935).
+    // The DataGateway is not re-checked here on purpose: disabling one leaves
+    // existing upstream accounts linked, so a sign-in finishing within its
+    // lifetime is consistent with that (#935).
     try {
       await this.upstreamAccounts.create({
         userId: pending.userId,

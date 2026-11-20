@@ -121,11 +121,10 @@ export type SubjectWhereInput = ForEverySubject<{
   // System
   SystemSetting: Prisma.SystemSettingWhereInput;
 
+  // User
   UpstreamAccount: Prisma.UpstreamAccountWhereInput;
 
-  // User
   User: Prisma.UserWhereInput;
-
   UserGameCustomization: Prisma.UserGameCustomizationWhereInput;
   UserPlugin: Prisma.UserPluginWhereInput;
   UserProfile: Prisma.UserProfileWhereInput;
@@ -205,11 +204,10 @@ export type SubjectScalarField = ForEverySubject<{
   // System
   SystemSetting: Prisma.SystemSettingScalarFieldEnum;
 
+  // User
   UpstreamAccount: Prisma.UpstreamAccountScalarFieldEnum;
 
-  // User
   User: Prisma.UserScalarFieldEnum;
-
   UserGameCustomization: Prisma.UserGameCustomizationScalarFieldEnum;
   UserPlugin: Prisma.UserPluginScalarFieldEnum;
   UserProfile: Prisma.UserProfileScalarFieldEnum;

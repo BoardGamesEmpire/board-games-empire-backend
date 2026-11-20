@@ -1,5 +1,4 @@
-import type { Actor } from '@bge/actor-context';
-import { AuditContextService, isUserActor, requireSessionUserId } from '@bge/actor-context';
+import { AuditContextService, requireSessionUserId, sessionUserId } from '@bge/actor-context';
 import { Action, ResourceType } from '@bge/database';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import type { HttpRedirectResponse } from '@nestjs/common';
@@ -20,11 +19,7 @@ import { UpstreamAccountErrorCode } from '../upstream-account.constants';
 import { StartSteamSignInDto } from './dto/start-steam-sign-in.dto';
 import { SteamSignInResponseDto } from './dto/steam-sign-in-response.dto';
 import { SteamLinkService } from './steam-link.service';
-
-/** The registered user whose session a request came in: null for none, an API key or an anonymous user. */
-function sessionUserIdOf(actor: Actor | null): string | null {
-  return actor !== null && isUserActor(actor) ? actor.userId : null;
-}
+import { STEAM_SIGN_IN_LIFETIME_MINUTES } from './steam-sign-in.store';
 
 /**
  * Linking your Steam account through Steam sign-in (#935): one route starts
@@ -58,9 +53,10 @@ export class SteamLinkController {
   @ApiOperation({
     summary: 'Start linking your Steam account',
     description:
-      "Answers Steam's sign-in address, when it stops being usable (30 minutes), and the privacy policy to show " +
-      'before sending the browser there. Steam sends the browser back to this server, which links the account ' +
-      'and sends it on to `returnTo` with `upstreamAccount=steam` and either `result=linked` or `error=<code>`. ' +
+      `Answers Steam's sign-in address, when it stops being usable (${STEAM_SIGN_IN_LIFETIME_MINUTES} minutes), and ` +
+      'the privacy policy to show before sending the browser there. Steam sends the browser back to this server, ' +
+      'which links the account and sends it on to `returnTo` with `upstreamAccount=steam` and either ' +
+      '`result=linked` or `error=<code>`. ' +
       'Starting again replaces a sign-in you have pending. Needs a signed-in user in the browser that will go to ' +
       'Steam: an API key or an anonymous user gets 403. A client with only a bearer token and no browser session ' +
       "can start the sign-in but can't finish it, because the return needs the browser's session; linking from a " +
@@ -129,8 +125,9 @@ export class SteamLinkController {
       `${UpstreamAccountErrorCode.Cancelled} (the user cancelled at Steam), ` +
       `${UpstreamAccountErrorCode.NotVerified} (Steam's answer could not be verified), ` +
       `${UpstreamAccountErrorCode.Unreachable} (Steam could not be reached to verify it), ` +
-      `${UpstreamAccountErrorCode.AlreadyLinked} (you linked a Steam account meanwhile), or ` +
-      `${UpstreamAccountErrorCode.Taken} (another user on this server has linked that Steam account).`,
+      `${UpstreamAccountErrorCode.AlreadyLinked} (you linked a Steam account meanwhile), ` +
+      `${UpstreamAccountErrorCode.Taken} (another user on this server has linked that Steam account), or ` +
+      `${UpstreamAccountErrorCode.Failed} (something went wrong on this server; nothing was linked).`,
     headers: { Location: { description: "The start's `returnTo`, with the result.", schema: { type: 'string' } } },
   })
   @ApiResponse({
@@ -146,7 +143,7 @@ export class SteamLinkController {
     const url = await this.steamLink.finishSignIn({
       state: typeof state === 'string' ? state : null,
       query: req.query,
-      sessionUserId: sessionUserIdOf(this.auditContext.getActor()),
+      sessionUserId: sessionUserId(this.auditContext.getActor()),
     });
 
     return { url, statusCode: HttpStatus.FOUND };
