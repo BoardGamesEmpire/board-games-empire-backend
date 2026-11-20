@@ -40,15 +40,34 @@ describe('admin plugin role map', () => {
   });
 
   /**
-   * D-408-1: the statement list is derived from `adminAc` by subtraction, so a
+   * The statement list is derived from `adminAc` by subtraction (#408), so a
    * typo cannot silently revoke a capability. The cost of deriving is that a
    * statement added by a future better-auth release would be granted
    * silently — this literal is what turns that into a red build.
+   *
+   * `set-phone` (better-auth 1.7.16, #1163) is granted on purpose. It adds no
+   * capability: before it, `update` alone let `/admin/update-user` write
+   * `phoneNumber`, and the new statement splits that write out behind its own
+   * check, as `set-email` does for `email`. The admin already holds
+   * `set-email` and `set-password`, which reach further than a phone number,
+   * so withholding it would protect no one. No `phoneNumber` column exists
+   * while the phone-number plugin is off, so today it guards nothing.
    */
   describe('the pinned statement set', () => {
     it('is exactly the expected set', () => {
       expect(ADMIN_ROLE_STATEMENTS).toEqual({
-        user: ['create', 'list', 'set-role', 'ban', 'delete', 'set-password', 'set-email', 'get', 'update'],
+        user: [
+          'create',
+          'list',
+          'set-role',
+          'ban',
+          'delete',
+          'set-password',
+          'set-email',
+          'set-phone',
+          'get',
+          'update',
+        ],
         session: ['list', 'revoke', 'delete'],
       });
     });
