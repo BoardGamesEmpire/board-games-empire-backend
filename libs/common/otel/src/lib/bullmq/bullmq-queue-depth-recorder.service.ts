@@ -2,7 +2,7 @@ import type { OnApplicationBootstrap, OnApplicationShutdown } from '@nestjs/comm
 import { Injectable, Logger } from '@nestjs/common';
 import { DiscoveryService } from '@nestjs/core';
 import { Queue } from 'bullmq';
-import { resolveMetricExportTiming } from '../init/metric-export-env';
+import { metricExportTiming } from '../init/metric-export-env';
 import { metricsExportEnabled } from '../init/metrics-enabled';
 
 /**
@@ -52,8 +52,9 @@ export class BullMQQueueDepthRecorder implements OnApplicationBootstrap, OnAppli
       return;
     }
 
-    // Same parsing as the SDK reader's interval, so polling matches export (#1436).
-    const intervalMs = resolveMetricExportTiming().exportIntervalMillis;
+    // The interval `initOtel` gave the metric reader, so polling matches
+    // export even when `.env` was loaded after the reader was built (#1436).
+    const intervalMs = metricExportTiming().exportIntervalMillis;
     this.intervalHandle = setInterval(() => {
       void this.recordAll();
     }, intervalMs);

@@ -17,10 +17,12 @@ jest.mock('bullmq', () => {
 import type { DiscoveryService } from '@nestjs/core';
 import type { InstanceWrapper } from '@nestjs/core/injector/instance-wrapper';
 import { Queue } from 'bullmq';
+import {
+  OTEL_METRIC_EXPORT_INTERVAL_ENV as METRIC_EXPORT_INTERVAL_ENV,
+  pinMetricExportTiming,
+} from '../init/metric-export-env';
 import { OTEL_EXPORTER_NONE, OTEL_EXPORTER_OTLP_ENDPOINT_ENV, OTEL_METRICS_EXPORTER_ENV } from '../init/otel.config';
 import { BullMQQueueDepthRecorder } from './bullmq-queue-depth-recorder.service';
-
-const METRIC_EXPORT_INTERVAL_ENV = 'OTEL_METRIC_EXPORT_INTERVAL';
 
 interface MockedQueue {
   readonly name: string;
@@ -68,6 +70,7 @@ describe('BullMQQueueDepthRecorder', () => {
 
   afterEach(() => {
     jest.useRealTimers();
+    pinMetricExportTiming(undefined);
     restoreEnvVar(OTEL_METRICS_EXPORTER_ENV, originalMetricsExporter);
     restoreEnvVar(OTEL_EXPORTER_OTLP_ENDPOINT_ENV, originalEndpoint);
     restoreEnvVar(METRIC_EXPORT_INTERVAL_ENV, originalInterval);
@@ -205,6 +208,54 @@ describe('BullMQQueueDepthRecorder', () => {
       expect(queue.recordJobCountsMetric).not.toHaveBeenCalled();
 
       jest.advanceTimersByTime(50_000);
+      expect(queue.recordJobCountsMetric).toHaveBeenCalledTimes(1);
+    });
+
+    // Parsed with `Number`, as the SDK parses it, not `parseInt`: a unit
+    // suffix is rejected rather than read as its numeric prefix (#1436).
+    it('falls back to default when OTEL_METRIC_EXPORT_INTERVAL carries a unit suffix', () => {
+      process.env[METRIC_EXPORT_INTERVAL_ENV] = '10000ms';
+      const queue = new Queue('test-queue') as unknown as MockedQueue;
+      const discovery = buildDiscoveryService([queue as unknown as Queue]);
+      const recorder = new BullMQQueueDepthRecorder(discovery);
+
+      recorder.onApplicationBootstrap();
+      jest.advanceTimersByTime(10_000);
+      expect(queue.recordJobCountsMetric).not.toHaveBeenCalled();
+
+      jest.advanceTimersByTime(50_000);
+      expect(queue.recordJobCountsMetric).toHaveBeenCalledTimes(1);
+    });
+
+    // Node runs a timer below 1 ms every millisecond, which would poll Redis
+    // a thousand times a second (#1436).
+    it('falls back to default when OTEL_METRIC_EXPORT_INTERVAL is below 1 ms', () => {
+      process.env[METRIC_EXPORT_INTERVAL_ENV] = '0.5';
+      const queue = new Queue('test-queue') as unknown as MockedQueue;
+      const discovery = buildDiscoveryService([queue as unknown as Queue]);
+      const recorder = new BullMQQueueDepthRecorder(discovery);
+
+      recorder.onApplicationBootstrap();
+      jest.advanceTimersByTime(59_999);
+      expect(queue.recordJobCountsMetric).not.toHaveBeenCalled();
+
+      jest.advanceTimersByTime(1);
+      expect(queue.recordJobCountsMetric).toHaveBeenCalledTimes(1);
+    });
+
+    // `initOtel` pins the reader's timing before ConfigModule loads `.env`,
+    // so a value that arrives later must not move polling off the reader's
+    // cycle (#1436).
+    it('polls on the interval initOtel pinned, not one set in the environment later', () => {
+      pinMetricExportTiming({ exportIntervalMillis: 10_000, exportTimeoutMillis: 10_000 });
+      process.env[METRIC_EXPORT_INTERVAL_ENV] = '30000';
+      const queue = new Queue('test-queue') as unknown as MockedQueue;
+      const discovery = buildDiscoveryService([queue as unknown as Queue]);
+      const recorder = new BullMQQueueDepthRecorder(discovery);
+
+      recorder.onApplicationBootstrap();
+      jest.advanceTimersByTime(10_000);
+
       expect(queue.recordJobCountsMetric).toHaveBeenCalledTimes(1);
     });
 

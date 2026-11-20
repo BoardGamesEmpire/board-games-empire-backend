@@ -68,6 +68,7 @@ import { BatchSpanProcessor } from '@opentelemetry/sdk-trace';
 import { noopActorContextProvider } from '../processors/actor-context-provider';
 import { ActorSpanProcessor } from '../processors/actor-span.processor';
 import { initOtel } from './init-otel';
+import { metricExportTiming, pinMetricExportTiming } from './metric-export-env';
 import type { OtelInitConfig } from './otel.config';
 
 interface CapturedSdkConfig {
@@ -401,6 +402,10 @@ describe('initOtel', () => {
       process.env['OTEL_METRICS_EXPORTER'] = 'otlp';
     });
 
+    afterEach(() => {
+      pinMetricExportTiming(undefined);
+    });
+
     it('uses the SDK defaults (60000 ms interval, 30000 ms timeout) when both are unset', () => {
       initOtel(baseConfig);
 
@@ -447,6 +452,28 @@ describe('initOtel', () => {
       initOtel(baseConfig);
 
       expect(readerOptions()).toMatchObject({ exportIntervalMillis: 15_000, exportTimeoutMillis: 15_000 });
+    });
+
+    // ConfigModule loads `.env` after initOtel has run, outside production;
+    // the queue depth recorder reads the pinned timing so a value that
+    // arrives then can't split polling from export (#1436).
+    it("pins the reader's timing for the queue depth recorder (#1436)", () => {
+      process.env['OTEL_METRIC_EXPORT_INTERVAL'] = '120000';
+
+      initOtel(baseConfig);
+      process.env['OTEL_METRIC_EXPORT_INTERVAL'] = '10000';
+
+      expect(metricExportTiming()).toEqual({ exportIntervalMillis: 120_000, exportTimeoutMillis: 30_000 });
+    });
+
+    it('pins nothing when no metric reader is built (#1436)', () => {
+      process.env['OTEL_METRICS_EXPORTER'] = 'none';
+      process.env['OTEL_METRIC_EXPORT_INTERVAL'] = '120000';
+
+      initOtel(baseConfig);
+      process.env['OTEL_METRIC_EXPORT_INTERVAL'] = '10000';
+
+      expect(metricExportTiming().exportIntervalMillis).toBe(10_000);
     });
   });
 });

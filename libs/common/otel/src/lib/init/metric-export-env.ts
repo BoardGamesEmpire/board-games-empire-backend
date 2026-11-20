@@ -1,3 +1,6 @@
+import { diag } from '@opentelemetry/api';
+import { timerDelayFromEnv } from './env-number';
+
 export const OTEL_METRIC_EXPORT_INTERVAL_ENV = 'OTEL_METRIC_EXPORT_INTERVAL';
 export const OTEL_METRIC_EXPORT_TIMEOUT_ENV = 'OTEL_METRIC_EXPORT_TIMEOUT';
 
@@ -11,39 +14,64 @@ export interface MetricExportTiming {
 }
 
 /**
+ * The timing `initOtel` gave its metric reader, once it has built one.
+ * `BullMQQueueDepthRecorder` reads this rather than the environment, so it
+ * polls on the reader's cycle even when `.env` is loaded after `initOtel`
+ * has run, as ConfigModule does outside production (#1436).
+ */
+let pinnedTiming: MetricExportTiming | undefined;
+
+/**
  * Reads `OTEL_METRIC_EXPORT_INTERVAL` and `OTEL_METRIC_EXPORT_TIMEOUT`.
- * Consulted by `resolveMetricReader` and `BullMQQueueDepthRecorder`, so
- * queue depth is polled on the same cycle the reader exports (#1436).
  *
  * NodeSDK reads these vars only for readers it builds itself; `initOtel`
- * passes its own reader, so it must pass them along. A missing, empty,
- * non-numeric, infinite or non-positive value falls back to the SDK default.
+ * passes its own reader, so it must pass them along (#1436). A missing or
+ * blank value falls back to the SDK default quietly. A value that isn't a
+ * number of milliseconds from 1 to 2147483647 falls back with a `diag`
+ * warning: Node runs a timer outside that range every millisecond.
  *
  * The timeout is limited to the interval: `PeriodicExportingMetricReader`
  * throws when the timeout is longer, so setting only a short interval
- * would otherwise crash startup against the 30000 ms default timeout.
+ * would otherwise crash startup against the 30000 ms default timeout. As
+ * in the SDK's own env reader, the limit is a `diag` warning when the
+ * operator set both values, and `diag` info when one is a default.
  */
 export function resolveMetricExportTiming(env: NodeJS.ProcessEnv = process.env): MetricExportTiming {
-  const exportIntervalMillis =
-    readPositiveNumber(env[OTEL_METRIC_EXPORT_INTERVAL_ENV]) ?? DEFAULT_METRIC_EXPORT_INTERVAL_MS;
-  const exportTimeoutMillis = Math.min(
-    readPositiveNumber(env[OTEL_METRIC_EXPORT_TIMEOUT_ENV]) ?? DEFAULT_METRIC_EXPORT_TIMEOUT_MS,
-    exportIntervalMillis,
-  );
+  const interval = timerDelayFromEnv(env, OTEL_METRIC_EXPORT_INTERVAL_ENV);
+  const timeout = timerDelayFromEnv(env, OTEL_METRIC_EXPORT_TIMEOUT_ENV);
+  const exportIntervalMillis = interval ?? DEFAULT_METRIC_EXPORT_INTERVAL_MS;
+  const exportTimeoutMillis = timeout ?? DEFAULT_METRIC_EXPORT_TIMEOUT_MS;
 
-  return { exportIntervalMillis, exportTimeoutMillis };
+  if (exportTimeoutMillis <= exportIntervalMillis) {
+    return { exportIntervalMillis, exportTimeoutMillis };
+  }
+
+  const describe = (value: number | undefined, fallback: number): string => value?.toString() ?? `${fallback}, default`;
+  const message =
+    `${OTEL_METRIC_EXPORT_TIMEOUT_ENV} (${describe(timeout, DEFAULT_METRIC_EXPORT_TIMEOUT_MS)}) is longer than ` +
+    `${OTEL_METRIC_EXPORT_INTERVAL_ENV} (${describe(interval, DEFAULT_METRIC_EXPORT_INTERVAL_MS)}); ` +
+    'using the interval as the timeout.';
+  if (interval !== undefined && timeout !== undefined) {
+    diag.warn(message);
+  } else {
+    diag.info(message);
+  }
+
+  return { exportIntervalMillis, exportTimeoutMillis: exportIntervalMillis };
 }
 
 /**
- * Parses the way the SDK's `getNumberFromEnv` does, with `Number` rather
- * than `parseInt`: `10000ms` falls back instead of reading as `10000`, and
- * `5.5` is kept whole instead of truncated to `5`.
+ * Records the timing the metric reader runs on. Called by `initOtel` when it
+ * builds the reader; `undefined` clears it.
  */
-function readPositiveNumber(raw: string | undefined): number | undefined {
-  if (raw === undefined || raw.trim() === '') {
-    return undefined;
-  }
+export function pinMetricExportTiming(timing: MetricExportTiming | undefined): void {
+  pinnedTiming = timing;
+}
 
-  const parsed = Number(raw);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+/**
+ * The timing the metric reader runs on: the one `initOtel` pinned, or, when
+ * no reader has been built in this process, the environment's.
+ */
+export function metricExportTiming(): MetricExportTiming {
+  return pinnedTiming ?? resolveMetricExportTiming();
 }
