@@ -148,10 +148,12 @@ export class CreateEventDto {
       'Each user is added as an EventParticipant with Invited status. ' +
       "An id that names no person answers 404, and one the server's or the user's invite settings refuse answers 403; either way nothing is written.",
   })
+  // ValidateIf, not IsOptional, which let null through to the service as a
+  // TypeError and a 500 (#1275).
+  @ValidateIf((_, value) => value !== undefined)
   @IsArray({ message: i18nValidationMessage('validation.isArray') })
   @IsString({ each: true, message: i18nValidationMessage('validation.each.isString') })
   @ArrayMaxSize(MAX_INVITE_USER_IDS, { message: i18nValidationMessage('validation.arrayMaxSize') })
-  @IsOptional()
   inviteUserIds?: string[];
 
   // Fixed mode — single occurrence with an optional start date.

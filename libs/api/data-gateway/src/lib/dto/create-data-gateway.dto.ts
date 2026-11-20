@@ -2,7 +2,7 @@ import { AuthType, Prisma } from '@bge/database';
 import { i18nValidationMessage } from '@bge/i18n';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsBoolean, IsIn, IsOptional, IsPositive, IsString, Max } from 'class-validator';
+import { IsBoolean, IsIn, IsOptional, IsPositive, IsString, Max, ValidateIf } from 'class-validator';
 
 /**
  * Creates a remote DataGateway. A plugin DataGateway's row comes from
@@ -33,9 +33,11 @@ export class CreateDataGatewayDto {
   @Max(65535, { message: i18nValidationMessage('validation.max') })
   connectionPort!: number;
 
+  // ValidateIf, not IsOptional, which let null through to the non-nullable
+  // column as a 500 (#1275). Left out, the column's default switches it on.
   @Type(() => Boolean)
   @ApiPropertyOptional({ description: 'Indicates whether the DataGateway is enabled' })
-  @IsOptional()
+  @ValidateIf((_, value) => value !== undefined)
   @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
   enabled?: boolean;
 

@@ -57,6 +57,58 @@ describe('CreateEventDto', () => {
     expect(dto.schedulingMode).toBeUndefined();
   });
 
+  // IsOptional skipped null as well as a missing key, and the service reads a
+  // null invite list as a list, which threw a TypeError as a 500 (#1275).
+  it('refuses null for inviteUserIds, which the event has no way to read (#1275)', async () => {
+    await expect(propertiesWithErrors({ title: 'Game night', inviteUserIds: null })).resolves.toEqual([
+      'inviteUserIds',
+    ]);
+  });
+
+  it('accepts a create that leaves inviteUserIds out, so no one is invited (#1275)', async () => {
+    await expect(propertiesWithErrors({ title: 'Game night', inviteUserIds: undefined })).resolves.toEqual([]);
+  });
+
+  describe('policy fields whose columns cannot be null (#1275)', () => {
+    async function policyErrors(policy: PlainPayload) {
+      const dto = plainToInstance(CreateEventDto, { title: 'Game night', policy }, { enableImplicitConversion: true });
+
+      return validate(dto, { whitelist: true, forbidNonWhitelisted: true });
+    }
+
+    it.each([
+      'allowMemberInvites',
+      'allowGuestInvites',
+      'requireHostApprovalToJoin',
+      'allowSpectators',
+      'strictCapacity',
+      'restrictToAttendeePool',
+      'restrictToGameCategories',
+      'gameAdditionMode',
+      'voteThresholdType',
+      'voteQuorumType',
+      'voteEligibility',
+      'interestedWeight',
+    ])('refuses null for policy.%s (#1275)', async (field) => {
+      const errors = await policyErrors({ [field]: null });
+
+      // A nested error surfaces on its parent.
+      expect(errors.map((error) => error.property)).toEqual(['policy']);
+      expect(errors[0].children?.map((child) => child.property)).toEqual([field]);
+    });
+
+    it('accepts a policy that leaves them all out, so their defaults apply (#1275)', async () => {
+      await expect(policyErrors({})).resolves.toEqual([]);
+    });
+
+    it.each(['maxAttendees', 'maxTotalParticipants', 'fillerMaxPlayTime', 'votingWindowHours'])(
+      'accepts null for policy.%s, which leaves it empty (#1275)',
+      async (field) => {
+        await expect(policyErrors({ [field]: null })).resolves.toEqual([]);
+      },
+    );
+  });
+
   // The create check reads an empty string as a household id, which no
   // household role matches, so it would answer 403 to a request that only
   // meant "no household".
