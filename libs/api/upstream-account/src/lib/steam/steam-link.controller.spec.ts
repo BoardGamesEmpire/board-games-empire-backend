@@ -250,12 +250,14 @@ describe('SteamLinkController (#935)', () => {
     it.each<[string, Actor]>([
       ['an API key', { kind: 'apiKey', apiKeyId: 'key-1', userId: ME }],
       ['an anonymous user', { kind: 'anonymous', userId: ME }],
-    ])('refuses to start for %s with 403', async (_, actor) => {
+    ])('refuses to start for %s with 403 UPSTREAM_LINK_SESSION_REQUIRED', async (_, actor) => {
       getActor.mockReturnValue(actor);
 
       const answer = await startSignIn({ returnTo: RETURN_TO });
 
       expect(answer.status).toBe(HttpStatus.FORBIDDEN);
+      // Its own code, so a client can tell it from a missing permission.
+      await expect(answer.json()).resolves.toMatchObject({ code: 'UPSTREAM_LINK_SESSION_REQUIRED' });
       expect(start).not.toHaveBeenCalled();
     });
 

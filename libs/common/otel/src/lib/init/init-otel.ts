@@ -11,6 +11,7 @@ import { NodeSDK } from '@opentelemetry/sdk-node';
 import type { SpanExporter, SpanProcessor } from '@opentelemetry/sdk-trace';
 import { BatchSpanProcessor } from '@opentelemetry/sdk-trace';
 import { ActorSpanProcessor } from '../processors/actor-span.processor';
+import { QueryWithholdingSpanProcessor } from '../processors/query-withholding.span-processor';
 import { OTEL_LOG_LEVEL_ENV, resolveDiagLogLevel } from './diag-log-level';
 import { metricsExportEnabled } from './metrics-enabled';
 import type { OtelInitConfig } from './otel.config';
@@ -36,6 +37,14 @@ import {
 export interface OtelBootstrapHandle {
   readonly sdk: NodeSDK;
   shutdown(): Promise<void>;
+
+  /**
+   * Keeps the query string of a request to any of `paths`, global prefix
+   * included (`/api/...`), out of every span from now on (#935). Called once
+   * the app has imported the libs that name those routes, before it serves
+   * a request: see {@link QueryWithholdingSpanProcessor}.
+   */
+  withholdQueryFor(paths: readonly string[]): void;
 }
 
 /**
@@ -198,7 +207,9 @@ export const initOtel = (config: OtelInitConfig): OtelBootstrapHandle => {
     ...(config.environment ? { 'deployment.environment.name': config.environment } : {}),
   });
 
-  const spanProcessors: SpanProcessor[] = [new ActorSpanProcessor(config.actorContextProvider)];
+  // First, so no other processor sees a withheld query.
+  const queryWithholding = new QueryWithholdingSpanProcessor();
+  const spanProcessors: SpanProcessor[] = [queryWithholding, new ActorSpanProcessor(config.actorContextProvider)];
 
   const exporter = resolveTraceExporter(process.env);
   if (exporter) {
@@ -224,5 +235,6 @@ export const initOtel = (config: OtelInitConfig): OtelBootstrapHandle => {
   return {
     sdk,
     shutdown: () => sdk.shutdown(),
+    withholdQueryFor: (paths) => queryWithholding.withholdQueryFor(paths),
   };
 };

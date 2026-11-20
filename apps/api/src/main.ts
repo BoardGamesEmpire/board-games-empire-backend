@@ -37,6 +37,11 @@ import { createAuthClientIpHandler } from './app/lib/auth-client-ip';
 import { createHostCheck } from './app/lib/host-check';
 import type { ServerNames } from './app/lib/host-rule';
 import { allowsEveryHost, createHostRule } from './app/lib/host-rule';
+import { PATHS_WITHOUT_QUERY } from './app/lib/paths-without-query';
+
+// The paths name feature-lib routes, imported above, so they reach the SDK
+// only now; no request is served before the app listens (#935).
+otel.withholdQueryFor(PATHS_WITHOUT_QUERY);
 
 async function bootstrap() {
   const LOGGER_CONTEXT = 'Bootstrap';

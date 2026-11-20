@@ -1,5 +1,5 @@
-import { AuditContextService, requireSessionUserId, sessionUserId } from '@bge/actor-context';
-import { Action, ResourceType } from '@bge/database';
+import { AuditContextService, sessionUserId } from '@bge/actor-context';
+import { Action, ResourceType, Upstream } from '@bge/database';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import type { HttpRedirectResponse } from '@nestjs/common';
 import { Body, Controller, Get, Header, Headers, HttpStatus, Post, Redirect, Req, UseGuards } from '@nestjs/common';
@@ -15,6 +15,7 @@ import {
 import { Http } from '@status/codes';
 import { OptionalAuth } from '@thallesp/nestjs-better-auth';
 import type { Request } from 'express';
+import { linkingUserId } from '../linking-user-id';
 import { UpstreamAccountErrorCode } from '../upstream-account.constants';
 import { StartSteamSignInDto } from './dto/start-steam-sign-in.dto';
 import { SteamSignInResponseDto } from './dto/steam-sign-in-response.dto';
@@ -78,7 +79,9 @@ export class SteamLinkController {
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({
     status: Http.Forbidden,
-    description: "Insufficient permissions, or not a registered user's own session: an API key or an anonymous user",
+    description:
+      "Insufficient permissions, or not a registered user's own session: an API key or an anonymous user " +
+      `(code ${UpstreamAccountErrorCode.SessionRequired})`,
   })
   @ApiResponse({
     status: Http.Conflict,
@@ -93,7 +96,7 @@ export class SteamLinkController {
     @Body() body: StartSteamSignInDto,
     @Headers('accept-language') acceptLanguage: string | undefined,
   ): Promise<SteamSignInResponseDto> {
-    const userId = requireSessionUserId(this.auditContext.getActor());
+    const userId = linkingUserId(this.auditContext.getActor(), Upstream.Steam);
     const signIn = await this.steamLink.startSignIn(userId, body.returnTo, acceptLanguage);
 
     return { signIn };

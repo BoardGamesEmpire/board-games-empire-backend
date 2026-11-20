@@ -22,6 +22,7 @@ const buildMockApp = (closeImpl?: () => Promise<void>): jest.Mocked<Shutdownable
 const buildMockOtelHandle = (shutdownImpl?: () => Promise<void>): jest.Mocked<OtelBootstrapHandle> => ({
   sdk: {} as never,
   shutdown: jest.fn(shutdownImpl ?? (() => Promise.resolve())) as jest.Mock,
+  withholdQueryFor: jest.fn(),
 });
 
 describe('createShutdown', () => {

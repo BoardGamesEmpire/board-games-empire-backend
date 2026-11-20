@@ -20,6 +20,20 @@ import { STEAM_SIGN_IN_LIFETIME_MINUTES, SteamSignInStore } from './steam-sign-i
  */
 export const STEAM_RETURN_PATH = '/api/users/me/upstream-accounts/steam/return';
 
+/**
+ * `authUrl` as the base of this server's own addresses: its path kept, as
+ * better-auth keeps it for the sign-in providers' callbacks, so a server
+ * behind a proxy at a sub-path gets Steam's return there too. A trailing
+ * slash, a query and a fragment are dropped (#935).
+ */
+function serverBase(authUrl: string): string {
+  const base = new URL(authUrl);
+  base.search = '';
+  base.hash = '';
+
+  return base.toString().replace(/\/+$/, '');
+}
+
 /** What Steam's return brought back, as the return route received it (#935). */
 export interface SteamSignInReturn {
   /** The return's whole query, Steam's `openid.*` fields among it, unvalidated. */
@@ -98,9 +112,9 @@ function httpAddress(returnTo: string): URL | null {
  *
  * Starting keeps a pending sign-in under a single-use state for the user and
  * answers Steam's sign-in address. Its realm, the site Steam shows the user,
- * is this server's own origin, read from the `auth.url` config (never from a
- * request's `Host`), and its return address is the return route with the
- * state on it.
+ * is the origin of this server's own address, the `auth.url` config (never a
+ * request's `Host`), and its return address is the return route under that
+ * address, path included, with the state on it.
  *
  * The return uses the state up before anything else, so any arrival, even
  * one refused, ends the sign-in. It then needs the browser to have come back
@@ -116,7 +130,10 @@ function httpAddress(returnTo: string): URL | null {
 export class SteamLinkService {
   private readonly logger = new Logger(SteamLinkService.name);
 
-  /** This server's origin: the sign-in's realm, and where its return address points. */
+  /** Where clients reach this server, `auth.url` with no trailing slash: the base the return address is built on. */
+  private readonly base: string;
+
+  /** This server's origin: the sign-in's realm, which every address under {@link base} sits under. */
   private readonly origin: string;
 
   constructor(
@@ -126,7 +143,8 @@ export class SteamLinkService {
     private readonly auth: AuthService,
     config: ConfigService,
   ) {
-    this.origin = new URL(config.getOrThrow<string>('auth.url')).origin;
+    this.base = serverBase(config.getOrThrow<string>('auth.url'));
+    this.origin = new URL(this.base).origin;
   }
 
   /**
@@ -254,7 +272,7 @@ export class SteamLinkService {
    * and the return both build it here.
    */
   private returnUrl(state: string): string {
-    const address = new URL(STEAM_RETURN_PATH, this.origin);
+    const address = new URL(`${this.base}${STEAM_RETURN_PATH}`);
     address.searchParams.set('state', state);
 
     return address.toString();

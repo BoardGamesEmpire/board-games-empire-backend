@@ -250,9 +250,11 @@ export class UpstreamAccountService {
         : this.taken(input.upstream);
     }
 
+    // By the constraint, the error's name and its code only: a Prisma error's
+    // message and stack print the call's arguments, the account's external id
+    // among them, which unlinking deletes.
     this.logger.error(
-      `Upstream account insert hit an unexpected unique: ${JSON.stringify(identity)}: ${error.message}`,
-      error.stack,
+      `Upstream account insert hit an unexpected unique: ${JSON.stringify(identity)} (${error.name} ${error.code})`,
     );
     return error;
   }

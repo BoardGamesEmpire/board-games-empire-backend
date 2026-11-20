@@ -14,6 +14,10 @@ export const UPSTREAMS_WITH_LINK_METHOD: ReadonlySet<Upstream> = new Set([Upstre
  * `PrivacyPolicyErrorCode` is: `CodedHttpException` takes an upper-case string,
  * and an enum member is not one to the compiler.
  *
+ * Starting a link refuses anyone but a registered user in their own
+ * session, an API key or an anonymous user, with `SessionRequired`, a 403 a
+ * client can tell apart from a missing permission.
+ *
  * A link through an upstream's sign-in ends with the browser sent back to the
  * client, so most of its refusals reach the client as the `error` of that
  * redirect rather than as an error answer: `SessionMismatch`, `Cancelled`,
@@ -30,6 +34,7 @@ export const UpstreamAccountErrorCode = {
   ReturnAddressRefused: 'UPSTREAM_LINK_RETURN_ADDRESS_REFUSED',
   Expired: 'UPSTREAM_LINK_EXPIRED',
   SessionMismatch: 'UPSTREAM_LINK_SESSION_MISMATCH',
+  SessionRequired: 'UPSTREAM_LINK_SESSION_REQUIRED',
   Cancelled: 'UPSTREAM_LINK_CANCELLED',
   NotVerified: 'UPSTREAM_LINK_NOT_VERIFIED',
   Unreachable: 'UPSTREAM_UNREACHABLE',

@@ -8,6 +8,7 @@ import { noopActorContextProvider } from '../processors/actor-context-provider';
 const mockOtelHandle: OtelBootstrapHandle = {
   sdk: {} as never,
   shutdown: jest.fn().mockResolvedValue(undefined),
+  withholdQueryFor: jest.fn(),
 };
 
 jest.mock('../init/init-otel', () => ({

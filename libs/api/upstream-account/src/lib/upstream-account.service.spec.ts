@@ -320,15 +320,20 @@ describe('UpstreamAccountService (#935)', () => {
       });
     });
 
-    it('lets a violation of any other unique through, and logs which one', async () => {
+    it("lets a violation of any other unique through, and logs which one, never the error's message or stack", async () => {
       const logError = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
       const violation = uniqueViolation({ index: 'upstream_accounts_pkey' });
+      // A Prisma error's message prints the call's arguments (#935).
+      violation.message = `Invalid create() invocation: { externalId: "${STEAM_ID}" }`;
       db.upstreamAccount.create.mockRejectedValue(violation);
 
       await expect(service.create(STEAM_INPUT)).rejects.toBe(violation);
       expect(emit).not.toHaveBeenCalled();
       expect(db.upstreamAccount.findUnique).not.toHaveBeenCalled();
-      expect(logError).toHaveBeenCalledWith(expect.stringContaining('upstream_accounts_pkey'), violation.stack);
+      expect(logError).toHaveBeenCalledTimes(1);
+      expect(logError).toHaveBeenCalledWith(expect.stringContaining('upstream_accounts_pkey'));
+      expect(logError.mock.calls[0][0]).toContain('P2002');
+      expect(JSON.stringify(logError.mock.calls)).not.toContain(STEAM_ID);
 
       logError.mockRestore();
     });

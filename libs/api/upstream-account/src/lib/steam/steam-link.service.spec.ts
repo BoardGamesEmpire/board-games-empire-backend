@@ -21,8 +21,11 @@ const SOMEONE_ELSE = 'user-2';
 const STEAM_ID = '76561197960287930';
 
 /** This server's public address, with a path the realm must leave out. */
-const AUTH_URL = 'https://bge.example/ignored/path';
+// A server behind a proxy at a sub-path: better-auth keeps the path for the
+// sign-in providers' callbacks, so Steam's return keeps it too (#935).
+const AUTH_URL = 'https://bge.example/games/';
 const ORIGIN = 'https://bge.example';
+const BASE = 'https://bge.example/games';
 const RETURN_TO = 'https://app.example/settings/upstream-accounts?tab=links';
 const STARTED_AT = Date.parse('2026-11-19T12:00:00.000Z');
 
@@ -136,7 +139,7 @@ describe('SteamLinkService (#935)', () => {
       expect(Object.fromEntries(address.searchParams)).toEqual({
         'openid.ns': OPENID_2_NAMESPACE,
         'openid.mode': 'checkid_setup',
-        'openid.return_to': `${ORIGIN}${STEAM_RETURN_PATH}?state=${state}`,
+        'openid.return_to': `${BASE}${STEAM_RETURN_PATH}?state=${state}`,
         'openid.realm': ORIGIN,
         'openid.identity': OPENID_IDENTIFIER_SELECT,
         'openid.claimed_id': OPENID_IDENTIFIER_SELECT,

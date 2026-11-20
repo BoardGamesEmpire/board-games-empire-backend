@@ -40,7 +40,7 @@ import { CACHE_REDIS_CLIENT, createCacheStore, QUEUE_REDIS_CLIENT, RedisModule }
 import { SafeHttpModule } from '@bge/safe-http';
 import { SecureHttpModule } from '@bge/secure-http';
 import { PrivacyPolicyModule, SystemSettingsModule } from '@bge/system-settings';
-import { STEAM_RETURN_PATH, UpstreamAccountModule } from '@bge/upstream-account';
+import { UpstreamAccountModule } from '@bge/upstream-account';
 import { UserModule } from '@bge/user';
 import { WebhookSubscriptionModule } from '@bge/webhook-subscription';
 import { WellKnownModule } from '@bge/well-known';
@@ -65,6 +65,7 @@ import { GameSearchGateway } from './gateways/game/search.gateway';
 import { TransactionDeadlockInterceptor } from './interceptors/transaction-deadlock.interceptor';
 import { UserAwareCacheInterceptor } from './interceptors/user-aware-cache.interceptor';
 import { baseLogger } from './lib/logger';
+import { PATHS_WITHOUT_QUERY } from './lib/paths-without-query';
 import { RateLimitGuard } from './lib/rate-limit.guard';
 import { RedisThrottlerStorage } from './lib/redis-throttler.storage';
 import { createThrottlers } from './lib/throttlers';
@@ -154,13 +155,14 @@ import { apiPluginModuleOptions } from './plugin-module.options';
     // log.
     //
     // The Steam sign-in return is logged by path alone: its query carries the
-    // SteamID, which stays out of the logs because unlinking deletes it (#935).
+    // SteamID, which stays out of the logs because unlinking deletes it. The
+    // same list keeps it out of the trace spans, from main.ts (#935).
     LoggerModule.forRoot({
       forRoutes: ['*'],
       pinoHttp: {
         logger: baseLogger,
         serializers: {
-          req: buildRequestSerializer({ pathsWithoutQuery: [STEAM_RETURN_PATH] }),
+          req: buildRequestSerializer({ pathsWithoutQuery: PATHS_WITHOUT_QUERY }),
         },
       },
     }),

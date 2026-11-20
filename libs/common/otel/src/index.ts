@@ -15,6 +15,7 @@ export {
   type ActorSpanContext,
 } from './lib/processors/actor-context-provider';
 export { ActorSpanProcessor } from './lib/processors/actor-span.processor';
+export { QueryWithholdingSpanProcessor } from './lib/processors/query-withholding.span-processor';
 
 // Pino integration
 export { buildOtelPinoOptions, otelTraceMixin } from './lib/pino/otel-pino.options';

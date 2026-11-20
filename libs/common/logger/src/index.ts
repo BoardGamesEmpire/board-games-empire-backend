@@ -1,6 +1,7 @@
 export {
   buildBasePinoOptions,
   buildRequestSerializer,
+  normalizeRequestPath,
   resolvePinoLevel,
   type LogDestination,
   type RequestSerializerOptions,

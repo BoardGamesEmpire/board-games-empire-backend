@@ -214,14 +214,14 @@ describe('linking a Steam account (#935)', () => {
       // upstream accounts; the list answering it shows the key works and
       // carries the read grant, not that the create grant would pass the
       // permission check, since no route takes a key's create on upstream
-      // accounts. That the 403 is the start's own refusal of a key, past the
-      // permission check, is pinned by the controller's unit spec.
+      // accounts. The code shows the 403 is the start's own refusal of a key,
+      // past the permission check.
       const key = await mintApiKey(baseUrl, db.client, user, {
         resourceType: ResourceType.UpstreamAccount,
         slugs: ['create:upstream_account:own', 'read:upstream_account:own'],
       });
       await request(baseUrl).get(LIST).set(key.headers).expect(200);
-      await start(key.headers).expect(403);
+      expectErrorEnvelope(await start(key.headers), { status: 403, code: 'UPSTREAM_LINK_SESSION_REQUIRED' });
 
       // An anonymous user holds no upstream_account permission, so the
       // permission check answers 403 before the start is reached; someone

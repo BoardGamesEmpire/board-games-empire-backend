@@ -139,10 +139,13 @@ export interface RequestSerializerOptions {
 }
 
 /**
- * Express matches routes case-insensitively and ignores a trailing slash, so
- * the comparison does too: any spelling that reaches the route matches here.
+ * A request path as Express matches it to a route: case-insensitively, and
+ * ignoring a trailing slash. Two paths that reach the same route compare equal
+ * once both are normalized, so a list of paths whose query is withheld, from
+ * a log line here or from a trace span in `@bge/otel`, matches any spelling
+ * that reaches the route (#935).
  */
-const normalizePath = (path: string): string => path.toLowerCase().replace(/\/+$/, '') || '/';
+export const normalizeRequestPath = (path: string): string => path.toLowerCase().replace(/\/+$/, '') || '/';
 
 /**
  * Returns a pino-http `req` serializer that logs only the path, with no
@@ -155,7 +158,7 @@ const normalizePath = (path: string): string => path.toLowerCase().replace(/\/+$
 export function buildRequestSerializer({
   pathsWithoutQuery,
 }: RequestSerializerOptions): (req: SerializedRequest) => SerializedRequest {
-  const unlogged = new Set(pathsWithoutQuery.map(normalizePath));
+  const unlogged = new Set(pathsWithoutQuery.map(normalizeRequestPath));
 
   return (req) => {
     if (typeof req.url !== 'string') {
@@ -163,7 +166,7 @@ export function buildRequestSerializer({
     }
 
     const [path = req.url] = req.url.split('?', 1);
-    if (!unlogged.has(normalizePath(path))) {
+    if (!unlogged.has(normalizeRequestPath(path))) {
       return req;
     }
 
