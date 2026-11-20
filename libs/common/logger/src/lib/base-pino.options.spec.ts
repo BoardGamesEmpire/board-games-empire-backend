@@ -7,7 +7,12 @@ import pino from 'pino';
 import pinoHttp from 'pino-http';
 import request from 'supertest';
 import type { LogDestination } from './base-pino.options';
-import { buildBasePinoOptions, buildRequestSerializer, resolvePinoLevel } from './base-pino.options';
+import {
+  buildBasePinoOptions,
+  buildRequestSerializer,
+  normalizeRequestPath,
+  resolvePinoLevel,
+} from './base-pino.options';
 
 /**
  * Narrows the loose `LoggerOptions['transport']` to the multi-target
@@ -262,6 +267,28 @@ describe('credential redaction (#748)', () => {
     expect(req.headers).not.toHaveProperty('authorization');
     expect(req.headers).not.toHaveProperty('cookie');
     expect(req.headers).not.toHaveProperty('x-api-key');
+  });
+});
+
+describe('normalizeRequestPath (#935)', () => {
+  it.each([
+    ['/API/Users/Me', '/api/users/me'],
+    ['/api/users/', '/api/users'],
+    ['/api/users///', '/api/users'],
+    ['/api//users', '/api//users'],
+    ['/', '/'],
+    ['///', '/'],
+    ['', '/'],
+  ])('normalizes %j to %j', (path, expected) => {
+    expect(normalizeRequestPath(path)).toBe(expected);
+  });
+
+  // A run of slashes that does not end the path is the input a trailing-slash
+  // regular expression backtracks on; the scan leaves it as it is.
+  it('keeps a long run of slashes that does not end the path', () => {
+    const path = `/${'/'.repeat(16_384)}X`;
+
+    expect(normalizeRequestPath(path)).toBe(path.toLowerCase());
   });
 });
 

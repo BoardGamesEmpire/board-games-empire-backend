@@ -140,6 +140,9 @@ describe('SteamSignInStore (#935)', () => {
     expect(commands).toEqual([]);
 
     const state = 'a'.repeat(32);
+    // The user's pointer names the state, so only the record itself can be
+    // what a take refuses: without it, any record reads as nothing (#935).
+    values.set(`bge:upstream-link:steam:user:${pending.userId}`, state);
     values.set(`bge:upstream-link:steam:state:${state}`, 'not json');
     await expect(store.take(state)).resolves.toBeNull();
 
@@ -171,6 +174,9 @@ describe('SteamSignInStore (#935)', () => {
     const store = new SteamSignInStore(redis);
     const state = 'a'.repeat(32);
     const record = { ...pending, createdAt: new Date().toISOString(), ...change };
+    // The record's user's pointer names the state, so only the record's
+    // schema can be what a take refuses (#935).
+    values.set(`bge:upstream-link:steam:user:${record.userId}`, state);
     values.set(`bge:upstream-link:steam:state:${state}`, JSON.stringify(record));
 
     await expect(store.take(state)).resolves.toBeNull();

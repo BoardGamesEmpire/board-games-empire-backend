@@ -126,6 +126,9 @@ export function buildBasePinoOptions(
   };
 }
 
+/** The character code of `/`. */
+const SLASH = 0x2f;
+
 /**
  * Options for {@link buildRequestSerializer}.
  */
@@ -144,8 +147,21 @@ export interface RequestSerializerOptions {
  * once both are normalized, so a list of paths whose query is withheld, from
  * a log line here or from a trace span in `@bge/otel`, matches any spelling
  * that reaches the route (#935).
+ *
+ * Every request's path passes through here, so the trailing slashes are
+ * trimmed by a scan back from the end. A `/\/+$/` replace retries the slash
+ * run from each position in it, which is quadratic in the path's length: a
+ * path of slashes ending in another character, at the request line's 16 KB
+ * limit, held the event loop for about 90 ms, twice per request (#935).
  */
-export const normalizeRequestPath = (path: string): string => path.toLowerCase().replace(/\/+$/, '') || '/';
+export function normalizeRequestPath(path: string): string {
+  let end = path.length;
+  while (end > 0 && path.charCodeAt(end - 1) === SLASH) {
+    end -= 1;
+  }
+
+  return path.slice(0, end).toLowerCase() || '/';
+}
 
 /**
  * Returns a pino-http `req` serializer that logs only the path, with no

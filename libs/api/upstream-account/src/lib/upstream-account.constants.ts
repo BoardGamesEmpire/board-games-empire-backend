@@ -14,9 +14,10 @@ export const UPSTREAMS_WITH_LINK_METHOD: ReadonlySet<Upstream> = new Set([Upstre
  * `PrivacyPolicyErrorCode` is: `CodedHttpException` takes an upper-case string,
  * and an enum member is not one to the compiler.
  *
- * Starting a link refuses anyone but a registered user in their own
- * session, an API key or an anonymous user, with `SessionRequired`, a 403 a
- * client can tell apart from a missing permission.
+ * Starting a link refuses an API key, which acts for its owner but is not
+ * the owner, with `SessionRequired`: a 403 a client can tell apart from a
+ * missing permission. An anonymous user holds no upstream account permission,
+ * so the permission check refuses one first, with its own 403.
  *
  * A link through an upstream's sign-in ends with the browser sent back to the
  * client, so most of its refusals reach the client as the `error` of that

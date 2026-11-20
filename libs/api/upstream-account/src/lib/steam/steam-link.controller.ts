@@ -80,8 +80,8 @@ export class SteamLinkController {
   @ApiResponse({
     status: Http.Forbidden,
     description:
-      "Insufficient permissions, or not a registered user's own session: an API key or an anonymous user " +
-      `(code ${UpstreamAccountErrorCode.SessionRequired})`,
+      'Insufficient permissions, which is what an anonymous user gets, or an API key rather than a registered ' +
+      `user's own session (code ${UpstreamAccountErrorCode.SessionRequired})`,
   })
   @ApiResponse({
     status: Http.Conflict,
