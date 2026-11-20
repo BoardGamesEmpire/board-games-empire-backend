@@ -10,6 +10,7 @@ import {
 import { i18nValidationMessage } from '@bge/i18n';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsArray, IsBoolean, IsEnum, IsInt, IsOptional, IsString, Min, ValidateIf } from 'class-validator';
+import { MAX_PERCENT, MIN_SUPERMAJORITY_PERCENT } from '../effective-policy';
 
 /**
  * A patch to an event's policy (#796). Each field is optional, so a patch
@@ -20,9 +21,10 @@ import { IsArray, IsBoolean, IsEnum, IsInt, IsOptional, IsString, Min, ValidateI
  * the field instead of reaching the write as a 500. A nullable column keeps
  * `IsOptional`, and `null` clears it.
  *
- * It doesn't extend `CreateEventPolicyDto`: the create's `ValidateIf`s require
- * a threshold or quorum value from the type sent beside it, and a patch has to
- * be judged with the stored policy, which the service merges it over.
+ * It doesn't extend `CreateEventPolicyDto`: `PartialType` would put
+ * `IsOptional` back on the create's non-nullable fields. A threshold or quorum
+ * value is judged by the service, against the stored policy it merges the
+ * patch over.
  *
  * The allowed lists replace the stored one when sent, `[]` clears it, and one
  * left out stays (#1268). They are not columns, so `null` is refused for them
@@ -141,8 +143,9 @@ export class UpdateEventPolicyDto {
   @ApiPropertyOptional({
     nullable: true,
     description:
-      'Required for Supermajority (e.g. 66) and FixedCount (e.g. 3), sent or already stored, by the event and by ' +
-      'every date whose own threshold type relies on it. A Supermajority percentage is at most 100.',
+      `Required for Supermajority (${MIN_SUPERMAJORITY_PERCENT} to ${MAX_PERCENT}) and FixedCount (e.g. 3), sent or ` +
+      'already stored, by the event and by ' +
+      'every date whose own threshold type relies on it.',
   })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })

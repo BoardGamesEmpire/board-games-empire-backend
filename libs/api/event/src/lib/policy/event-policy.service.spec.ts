@@ -243,10 +243,49 @@ describe('EventPolicyService', () => {
 
       await expect(update({ voteThresholdValue: null })).rejects.toMatchObject({
         status: 400,
-        response: { code: 'EVENT_POLICY_INVALID', message: t('errors.event_policy.threshold_value_required') },
+        response: {
+          code: 'EVENT_POLICY_INVALID',
+          message: t('errors.event_policy.threshold_value_required'),
+          occurrenceIds: ['occ-1'],
+        },
       });
 
       expect(tx.eventPolicy.update).not.toHaveBeenCalled();
+    });
+
+    // The host changed the event, and the date reads its count of 3 as a
+    // Supermajority percentage, so the refusal names the date (#1274).
+    it("names the date whose percentage threshold would read the event's FixedCount as below 51 (#1274)", async () => {
+      stored = makeEventPolicy('event-1', {
+        id: 'policy-1',
+        voteThresholdType: VoteThresholdType.Supermajority,
+        voteThresholdValue: 66,
+      });
+      datePolicies = [datePolicy('occ-1', { voteThresholdType: VoteThresholdType.Supermajority })];
+
+      await expect(
+        update({ voteThresholdType: VoteThresholdType.FixedCount, voteThresholdValue: 3 }),
+      ).rejects.toMatchObject({
+        status: 400,
+        response: {
+          code: 'EVENT_POLICY_INVALID',
+          message: t('errors.event_policy.threshold_percent_too_low', { min: 51, max: 100 }),
+          occurrenceIds: ['occ-1'],
+        },
+      });
+
+      expect(tx.eventPolicy.update).not.toHaveBeenCalled();
+    });
+
+    // The event's own policy is no date's, so its refusal names none (#1274).
+    it("names no date when the event's own policy is the one refused (#1274)", async () => {
+      const refusal = await update({
+        voteThresholdType: VoteThresholdType.Supermajority,
+        voteThresholdValue: 50,
+      }).catch((error: unknown) => error);
+
+      expect(refusal).toMatchObject({ status: 400, response: { code: 'EVENT_POLICY_INVALID' } });
+      expect((refusal as { response: object }).response).not.toHaveProperty('occurrenceIds');
     });
 
     // 150 is a fine count for the event's FixedCount, but the date reads it as
@@ -258,7 +297,11 @@ describe('EventPolicyService', () => {
         update({ voteThresholdType: VoteThresholdType.FixedCount, voteThresholdValue: 150 }),
       ).rejects.toMatchObject({
         status: 400,
-        response: { code: 'EVENT_POLICY_INVALID', message: t('errors.event_policy.threshold_percent_too_high') },
+        response: {
+          code: 'EVENT_POLICY_INVALID',
+          message: t('errors.event_policy.threshold_percent_too_high', { min: 51, max: 100 }),
+          occurrenceIds: ['occ-1'],
+        },
       });
 
       expect(tx.eventPolicy.update).not.toHaveBeenCalled();
@@ -720,6 +763,26 @@ describe('EventPolicyService', () => {
       await updateDate({ voteThresholdType: VoteThresholdType.Supermajority });
 
       expect(tx.eventOccurrencePolicy.upsert).toHaveBeenCalled();
+    });
+
+    // The date reads the event's count of 3 as its Supermajority percentage,
+    // which is less than half of the votes (#1274).
+    it('refuses a date policy edit whose Supermajority inherits a FixedCount below 51 from the event (#1274)', async () => {
+      stored = makeEventPolicy('event-1', {
+        id: 'policy-1',
+        voteThresholdType: VoteThresholdType.FixedCount,
+        voteThresholdValue: 3,
+      });
+
+      await expect(updateDate({ voteThresholdType: VoteThresholdType.Supermajority })).rejects.toMatchObject({
+        status: 400,
+        response: {
+          code: 'EVENT_POLICY_INVALID',
+          message: t('errors.event_policy.threshold_percent_too_low', { min: 51, max: 100 }),
+        },
+      });
+
+      expect(tx.eventOccurrencePolicy.upsert).not.toHaveBeenCalled();
     });
 
     it("null clears an override, so the date takes the event's (#796)", async () => {

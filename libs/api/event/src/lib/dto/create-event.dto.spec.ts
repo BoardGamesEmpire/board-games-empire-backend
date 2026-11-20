@@ -1,4 +1,4 @@
-import { Reach } from '@bge/database';
+import { Reach, VoteThresholdType } from '@bge/database';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { CreateEventDto } from './create-event.dto';
@@ -172,5 +172,27 @@ describe('CreateEventDto', () => {
     await expect(propertiesWithErrors(policy('TightenOnly'))).resolves.toEqual([]);
     await expect(propertiesWithErrors(policy(null))).resolves.toEqual(['policy']);
     await expect(propertiesWithErrors(policy('Loose'))).resolves.toEqual(['policy']);
+  });
+
+  // The number fields are checked whenever sent, as the policy edit checks
+  // them: a type that reads no number used to skip every check, so a bad one
+  // reached the database (#1274).
+  it.each([['abc'], [0], [-5]])(
+    'refuses voteThresholdValue %p under SimpleMajority, as edit does (#1274)',
+    async (voteThresholdValue) => {
+      await expect(
+        propertiesWithErrors({
+          title: 'Game night',
+          policy: { voteThresholdType: VoteThresholdType.SimpleMajority, voteThresholdValue },
+        }),
+      ).resolves.toEqual(['policy']);
+    },
+  );
+
+  // A missing number is the service's to refuse, with the edit's code (#1274).
+  it('accepts a Supermajority with no number, which the service judges (#1274)', async () => {
+    await expect(
+      propertiesWithErrors({ title: 'Game night', policy: { voteThresholdType: VoteThresholdType.Supermajority } }),
+    ).resolves.toEqual([]);
   });
 });

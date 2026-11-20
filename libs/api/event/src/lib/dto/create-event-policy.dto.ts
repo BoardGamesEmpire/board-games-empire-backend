@@ -10,6 +10,7 @@ import {
 import { i18nValidationMessage } from '@bge/i18n';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsArray, IsBoolean, IsEnum, IsInt, IsOptional, IsString, Min, ValidateIf } from 'class-validator';
+import { MAX_PERCENT, MIN_SUPERMAJORITY_PERCENT } from '../policy/effective-policy';
 
 /**
  * An event's policy, set when the event is created. Each field is optional: one
@@ -127,28 +128,30 @@ export class CreateEventPolicyDto {
   @IsEnum(VoteThresholdType, { message: i18nValidationMessage('validation.isEnum') })
   voteThresholdType?: VoteThresholdType;
 
-  @ApiPropertyOptional({ description: 'Required for Supermajority (e.g. 66) and FixedCount (e.g. 3)' })
+  // Checked whenever sent, as the policy edit checks it. A missing number is
+  // the service's to refuse, with the edit's code (#1274).
+  @ApiPropertyOptional({
+    nullable: true,
+    description: `Required for Supermajority (${MIN_SUPERMAJORITY_PERCENT} to ${MAX_PERCENT}) and FixedCount (e.g. 3).`,
+  })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })
-  @ValidateIf(
-    (o: CreateEventPolicyDto) =>
-      o.voteThresholdType === VoteThresholdType.Supermajority || o.voteThresholdType === VoteThresholdType.FixedCount,
-  )
-  voteThresholdValue?: number;
+  @IsOptional()
+  voteThresholdValue?: number | null;
 
   @ApiPropertyOptional({ enum: VoteQuorumType, default: VoteQuorumType.None })
   @ValidateIf((_, value) => value !== undefined)
   @IsEnum(VoteQuorumType, { message: i18nValidationMessage('validation.isEnum') })
   voteQuorumType?: VoteQuorumType;
 
-  @ApiPropertyOptional({ description: 'Required for PercentOfAttendees and FixedCount quorum types' })
+  @ApiPropertyOptional({
+    nullable: true,
+    description: 'Required for PercentOfAttendees (1 to 100) and FixedCount quorum types.',
+  })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })
-  @ValidateIf(
-    (o: CreateEventPolicyDto) =>
-      o.voteQuorumType === VoteQuorumType.PercentOfAttendees || o.voteQuorumType === VoteQuorumType.FixedCount,
-  )
-  voteQuorumValue?: number;
+  @IsOptional()
+  voteQuorumValue?: number | null;
 
   @ApiPropertyOptional({ enum: VoteEligibility, default: VoteEligibility.ConfirmedOnly })
   @ValidateIf((_, value) => value !== undefined)

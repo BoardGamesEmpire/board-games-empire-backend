@@ -4,6 +4,7 @@ import {
   OccurrenceStatus,
   ResourceType,
   SystemRole,
+  VoteQuorumType,
   VoteThresholdType,
 } from '@bge/database';
 import type { Actors, AuthenticatedActor } from '@bge/testing-e2e';
@@ -311,6 +312,28 @@ describe("changing an event's policy (#796)", () => {
       }).expect(200);
     });
 
+    // At or under half of the votes is no supermajority (#1274).
+    it('answers 400 EVENT_POLICY_INVALID to a Supermajority of 50 and writes nothing (#1274)', async () => {
+      const host = await actors.user();
+      const eventId = await createdEventId(host);
+      const before = await storedPolicy(eventId);
+
+      expectErrorEnvelope(
+        await updatePolicy(host, eventId, {
+          voteThresholdType: VoteThresholdType.Supermajority,
+          voteThresholdValue: 50,
+        }),
+        { status: 400, code: 'EVENT_POLICY_INVALID' },
+      );
+      expect(await storedPolicy(eventId)).toEqual(before);
+
+      // Control: the smallest supermajority.
+      await updatePolicy(host, eventId, {
+        voteThresholdType: VoteThresholdType.Supermajority,
+        voteThresholdValue: 51,
+      }).expect(200);
+    });
+
     it('answers a patch that re-sends the stored game addition mode 200, and records no audit entry for it', async () => {
       const host = await actors.user();
       const eventId = await createdEventId(host);
@@ -345,6 +368,41 @@ describe("changing an event's policy (#796)", () => {
 
       await updatePolicy(host, eventId, { allowSpectators: true }).expect(404);
       expect((await storedPolicy(eventId)).allowSpectators).toBe(false);
+    });
+  });
+
+  // Create used to judge the policy on its own terms: a missing number was a
+  // plain validation 400, and a percentage out of bounds was stored (#1274).
+  describe('POST /api/events judges a vote policy as the policy edit does (#1274)', () => {
+    it.each<[string, Record<string, unknown>]>([
+      ['a Supermajority of 101', { voteThresholdType: VoteThresholdType.Supermajority, voteThresholdValue: 101 }],
+      ['a Supermajority of 50', { voteThresholdType: VoteThresholdType.Supermajority, voteThresholdValue: 50 }],
+      ['a Supermajority with no number', { voteThresholdType: VoteThresholdType.Supermajority }],
+      ['a FixedCount threshold with no number', { voteThresholdType: VoteThresholdType.FixedCount }],
+      [
+        'a PercentOfAttendees quorum of 101',
+        { voteQuorumType: VoteQuorumType.PercentOfAttendees, voteQuorumValue: 101 },
+      ],
+      ['a FixedCount quorum with no number', { voteQuorumType: VoteQuorumType.FixedCount }],
+    ])('answers 400 EVENT_POLICY_INVALID to %s and creates nothing (#1274)', async (_, policy) => {
+      const host = await actors.user();
+      const title = `e2e invalid policy ${host.user.id}`;
+
+      expectErrorEnvelope(await createEvent(host, { title, policy }), { status: 400, code: 'EVENT_POLICY_INVALID' });
+
+      expect(await db.client.event.count({ where: { title } })).toBe(0);
+    });
+
+    it('creates an event with a Supermajority of 51 (#1274)', async () => {
+      const host = await actors.user();
+      const eventId = await createdEventId(host, {
+        policy: { voteThresholdType: VoteThresholdType.Supermajority, voteThresholdValue: 51 },
+      });
+
+      expect(await storedPolicy(eventId)).toMatchObject({
+        voteThresholdType: VoteThresholdType.Supermajority,
+        voteThresholdValue: 51,
+      });
     });
   });
 });

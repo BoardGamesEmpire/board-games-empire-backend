@@ -2,7 +2,7 @@ import type { EventOccurrencePolicy } from '@bge/database';
 import { GameAdditionMode, InterestedWeight, VoteEligibility, VoteQuorumType, VoteThresholdType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { makeEventPolicy } from '@bge/testing';
-import { assertValidVotingPolicy, foldPolicy } from './effective-policy';
+import { assertValidCreatedVotingPolicy, assertValidVotingPolicy, foldPolicy } from './effective-policy';
 
 /** The error `run` throws, or a failure when it throws none. */
 function refusalOf(run: () => void): unknown {
@@ -115,9 +115,28 @@ describe('assertValidVotingPolicy', () => {
 
     expect(refusalOf(() => assertValidVotingPolicy(supermajority(101)))).toMatchObject({
       status: 400,
-      response: { code: 'EVENT_POLICY_INVALID', message: t('errors.event_policy.threshold_percent_too_high') },
+      response: {
+        code: 'EVENT_POLICY_INVALID',
+        message: t('errors.event_policy.threshold_percent_too_high', { min: 51, max: 100 }),
+      },
     });
     expect(() => assertValidVotingPolicy(supermajority(100))).not.toThrow();
+  });
+
+  // At or under half of the votes isn't a supermajority: two opposite
+  // nominations could both pass (#1274).
+  it('refuses a Supermajority threshold below 51 percent, and accepts 51 (#1274)', () => {
+    const supermajority = (voteThresholdValue: number) =>
+      votingPolicy({ voteThresholdType: VoteThresholdType.Supermajority, voteThresholdValue });
+
+    expect(refusalOf(() => assertValidVotingPolicy(supermajority(50)))).toMatchObject({
+      status: 400,
+      response: {
+        code: 'EVENT_POLICY_INVALID',
+        message: t('errors.event_policy.threshold_percent_too_low', { min: 51, max: 100 }),
+      },
+    });
+    expect(() => assertValidVotingPolicy(supermajority(51))).not.toThrow();
   });
 
   it('refuses a PercentOfAttendees quorum above 100 percent, and accepts 100 (#796)', () => {
@@ -126,7 +145,10 @@ describe('assertValidVotingPolicy', () => {
 
     expect(refusalOf(() => assertValidVotingPolicy(percentQuorum(101)))).toMatchObject({
       status: 400,
-      response: { code: 'EVENT_POLICY_INVALID', message: t('errors.event_policy.quorum_percent_too_high') },
+      response: {
+        code: 'EVENT_POLICY_INVALID',
+        message: t('errors.event_policy.quorum_percent_too_high', { max: 100 }),
+      },
     });
     expect(() => assertValidVotingPolicy(percentQuorum(100))).not.toThrow();
   });
@@ -142,6 +164,72 @@ describe('assertValidVotingPolicy', () => {
           voteQuorumValue: 150,
         }),
       ),
+    ).not.toThrow();
+  });
+});
+
+// Create judges the policy it is sent as the policy edit judges the policy a
+// patch leaves, over the schema's defaults (#1274).
+describe('assertValidCreatedVotingPolicy (#1274)', () => {
+  const refusalMessage = (policy: Parameters<typeof assertValidCreatedVotingPolicy>[0]) =>
+    (refusalOf(() => assertValidCreatedVotingPolicy(policy)) as { response?: { message?: string } } | undefined)
+      ?.response?.message;
+
+  it('accepts an event created with no policy, which takes the defaults (#1274)', () => {
+    expect(() => assertValidCreatedVotingPolicy(undefined)).not.toThrow();
+    expect(() => assertValidCreatedVotingPolicy({})).not.toThrow();
+  });
+
+  it('refuses a Supermajority threshold sent with no number (#1274)', () => {
+    expect(
+      refusalOf(() => assertValidCreatedVotingPolicy({ voteThresholdType: VoteThresholdType.Supermajority })),
+    ).toMatchObject({
+      status: 400,
+      response: { code: 'EVENT_POLICY_INVALID', message: t('errors.event_policy.threshold_value_required') },
+    });
+  });
+
+  it('refuses a Supermajority threshold sent with null, as with no number (#1274)', () => {
+    expect(refusalMessage({ voteThresholdType: VoteThresholdType.Supermajority, voteThresholdValue: null })).toEqual(
+      t('errors.event_policy.threshold_value_required'),
+    );
+  });
+
+  it.each<[string, Parameters<typeof assertValidCreatedVotingPolicy>[0], ReturnType<typeof t>]>([
+    [
+      'a Supermajority above 100',
+      { voteThresholdType: VoteThresholdType.Supermajority, voteThresholdValue: 101 },
+      t('errors.event_policy.threshold_percent_too_high', { min: 51, max: 100 }),
+    ],
+    [
+      'a Supermajority below 51',
+      { voteThresholdType: VoteThresholdType.Supermajority, voteThresholdValue: 50 },
+      t('errors.event_policy.threshold_percent_too_low', { min: 51, max: 100 }),
+    ],
+    [
+      'a PercentOfAttendees quorum above 100',
+      { voteQuorumType: VoteQuorumType.PercentOfAttendees, voteQuorumValue: 101 },
+      t('errors.event_policy.quorum_percent_too_high', { max: 100 }),
+    ],
+    [
+      'a FixedCount quorum with no number',
+      { voteQuorumType: VoteQuorumType.FixedCount },
+      t('errors.event_policy.quorum_value_required'),
+    ],
+  ])('refuses %s (#1274)', (_, policy, message) => {
+    expect(refusalMessage(policy)).toEqual(message);
+  });
+
+  // The policy edit accepts a number its type doesn't read, so create does too.
+  it('accepts a SimpleMajority threshold sent with a number it does not read (#1274)', () => {
+    expect(() =>
+      assertValidCreatedVotingPolicy({ voteThresholdType: VoteThresholdType.SimpleMajority, voteThresholdValue: 3 }),
+    ).not.toThrow();
+  });
+
+  it('accepts a Supermajority of 51 (#1274)', () => {
+    expect(() =>
+      assertValidCreatedVotingPolicy({ voteThresholdType: VoteThresholdType.Supermajority, voteThresholdValue: 51 }),
     ).not.toThrow();
   });
 });

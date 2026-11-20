@@ -13,6 +13,7 @@ import {
   Prisma,
   Reach,
   ResourceType,
+  VoteThresholdType,
 } from '@bge/database';
 import { uniqueViolationWithoutMeta } from '@bge/database/testing';
 import { t } from '@bge/i18n';
@@ -1547,6 +1548,24 @@ describe('EventService', () => {
         response: { code: 'EVENT_FIXED_MODE_TOO_MANY_DATES', message: t('errors.event.fixed_mode_single') },
       });
       expect(db.event.create).not.toHaveBeenCalled();
+    });
+
+    // Create judges the policy as the policy edit does, before the
+    // transaction, so a refusal writes nothing (#1274).
+    it('refuses a vote policy the policy edit would refuse, and opens no transaction (#1274)', async () => {
+      await expect(
+        service.createEvent({
+          title: 'X',
+          policy: { voteThresholdType: VoteThresholdType.Supermajority, voteThresholdValue: 150 },
+        } as CreateEventDto),
+      ).rejects.toMatchObject({
+        status: 400,
+        response: {
+          code: 'EVENT_POLICY_INVALID',
+          message: t('errors.event_policy.threshold_percent_too_high', { min: 51, max: 100 }),
+        },
+      });
+      expect(db.$transaction).not.toHaveBeenCalled();
     });
 
     it('creates an empty policy when the request names none', async () => {

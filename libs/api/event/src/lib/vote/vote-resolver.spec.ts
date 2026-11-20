@@ -271,6 +271,24 @@ describe('VoteResolver', () => {
       });
     });
 
+    // No eligible voter means no one agreed: Unanimous passed on 0 For of 0
+    // eligible, where every other threshold fails with no votes (#1140).
+    describe('with no eligible voters (#1140)', () => {
+      it.each<[VoteThresholdType, number | null]>([
+        [VoteThresholdType.SimpleMajority, null],
+        [VoteThresholdType.Supermajority, 66],
+        [VoteThresholdType.Unanimous, null],
+        [VoteThresholdType.FixedCount, 1],
+      ])('a %s threshold fails (#1140)', (voteThresholdType, voteThresholdValue) => {
+        expect(
+          VoteResolver.checkThreshold({ forCount: 0, againstCount: 0, interestedCount: 0, totalVotes: 0 }, 0, {
+            voteThresholdType,
+            voteThresholdValue,
+          }),
+        ).toBe(false);
+      });
+    });
+
     describe('FixedCount', () => {
       it('passes when For count meets threshold', () => {
         expect(
@@ -446,6 +464,32 @@ describe('VoteResolver', () => {
 
       expect(result.eligibleVoterCount).toBe(1);
       expect(result.status).toBe(NominationStatus.Passed);
+    });
+
+    // A quorum of None passes with no votes, so the threshold alone decides,
+    // and no eligible voter agreed (#1140).
+    it.each<[string, AttendeeStub[]]>([
+      ['no attendees at all', []],
+      ['only an attendee whose role does not vote', [{ ...makeAttendee(), role: makeVoterRole(false) }]],
+    ])('answers Failed for a Unanimous nomination with %s (#1140)', (_, attendees) => {
+      const result = VoteResolver.resolve(
+        [],
+        makePolicy({ voteThresholdType: VoteThresholdType.Unanimous }),
+        attendees,
+      );
+
+      expect(result.eligibleVoterCount).toBe(0);
+      expect(result.status).toBe(NominationStatus.Failed);
+    });
+
+    it('passes a Unanimous nomination when all 3 eligible voters vote For, and fails it when none has voted (#1140)', () => {
+      const attendees = [makeAttendee(), makeAttendee(), makeAttendee()];
+      const unanimous = makePolicy({ voteThresholdType: VoteThresholdType.Unanimous });
+
+      expect(VoteResolver.resolve(votes(VoteType.For, VoteType.For, VoteType.For), unanimous, attendees).status).toBe(
+        NominationStatus.Passed,
+      );
+      expect(VoteResolver.resolve([], unanimous, attendees).status).toBe(NominationStatus.Failed);
     });
 
     it('does not count the vote of a voter whose role has since lost the vote, and counts it again once the role has it back (#759)', () => {

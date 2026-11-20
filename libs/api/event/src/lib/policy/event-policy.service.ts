@@ -128,8 +128,12 @@ export class EventPolicyService {
         // it, and each list sent in place of the stored one.
         const merged = { ...existing, ...columns, ...lists.after };
         assertValidVotingPolicy(merged);
+        // A refusal of a date's folded policy names the date, as a scope
+        // refusal does: the host changed the event, not the date (#1274).
         for (const occurrencePolicy of storedOccurrencePolicies) {
-          assertValidVotingPolicy(foldPolicy(merged, occurrencePolicy));
+          assertValidVotingPolicy(foldPolicy(merged, occurrencePolicy), {
+            occurrenceIds: [occurrencePolicy.occurrenceId],
+          });
         }
 
         // Every date's own restrictions stay within the scope the patch
