@@ -16,8 +16,17 @@ import { PluginGatewayController } from './plugin-gateway.controller';
 /** The plugin DataGateway the calls name. */
 const GW = 'acme';
 
-const { Search, Fetch, FetchGames, FetchExpansions, ListLanguages, ListPlatforms, ListCategories, ListMechanics } =
-  DataGatewayCapability;
+const {
+  Search,
+  Fetch,
+  FetchGames,
+  FetchExpansions,
+  ListLanguages,
+  ListPlatforms,
+  ListCategories,
+  ListMechanics,
+  FindUpstreamAccount,
+} = DataGatewayCapability;
 
 /**
  * Each RPC with the capability its DataGateway must be routable for, none
@@ -67,6 +76,12 @@ const RPCS: ReadonlyArray<[DataGatewayDriverOperation, DataGatewayCapability | u
   ['listPlatforms', ListPlatforms, { correlationId: 'c' }, [{ correlationId: 'c', platforms: [] }]],
   ['listCategories', ListCategories, { correlationId: 'c' }, [{ correlationId: 'c', categories: [] }]],
   ['listMechanics', ListMechanics, { correlationId: 'c' }, [{ correlationId: 'c', mechanics: [] }]],
+  [
+    'findUpstreamAccount',
+    FindUpstreamAccount,
+    { correlationId: 'c', username: 'Ada' },
+    [{ correlationId: 'c', status: proto.ResultStatus.RESULT_STATUS_NOT_FOUND }],
+  ],
 ];
 
 /** A call's metadata, naming `gatewayId` as the DataGateway it is for when one is given. */
@@ -130,6 +145,7 @@ describe('PluginGatewayController', () => {
       listPlatforms: jest.fn(),
       listCategories: jest.fn(),
       listMechanics: jest.fn(),
+      findUpstreamAccount: jest.fn(),
       dispose: jest.fn(),
     };
     registry = { pluginDriver: jest.fn().mockResolvedValue(driver) };

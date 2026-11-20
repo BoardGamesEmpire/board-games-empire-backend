@@ -97,7 +97,24 @@ describe('a plugin DataGateway the coordinator runs', () => {
       DataGatewayCapability.Search,
       DataGatewayCapability.Fetch,
       DataGatewayCapability.FetchGames,
+      DataGatewayCapability.FindUpstreamAccount,
     ]);
+  });
+
+  // Linking an upstream account by username asks a DataGateway through the
+  // coordinator whether the account exists (#1226).
+  it('routes FindUpstreamAccount through CoordinatorService to the plugin DataGateway (#1226)', async () => {
+    const { username, ...account } = FIRST_BUILD.upstreamAccount;
+
+    await expect(coordinator().service.findUpstreamAccount(plugin.gatewayId, username)).resolves.toMatchObject({
+      gatewayId: plugin.gatewayId,
+      status: 'RESULT_STATUS_RESULT',
+      account,
+    });
+
+    await expect(
+      coordinator().service.findUpstreamAccount(plugin.gatewayId, 'nobody-by-this-name'),
+    ).resolves.toMatchObject({ gatewayId: plugin.gatewayId, status: 'RESULT_STATUS_NOT_FOUND' });
   });
 
   // The gateway worker asks the coordinator's plugin load records whether a

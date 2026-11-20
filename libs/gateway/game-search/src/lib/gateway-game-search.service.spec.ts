@@ -1211,6 +1211,125 @@ describe('GatewayGameSearchService', () => {
     });
   });
 
+  // Linking an upstream account by username asks one DataGateway whether the
+  // account exists (#1226).
+  describe('findUpstreamAccount', () => {
+    const ada: proto.UpstreamAccountData = {
+      externalId: 'Ada',
+      displayName: 'Ada',
+      profileUrl: 'https://boardgamegeek.com/user/Ada',
+    };
+
+    const findRequest = (gatewayId: string, username: string): proto.CoordinatorFindUpstreamAccountRequest => ({
+      correlationId: 'corr-4',
+      gatewayId,
+      username,
+    });
+
+    it('returns the account the DataGateway found, attributed to that DataGateway', async () => {
+      registry.register('bgg', new InMemoryGatewayDriver({ upstreamAccountsByUsername: { ada } }));
+
+      const response = await lastValueFrom(service.findUpstreamAccount(findRequest('bgg', 'ada')));
+
+      expect(response).toEqual({ correlationId: 'corr-4', gatewayId: 'bgg', status: RESULT, account: ada });
+    });
+
+    it('passes a username nobody has through as NOT_FOUND', async () => {
+      registry.register('bgg', new InMemoryGatewayDriver({ upstreamAccountsByUsername: { ada } }));
+
+      const response = await lastValueFrom(service.findUpstreamAccount(findRequest('bgg', 'nobody')));
+
+      expect(response).toEqual({
+        correlationId: 'corr-4',
+        gatewayId: 'bgg',
+        status: proto.ResultStatus.RESULT_STATUS_NOT_FOUND,
+      });
+    });
+
+    it('asks by external id when the request names one', async () => {
+      const bgg = new InMemoryGatewayDriver({ upstreamAccountsByUsername: { ada } });
+      registry.register('bgg', bgg);
+      const found = jest.spyOn(bgg, 'findUpstreamAccount');
+
+      const response = await lastValueFrom(
+        service.findUpstreamAccount({ correlationId: 'corr-4', gatewayId: 'bgg', externalId: 'Ada' }),
+      );
+
+      expect(response).toEqual(expect.objectContaining({ status: RESULT, account: ada }));
+      expect(found).toHaveBeenCalledWith(expect.objectContaining({ externalId: 'Ada' }));
+      expect(found.mock.calls[0]?.[0]).not.toHaveProperty('username');
+    });
+
+    // A user is waiting on screen for the lookup (#1226).
+    it('asks the DataGateway as live traffic', async () => {
+      const bgg = new InMemoryGatewayDriver({ upstreamAccountsByUsername: { ada } });
+      registry.register('bgg', bgg);
+      const found = jest.spyOn(bgg, 'findUpstreamAccount');
+
+      await lastValueFrom(service.findUpstreamAccount(findRequest('bgg', 'ada')));
+
+      expect(found).toHaveBeenCalledWith({
+        correlationId: 'corr-4',
+        username: 'ada',
+        trafficClass: proto.TrafficClass.TRAFFIC_CLASS_LIVE,
+      });
+    });
+
+    it('relays a throttled answer with the milliseconds to wait', async () => {
+      registry.register('bgg', new InMemoryGatewayDriver({ throttledUpstreamAccountKeys: { ada: 30_000 } }));
+
+      const response = await lastValueFrom(service.findUpstreamAccount(findRequest('bgg', 'ada')));
+
+      expect(response).toEqual({
+        correlationId: 'corr-4',
+        gatewayId: 'bgg',
+        status: RATE_LIMITED,
+        retryAfterMs: 30_000,
+      });
+    });
+
+    it('answers a DataGateway that may not look up upstream accounts with an ERROR response saying why', async () => {
+      registry.register('bgg', new InMemoryGatewayDriver({ upstreamAccountsByUsername: { ada } }), [
+        DataGatewayCapability.Search,
+      ]);
+
+      const response = await lastValueFrom(service.findUpstreamAccount(findRequest('bgg', 'ada')));
+
+      expect(response).toEqual({
+        correlationId: 'corr-4',
+        gatewayId: 'bgg',
+        status: ERROR,
+        message: `DataGateway bgg doesn't declare FindUpstreamAccount`,
+      });
+    });
+
+    it('answers an unreachable DataGateway with an ERROR response instead of failing the stream', async () => {
+      const response = await lastValueFrom(service.findUpstreamAccount(findRequest('steam', 'ada')));
+
+      expect(response).toEqual({
+        correlationId: 'corr-4',
+        gatewayId: 'steam',
+        status: ERROR,
+        message: 'No connection established for gateway steam.',
+      });
+    });
+
+    it('answers a failing DataGateway with an ERROR response carrying the failure', async () => {
+      const failing = new InMemoryGatewayDriver({ upstreamAccountsByUsername: { ada } });
+      failing.failWith(new Error('upstream exploded'));
+      registry.register('bgg', failing);
+
+      const response = await lastValueFrom(service.findUpstreamAccount(findRequest('bgg', 'ada')));
+
+      expect(response).toEqual({
+        correlationId: 'corr-4',
+        gatewayId: 'bgg',
+        status: ERROR,
+        message: 'upstream exploded',
+      });
+    });
+  });
+
   describe('fetchExpansions', () => {
     const seafarers = searchHit('325', 'Catan: Seafarers');
 

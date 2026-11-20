@@ -31,6 +31,7 @@ export function aroundDriverCalls(
     listPlatforms: (request) => around(() => driver.listPlatforms(request)),
     listCategories: (request) => around(() => driver.listCategories(request)),
     listMechanics: (request) => around(() => driver.listMechanics(request)),
+    findUpstreamAccount: (request) => around(() => driver.findUpstreamAccount(request)),
     dispose: () => driver.dispose(),
   };
 

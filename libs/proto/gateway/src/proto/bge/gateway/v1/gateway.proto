@@ -32,6 +32,12 @@ service GatewayService {
   rpc ListPlatforms(ListPlatformsRequest) returns (ListPlatformsResponse);
   rpc ListCategories(ListCategoriesRequest) returns (ListCategoriesResponse);
   rpc ListMechanics(ListMechanicsRequest) returns (ListMechanicsResponse);
+
+  // Looks up a user's upstream account, by username or by external ID
+  // (#1226). It answers RESULT with the account, NOT_FOUND when the upstream
+  // has none by that key, or RATE_LIMITED with retry_after_ms. A request
+  // naming neither key is refused with INVALID_ARGUMENT.
+  rpc FindUpstreamAccount(FindUpstreamAccountRequest) returns (FindUpstreamAccountResponse);
 }
 
 message GatewayPingRequest {
@@ -123,6 +129,9 @@ enum Capability {
 
   // FetchGames. Declared with DescribeResponse.fetch_games_max_ids.
   CAPABILITY_FETCH_GAMES = 8;
+
+  // FindUpstreamAccount (#1226).
+  CAPABILITY_FIND_UPSTREAM_ACCOUNT = 9;
 }
 
 // The kinds of game a DataGateway can return: every combination of a
@@ -330,6 +339,38 @@ message FetchGamesResponse {
   // Set with RESULT_STATUS_RATE_LIMITED: the DataGateway's upstream budget is
   // spent, and this ID may be asked for again after this many milliseconds.
   optional int32 retry_after_ms = 6;
+}
+
+message FindUpstreamAccountRequest {
+  string correlation_id = 1;
+
+  // The key the upstream account is looked up by. A DataGateway may serve
+  // only one of them, and answers the other INVALID_ARGUMENT.
+  oneof key {
+    // The name the user goes by at the upstream, as they typed it.
+    string username = 2;
+
+    // The account's id at the upstream.
+    string external_id = 3;
+  }
+
+  // Whether a user is waiting on this lookup. Unset means live (#925).
+  optional TrafficClass traffic_class = 4;
+}
+
+// RESULT with the account when it was found, NOT_FOUND with none when the
+// upstream has no account by that key, and RATE_LIMITED with none when the
+// DataGateway is throttled (#1226). ERROR means the lookup failed, and says
+// nothing about the account.
+message FindUpstreamAccountResponse {
+  string correlation_id = 1;
+  ResultStatus status = 2;
+  optional UpstreamAccountData account = 3;
+  optional string message = 4;
+
+  // Set with RESULT_STATUS_RATE_LIMITED: the DataGateway's upstream budget is
+  // spent, and the lookup may be tried again after this many milliseconds.
+  optional int32 retry_after_ms = 5;
 }
 
 message FetchExpansionsRequest {

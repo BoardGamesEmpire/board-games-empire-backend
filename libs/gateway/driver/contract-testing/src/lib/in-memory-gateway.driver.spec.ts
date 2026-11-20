@@ -48,6 +48,13 @@ const hit = (
   crossReferences: [],
 });
 
+/** An upstream account the driver finds by its username, `Ada` (#1226). */
+const ada: proto.UpstreamAccountData = {
+  externalId: '4217',
+  displayName: 'Ada',
+  profileUrl: 'https://boardgamegeek.com/user/Ada',
+};
+
 const catan = hit('catan', BASE_GAME, [TABLETOP]);
 const seafarers = hit('seafarers', EXPANSION, [TABLETOP]);
 const catanUniverse = hit('catan-universe', BASE_GAME, [PC]);
@@ -65,6 +72,7 @@ runDataGatewayDriverContract('InMemoryGatewayDriver', () => ({
     coverage: { platformTypes: [TABLETOP], contentTypes: [BASE_GAME, EXPANSION] },
     filterableAxes: [PLATFORM_TYPE_AXIS, CONTENT_TYPE_AXIS, PUBLISH_YEAR_AXIS, PLAYER_COUNT_AXIS, PLAY_TIME_AXIS],
     upstream: proto.Upstream.UPSTREAM_BOARDGAMEGEEK,
+    upstreamAccountsByUsername: { Ada: ada },
   }),
   capabilities: [
     proto.Capability.CAPABILITY_SEARCH,
@@ -75,11 +83,14 @@ runDataGatewayDriverContract('InMemoryGatewayDriver', () => ({
     proto.Capability.CAPABILITY_LIST_CATEGORIES,
     proto.Capability.CAPABILITY_LIST_MECHANICS,
     proto.Capability.CAPABILITY_FETCH_GAMES,
+    proto.Capability.CAPABILITY_FIND_UPSTREAM_ACCOUNT,
   ],
   filterableAxes: [PLATFORM_TYPE_AXIS, CONTENT_TYPE_AXIS, PUBLISH_YEAR_AXIS, PLAYER_COUNT_AXIS, PLAY_TIME_AXIS],
   upstream: proto.Upstream.UPSTREAM_BOARDGAMEGEEK,
   knownExternalId: 'bgg-13',
   unknownExternalId: 'no-such-id',
+  knownUsername: 'Ada',
+  unknownUsername: 'nobody-by-this-name',
   searchQuery: 'catan',
 }));
 
@@ -333,6 +344,67 @@ describe('InMemoryGatewayDriver throttling', () => {
     );
 
     expect(described.fetchGamesMaxIds).toBeUndefined();
+  });
+});
+
+// Linking an upstream account by username asks a DataGateway whether the
+// account exists (#1226).
+describe('InMemoryGatewayDriver findUpstreamAccount', () => {
+  const driver = () =>
+    new InMemoryGatewayDriver({
+      upstreamAccountsByUsername: { Ada: ada },
+      throttledUpstreamAccountKeys: { 'busy-name': 5_000 },
+    });
+
+  it('finds an upstream account by its username', async () => {
+    await expect(
+      firstValueFrom(driver().findUpstreamAccount({ correlationId: 'c', username: 'Ada' })),
+    ).resolves.toEqual({ correlationId: 'c', status: proto.ResultStatus.RESULT_STATUS_RESULT, account: ada });
+  });
+
+  it('finds an upstream account by its external id', async () => {
+    await expect(
+      firstValueFrom(driver().findUpstreamAccount({ correlationId: 'c', externalId: '4217' })),
+    ).resolves.toEqual({ correlationId: 'c', status: proto.ResultStatus.RESULT_STATUS_RESULT, account: ada });
+  });
+
+  it('answers a username nobody has NOT_FOUND, with no account', async () => {
+    await expect(
+      firstValueFrom(driver().findUpstreamAccount({ correlationId: 'c', username: 'nobody' })),
+    ).resolves.toEqual({ correlationId: 'c', status: proto.ResultStatus.RESULT_STATUS_NOT_FOUND });
+  });
+
+  // A throttled DataGateway answers in-band, never as an errored stream (#925).
+  it('answers a throttled username RATE_LIMITED with its wait and no account', async () => {
+    await expect(
+      firstValueFrom(driver().findUpstreamAccount({ correlationId: 'c', username: 'busy-name' })),
+    ).resolves.toEqual({
+      correlationId: 'c',
+      status: proto.ResultStatus.RESULT_STATUS_RATE_LIMITED,
+      retryAfterMs: 5_000,
+    });
+  });
+
+  it.each([
+    ['neither key', {}],
+    ['an empty username', { username: '' }],
+    ['an empty external id', { externalId: '' }],
+    ['both keys', { username: 'Ada', externalId: '4217' }],
+  ])('refuses a request naming %s with INVALID_ARGUMENT', async (_label, key) => {
+    await expect(firstValueFrom(driver().findUpstreamAccount({ correlationId: 'c', ...key }))).rejects.toMatchObject({
+      code: status.INVALID_ARGUMENT,
+    });
+  });
+
+  it('answers UNIMPLEMENTED when it does not declare FindUpstreamAccount', async () => {
+    const fetchOnly = new InMemoryGatewayDriver({
+      upstreamAccountsByUsername: { Ada: ada },
+      capabilities: [proto.Capability.CAPABILITY_FETCH],
+    });
+
+    await expect(
+      firstValueFrom(fetchOnly.findUpstreamAccount({ correlationId: 'c', username: 'Ada' })),
+    ).rejects.toMatchObject({ code: status.UNIMPLEMENTED });
   });
 });
 

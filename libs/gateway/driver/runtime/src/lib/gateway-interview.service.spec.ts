@@ -229,6 +229,26 @@ describe('GatewayInterviewService', () => {
       expect(table.row(GW)?.upstream).toBeNull();
     });
 
+    // The server routes a link-by-username lookup only to a DataGateway that declares it (#1226).
+    it('stores FindUpstreamAccount when the DataGateway declares it', async () => {
+      table.seed({ id: GW });
+
+      await service.interview(
+        GW,
+        dataGateway({
+          description: {
+            ...STUB_DESCRIPTION,
+            capabilities: [proto.Capability.CAPABILITY_FETCH, proto.Capability.CAPABILITY_FIND_UPSTREAM_ACCOUNT],
+          },
+        }),
+      );
+
+      expect(table.row(GW)?.capabilities).toEqual([
+        DataGatewayCapability.Fetch,
+        DataGatewayCapability.FindUpstreamAccount,
+      ]);
+    });
+
     it('stores FetchGames with the batch limit it declares (#925)', async () => {
       table.seed({ id: GW });
 

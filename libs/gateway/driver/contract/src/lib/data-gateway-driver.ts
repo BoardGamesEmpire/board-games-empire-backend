@@ -20,8 +20,8 @@ import type { GatewayInboundEvent } from './types.js';
  * suite in `@boardgamesempire/gateway-driver-contract-testing`):
  *
  *  - `describe` declares the operations the driver serves, any subset of
- *    search, fetch, fetch expansions and the lists (languages, platforms,
- *    categories and mechanics), and a content format
+ *    search, fetch, fetch expansions, the lists (languages, platforms,
+ *    categories and mechanics) and the upstream account lookup, and a content format
  *    of plain text, HTML, BBCode or Markdown. The server calls only the
  *    operations declared, so one left out may answer UNIMPLEMENTED. Each run
  *    of the suite names the operations its driver serves: the suite checks
@@ -42,6 +42,12 @@ import type { GatewayInboundEvent } from './types.js';
  *    answers already sent stand. It refuses more distinct IDs than the
  *    `fetch_games_max_ids` it declares with INVALID_ARGUMENT. `fetchEachGame`
  *    serves it one fetch at a time for an upstream with no batch call (#925).
+ *  - `findUpstreamAccount` answers a found account RESULT with `account`, and
+ *    an upstream with no account by that key NOT_FOUND with none, a response
+ *    rather than an errored Observable. It refuses a request naming neither
+ *    a username nor an external ID with INVALID_ARGUMENT, and may refuse the
+ *    key it can't look up by the same way. `upstreamAccountKeyOf` reads the
+ *    key (#1226).
  *  - `dispose()` releases transport resources and must be safe to call on an
  *    already-disposed driver.
  *

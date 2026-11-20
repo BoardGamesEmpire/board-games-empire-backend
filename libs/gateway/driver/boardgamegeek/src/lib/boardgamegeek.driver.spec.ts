@@ -185,6 +185,16 @@ describe('BoardGameGeekDriver', () => {
     });
   });
 
+  // Describe doesn't declare the lookup until BoardGameGeek serves it, so the
+  // server never asks (#1226).
+  describe('findUpstreamAccount', () => {
+    it('answers UNIMPLEMENTED', async () => {
+      await expect(
+        firstValueFrom(driver.findUpstreamAccount({ correlationId: 'corr-find-account', username: 'ada' })),
+      ).rejects.toMatchObject({ code: 12, message: 'FindUpstreamAccount is not served by this DataGateway' });
+    });
+  });
+
   describe('check', () => {
     it('returns SERVING status', async () => {
       const request: proto.HealthCheckRequest = { service: 'GatewayService' };

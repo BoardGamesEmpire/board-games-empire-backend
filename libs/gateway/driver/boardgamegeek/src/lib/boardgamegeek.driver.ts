@@ -347,6 +347,14 @@ export class BoardGameGeekDriver implements DataGatewayDriver {
     return unsupportedOperation('FetchGames');
   }
 
+  /**
+   * Not served yet: the lookup through BoardGameGeek's user API is #1226's
+   * next step. Describe doesn't declare it, so the server never calls it.
+   */
+  findUpstreamAccount(_request: proto.FindUpstreamAccountRequest): Observable<proto.FindUpstreamAccountResponse> {
+    return unsupportedOperation('FindUpstreamAccount');
+  }
+
   fetchGame(request: proto.FetchGameRequest): Observable<proto.FetchGameResponse> {
     return defer(() => {
       const externalId = parseExternalId(request.externalId);

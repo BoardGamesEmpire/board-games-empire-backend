@@ -62,6 +62,12 @@ describe('stored enums', () => {
     expect(toStoredCapability(proto.Capability.CAPABILITY_LIST_MECHANICS)).toBe(DataGatewayCapability.ListMechanics);
   });
 
+  it('stores the upstream account lookup (#1226)', () => {
+    expect(toStoredCapability(proto.Capability.CAPABILITY_FIND_UPSTREAM_ACCOUNT)).toBe(
+      DataGatewayCapability.FindUpstreamAccount,
+    );
+  });
+
   it('stores publish year as a filterable axis (#719)', () => {
     expect(toStoredSearchFilterAxis(proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PUBLISH_YEAR)).toBe(
       SearchFilterAxis.PublishYear,

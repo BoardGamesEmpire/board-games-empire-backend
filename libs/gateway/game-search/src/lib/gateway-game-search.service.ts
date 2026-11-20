@@ -168,6 +168,47 @@ export class GatewayGameSearchService {
   }
 
   /**
+   * Asks one DataGateway for a user's upstream account, by the username or
+   * external ID the request names, as live traffic: the user is waiting to
+   * link it (#1226). A DataGateway that can't be reached, may not serve the
+   * lookup, or fails it answers ERROR with the reason, never an errored
+   * stream. The username is the user's personal data, so it stays out of the
+   * log.
+   */
+  findUpstreamAccount(
+    request: proto.CoordinatorFindUpstreamAccountRequest,
+  ): Observable<proto.CoordinatorFindUpstreamAccountResponse> {
+    const key = request.username !== undefined ? { username: request.username } : { externalId: request.externalId };
+
+    return defer(() => from(this.registry.resolve(request.gatewayId, DataGatewayCapability.FindUpstreamAccount))).pipe(
+      concatMap((driver) =>
+        driver.findUpstreamAccount({
+          correlationId: request.correlationId,
+          ...key,
+          trafficClass: proto.TrafficClass.TRAFFIC_CLASS_LIVE,
+        }),
+      ),
+      tap((response) =>
+        this.logger.debug(
+          `Received findUpstreamAccount response from gateway ${request.gatewayId} with status ${response.status}`,
+        ),
+      ),
+      map((response): proto.CoordinatorFindUpstreamAccountResponse => ({ ...response, gatewayId: request.gatewayId })),
+      catchError((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.error(`FindUpstreamAccount failed for gateway ${request.gatewayId}: ${message}`);
+
+        return of<proto.CoordinatorFindUpstreamAccountResponse>({
+          correlationId: request.correlationId,
+          gatewayId: request.gatewayId,
+          status: proto.ResultStatus.RESULT_STATUS_ERROR,
+          message,
+        });
+      }),
+    );
+  }
+
+  /**
    * Asks one DataGateway for a base game's expansions, by the base game's
    * external ID there. A game on this server is asked for by the API, once
    * per DataGateway link, after it checks the actor may read the game: this

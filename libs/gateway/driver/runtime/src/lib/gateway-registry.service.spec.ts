@@ -33,8 +33,17 @@ import type { GatewayConfigEvent } from './interfaces';
 import { FakeDataGatewayTable } from './testing/fake-data-gateway-table';
 import { VocabularySectionQueue } from './vocabulary-section.queue';
 
-const { Search, Fetch, FetchExpansions, ListLanguages, ListPlatforms, ListCategories, ListMechanics, FetchGames } =
-  DataGatewayCapability;
+const {
+  Search,
+  Fetch,
+  FetchExpansions,
+  ListLanguages,
+  ListPlatforms,
+  ListCategories,
+  ListMechanics,
+  FetchGames,
+  FindUpstreamAccount,
+} = DataGatewayCapability;
 const EVERY_CAPABILITY = [
   Search,
   Fetch,
@@ -44,6 +53,7 @@ const EVERY_CAPABILITY = [
   ListCategories,
   ListMechanics,
   FetchGames,
+  FindUpstreamAccount,
 ];
 const { Tabletop } = PlatformType;
 

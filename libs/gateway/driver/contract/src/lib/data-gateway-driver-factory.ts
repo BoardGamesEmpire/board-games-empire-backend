@@ -34,6 +34,7 @@ export const DATA_GATEWAY_DRIVER_OPERATIONS = [
   'listPlatforms',
   'listCategories',
   'listMechanics',
+  'findUpstreamAccount',
 ] as const satisfies readonly (keyof GatewayServiceClient)[];
 
 type ListedOperation = (typeof DATA_GATEWAY_DRIVER_OPERATIONS)[number];

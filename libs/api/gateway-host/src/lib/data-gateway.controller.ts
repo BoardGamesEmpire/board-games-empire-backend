@@ -75,6 +75,12 @@ export class DataGatewayController implements proto.GatewayServiceController, On
     return relayDriverAnswer(this.driver.listMechanics(request));
   }
 
+  // The username is a user's personal data, so it stays out of the log (#1226).
+  findUpstreamAccount(request: proto.FindUpstreamAccountRequest): Observable<proto.FindUpstreamAccountResponse> {
+    this.logger.log('FindUpstreamAccount request received');
+    return relayDriverAnswer(this.driver.findUpstreamAccount(request));
+  }
+
   async onApplicationShutdown(): Promise<void> {
     await this.driver.dispose();
   }

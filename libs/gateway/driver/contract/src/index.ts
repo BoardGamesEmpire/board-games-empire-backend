@@ -7,4 +7,5 @@ export * from './lib/fetch-each-game.js';
 export * from './lib/throttled.js';
 export * from './lib/traffic-class.js';
 export * from './lib/types.js';
+export * from './lib/upstream-account-key.js';
 export * from './lib/upstream-fetch.js';

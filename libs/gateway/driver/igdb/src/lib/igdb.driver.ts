@@ -169,6 +169,11 @@ export class IgdbDriver implements DataGatewayDriver {
     return unsupportedOperation('ListMechanics');
   }
 
+  /** IGDB has no user accounts, so the driver declares no lookup and answers UNIMPLEMENTED (#1226). */
+  findUpstreamAccount(_request: proto.FindUpstreamAccountRequest): Observable<proto.FindUpstreamAccountResponse> {
+    return unsupportedOperation('FindUpstreamAccount');
+  }
+
   /**
    * Searches IGDB for the request's query, narrowed by its filter. A filter
    * nothing IGDB has can match ends the search at once, without asking IGDB.

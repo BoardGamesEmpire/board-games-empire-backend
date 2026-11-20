@@ -77,6 +77,13 @@ export class GatewayCoordinatorClientService implements OnModuleInit, OnModuleDe
     return this.coordinatorService.fetchExpansions(request);
   }
 
+  /** Asks one DataGateway, through the coordinator, for a user's upstream account (#1226). */
+  findUpstreamAccount(
+    request: proto.CoordinatorFindUpstreamAccountRequest,
+  ): Observable<proto.CoordinatorFindUpstreamAccountResponse> {
+    return this.coordinatorService.findUpstreamAccount(request);
+  }
+
   startGameImport(request: proto.StartGameImportRequest): Observable<proto.StartGameImportResponse> {
     return this.coordinatorService.startGameImport(request);
   }

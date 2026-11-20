@@ -24,6 +24,14 @@ export interface FixtureBuild {
     readonly title: string;
   };
 
+  /** The one upstream account its FindUpstreamAccount finds, by this username (#1226). */
+  readonly upstreamAccount: {
+    readonly displayName: string;
+    readonly externalId: string;
+    readonly profileUrl: string;
+    readonly username: string;
+  };
+
   /** The version its manifest names, and its driver reports on Ping. */
   readonly version: string;
 }
@@ -34,4 +42,10 @@ export const FIRST_BUILD: FixtureBuild = {
   game: { externalId: 'fixture-game', title: 'Fixture Game, first build' },
   fetchGamesMaxIds: 50,
   actorProbeExternalId: 'who-is-acting',
+  upstreamAccount: {
+    username: 'fixture-user',
+    externalId: 'Fixture-User',
+    displayName: 'Fixture User',
+    profileUrl: 'https://upstream.example/user/Fixture-User',
+  },
 };

@@ -57,6 +57,12 @@ export class CoordinatorController implements CoordinatorServiceController {
     return this.gameSearchService.fetchExpansions(request);
   }
 
+  findUpstreamAccount(
+    request: proto.CoordinatorFindUpstreamAccountRequest,
+  ): Observable<proto.CoordinatorFindUpstreamAccountResponse> {
+    return this.gameSearchService.findUpstreamAccount(request);
+  }
+
   /**
    * Creates a new import job for a base game and optional expansions.
    */
