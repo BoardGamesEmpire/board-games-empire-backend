@@ -207,7 +207,9 @@ export class BoardGameGeekDriver implements DataGatewayDriver {
   /**
    * Searches BGG for the request's query. A filter on content types narrows
    * the thing types search keeps; BGG itself is always asked for both, since
-   * it labels expansions as base games in a base-game search (#777). A filter
+   * it labels expansions as base games in a base-game search (#777). A Bundle
+   * filter keeps `boardgame` things, since a bundle is one that lists
+   * contents; the server drops the results that aren't bundles (#1394). A filter
    * naming nothing BGG has ends the search at once, without asking BGG. A
    * publish-year range narrows the games it keeps before they're paged (#719).
    * Each page's results are filled in from their things, and a failed lookup

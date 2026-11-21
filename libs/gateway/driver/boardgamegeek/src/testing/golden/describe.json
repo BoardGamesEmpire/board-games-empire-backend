@@ -15,6 +15,7 @@
     ],
     "contentTypes": [
       "CONTENT_TYPE_BASE_GAME",
+      "CONTENT_TYPE_BUNDLE",
       "CONTENT_TYPE_EXPANSION"
     ]
   },

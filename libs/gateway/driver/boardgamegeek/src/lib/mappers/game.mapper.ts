@@ -5,35 +5,43 @@ import { decodeDescription, decodeText } from './decode-text';
 import { toLanguageDataList } from './language.mapper';
 
 /**
- * BGG `type` → proto ContentType. Video games and RPG items and issues fall
- * through to UNSPECIFIED.
+ * BGG `type` → the proto ContentTypes a thing of it can have, the usual one
+ * first. A `boardgame` is a base game, or a bundle when it lists contents
+ * (#1394). Video games and RPG items and issues fall through to UNSPECIFIED.
+ * Every mapping below reads this one relation.
  */
-const BGG_CONTENT_TYPE_MAP: Readonly<Record<string, proto.ContentType>> = {
-  [BggThingType.BoardGame]: proto.ContentType.CONTENT_TYPE_BASE_GAME,
-  [BggThingType.BoardGameExpansion]: proto.ContentType.CONTENT_TYPE_EXPANSION,
-  [BggThingType.BoardGameAccessory]: proto.ContentType.CONTENT_TYPE_ACCESSORY,
+const BGG_CONTENT_TYPES: Readonly<Record<string, readonly proto.ContentType[]>> = {
+  [BggThingType.BoardGame]: [proto.ContentType.CONTENT_TYPE_BASE_GAME, proto.ContentType.CONTENT_TYPE_BUNDLE],
+  [BggThingType.BoardGameExpansion]: [proto.ContentType.CONTENT_TYPE_EXPANSION],
+  [BggThingType.BoardGameAccessory]: [proto.ContentType.CONTENT_TYPE_ACCESSORY],
 };
+
+/** The usual content type of a BGG thing type, without looking at its links. */
+function usualContentType(type: string): proto.ContentType {
+  return BGG_CONTENT_TYPES[type]?.[0] ?? proto.ContentType.CONTENT_TYPE_UNSPECIFIED;
+}
 
 /**
  * The content types BGG things of `thingTypes` map to, each once. A type the
  * map doesn't name is left out, since coverage never lists UNSPECIFIED.
  */
 export function toContentTypes(thingTypes: readonly BggThingType[]): proto.ContentType[] {
-  return [...new Set(thingTypes.flatMap((type) => BGG_CONTENT_TYPE_MAP[type] ?? []))];
+  return [...new Set(thingTypes.flatMap((type) => BGG_CONTENT_TYPES[type] ?? []))];
 }
 
 /**
  * The BGG thing types among `thingTypes` whose content type is one of
  * `contentTypes`: what a search narrowed to those content types asks BGG
- * for. A content type no BGG thing type maps to adds none.
+ * for. A bundle is a `boardgame` thing, so a Bundle filter asks for those and
+ * the server keeps only the bundles among them (#1394). A content type no BGG
+ * thing type maps to adds none.
  */
 export function toThingTypes(
   contentTypes: readonly proto.ContentType[],
   thingTypes: readonly BggThingType[],
 ): BggThingType[] {
   return thingTypes.filter((type) => {
-    const contentType = BGG_CONTENT_TYPE_MAP[type];
-    return contentType !== undefined && contentTypes.includes(contentType);
+    return (BGG_CONTENT_TYPES[type] ?? []).some((contentType) => contentTypes.includes(contentType));
   });
 }
 
@@ -106,8 +114,68 @@ export function getOutboundExpansionIds(thing: Pick<BggThing, 'links'>): number[
     .map((link) => link.id);
 }
 
-function toContentType(thing: Pick<BggThing, 'type'>): proto.ContentType {
-  return BGG_CONTENT_TYPE_MAP[thing.type] ?? proto.ContentType.CONTENT_TYPE_UNSPECIFIED;
+/**
+ * The content type of a thing: its thing type's usual one, except that a
+ * board game that lists contents is a bundle (#1394). Only a `boardgame`
+ * thing: BGG expansions list contents too (an expansion that collects
+ * others), and each would lose its add-on links as a bundle, so an expansion
+ * stays an expansion.
+ * Horizons of Spirit Island lists split-out packs and so imports as a bundle.
+ * No route changes a content type yet, and each import writes this one to a
+ * game that isn't frozen: a person's correction, kept across imports, is
+ * #1447.
+ */
+function toContentType(thing: Pick<BggThing, 'id' | 'type' | 'links'>): proto.ContentType {
+  if (thing.type === BggThingType.BoardGame && toContentExternalIds(thing).length > 0) {
+    return proto.ContentType.CONTENT_TYPE_BUNDLE;
+  }
+
+  return usualContentType(thing.type);
+}
+
+/**
+ * The BGG ids of a thing's links of one type and direction, in BGG order,
+ * each once and never the thing itself. BGG can repeat a link or point one
+ * back at its own item (#1392, #1394).
+ */
+function toLinkedExternalIds(
+  thing: Pick<BggThing, 'id' | 'links'>,
+  type: BggLinkType,
+  direction: 'inbound' | 'outbound' | 'either',
+): string[] {
+  const ids = (thing.links ?? [])
+    .filter(
+      (link) =>
+        link.type === type &&
+        link.id !== thing.id &&
+        (direction === 'either' || isInbound(link.inbound) === (direction === 'inbound')),
+    )
+    .map((link) => String(link.id));
+
+  return [...new Set(ids)];
+}
+
+/**
+ * The BGG ids of every game a thing works with: its `boardgameintegration`
+ * links.
+ * BGG sends them outbound on both games, but the direction is not relied on
+ * (#1392).
+ */
+function toWorksWithExternalIds(thing: Pick<BggThing, 'id' | 'links'>): string[] {
+  return toLinkedExternalIds(thing, BggLinkType.BoardGameIntegration, 'either');
+}
+
+/** The BGG ids a bundle holds: its inbound `boardgamecompilation` links (#1394). */
+function toContentExternalIds(thing: Pick<BggThing, 'id' | 'links'>): string[] {
+  return toLinkedExternalIds(thing, BggLinkType.BoardGameCompilation, 'inbound');
+}
+
+/**
+ * The BGG ids of the bundles a game is contained in: its outbound
+ * `boardgamecompilation` links (#1394).
+ */
+function toBundleExternalIds(thing: Pick<BggThing, 'id' | 'links'>): string[] {
+  return toLinkedExternalIds(thing, BggLinkType.BoardGameCompilation, 'outbound');
 }
 
 /**
@@ -292,9 +360,11 @@ function toReleases(thing: BggThing): proto.GameReleaseData[] {
  *
  * Search answers carry no thumbnail, rating, player counts or description.
  * `searchGames` asks for each item's thing and fills those in from it (#880).
- * The title, content type and year stay as search found them, since the page
- * was filtered and built on them. The source URL follows the content type,
- * and the release is dated by search's year, so a result carries one year.
+ * The title and year stay as search found them, since the page was filtered
+ * and built on them. With a thing, the content type is the thing's, so a
+ * bundle such as Dominion: Big Box reads as one in search as it does on
+ * import (#1394). The source URL follows the search item's type, and the
+ * release is dated by search's year, so a result carries one year.
  * The title is the name BGG matched, which can be an alternate one; a blank
  * one takes the thing's.
  *
@@ -308,7 +378,7 @@ export function searchItemToGameSearchData(item: BggSearchItem, thing?: BggThing
   const found = {
     externalId: String(item.id),
     title,
-    contentType: BGG_CONTENT_TYPE_MAP[item.type] ?? proto.ContentType.CONTENT_TYPE_UNSPECIFIED,
+    contentType: usualContentType(item.type),
     yearPublished: toPublishYear(item.yearpublished),
     sourceUrl: toSourceUrl({ id: item.id, type: item.type }),
     availablePlatforms: [TABLETOP_PLATFORM],
@@ -328,6 +398,8 @@ export function searchItemToGameSearchData(item: BggSearchItem, thing?: BggThing
     ...fromThing,
     ...found,
     title: found.title || fromThing.title,
+    // The thing's content type, so a bundle reads as one in search as on import (#1394).
+    contentType: toContentType(thing),
     availableReleases: [toSyntheticTabletopRelease(item)],
   } satisfies proto.GameSearchData;
 }
@@ -416,9 +488,9 @@ export function thingToGameData(thing: BggThing, locale?: string): proto.GameDat
     baseGameExternalIds: toBaseGameExternalIds(thing),
     // BGG names no game's id at another upstream (#925).
     crossReferences: [],
-    worksWithExternalIds: [],
-    contentExternalIds: [],
-    bundleExternalIds: [],
+    worksWithExternalIds: toWorksWithExternalIds(thing),
+    contentExternalIds: toContentExternalIds(thing),
+    bundleExternalIds: toBundleExternalIds(thing),
 
     platforms: [TABLETOP_PLATFORM],
     releases: toReleases(thing),

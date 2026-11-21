@@ -94,12 +94,16 @@ describe('BoardGameGeekDriver', () => {
       expect((await describeOnce({})).capabilities).toContain(proto.Capability.CAPABILITY_LIST_PLATFORMS);
     });
 
-    it('covers tabletop base games and expansions', async () => {
+    it('covers tabletop base games, bundles and expansions (#1394)', async () => {
       const { coverage } = await describeOnce({});
 
       expect(coverage?.platformTypes).toEqual([proto.PlatformType.PLATFORM_TYPE_TABLETOP]);
       expect(new Set(coverage?.contentTypes)).toEqual(
-        new Set([proto.ContentType.CONTENT_TYPE_BASE_GAME, proto.ContentType.CONTENT_TYPE_EXPANSION]),
+        new Set([
+          proto.ContentType.CONTENT_TYPE_BASE_GAME,
+          proto.ContentType.CONTENT_TYPE_BUNDLE,
+          proto.ContentType.CONTENT_TYPE_EXPANSION,
+        ]),
       );
     });
 
@@ -520,6 +524,84 @@ describe('BoardGameGeekDriver', () => {
 
         const results = frames.filter((frame) => frame.status === proto.ResultStatus.RESULT_STATUS_RESULT);
         expect(results.map((frame) => frame.game?.externalId)).toEqual(['1']);
+      });
+
+      it('asks BGG for board games, not expansions, when the filter names Bundle, since a bundle is a board game that lists contents (#1394)', async () => {
+        const search = jest.fn().mockResolvedValue([
+          {
+            total: 2,
+            items: [
+              { id: 182880, type: BggThingType.BoardGame, name: 'Big Box' },
+              { id: 2, type: BggThingType.BoardGameExpansion, name: 'Expansion Collection' },
+            ],
+          },
+        ]);
+        const things = jest.fn().mockResolvedValue([]);
+        bggCaller.call.mockImplementation((bggRequest) =>
+          (bggRequest as BggRequest<unknown>)({ search: { query: search }, thing: { query: things } } as never),
+        );
+
+        const frames = await firstValueFrom(
+          driver
+            .searchGames({
+              correlationId: 'c',
+              query: 'big box',
+              filter: { platformTypes: [], contentTypes: [proto.ContentType.CONTENT_TYPE_BUNDLE] },
+            })
+            .pipe(toArray()),
+        );
+
+        const results = frames.filter((frame) => frame.status === proto.ResultStatus.RESULT_STATUS_RESULT);
+        expect(results.map((frame) => frame.game?.externalId)).toEqual(['182880']);
+      });
+
+      // BGG labels a bundle a `boardgame` in search. Its thing lists contents
+      // through inbound `boardgamecompilation` links, which is what makes it a
+      // bundle, so the result sends Bundle for the server's filter to keep.
+      // Dominion, a board game that lists none, is the control (#1394).
+      it('sends a board game whose thing lists contents as a bundle in a Bundle-filtered search (#1394)', async () => {
+        const search = jest.fn().mockResolvedValue([
+          {
+            total: 2,
+            items: [
+              { id: 137166, type: BggThingType.BoardGame, name: 'Dominion: Big Box' },
+              { id: 36218, type: BggThingType.BoardGame, name: 'Dominion' },
+            ],
+          },
+        ]);
+        const things = jest.fn().mockResolvedValue([
+          {
+            id: 137166,
+            type: BggThingType.BoardGame,
+            names: [{ type: BggNameType.Primary, value: 'Dominion: Big Box' }],
+            links: [{ type: BggLinkType.BoardGameCompilation, id: 36218, value: 'Dominion', inbound: 'true' }],
+          },
+          {
+            id: 36218,
+            type: BggThingType.BoardGame,
+            names: [{ type: BggNameType.Primary, value: 'Dominion' }],
+            links: [{ type: BggLinkType.BoardGameCompilation, id: 137166, value: 'Dominion: Big Box' }],
+          },
+        ] satisfies BggThing[]);
+        bggCaller.call.mockImplementation((bggRequest) =>
+          (bggRequest as BggRequest<unknown>)({ search: { query: search }, thing: { query: things } } as never),
+        );
+
+        const frames = await firstValueFrom(
+          driver
+            .searchGames({
+              correlationId: 'c',
+              query: 'dominion',
+              filter: { platformTypes: [], contentTypes: [proto.ContentType.CONTENT_TYPE_BUNDLE] },
+            })
+            .pipe(toArray()),
+        );
+
+        const results = frames.filter((frame) => frame.status === proto.ResultStatus.RESULT_STATUS_RESULT);
+        expect(results.map((frame) => [frame.game?.externalId, frame.game?.contentType])).toEqual([
+          ['137166', proto.ContentType.CONTENT_TYPE_BUNDLE],
+          ['36218', proto.ContentType.CONTENT_TYPE_BASE_GAME],
+        ]);
       });
 
       it('ends at once, without asking BGG, when it names nothing BGG search has', async () => {
