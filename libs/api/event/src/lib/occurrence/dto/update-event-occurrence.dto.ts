@@ -1,6 +1,7 @@
+import { INT32_MAX } from '@bge/game-search';
 import { i18nValidationMessage } from '@bge/i18n';
 import { ApiPropertyOptional, OmitType, PartialType } from '@nestjs/swagger';
-import { IsInt, Min, ValidateIf } from 'class-validator';
+import { IsInt, Max, Min, ValidateIf } from 'class-validator';
 import { CreateEventOccurrenceDto } from './create-event-occurrence.dto';
 
 /**
@@ -16,5 +17,6 @@ export class UpdateEventOccurrenceDto extends PartialType(OmitType(CreateEventOc
   @ValidateIf((_, value) => value !== undefined)
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(0, { message: i18nValidationMessage('validation.min') })
+  @Max(INT32_MAX, { message: i18nValidationMessage('validation.max') })
   sortOrder?: number;
 }

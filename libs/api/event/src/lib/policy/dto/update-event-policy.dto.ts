@@ -7,9 +7,10 @@ import {
   VoteQuorumType,
   VoteThresholdType,
 } from '@bge/database';
+import { INT32_MAX } from '@bge/game-search';
 import { i18nValidationMessage } from '@bge/i18n';
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsArray, IsBoolean, IsEnum, IsInt, IsOptional, IsString, Min, ValidateIf } from 'class-validator';
+import { IsArray, IsBoolean, IsEnum, IsInt, IsOptional, IsString, Max, Min, ValidateIf } from 'class-validator';
 import { MAX_PERCENT, MIN_SUPERMAJORITY_PERCENT } from '../effective-policy';
 
 /**
@@ -46,6 +47,7 @@ export class UpdateEventPolicyDto {
   @ApiPropertyOptional({ nullable: true, description: '`null` removes the limit.' })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })
+  @Max(INT32_MAX, { message: i18nValidationMessage('validation.max') })
   @IsOptional()
   maxAttendees?: number | null;
 
@@ -64,6 +66,7 @@ export class UpdateEventPolicyDto {
   @ApiPropertyOptional({ nullable: true, description: '`null` removes the limit.' })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })
+  @Max(INT32_MAX, { message: i18nValidationMessage('validation.max') })
   @IsOptional()
   maxTotalParticipants?: number | null;
 
@@ -130,6 +133,7 @@ export class UpdateEventPolicyDto {
   @ApiPropertyOptional({ nullable: true, description: 'Minutes. `null` permits no fillers.' })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })
+  @Max(INT32_MAX, { message: i18nValidationMessage('validation.max') })
   @IsOptional()
   fillerMaxPlayTime?: number | null;
 
@@ -149,6 +153,7 @@ export class UpdateEventPolicyDto {
   })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })
+  @Max(INT32_MAX, { message: i18nValidationMessage('validation.max') })
   @IsOptional()
   voteThresholdValue?: number | null;
 
@@ -165,6 +170,7 @@ export class UpdateEventPolicyDto {
   })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })
+  @Max(INT32_MAX, { message: i18nValidationMessage('validation.max') })
   @IsOptional()
   voteQuorumValue?: number | null;
 
@@ -184,6 +190,7 @@ export class UpdateEventPolicyDto {
   })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })
+  @Max(INT32_MAX, { message: i18nValidationMessage('validation.max') })
   @IsOptional()
   votingWindowHours?: number | null;
 }

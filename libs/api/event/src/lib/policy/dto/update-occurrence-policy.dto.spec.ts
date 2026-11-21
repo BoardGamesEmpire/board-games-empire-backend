@@ -12,6 +12,13 @@ async function propertiesWithErrors(payload: PlainPayload): Promise<string[]> {
   return errors.map((error) => error.property);
 }
 
+async function constraintsByProperty(payload: PlainPayload): Promise<Record<string, string[]>> {
+  const dto = plainToInstance(UpdateOccurrencePolicyDto, payload, { enableImplicitConversion: true });
+  const errors = await validate(dto, { whitelist: true, forbidNonWhitelisted: true });
+
+  return Object.fromEntries(errors.map((error) => [error.property, Object.keys(error.constraints ?? {})]));
+}
+
 describe('UpdateOccurrencePolicyDto', () => {
   // Every column of a date's policy can be null, which means the event's (#796).
   it("accepts null on every nullable column, which hands the field back to the event's (#796)", async () => {
@@ -109,5 +116,19 @@ describe('UpdateOccurrencePolicyDto', () => {
   // A date's policy has no invite controls of its own (#796).
   it('refuses a field the date has no column for (#796)', async () => {
     await expect(propertiesWithErrors({ allowMemberInvites: false })).resolves.toEqual(['allowMemberInvites']);
+  });
+
+  // Each column is a 32-bit Int, so a larger number answers 400 naming the
+  // field rather than failing the write as a 500 (#1444).
+  it.each([
+    'maxAttendees',
+    'maxTotalParticipants',
+    'fillerMaxPlayTime',
+    'voteThresholdValue',
+    'voteQuorumValue',
+    'votingWindowHours',
+  ])('refuses %s past the 32-bit column range (#1444)', async (field) => {
+    await expect(constraintsByProperty({ [field]: 2 ** 31 })).resolves.toEqual({ [field]: ['max'] });
+    await expect(constraintsByProperty({ [field]: 2 ** 31 - 1 })).resolves.toEqual({});
   });
 });

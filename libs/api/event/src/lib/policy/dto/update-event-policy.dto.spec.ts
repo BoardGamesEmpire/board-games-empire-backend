@@ -12,6 +12,13 @@ async function propertiesWithErrors(payload: PlainPayload): Promise<string[]> {
   return errors.map((error) => error.property);
 }
 
+async function constraintsByProperty(payload: PlainPayload): Promise<Record<string, string[]>> {
+  const dto = plainToInstance(UpdateEventPolicyDto, payload, { enableImplicitConversion: true });
+  const errors = await validate(dto, { whitelist: true, forbidNonWhitelisted: true });
+
+  return Object.fromEntries(errors.map((error) => [error.property, Object.keys(error.constraints ?? {})]));
+}
+
 describe('UpdateEventPolicyDto', () => {
   // The column can't be null, so `null` answers 400 naming the field rather
   // than reaching the write as a 500 (#796).
@@ -58,5 +65,19 @@ describe('UpdateEventPolicyDto', () => {
     await expect(
       propertiesWithErrors({ allowedPlatformTypes: null, allowedPlatformIds: null, allowedCategoryIds: null }),
     ).resolves.toEqual(['allowedCategoryIds', 'allowedPlatformTypes', 'allowedPlatformIds']);
+  });
+
+  // Each column is a 32-bit Int, so a larger number answers 400 naming the
+  // field rather than failing the write as a 500 (#1444).
+  it.each([
+    'maxAttendees',
+    'maxTotalParticipants',
+    'fillerMaxPlayTime',
+    'voteThresholdValue',
+    'voteQuorumValue',
+    'votingWindowHours',
+  ])('refuses %s past the 32-bit column range (#1444)', async (field) => {
+    await expect(constraintsByProperty({ [field]: 2 ** 31 })).resolves.toEqual({ [field]: ['max'] });
+    await expect(constraintsByProperty({ [field]: 2 ** 31 - 1 })).resolves.toEqual({});
   });
 });

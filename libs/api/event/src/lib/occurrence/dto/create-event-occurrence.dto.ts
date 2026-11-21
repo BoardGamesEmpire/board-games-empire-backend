@@ -1,7 +1,8 @@
+import { INT32_MAX } from '@bge/game-search';
 import { i18nValidationMessage } from '@bge/i18n';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsDate, IsInt, IsOptional, IsString, Min } from 'class-validator';
+import { IsDate, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 
 export class CreateEventOccurrenceDto {
   @ApiPropertyOptional({ description: 'Label for this occurrence, e.g. "Day 1" or "Saturday Evening"' })
@@ -29,6 +30,7 @@ export class CreateEventOccurrenceDto {
   @ApiPropertyOptional({ default: 0 })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(0, { message: i18nValidationMessage('validation.min') })
+  @Max(INT32_MAX, { message: i18nValidationMessage('validation.max') })
   @IsOptional()
   sortOrder?: number;
 }
