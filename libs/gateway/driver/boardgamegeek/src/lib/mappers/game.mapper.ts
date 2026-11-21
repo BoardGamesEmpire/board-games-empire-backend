@@ -416,6 +416,9 @@ export function thingToGameData(thing: BggThing, locale?: string): proto.GameDat
     baseGameExternalIds: toBaseGameExternalIds(thing),
     // BGG names no game's id at another upstream (#925).
     crossReferences: [],
+    worksWithExternalIds: [],
+    contentExternalIds: [],
+    bundleExternalIds: [],
 
     platforms: [TABLETOP_PLATFORM],
     releases: toReleases(thing),

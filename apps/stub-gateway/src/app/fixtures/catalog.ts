@@ -72,6 +72,9 @@ export const STUB_BASE_GAME: proto.GameData = {
   metadataValues: [],
   dlc: [],
   crossReferences: [],
+  worksWithExternalIds: [],
+  contentExternalIds: [],
+  bundleExternalIds: [],
 };
 
 export const STUB_EXPANSION: proto.GameData = {
@@ -100,6 +103,9 @@ export const STUB_EXPANSION: proto.GameData = {
   metadataValues: [],
   dlc: [],
   crossReferences: [],
+  worksWithExternalIds: [],
+  contentExternalIds: [],
+  bundleExternalIds: [],
 };
 
 /** Every game, in the order a search returns them. */

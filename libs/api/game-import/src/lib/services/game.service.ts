@@ -104,7 +104,7 @@ export class GameUpsertService {
               gatewayId,
               externalId: gameData.externalId,
               sourceUrl: gameData.sourceUrl,
-              baseExternalIds: gameData.baseGameExternalIds ?? [],
+              ...storedLinkIds(gameData),
             },
           },
         },
@@ -143,27 +143,34 @@ export class GameUpsertService {
   private findGameSource(gatewayId: string, externalId: string) {
     return this.db.gameSource.findUnique({
       where: { gatewayId_externalId: { gatewayId, externalId } },
-      select: { baseExternalIds: true, game: { select: { id: true, contentType: true, frozenAt: true } } },
+      select: {
+        baseExternalIds: true,
+        worksWithExternalIds: true,
+        contentExternalIds: true,
+        bundleExternalIds: true,
+        game: { select: { id: true, contentType: true, frozenAt: true } },
+      },
     });
   }
 
   /**
    * Applies the re-import update path to an already-persisted game (skipping
-   * frozen rows). Its DataGateway link takes the base game ids either way: they
-   * describe the DataGateway's data, not the game's, and the links rest on
-   * them (#971). They rarely change, so an unchanged list is not written.
+   * frozen rows). Its DataGateway link takes the base game, works-with,
+   * contents and bundle ids either way: they describe the DataGateway's data,
+   * not the game's, and the links rest on them (#971, #1392, #1394). They rarely
+   * change, so unchanged lists are not written.
    */
   private async applyExistingGameUpdate(
-    source: { baseExternalIds: string[]; game: { contentType: ContentType; frozenAt: Date | null; id: string } },
+    source: StoredLinkIds & { game: { contentType: ContentType; frozenAt: Date | null; id: string } },
     gameData: GameData,
     gatewayId: string,
   ): Promise<UpsertedGame> {
     const { game } = source;
-    const baseExternalIds = gameData.baseGameExternalIds ?? [];
-    if (!sameIds(source.baseExternalIds, baseExternalIds)) {
+    const sent = storedLinkIds(gameData);
+    if (STORED_LINK_ID_KEYS.some((key) => !sameIds(source[key], sent[key]))) {
       await this.db.gameSource.update({
         where: { gatewayId_externalId: { gatewayId, externalId: gameData.externalId } },
-        data: { baseExternalIds },
+        data: sent,
       });
     }
 
@@ -429,6 +436,26 @@ function inMarkdown(gameData: GameData, contentFormat: ContentFormat | null): Ga
 /** A content type with no stored equivalent, UNSPECIFIED included, is stored as unknown. */
 function toDbContentType(protoType: string | undefined): ContentType {
   return toStoredContentType(protoType) ?? ContentType.Unknown;
+}
+
+/** The id lists a DataGateway link stores, as the DataGateway last sent them (#971, #1392, #1394). */
+const STORED_LINK_ID_KEYS = [
+  'baseExternalIds',
+  'worksWithExternalIds',
+  'contentExternalIds',
+  'bundleExternalIds',
+] as const satisfies readonly (keyof Prisma.GameSourceUncheckedCreateInput)[];
+
+export type StoredLinkIds = Record<(typeof STORED_LINK_ID_KEYS)[number], string[]>;
+
+/** The id lists `gameData` names, each empty when the DataGateway sent none (#971, #1392, #1394). */
+function storedLinkIds(gameData: GameData): StoredLinkIds {
+  return {
+    baseExternalIds: gameData.baseGameExternalIds ?? [],
+    worksWithExternalIds: gameData.worksWithExternalIds ?? [],
+    contentExternalIds: gameData.contentExternalIds ?? [],
+    bundleExternalIds: gameData.bundleExternalIds ?? [],
+  };
 }
 
 /** True when two id lists hold the same ids in the same order: the order names the primary base game. */

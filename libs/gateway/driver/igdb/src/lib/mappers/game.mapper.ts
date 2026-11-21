@@ -591,6 +591,9 @@ export function toGameData(game: IgdbGame, locale?: string): proto.GameData {
     averageRating: game.total_rating,
     baseGameExternalIds: toBaseGameExternalIds(game),
     crossReferences: toCrossReferences(game),
+    worksWithExternalIds: [],
+    contentExternalIds: [],
+    bundleExternalIds: [],
 
     categories,
     contentType: toContentType(game.game_type),

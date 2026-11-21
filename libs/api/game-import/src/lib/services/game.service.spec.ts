@@ -6,6 +6,7 @@ import { VocabularyLinkService } from '@bge/vocabulary';
 import type { GameData } from '@boardgamesempire/proto-gateway';
 import { ContentType, PlatformType as ProtoPlatformType } from '@boardgamesempire/proto-gateway';
 import { BaseGameLinkService } from './base-game-link.service';
+import type { StoredLinkIds } from './game.service';
 import { GameUpsertService } from './game.service';
 import { PersonUpsertService } from './person.service';
 import type { PlatformGameMap } from './platform.service';
@@ -159,14 +160,22 @@ describe('GameUpsertService', () => {
     } as GameData;
   }
 
+  const NO_STORED_IDS: StoredLinkIds = {
+    baseExternalIds: [],
+    worksWithExternalIds: [],
+    contentExternalIds: [],
+    bundleExternalIds: [],
+  };
+
   function stubNewGameCreation(gameId = 'game-1'): void {
     db.gameSource.findUnique.mockResolvedValue(null);
     db.game.create.mockResolvedValue({ id: gameId } as never);
   }
 
-  function stubExistingGame(gameId = 'game-1', frozen = false, baseExternalIds: string[] = []): void {
+  function stubExistingGame(gameId = 'game-1', frozen = false, stored: Partial<StoredLinkIds> = {}): void {
     db.gameSource.findUnique.mockResolvedValue({
-      baseExternalIds,
+      ...NO_STORED_IDS,
+      ...stored,
       game: { id: gameId, frozenAt: frozen ? new Date() : null },
     } as never);
     db.game.update.mockResolvedValue({ id: gameId } as never);
@@ -392,7 +401,7 @@ describe('GameUpsertService', () => {
       // recovery re-fetch finds the winner.
       db.gameSource.findUnique
         .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce({ baseExternalIds: [], game: { id: 'game-raced', frozenAt: null } } as never);
+        .mockResolvedValueOnce({ ...NO_STORED_IDS, game: { id: 'game-raced', frozenAt: null } } as never);
       db.game.create.mockRejectedValue(uniqueViolation());
       db.game.update.mockResolvedValue({ id: 'game-raced' } as never);
       stubPlatformGameMap(['platform-tabletop', 'pg-1']);
@@ -406,7 +415,7 @@ describe('GameUpsertService', () => {
     it('recovers a frozen raced game without updating it', async () => {
       db.gameSource.findUnique
         .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce({ baseExternalIds: [], game: { id: 'game-raced', frozenAt: new Date() } } as never);
+        .mockResolvedValueOnce({ ...NO_STORED_IDS, game: { id: 'game-raced', frozenAt: new Date() } } as never);
       db.game.create.mockRejectedValue(uniqueViolation());
       stubPlatformGameMap(['platform-tabletop', 'pg-1']);
 
@@ -584,12 +593,12 @@ describe('GameUpsertService', () => {
 
       expect(db.gameSource.update).toHaveBeenCalledWith({
         where: { gatewayId_externalId: { gatewayId: GATEWAY_ID, externalId: '926' } },
-        data: { baseExternalIds: ['13'] },
+        data: { ...NO_STORED_IDS, baseExternalIds: ['13'] },
       });
     });
 
     it('leaves an unchanged list of base game ids unwritten on a re-import (#971)', async () => {
-      stubExistingGame('game-expansion', false, ['13']);
+      stubExistingGame('game-expansion', false, { baseExternalIds: ['13'] });
 
       await service.upsert(expansionData(), GATEWAY_ID, ContentFormat.PlainText);
 
@@ -598,7 +607,7 @@ describe('GameUpsertService', () => {
     });
 
     it('writes base game ids whose order changed, since the first is the primary base game (#971)', async () => {
-      stubExistingGame('game-expansion', false, ['143065', '13']);
+      stubExistingGame('game-expansion', false, { baseExternalIds: ['143065', '13'] });
 
       await service.upsert(
         expansionData({ baseGameExternalIds: ['13', '143065'] }),
@@ -607,7 +616,116 @@ describe('GameUpsertService', () => {
       );
 
       expect(db.gameSource.update).toHaveBeenCalledWith(
-        expect.objectContaining({ data: { baseExternalIds: ['13', '143065'] } }),
+        expect.objectContaining({ data: { ...NO_STORED_IDS, baseExternalIds: ['13', '143065'] } }),
+      );
+    });
+
+    it('stores the works-with, contents and bundle ids on a new DataGateway link (#1392, #1394)', async () => {
+      stubNewGameCreation('game-linked');
+
+      await service.upsert(
+        bggGameData({ worksWithExternalIds: ['162886'], contentExternalIds: ['13'], bundleExternalIds: ['182880'] }),
+        GATEWAY_ID,
+        ContentFormat.PlainText,
+      );
+
+      expect(db.game.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            gameSources: {
+              create: expect.objectContaining({
+                worksWithExternalIds: ['162886'],
+                contentExternalIds: ['13'],
+                bundleExternalIds: ['182880'],
+              }),
+            },
+          }),
+        }),
+      );
+    });
+
+    // A works-with, contents or bundle id names a game the catalog may not
+    // hold yet. Import stores the id and nothing more: the named game comes in
+    // only when someone imports it, and the link is worked out at read time
+    // (#1392, #1394).
+    it('creates only the imported game, and no game or DataGateway link for the ids it names (#1392, #1394)', async () => {
+      stubNewGameCreation('game-linked');
+      const gameData = bggGameData({
+        worksWithExternalIds: ['162886'],
+        contentExternalIds: ['278'],
+        bundleExternalIds: ['182880'],
+      });
+
+      await service.upsert(gameData, GATEWAY_ID, ContentFormat.PlainText);
+
+      expect(db.game.create).toHaveBeenCalledTimes(1);
+      expect(db.game.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            gameSources: {
+              create: expect.objectContaining({ gatewayId: GATEWAY_ID, externalId: gameData.externalId }),
+            },
+          }),
+        }),
+      );
+      for (const write of [
+        db.game.createMany,
+        db.game.createManyAndReturn,
+        db.game.upsert,
+        db.gameSource.create,
+        db.gameSource.createMany,
+        db.gameSource.createManyAndReturn,
+        db.gameSource.upsert,
+        db.gameSource.update,
+        db.gameSource.updateMany,
+      ]) {
+        expect(write).not.toHaveBeenCalled();
+      }
+
+      // Nor are the named ids handed to the base game links as base games.
+      expect(baseGameLinks.link).toHaveBeenCalledWith(expect.objectContaining({ baseExternalIds: [] }));
+    });
+
+    it('updates the stored ids on a re-import when any list changed (#1392, #1394)', async () => {
+      stubExistingGame('game-linked');
+
+      await service.upsert(bggGameData({ worksWithExternalIds: ['162886'] }), GATEWAY_ID, ContentFormat.PlainText);
+
+      expect(db.gameSource.update).toHaveBeenCalledWith({
+        where: { gatewayId_externalId: { gatewayId: GATEWAY_ID, externalId: bggGameData().externalId } },
+        data: {
+          baseExternalIds: [],
+          worksWithExternalIds: ['162886'],
+          contentExternalIds: [],
+          bundleExternalIds: [],
+        },
+      });
+    });
+
+    it('writes nothing to the DataGateway link when no list changed (#1392, #1394)', async () => {
+      stubExistingGame('game-linked', false, {
+        worksWithExternalIds: ['162886'],
+        contentExternalIds: ['13'],
+        bundleExternalIds: ['182880'],
+      });
+
+      await service.upsert(
+        bggGameData({ worksWithExternalIds: ['162886'], contentExternalIds: ['13'], bundleExternalIds: ['182880'] }),
+        GATEWAY_ID,
+        ContentFormat.PlainText,
+      );
+
+      expect(db.gameSource.update).not.toHaveBeenCalled();
+    });
+
+    it('stores the ids for a frozen game too (#1392, #1394)', async () => {
+      stubExistingGame('game-frozen', true);
+
+      await service.upsert(bggGameData({ contentExternalIds: ['13'] }), GATEWAY_ID, ContentFormat.PlainText);
+
+      expect(db.game.update).not.toHaveBeenCalled();
+      expect(db.gameSource.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ contentExternalIds: ['13'] }) }),
       );
     });
 
@@ -617,19 +735,23 @@ describe('GameUpsertService', () => {
       await service.upsert(expansionData(), GATEWAY_ID, ContentFormat.PlainText);
 
       expect(db.game.update).not.toHaveBeenCalled();
-      expect(db.gameSource.update).toHaveBeenCalledWith(expect.objectContaining({ data: { baseExternalIds: ['13'] } }));
+      expect(db.gameSource.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { ...NO_STORED_IDS, baseExternalIds: ['13'] } }),
+      );
       expect(baseGameLinks.link).toHaveBeenCalledWith(expect.objectContaining({ gameId: 'game-frozen' }));
     });
 
     it('stores the base game ids on the DataGateway link that won a concurrent import', async () => {
       db.gameSource.findUnique
         .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce({ baseExternalIds: [], game: { id: 'game-raced', frozenAt: null } } as never);
+        .mockResolvedValueOnce({ ...NO_STORED_IDS, game: { id: 'game-raced', frozenAt: null } } as never);
       db.game.create.mockRejectedValue(uniqueViolation());
 
       await service.upsert(expansionData(), GATEWAY_ID, ContentFormat.PlainText);
 
-      expect(db.gameSource.update).toHaveBeenCalledWith(expect.objectContaining({ data: { baseExternalIds: ['13'] } }));
+      expect(db.gameSource.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { ...NO_STORED_IDS, baseExternalIds: ['13'] } }),
+      );
     });
 
     it('links the game once its DataGateway link holds the base game ids', async () => {
