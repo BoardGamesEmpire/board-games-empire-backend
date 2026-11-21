@@ -57,9 +57,10 @@ describe('the BoardGameGeek gateway over gRPC', () => {
     });
 
     // Coverage's lists are sets: their order follows the thing types it asks for, and means nothing.
+    // A board game that lists its contents is a Bundle, so BoardGameGeek covers Bundle too (#1394).
     expect(new Set(reply.coverage?.platformTypes)).toEqual(new Set(['PLATFORM_TYPE_TABLETOP']));
     expect(new Set(reply.coverage?.contentTypes)).toEqual(
-      new Set(['CONTENT_TYPE_BASE_GAME', 'CONTENT_TYPE_EXPANSION']),
+      new Set(['CONTENT_TYPE_BASE_GAME', 'CONTENT_TYPE_BUNDLE', 'CONTENT_TYPE_EXPANSION']),
     );
   });
 
