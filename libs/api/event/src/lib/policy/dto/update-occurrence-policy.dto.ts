@@ -6,10 +6,11 @@ import {
   VoteQuorumType,
   VoteThresholdType,
 } from '@bge/database';
+import { INT32_MAX } from '@bge/game-search';
 import { i18nValidationMessage } from '@bge/i18n';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsArray, IsBoolean, IsEnum, IsInt, IsOptional, IsString, Min, ValidateIf } from 'class-validator';
+import { IsArray, IsBoolean, IsEnum, IsInt, IsOptional, IsString, Max, Min, ValidateIf } from 'class-validator';
 import { MAX_PERCENT, MIN_SUPERMAJORITY_PERCENT } from '../effective-policy';
 
 const NULL_MEANS_EVENTS = "`null` means the event's.";
@@ -101,15 +102,17 @@ export class UpdateOccurrencePolicyDto {
 
   // --- Capacity ---
 
-  @ApiPropertyOptional({ nullable: true, description: NULL_MEANS_EVENTS })
+  @ApiPropertyOptional({ nullable: true, description: NULL_MEANS_EVENTS, type: 'integer', format: 'int32' })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })
+  @Max(INT32_MAX, { message: i18nValidationMessage('validation.max') })
   @IsOptional()
   maxAttendees?: number | null;
 
-  @ApiPropertyOptional({ nullable: true, description: NULL_MEANS_EVENTS })
+  @ApiPropertyOptional({ nullable: true, description: NULL_MEANS_EVENTS, type: 'integer', format: 'int32' })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })
+  @Max(INT32_MAX, { message: i18nValidationMessage('validation.max') })
   @IsOptional()
   maxTotalParticipants?: number | null;
 
@@ -156,9 +159,15 @@ export class UpdateOccurrencePolicyDto {
   @IsOptional()
   restrictToAttendeePool?: boolean | null;
 
-  @ApiPropertyOptional({ nullable: true, description: `Minutes. ${NULL_MEANS_EVENTS}` })
+  @ApiPropertyOptional({
+    nullable: true,
+    description: `Minutes. ${NULL_MEANS_EVENTS}`,
+    type: 'integer',
+    format: 'int32',
+  })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })
+  @Max(INT32_MAX, { message: i18nValidationMessage('validation.max') })
   @IsOptional()
   fillerMaxPlayTime?: number | null;
 
@@ -175,9 +184,12 @@ export class UpdateOccurrencePolicyDto {
       `Supermajority (${MIN_SUPERMAJORITY_PERCENT} to ${MAX_PERCENT}) and FixedCount (e.g. 3) need a value, the ` +
       "date's or the event's. " +
       NULL_MEANS_EVENTS,
+    type: 'integer',
+    format: 'int32',
   })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })
+  @Max(INT32_MAX, { message: i18nValidationMessage('validation.max') })
   @IsOptional()
   voteThresholdValue?: number | null;
 
@@ -191,9 +203,12 @@ export class UpdateOccurrencePolicyDto {
     description:
       "PercentOfAttendees and FixedCount quorum types need a value, the date's or the event's. A " +
       `PercentOfAttendees percentage is at most 100. ${NULL_MEANS_EVENTS}`,
+    type: 'integer',
+    format: 'int32',
   })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })
+  @Max(INT32_MAX, { message: i18nValidationMessage('validation.max') })
   @IsOptional()
   voteQuorumValue?: number | null;
 
@@ -210,9 +225,12 @@ export class UpdateOccurrencePolicyDto {
   @ApiPropertyOptional({
     nullable: true,
     description: `Hours a nomination for this date stays open for votes. ${NULL_MEANS_EVENTS}`,
+    type: 'integer',
+    format: 'int32',
   })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })
+  @Max(INT32_MAX, { message: i18nValidationMessage('validation.max') })
   @IsOptional()
   votingWindowHours?: number | null;
 }

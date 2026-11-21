@@ -1,7 +1,8 @@
 import { ScheduledGameRole } from '@bge/database';
+import { INT32_MAX } from '@bge/game-search';
 import { i18nValidationMessage } from '@bge/i18n';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, IsInt, IsOptional, IsString, Min } from 'class-validator';
+import { IsEnum, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 
 export class DirectAddGameDto {
   @ApiProperty({ description: 'The PlatformGame to add to the lineup (specific game + platform combination)' })
@@ -32,15 +33,21 @@ export class DirectAddGameDto {
   @IsOptional()
   notes?: string;
 
-  @ApiPropertyOptional({ description: 'For Filler role only — max play time in minutes' })
+  @ApiPropertyOptional({
+    description: 'For Filler role only — max play time in minutes',
+    type: 'integer',
+    format: 'int32',
+  })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })
+  @Max(INT32_MAX, { message: i18nValidationMessage('validation.max') })
   @IsOptional()
   maxPlayTime?: number;
 
-  @ApiPropertyOptional({ default: 0 })
+  @ApiPropertyOptional({ default: 0, type: 'integer', format: 'int32' })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(0, { message: i18nValidationMessage('validation.min') })
+  @Max(INT32_MAX, { message: i18nValidationMessage('validation.max') })
   @IsOptional()
   sortOrder?: number;
 }

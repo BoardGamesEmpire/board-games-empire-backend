@@ -7,9 +7,10 @@ import {
   VoteQuorumType,
   VoteThresholdType,
 } from '@bge/database';
+import { INT32_MAX } from '@bge/game-search';
 import { i18nValidationMessage } from '@bge/i18n';
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsArray, IsBoolean, IsEnum, IsInt, IsOptional, IsString, Min, ValidateIf } from 'class-validator';
+import { IsArray, IsBoolean, IsEnum, IsInt, IsOptional, IsString, Max, Min, ValidateIf } from 'class-validator';
 import { MAX_PERCENT, MIN_SUPERMAJORITY_PERCENT } from '../policy/effective-policy';
 
 /**
@@ -34,9 +35,10 @@ export class CreateEventPolicyDto {
   @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
   allowGuestInvites?: boolean;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ type: 'integer', format: 'int32' })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })
+  @Max(INT32_MAX, { message: i18nValidationMessage('validation.max') })
   @IsOptional()
   maxAttendees?: number;
 
@@ -52,9 +54,10 @@ export class CreateEventPolicyDto {
   @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
   allowSpectators?: boolean;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ type: 'integer', format: 'int32' })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })
+  @Max(INT32_MAX, { message: i18nValidationMessage('validation.max') })
   @IsOptional()
   maxTotalParticipants?: number;
 
@@ -115,9 +118,10 @@ export class CreateEventPolicyDto {
   @IsEnum(OccurrenceOverrideScope, { message: i18nValidationMessage('validation.isEnum') })
   occurrenceOverrideScope?: OccurrenceOverrideScope;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ type: 'integer', format: 'int32' })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })
+  @Max(INT32_MAX, { message: i18nValidationMessage('validation.max') })
   @IsOptional()
   fillerMaxPlayTime?: number;
 
@@ -133,9 +137,12 @@ export class CreateEventPolicyDto {
   @ApiPropertyOptional({
     nullable: true,
     description: `Required for Supermajority (${MIN_SUPERMAJORITY_PERCENT} to ${MAX_PERCENT}) and FixedCount (e.g. 3).`,
+    type: 'integer',
+    format: 'int32',
   })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })
+  @Max(INT32_MAX, { message: i18nValidationMessage('validation.max') })
   @IsOptional()
   voteThresholdValue?: number | null;
 
@@ -147,9 +154,12 @@ export class CreateEventPolicyDto {
   @ApiPropertyOptional({
     nullable: true,
     description: 'Required for PercentOfAttendees (1 to 100) and FixedCount quorum types.',
+    type: 'integer',
+    format: 'int32',
   })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })
+  @Max(INT32_MAX, { message: i18nValidationMessage('validation.max') })
   @IsOptional()
   voteQuorumValue?: number | null;
 
@@ -163,9 +173,14 @@ export class CreateEventPolicyDto {
   @IsEnum(InterestedWeight, { message: i18nValidationMessage('validation.isEnum') })
   interestedWeight?: InterestedWeight;
 
-  @ApiPropertyOptional({ description: 'Hours a nomination stays open for votes. Null = host closes manually.' })
+  @ApiPropertyOptional({
+    description: 'Hours a nomination stays open for votes. Null = host closes manually.',
+    type: 'integer',
+    format: 'int32',
+  })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })
+  @Max(INT32_MAX, { message: i18nValidationMessage('validation.max') })
   @IsOptional()
   votingWindowHours?: number;
 }
