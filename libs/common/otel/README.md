@@ -65,7 +65,8 @@ All standard OTel vars. The two `*_EXPORTER` vars are forced to `none` if unset 
 | `OTEL_LOGS_EXPORTER`                  | `none` (forced) | Logs flow via `pino-opentelemetry-transport`; SDK-side export is suppressed to prevent double-ship.       |
 | `OTEL_RESOURCE_ATTRIBUTES`            | unset           | Additional resource labels.                                                                               |
 | `OTEL_LOG_LEVEL`                      | unset           | SDK-internal diagnostic level. Parsed (`none` / `error` / `warn` / `info` / `debug` / `verbose` / `all`). |
-| `OTEL_METRIC_EXPORT_INTERVAL`         | `60000` ms      | Metric collection cycle.                                                                                  |
+| `OTEL_METRIC_EXPORT_INTERVAL`         | `60000` ms      | Metric export interval, and how often `BullMQQueueDepthRecorder` polls queue depth. 1 to 2147483647.      |
+| `OTEL_METRIC_EXPORT_TIMEOUT`          | `30000` ms      | Metric export timeout. 1 to 2147483647, and limited to the export interval.                               |
 | `OTEL_BSP_*`                          | SDK defaults    | Batch span processor tuning: schedule delay, export timeout, queue size, batch size.                      |
 
 ### Activation matrix
