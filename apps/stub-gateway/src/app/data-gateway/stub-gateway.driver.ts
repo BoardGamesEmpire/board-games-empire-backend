@@ -1,6 +1,6 @@
 import { BGE_VERSION } from '@bge/version';
 import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
-import { fetchEachGame } from '@boardgamesempire/gateway-driver-contract';
+import { fetchEachGame, unsupportedOperation } from '@boardgamesempire/gateway-driver-contract';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { Injectable } from '@nestjs/common';
 import * as crypto from 'node:crypto';
@@ -209,6 +209,14 @@ export class StubGatewayDriver implements DataGatewayDriver {
     const expansions = STUB_GAMES.filter((game) => game.baseGameExternalIds.includes(request.baseExternalId));
 
     return this.stream(request.correlationId, expansions);
+  }
+
+  /**
+   * It draws from no real upstream, so it has no upstream accounts: describe
+   * doesn't declare the lookup, and the server never asks (#1226).
+   */
+  findUpstreamAccount(_request: proto.FindUpstreamAccountRequest): Observable<proto.FindUpstreamAccountResponse> {
+    return unsupportedOperation('FindUpstreamAccount');
   }
 
   private stream(correlationId: string, games: readonly proto.GameData[]): Observable<proto.GatewaySearchResult> {

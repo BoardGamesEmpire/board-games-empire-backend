@@ -118,6 +118,15 @@ export class PluginGatewayController implements proto.GatewayServiceController {
     return this.answer(metadata, DataGatewayCapability.ListMechanics, (driver) => driver.listMechanics(request));
   }
 
+  findUpstreamAccount(
+    request: proto.FindUpstreamAccountRequest,
+    metadata?: Metadata,
+  ): Observable<proto.FindUpstreamAccountResponse> {
+    return this.answer(metadata, DataGatewayCapability.FindUpstreamAccount, (driver) =>
+      driver.findUpstreamAccount(request),
+    );
+  }
+
   /**
    * The answer of `call`, made on the driver of the plugin DataGateway the
    * metadata names, once the gateway registry routes it for `capability`.

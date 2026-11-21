@@ -22,11 +22,23 @@ export interface DataGatewayDriverContractContext {
   /** An externalId the driver can resolve via fetchGame. */
   knownExternalId: string;
 
+  /**
+   * A username findUpstreamAccount finds. Required when the run names
+   * FindUpstreamAccount (#1226).
+   */
+  knownUsername?: string;
+
   /** A query expected to stream at least one RESULT frame. */
   searchQuery: string;
 
   /** An externalId the driver is guaranteed NOT to resolve. */
   unknownExternalId: string;
+
+  /**
+   * A username findUpstreamAccount is guaranteed NOT to find. Required when
+   * the run names FindUpstreamAccount (#1226).
+   */
+  unknownUsername?: string;
 
   /**
    * The upstream the driver draws from. Its `describe` must declare exactly
@@ -364,6 +376,52 @@ export function runDataGatewayDriverContract(description: string, setup: Setup, 
 
           const error = await lastValueFrom(
             ctx.driver.fetchGames({ correlationId: 'contract-fetch-games-over', externalIds }).pipe(toArray()),
+          ).catch((err: unknown) => err);
+
+          expect(error).toMatchObject({ code: 3 });
+        },
+      );
+    });
+
+    describe('when it declares find upstream account', () => {
+      itWhenDeclared(
+        proto.Capability.CAPABILITY_FIND_UPSTREAM_ACCOUNT,
+        'findUpstreamAccount finds a known username, with its external id',
+        async () => {
+          expect(ctx.knownUsername).toBeDefined();
+
+          const response = await firstValueFrom(
+            ctx.driver.findUpstreamAccount({ correlationId: 'contract-find-account', username: ctx.knownUsername }),
+          );
+
+          expect(response.status).toBe(proto.ResultStatus.RESULT_STATUS_RESULT);
+          expect(response.account?.externalId.trim()).toBeTruthy();
+        },
+      );
+
+      // A username nobody has is an answer about the upstream account, not a
+      // failure: an errored stream would count toward auto-disable (#1226).
+      itWhenDeclared(
+        proto.Capability.CAPABILITY_FIND_UPSTREAM_ACCOUNT,
+        'findUpstreamAccount answers an unknown username NOT_FOUND, never an errored stream',
+        async () => {
+          expect(ctx.unknownUsername).toBeDefined();
+
+          const response = await firstValueFrom(
+            ctx.driver.findUpstreamAccount({ correlationId: 'contract-find-miss', username: ctx.unknownUsername }),
+          );
+
+          expect(response.status).toBe(proto.ResultStatus.RESULT_STATUS_NOT_FOUND);
+          expect(response.account).toBeUndefined();
+        },
+      );
+
+      itWhenDeclared(
+        proto.Capability.CAPABILITY_FIND_UPSTREAM_ACCOUNT,
+        'findUpstreamAccount refuses a request naming neither a username nor an external id with INVALID_ARGUMENT',
+        async () => {
+          const error = await firstValueFrom(
+            ctx.driver.findUpstreamAccount({ correlationId: 'contract-find-no-key' }),
           ).catch((err: unknown) => err);
 
           expect(error).toMatchObject({ code: 3 });

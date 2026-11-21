@@ -19,6 +19,7 @@ function driverShape(): Record<string, unknown> {
     listPlatforms: () => EMPTY,
     listCategories: () => EMPTY,
     listMechanics: () => EMPTY,
+    findUpstreamAccount: () => EMPTY,
     dispose: () => undefined,
   };
 }
@@ -41,6 +42,7 @@ describe('data-gateway driver factory contract', () => {
       'listPlatforms',
       'listCategories',
       'listMechanics',
+      'findUpstreamAccount',
     ]);
   });
 

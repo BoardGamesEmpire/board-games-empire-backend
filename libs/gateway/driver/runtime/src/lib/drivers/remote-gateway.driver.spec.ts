@@ -16,6 +16,7 @@ const CALLS = [
   'listPlatforms',
   'listCategories',
   'listMechanics',
+  'findUpstreamAccount',
 ] as const satisfies readonly (keyof GatewayServiceClient)[];
 
 describe('RemoteGatewayDriver', () => {

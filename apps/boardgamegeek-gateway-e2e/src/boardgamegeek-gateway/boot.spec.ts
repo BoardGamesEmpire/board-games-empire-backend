@@ -45,6 +45,7 @@ describe('the BoardGameGeek gateway over gRPC', () => {
         'CAPABILITY_LIST_PLATFORMS',
         'CAPABILITY_LIST_CATEGORIES',
         'CAPABILITY_LIST_MECHANICS',
+        'CAPABILITY_FIND_UPSTREAM_ACCOUNT',
       ],
       filterableAxes: ['SEARCH_FILTER_AXIS_CONTENT_TYPE', 'SEARCH_FILTER_AXIS_PUBLISH_YEAR'],
       languageCodeFormats: {

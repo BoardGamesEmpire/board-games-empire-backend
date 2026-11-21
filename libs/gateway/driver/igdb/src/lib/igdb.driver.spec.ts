@@ -253,6 +253,23 @@ describe('IgdbDriver', () => {
     });
   });
 
+  // IGDB has no user accounts; describe doesn't declare the lookup, so the
+  // server never asks (#1226).
+  describe('findUpstreamAccount', () => {
+    it('answers UNIMPLEMENTED without asking IGDB', async () => {
+      await expect(
+        firstValueFrom(driver.findUpstreamAccount({ correlationId: 'corr-find-account', username: 'ada' })),
+      ).rejects.toMatchObject({ code: 12, message: 'FindUpstreamAccount is not served by this DataGateway' });
+      expect(igdbService.call).not.toHaveBeenCalled();
+    });
+
+    it('does not declare the lookup', async () => {
+      const { capabilities } = await firstValueFrom(driver.describe({}));
+
+      expect(capabilities).not.toContain(proto.Capability.CAPABILITY_FIND_UPSTREAM_ACCOUNT);
+    });
+  });
+
   // Not served until #928 sizes its batch limit; describe doesn't declare it,
   // so the server never asks (#925).
   describe('fetchGames', () => {

@@ -1,5 +1,5 @@
 ---
-updated: 2026-11-19
+updated: 2026-11-20
 ---
 
 # Privacy policy
@@ -19,7 +19,7 @@ Board Games Empire is software that anyone can run on a server of their own. The
 - **Your sessions:** when you signed in, the browser or app you used, and the network address you connected from.
 - **Your profile and settings:** your display name and picture. What you add to your profile, such as an about-me text, your pronouns, where you are, how you like to play, and any dietary or accessibility needs. Your settings, such as whether people can send you friend requests, and the plugins you have switched on.
 - **Your games:** your collection, with your ratings, comments and favorites; your lists and your wishlist; and the games you share with other people. Games you remove from your collection stay listed as previously owned. Games you import or add to the server's game catalog are recorded as added by you.
-- **Accounts on other services:** if you link your Steam account, the server keeps your SteamID and the address of your Steam profile. Unlinking deletes them.
+- **Accounts on other services:** if you link your Steam account, the server keeps your SteamID and the address of your Steam profile, and if you link your BoardGameGeek account, your BoardGameGeek username and the address of your profile there. Unlinking deletes them.
 - **Households, events and friends:** the households you belong to and your role in each. The events you create or are invited to, with your RSVPs, availability, the games you offer, nominations and votes. The invites you send and receive. Your friendships, friend requests and blocks.
 - **People without an account:** when someone invites a person to a household by email address, or adds someone without an account to an event, the server keeps the name and email address they give.
 - **Bans:** if you are banned from the server, any reason given and when the ban ends. If a household bans you, the ban and any reason given.
@@ -54,6 +54,7 @@ Some features send data to other services. This happens only in these cases:
 - **You set up a webhook.** The server sends news of changes to the web address you gave, only about things you can still see, and only if the server allows that address.
 - **You sign in through a sign-in provider.** The provider the operator set up learns that you signed in to this server. It sends the server your name, email address and picture.
 - **You link your Steam account.** The server sends you to Steam to sign in. Steam tells the server your SteamID, and the server asks Steam to confirm the answer is genuine.
+- **You link your BoardGameGeek account.** The server asks BoardGameGeek, through the DataGateway the server admins added, whether the username exists.
 - **A plugin sends data out.** Plugins the server admins install can send data to other services. They do so only with the permissions consented to them, and only to addresses the server allows.
 - **The operator sends out logs and monitoring data.** The operator can have the server send its logs and monitoring data to a monitoring service they choose.
 

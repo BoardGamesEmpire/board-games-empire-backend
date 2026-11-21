@@ -1,6 +1,7 @@
 import type { SystemActorScope } from '@bge/actor-context';
 import { AuditContextModule } from '@bge/actor-context';
 import { createTestingModuleWithDb } from '@bge/testing';
+import * as proto from '@boardgamesempire/proto-gateway';
 import type { ClientGrpc } from '@nestjs/microservices';
 import { ClientGrpcProxy } from '@nestjs/microservices';
 import { ClsModule } from 'nestjs-cls';
@@ -28,6 +29,28 @@ describe('GatewayCoordinatorClientService', () => {
 
   it('should be defined', () => {
     expect(service).toBeTruthy();
+  });
+});
+
+describe('GatewayCoordinatorClientService.findUpstreamAccount', () => {
+  it('sends the lookup to the coordinator and answers what it answers (#1226)', async () => {
+    const answer = {
+      correlationId: 'c',
+      gatewayId: 'gw-1',
+      status: proto.ResultStatus.RESULT_STATUS_NOT_FOUND,
+    } satisfies proto.CoordinatorFindUpstreamAccountResponse;
+    const stub = { findUpstreamAccount: jest.fn().mockReturnValue(of(answer)) };
+    const client = { getService: jest.fn().mockReturnValue(stub) } as unknown as ClientGrpc;
+    const service = new GatewayCoordinatorClientService(client, {} as SystemActorScope);
+    const request = { correlationId: 'c', gatewayId: 'gw-1', username: 'Ada' };
+
+    service.onModuleInit();
+    try {
+      await expect(firstValueFrom(service.findUpstreamAccount(request))).resolves.toEqual(answer);
+      expect(stub.findUpstreamAccount).toHaveBeenCalledWith(request);
+    } finally {
+      service.onModuleDestroy();
+    }
   });
 });
 

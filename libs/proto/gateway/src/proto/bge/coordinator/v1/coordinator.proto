@@ -39,6 +39,12 @@ service CoordinatorService {
   // which checks first that the actor may read the game (#1067).
   rpc FetchExpansions(CoordinatorFetchExpansionsRequest) returns (stream SearchGameResult);
 
+  // Asks one DataGateway for a user's upstream account, by username or by
+  // external ID, as live traffic: the user is waiting to link it (#1226). A
+  // DataGateway that can't be reached, or may not serve the lookup, answers
+  // ERROR with the reason in its message.
+  rpc FindUpstreamAccount(CoordinatorFindUpstreamAccountRequest) returns (CoordinatorFindUpstreamAccountResponse);
+
   // Enqueues an import flow for a base game and optional expansions.
   // Returns immediately with job IDs — actual gateway fetches and DB
   // upserts happen asynchronously in worker processes (gateway-worker
@@ -164,6 +170,34 @@ message CoordinatorFetchExpansionsRequest {
   string gateway_id = 4;
   // The base game's external ID at that DataGateway.
   string base_external_id = 5;
+}
+
+message CoordinatorFindUpstreamAccountRequest {
+  string correlation_id = 1;
+
+  // The DataGateway to ask.
+  string gateway_id = 2;
+
+  // The key the upstream account is looked up by, as in
+  // bge.gateway.v1.FindUpstreamAccountRequest.
+  oneof key {
+    string username = 3;
+    string external_id = 4;
+  }
+}
+
+// The DataGateway's answer, read as bge.gateway.v1.FindUpstreamAccountResponse
+// is, with the DataGateway that gave it (#1226).
+message CoordinatorFindUpstreamAccountResponse {
+  string correlation_id = 1;
+  string gateway_id = 2;
+  bge.gateway.v1.ResultStatus status = 3;
+  optional bge.gateway.v1.UpstreamAccountData account = 4;
+  optional string message = 5;
+
+  // Set with RATE_LIMITED: the DataGateway may be asked again after this many
+  // milliseconds.
+  optional int32 retry_after_ms = 6;
 }
 
 message StartGameImportRequest {

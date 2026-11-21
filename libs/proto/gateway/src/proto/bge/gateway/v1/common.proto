@@ -30,6 +30,11 @@ enum ResultStatus {
   // filter that DataGateway doesn't declare and the search keeps no games
   // with an unknown value (#869).
   RESULT_STATUS_UNFILTERABLE = 6;
+
+  // The upstream has nothing by the key asked for: a definite answer, never
+  // a failure. Only FindUpstreamAccount answers it (#1226); a failed upstream
+  // call answers ERROR instead.
+  RESULT_STATUS_NOT_FOUND = 7;
 }
 
 // Whether a call to a DataGateway is live or background, so that it can keep
@@ -66,6 +71,19 @@ message CrossReference {
   // as a Steam app id. It isn't an external ID: that is the id at the
   // DataGateway itself.
   string id = 2;
+}
+
+// A user's own account at an upstream, as the DataGateway found it (#1226).
+message UpstreamAccountData {
+  // The account's id at the upstream, exactly as the upstream writes it.
+  // BoardGameGeek's is the username, in the capitalisation it keeps.
+  string external_id = 1;
+
+  // The name the upstream shows for the account.
+  optional string display_name = 2;
+
+  // The address of the account's public profile at the upstream.
+  optional string profile_url = 3;
 }
 
 // Broad classification of a platform — used by clients to render

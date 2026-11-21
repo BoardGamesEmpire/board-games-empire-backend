@@ -49,6 +49,11 @@ const RPCS: ReadonlyArray<[Rpc, object, object[]]> = [
   ['listPlatforms', { correlationId: 'c' }, [{ correlationId: 'c', platforms: [] }]],
   ['listCategories', { correlationId: 'c' }, [{ correlationId: 'c', categories: [] }]],
   ['listMechanics', { correlationId: 'c' }, [{ correlationId: 'c', mechanics: [] }]],
+  [
+    'findUpstreamAccount',
+    { correlationId: 'c', username: 'Ada' },
+    [{ correlationId: 'c', status: proto.ResultStatus.RESULT_STATUS_RESULT, account: { externalId: 'Ada' } }],
+  ],
 ];
 
 /**
@@ -77,6 +82,7 @@ describe('DataGatewayController', () => {
       listPlatforms: jest.fn(),
       listCategories: jest.fn(),
       listMechanics: jest.fn(),
+      findUpstreamAccount: jest.fn(),
       dispose: jest.fn(),
     };
 

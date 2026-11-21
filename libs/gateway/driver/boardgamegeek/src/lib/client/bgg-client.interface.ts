@@ -1,5 +1,5 @@
 import type { Observable } from 'rxjs';
-import type { BggSearchResult, BggThing } from '../types';
+import type { BggSearchResult, BggThing, BggUser } from '../types';
 
 /**
  * Parameters for the BGG `/thing` endpoint.
@@ -31,6 +31,14 @@ export interface BggSearchQueryParams {
 }
 
 /**
+ * Parameters for the BGG `/user` endpoint: `name` is the username, which BGG
+ * matches without regard to capitalisation (#1226).
+ */
+export interface BggUserQueryParams {
+  name: string;
+}
+
+/**
  * The BGG queries the driver makes. `createBggClient` answers them over the
  * fetch the driver is handed, and tests stand in for it. A query's signal
  * aborts the call (#1082).
@@ -42,6 +50,11 @@ export interface BggClientLike {
 
   thing: {
     query(params: BggThingQueryParams, signal?: AbortSignal): Promise<BggThing[]>;
+  };
+
+  user: {
+    /** The user BGG has by that name, or undefined when it has none (#1226). */
+    query(params: BggUserQueryParams, signal?: AbortSignal): Promise<BggUser | undefined>;
   };
 }
 

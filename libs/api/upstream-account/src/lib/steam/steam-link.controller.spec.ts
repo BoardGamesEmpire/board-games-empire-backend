@@ -1,7 +1,7 @@
 import type { Actor } from '@bge/actor-context';
 import { AuditContextService } from '@bge/actor-context';
 import { AuthService } from '@bge/auth';
-import { Action, ResourceType, Upstream } from '@bge/database';
+import { Action, ResourceType } from '@bge/database';
 import { I18nExceptionFilter, LocaleResolutionService } from '@bge/i18n';
 import type { AppAbility } from '@bge/permissions';
 import { CHECK_POLICIES_KEY, PoliciesGuard } from '@bge/permissions';
@@ -157,7 +157,7 @@ describe('SteamLinkController (#935)', () => {
           {
             provide: UpstreamAccountService,
             useValue: {
-              linkableUpstreams: async () => [Upstream.Steam],
+              linkDataGateway: async () => ({ id: 'dg-steam' }),
               assertNotLinked: async () => undefined,
               privacyPolicy: async () => policy,
               create,

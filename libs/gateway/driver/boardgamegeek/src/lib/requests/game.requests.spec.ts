@@ -433,7 +433,7 @@ function buildMockClient(options?: {
   search.mockResolvedValue(options?.searchResults ?? []);
 
   return {
-    client: { thing: { query: thing }, search: { query: search } },
+    client: { thing: { query: thing }, search: { query: search }, user: { query: jest.fn() } },
     thing,
     search,
   };

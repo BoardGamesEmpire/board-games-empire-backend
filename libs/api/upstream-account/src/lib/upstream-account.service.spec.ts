@@ -1,7 +1,8 @@
 import type { UpstreamAccount } from '@bge/database';
-import { Prisma, ResourceType, Upstream } from '@bge/database';
+import { DataGatewayCapability, Prisma, ResourceType, Upstream } from '@bge/database';
 import { uniqueViolation, uniqueViolationWithoutMeta } from '@bge/database/testing';
-import { CodedHttpException } from '@bge/i18n';
+import { PLUGIN_SERVED_WHERE } from '@bge/gateway-registry';
+import { CodedHttpException, t } from '@bge/i18n';
 import type { PrivacyPolicyDto } from '@bge/system-settings';
 import { PrivacyPolicyService } from '@bge/system-settings';
 import type { MockDatabaseService } from '@bge/testing';
@@ -105,41 +106,119 @@ describe('UpstreamAccountService (#935)', () => {
     service = ctx.module.get(UpstreamAccountService);
   });
 
+  /**
+   * The DataGateways a link can go through, as both reads ask for them:
+   * enabled, undeleted, and, for a plugin DataGateway, with a plugin the
+   * server serves, as routing has it (#1083); BoardGameGeek's only when it
+   * serves the lookup a link by username makes and an admin hasn't switched
+   * it off (#1226); Steam's whatever it serves, since Steam sign-in asks it
+   * nothing (#935).
+   */
+  const USABLE_FOR_BOARDGAMEGEEK = {
+    enabled: true,
+    deletedAt: null,
+    upstream: Upstream.BoardGameGeek,
+    AND: [PLUGIN_SERVED_WHERE],
+    capabilities: { has: DataGatewayCapability.FindUpstreamAccount },
+    NOT: { disabledCapabilities: { has: DataGatewayCapability.FindUpstreamAccount } },
+  };
+  const USABLE_FOR_STEAM = { enabled: true, deletedAt: null, upstream: Upstream.Steam, AND: [PLUGIN_SERVED_WHERE] };
+
   describe('linkableUpstreams', () => {
-    it('reads the upstreams an enabled, undeleted DataGateway declares (#935)', async () => {
+    // The list tells a client which upstreams to offer a link for, so it names
+    // only those this server has a way to link (#935): IGDB has none, so no
+    // arm of the query names it.
+    it('reads the upstreams a DataGateway usable for their link declares (#935, #1226)', async () => {
       db.dataGateway.findMany.mockResolvedValue([{ upstream: Upstream.Steam }] as never);
 
       await service.linkableUpstreams();
 
       expect(db.dataGateway.findMany).toHaveBeenCalledWith({
-        where: { enabled: true, deletedAt: null, upstream: { not: null } },
+        where: { OR: [USABLE_FOR_BOARDGAMEGEEK, USABLE_FOR_STEAM] },
         select: { upstream: true },
         distinct: ['upstream'],
         orderBy: { upstream: 'asc' },
       });
     });
 
-    // The list tells a client which upstreams to offer a link for, so it names
-    // only those this server has a way to link (#935): IGDB has none.
-    it('answers only the declared upstreams this server can link', async () => {
-      db.dataGateway.findMany.mockResolvedValue([{ upstream: Upstream.IGDB }, { upstream: Upstream.Steam }] as never);
+    it('answers the upstreams the read found, in its order', async () => {
+      db.dataGateway.findMany.mockResolvedValue([
+        { upstream: Upstream.BoardGameGeek },
+        { upstream: Upstream.Steam },
+      ] as never);
 
-      await expect(service.linkableUpstreams()).resolves.toEqual([Upstream.Steam]);
+      await expect(service.linkableUpstreams()).resolves.toEqual([Upstream.BoardGameGeek, Upstream.Steam]);
     });
 
-    it.each([[Upstream.IGDB], [Upstream.BoardGameGeek]])(
-      'makes nothing linkable when the only DataGateway declares %s',
-      async (upstream) => {
-        db.dataGateway.findMany.mockResolvedValue([{ upstream }] as never);
-
-        await expect(service.linkableUpstreams()).resolves.toEqual([]);
-      },
-    );
-
-    it('makes nothing linkable when no DataGateway declares an upstream', async () => {
+    it('makes nothing linkable when no DataGateway is usable for a link', async () => {
       db.dataGateway.findMany.mockResolvedValue([]);
 
       await expect(service.linkableUpstreams()).resolves.toEqual([]);
+    });
+  });
+
+  describe('linkDataGateway', () => {
+    // The oldest usable one, so a link keeps asking the same DataGateway
+    // while it stays usable (#1226). The id breaks a tie in `createdAt`.
+    it.each([
+      [Upstream.BoardGameGeek, USABLE_FOR_BOARDGAMEGEEK],
+      [Upstream.Steam, USABLE_FOR_STEAM],
+    ])('reads the oldest DataGateway usable for a link at %s, by the rule the list uses', async (upstream, where) => {
+      db.dataGateway.findFirst.mockResolvedValue({ id: 'dg-1' } as never);
+
+      await expect(service.linkDataGateway(upstream)).resolves.toEqual({ id: 'dg-1' });
+
+      expect(db.dataGateway.findFirst).toHaveBeenCalledWith({
+        where,
+        select: { id: true },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      });
+    });
+
+    // A plugin DataGateway whose plugin was switched off, uninstalled or
+    // quarantined keeps its row enabled, and routing refuses it. Picking it
+    // would answer every link 503 while a served DataGateway sat unused, and
+    // the list would offer a link nothing can serve (#1083, #1226).
+    it.each([Upstream.BoardGameGeek, Upstream.Steam])(
+      'reads past a plugin DataGateway whose plugin the server does not serve, at %s, as routing does',
+      async (upstream) => {
+        db.dataGateway.findFirst.mockResolvedValue({ id: 'dg-1' } as never);
+        db.dataGateway.findMany.mockResolvedValue([]);
+
+        await service.linkDataGateway(upstream);
+        await service.linkableUpstreams();
+
+        const [linkRead] = db.dataGateway.findFirst.mock.calls[0];
+        const [listRead] = db.dataGateway.findMany.mock.calls[0];
+        expect(linkRead?.where).toMatchObject({ AND: [PLUGIN_SERVED_WHERE] });
+        expect(listRead?.where?.OR).toContainEqual(expect.objectContaining({ upstream, AND: [PLUGIN_SERVED_WHERE] }));
+      },
+    );
+
+    // A BoardGameGeek link asks its DataGateway to look the username up, so a
+    // server admin is told about that capability too: a DataGateway can be on
+    // and not serve it (#1226). Steam sign-in asks the DataGateway nothing.
+    it.each([
+      [Upstream.BoardGameGeek, 'errors.upstream_account.not_linkable_by_lookup'],
+      [Upstream.Steam, 'errors.upstream_account.not_linkable'],
+    ] as const)(
+      'refuses with 409 UPSTREAM_NOT_LINKABLE when no DataGateway is usable for a link at %s',
+      async (upstream, key) => {
+        db.dataGateway.findFirst.mockResolvedValue(null);
+
+        const error = await refusal(service.linkDataGateway(upstream));
+
+        expect(error.getStatus()).toBe(Http.Conflict);
+        expect(error.code).toBe(UpstreamAccountErrorCode.NotLinkable);
+        expect(error.getResponse()).toMatchObject({ message: t(key, { upstream }) });
+      },
+    );
+
+    it('refuses with 409 UPSTREAM_NOT_LINKABLE, reading nothing, at an upstream this server has no way to link', async () => {
+      const error = await refusal(service.linkDataGateway(Upstream.IGDB));
+
+      expect(error.code).toBe(UpstreamAccountErrorCode.NotLinkable);
+      expect(db.dataGateway.findFirst).not.toHaveBeenCalled();
     });
   });
 
@@ -317,6 +396,18 @@ describe('UpstreamAccountService (#935)', () => {
         const error = await refusal(service.create(STEAM_INPUT));
 
         expect(error.code).toBe(UpstreamAccountErrorCode.Taken);
+      });
+
+      // Only verified rows are held to one user, so an unverified insert can
+      // only have hit the user's own unique; TAKEN would tell the user that
+      // someone else linked the same username (#1226).
+      it('answers UPSTREAM_ACCOUNT_ALREADY_LINKED, never TAKEN, for an unverified account', async () => {
+        db.upstreamAccount.create.mockRejectedValue(uniqueViolationWithoutMeta());
+        db.upstreamAccount.findUnique.mockResolvedValue(null);
+
+        const error = await refusal(service.create({ ...STEAM_INPUT, verified: false }));
+
+        expect(error.code).toBe(UpstreamAccountErrorCode.AlreadyLinked);
       });
     });
 

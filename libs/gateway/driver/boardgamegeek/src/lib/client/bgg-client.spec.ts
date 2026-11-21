@@ -1,6 +1,7 @@
 import type { FakeFetchReply } from '@boardgamesempire/gateway-driver-contract-testing';
 import { createFakeFetch } from '@boardgamesempire/gateway-driver-contract-testing';
 import { createBggClient } from './bgg-client';
+import type { BggClientLike } from './bgg-client.interface';
 import { BggHttpError } from './bgg-http.error';
 
 const NO_THINGS = '<?xml version="1.0" encoding="utf-8"?><items termsofuse=""></items>';
@@ -53,6 +54,36 @@ describe('createBggClient', () => {
       '1+1 = "2" #',
       'Ōkami, 大神',
     ]);
+  });
+
+  it('asks /user for a name, encoded, and reads the answer', async () => {
+    const fetch = createFakeFetch(() => ({ body: '<user id="1" name="Mary Ann" termsofuse=""></user>' }));
+    const client = createBggClient({ fetch, apiKey: 'key-1' });
+
+    await expect(client.user.query({ name: 'Mary Ann' })).resolves.toEqual({ id: '1', name: 'Mary Ann' });
+
+    expect(fetch.requests[0].url.href).toBe('https://boardgamegeek.com/xmlapi2/user?name=Mary%20Ann');
+    expect(fetch.requests[0].headers).toEqual({ Authorization: 'Bearer key-1' });
+  });
+
+  // Live, BGG answers a name it doesn't know with a 404 HTML page (#1226).
+  it('reads a 404 from /user as no user by that name', async () => {
+    const fetch = createFakeFetch(() => ({
+      status: 404,
+      statusText: 'Not Found',
+      body: '<!DOCTYPE html><html></html>',
+    }));
+
+    await expect(createBggClient({ fetch, apiKey: 'key' }).user.query({ name: 'nobody' })).resolves.toBeUndefined();
+  });
+
+  it.each([
+    ['another failure from /user', (client: BggClientLike) => client.user.query({ name: 'bgfan' }), 500],
+    ['a 404 from another endpoint', (client: BggClientLike) => client.thing.query({ id: 1 }), 404],
+  ])('still fails on %s', async (_name, ask, status) => {
+    const fetch = createFakeFetch(() => ({ status, statusText: 'Failed', body: '' }));
+
+    await expect(ask(createBggClient({ fetch, apiKey: 'key' }))).rejects.toMatchObject({ status });
   });
 
   it('reads the search answer it gets', async () => {

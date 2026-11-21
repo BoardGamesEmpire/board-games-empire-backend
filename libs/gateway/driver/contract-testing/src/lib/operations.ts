@@ -10,4 +10,5 @@ export const OPERATIONS: readonly proto.Capability[] = [
   proto.Capability.CAPABILITY_LIST_CATEGORIES,
   proto.Capability.CAPABILITY_LIST_MECHANICS,
   proto.Capability.CAPABILITY_FETCH_GAMES,
+  proto.Capability.CAPABILITY_FIND_UPSTREAM_ACCOUNT,
 ];

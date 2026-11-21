@@ -1,13 +1,18 @@
 import type { DataGatewayDriver, DriverLogger, UpstreamFetch } from '@boardgamesempire/gateway-driver-contract';
-import { unsupportedOperation } from '@boardgamesempire/gateway-driver-contract';
+import {
+  invalidUpstreamAccountKey,
+  unsupportedOperation,
+  upstreamAccountKeyOf,
+} from '@boardgamesempire/gateway-driver-contract';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { randomUUID } from 'node:crypto';
 import type { Observable } from 'rxjs';
 import { defer, EMPTY, from, of, throwError } from 'rxjs';
 import { catchError, endWith, map, mergeMap, tap, timeout, toArray } from 'rxjs/operators';
-import { BggCaller } from './bgg-caller';
+import { BggCaller, DEFAULT_RATE_LIMIT_RETRY_MS, isRateLimit } from './bgg-caller';
 import { createBggClient } from './client/bgg-client';
 import { BggThingType, DEFAULT_BGG_SEARCH_TYPES, MAX_THINGS_PER_BATCH } from './constants';
+import { decodeText } from './mappers/decode-text';
 import {
   getOutboundExpansionIds,
   searchItemToGameSearchData,
@@ -27,7 +32,8 @@ import {
   parseExternalId,
   searchGamesRequest,
 } from './requests/game.requests';
-import type { BggSearchItem, BggThing } from './types';
+import { findUserRequest } from './requests/user.requests';
+import type { BggSearchItem, BggThing, BggUser } from './types';
 
 const FETCH_GAME_TYPES = [BggThingType.BoardGame, BggThingType.BoardGameExpansion] as const;
 const EXPANSION_BATCH_TYPES = [BggThingType.BoardGameExpansion] as const;
@@ -47,6 +53,33 @@ const SEARCH_THING_OPTIONS: ThingFetchOptions = { stats: 1, versions: 0, types: 
  * half a second, so a quick search leaves room for a rate limit's retry or a 202.
  */
 const SEARCH_THINGS_DEADLINE_MS = 12_000;
+
+/** BGG's profile page for a user, which the account's profile address names. */
+const profileUrlOf = (name: string): string => `https://boardgamegeek.com/user/${encodeURIComponent(name)}`;
+
+/**
+ * A failed lookup as its log line names it: the error's name, and its code
+ * when it has one. A failed call's message can quote the request's address,
+ * whose query carries the username, as a plugin's fetch does when it times
+ * out (#1226).
+ */
+const failureKind = (err: unknown): string => {
+  if (!(err instanceof Error)) {
+    return typeof err;
+  }
+
+  const code =
+    'code' in err && (typeof err.code === 'number' || typeof err.code === 'string') ? `, code ${err.code}` : '';
+
+  return `${err.name}${code}`;
+};
+
+/** The account for a user, its name decoded once from the entities BGG encodes it with (#716). */
+const toUpstreamAccount = (user: BggUser): proto.UpstreamAccountData => {
+  const name = decodeText(user.name);
+
+  return { externalId: name, displayName: name, profileUrl: profileUrlOf(name) };
+};
 
 export interface BoardGameGeekDriverOptions {
   apiKey: string;
@@ -88,6 +121,7 @@ export interface BoardGameGeekDriverOptions {
  */
 export class BoardGameGeekDriver implements DataGatewayDriver {
   private readonly caller: BggCaller;
+  private readonly rateLimitRetryMs: number;
   private readonly searchThingsDeadlineMs: number;
 
   constructor(private readonly options: BoardGameGeekDriverOptions) {
@@ -101,7 +135,9 @@ export class BoardGameGeekDriver implements DataGatewayDriver {
       acceptedRetries: timing?.acceptedRetries,
     });
 
-    this.caller = new BggCaller(client, options.logger, { rateLimitRetryMs: timing?.rateLimitRetryMs });
+    // A throttled lookup reports the wait the caller's own retry used.
+    this.rateLimitRetryMs = timing?.rateLimitRetryMs ?? DEFAULT_RATE_LIMIT_RETRY_MS;
+    this.caller = new BggCaller(client, options.logger, { rateLimitRetryMs: this.rateLimitRetryMs });
     this.searchThingsDeadlineMs = timing?.searchThingsDeadlineMs ?? SEARCH_THINGS_DEADLINE_MS;
   }
 
@@ -137,6 +173,7 @@ export class BoardGameGeekDriver implements DataGatewayDriver {
         proto.Capability.CAPABILITY_LIST_PLATFORMS,
         proto.Capability.CAPABILITY_LIST_CATEGORIES,
         proto.Capability.CAPABILITY_LIST_MECHANICS,
+        proto.Capability.CAPABILITY_FIND_UPSTREAM_ACCOUNT,
       ],
 
       /** The kinds of thing search and fetch ask BGG for, as the game mapper types them. */
@@ -345,6 +382,61 @@ export class BoardGameGeekDriver implements DataGatewayDriver {
    */
   fetchGames(_request: proto.FetchGamesRequest): Observable<proto.FetchGamesResponse> {
     return unsupportedOperation('FetchGames');
+  }
+
+  /**
+   * Looks a BoardGameGeek user up by name through `/user`. BGG keys users by
+   * name, so an account's external id is its name as BGG writes it, and a
+   * lookup by external id asks for that name: the same request, with the
+   * same answer, as by username. A request naming neither is
+   * INVALID_ARGUMENT. A name BGG doesn't know is NOT_FOUND, and a throttled
+   * call is RATE_LIMITED with the wait BGG asked for (#1226).
+   */
+  findUpstreamAccount(request: proto.FindUpstreamAccountRequest): Observable<proto.FindUpstreamAccountResponse> {
+    const key = upstreamAccountKeyOf(request);
+
+    if (key === undefined) {
+      return invalidUpstreamAccountKey();
+    }
+
+    const name = 'username' in key ? key.username : key.externalId;
+
+    return this.caller.call(findUserRequest(name)).pipe(
+      map((user): proto.FindUpstreamAccountResponse => {
+        this.logger.info(`findUpstreamAccount ${user ? 'found' : 'found no'} user`);
+
+        return user
+          ? {
+              correlationId: request.correlationId,
+              status: proto.ResultStatus.RESULT_STATUS_RESULT,
+              account: toUpstreamAccount(user),
+            }
+          : { correlationId: request.correlationId, status: proto.ResultStatus.RESULT_STATUS_NOT_FOUND };
+      }),
+
+      catchError((err) => {
+        if (isRateLimit(err)) {
+          this.logger.warn('findUpstreamAccount was throttled by BGG');
+
+          return of({
+            correlationId: request.correlationId,
+            status: proto.ResultStatus.RESULT_STATUS_RATE_LIMITED,
+            retryAfterMs: err.retryAfterMs ?? this.rateLimitRetryMs,
+          } satisfies proto.FindUpstreamAccountResponse);
+        }
+
+        // The username stays out of the log: it names a person. The answer
+        // keeps the message, which the api doesn't log either.
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.error(`findUpstreamAccount failed: ${failureKind(err)}`);
+
+        return of({
+          correlationId: request.correlationId,
+          status: proto.ResultStatus.RESULT_STATUS_ERROR,
+          message,
+        } satisfies proto.FindUpstreamAccountResponse);
+      }),
+    );
   }
 
   fetchGame(request: proto.FetchGameRequest): Observable<proto.FetchGameResponse> {

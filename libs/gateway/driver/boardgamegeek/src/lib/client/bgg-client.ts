@@ -1,11 +1,18 @@
 import type { UpstreamFetch } from '@boardgamesempire/gateway-driver-contract';
 import { discardBody } from '@boardgamesempire/gateway-driver-contract';
 import { setTimeout as wait } from 'node:timers/promises';
-import type { BggClientLike, BggSearchQueryParams, BggThingQueryParams } from './bgg-client.interface';
+import type {
+  BggClientLike,
+  BggSearchQueryParams,
+  BggThingQueryParams,
+  BggUserQueryParams,
+} from './bgg-client.interface';
 import { BggHttpError } from './bgg-http.error';
-import { parseSearch, parseThings } from './bgg-xml';
+import { parseSearch, parseThings, parseUser } from './bgg-xml';
 
 export const BGG_BASE_URL = 'https://boardgamegeek.com/xmlapi2';
+
+const NOT_FOUND = 404;
 
 export interface BggClientOptions {
   /** How many times to ask again after a 202 before giving up. Defaults to 5. */
@@ -96,6 +103,21 @@ export function createBggClient(options: BggClientOptions): BggClientLike {
       query: async (params: BggSearchQueryParams, signal?: AbortSignal) => [
         parseSearch(await get('search', { ...params }, signal)),
       ],
+    },
+    user: {
+      query: async (params: BggUserQueryParams, signal?: AbortSignal) => {
+        try {
+          return parseUser(await get('user', { ...params }, signal));
+        } catch (err) {
+          // BGG answers a name it doesn't know with a 404 and an HTML page,
+          // not with a `<user>` element (checked live, #1226).
+          if (err instanceof BggHttpError && err.status === NOT_FOUND) {
+            return undefined;
+          }
+
+          throw err;
+        }
+      },
     },
   };
 }

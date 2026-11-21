@@ -192,3 +192,13 @@ export interface BggVersion {
   width: number;
   yearpublished: number;
 }
+
+/**
+ * A user in a `/user` answer, as BGG wrote it. BGG answers a name it doesn't
+ * know with a `<user>` element that has an empty `id`, which reads as no user
+ * (#1226).
+ */
+export interface BggUser {
+  id: string;
+  name: string;
+}

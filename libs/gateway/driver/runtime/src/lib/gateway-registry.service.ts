@@ -1,6 +1,6 @@
 import { SystemActorScope } from '@bge/actor-context';
 import type { ContentFormat, ContentType, PlatformType, SearchFilterAxis } from '@bge/database';
-import { DatabaseService, DataGatewayCapability, PluginCategory } from '@bge/database';
+import { DatabaseService, DataGatewayCapability } from '@bge/database';
 import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
 import {
   Inject,
@@ -23,6 +23,7 @@ import { GatewayInterviewService } from './gateway-interview.service';
 import type { GatewayConfigEvent, GatewayConnectionOptions } from './interfaces';
 import type { PluginDriverSource, RoutedPlugin } from './plugin-driver-source';
 import { PLUGIN_DRIVER_SOURCE, ROUTED_PLUGIN_FIELDS } from './plugin-driver-source';
+import { isPluginServed } from './served-plugin';
 import type { CoverageFilter } from './utils/coverage-filter';
 import { hashGatewayConfig } from './utils/hash-config';
 import { remoteConnectionOptions } from './utils/remote-connection-options';
@@ -135,22 +136,12 @@ export interface SearchResolution extends GatewayResolution {
 }
 
 /**
- * Whether the server serves a plugin DataGateway's plugin: still a
- * data-gateway plugin, switched on, installed, and not quarantined by a failed
- * load (#1083). An update can move a plugin to another category, and the row
- * it leaves behind is then no plugin's to serve.
- */
-const isServed = (plugin: RoutedPlugin): boolean =>
-  plugin.category === PluginCategory.DataGateway &&
-  plugin.enabled &&
-  plugin.uninstalledAt === null &&
-  !plugin.loadFailed;
-
-/**
  * The routing rule, the one place it's written: why a DataGateway may not
  * serve `capability` now, or null when it may. `row` is its routing row,
  * null when it's absent or deleted. Without a capability, only whether the
- * DataGateway may be used at all.
+ * DataGateway may be used at all. Whether its plugin is served is
+ * {@link isPluginServed}, which a read picking a DataGateway states as
+ * `PLUGIN_SERVED_WHERE`.
  *
  * It goes by the row alone, with the plugin read beside it. Whether this
  * process has a plugin DataGateway's plugin loaded isn't on the row: the
@@ -166,7 +157,7 @@ function routingRefusal(row: RoutingRow | null, capability?: DataGatewayCapabili
   }
 
   // A plugin DataGateway is its plugin's to serve, whatever its own row says (#1083).
-  if (row.pluginId !== null && !(row.plugin && isServed(row.plugin))) {
+  if (row.pluginId !== null && !(row.plugin && isPluginServed(row.plugin))) {
     return 'plugin_not_served';
   }
 

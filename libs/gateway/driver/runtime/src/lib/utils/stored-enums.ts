@@ -29,6 +29,7 @@ const CAPABILITIES: ByProtoName<DataGatewayCapability> = {
   [proto.Capability.CAPABILITY_LIST_CATEGORIES]: DataGatewayCapability.ListCategories,
   [proto.Capability.CAPABILITY_LIST_MECHANICS]: DataGatewayCapability.ListMechanics,
   [proto.Capability.CAPABILITY_FETCH_GAMES]: DataGatewayCapability.FetchGames,
+  [proto.Capability.CAPABILITY_FIND_UPSTREAM_ACCOUNT]: DataGatewayCapability.FindUpstreamAccount,
 };
 
 const PLATFORM_TYPES: ByProtoName<PlatformType> = {

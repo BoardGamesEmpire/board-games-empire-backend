@@ -86,7 +86,7 @@ const queryOf = (address: string) => Object.fromEntries(new URL(address).searchP
 describe('SteamLinkService (#935)', () => {
   let service: SteamLinkService;
   let store: FakeSignInStore;
-  const linkableUpstreams = jest.fn<Promise<Upstream[]>, []>();
+  const linkDataGateway = jest.fn<Promise<{ id: string }>, [Upstream]>();
   const assertNotLinked = jest.fn<Promise<void>, [string, Upstream]>();
   const privacyPolicy = jest.fn<Promise<UpstreamPrivacyPolicyDto>, [string, string | undefined]>();
   const create = jest.fn<Promise<unknown>, [CreateUpstreamAccountInput]>();
@@ -95,7 +95,7 @@ describe('SteamLinkService (#935)', () => {
 
   beforeEach(async () => {
     store = new FakeSignInStore();
-    linkableUpstreams.mockReset().mockResolvedValue([Upstream.Steam]);
+    linkDataGateway.mockReset().mockResolvedValue({ id: 'dg-steam' });
     assertNotLinked.mockReset().mockResolvedValue(undefined);
     privacyPolicy.mockReset().mockResolvedValue(policy);
     create.mockReset().mockResolvedValue({});
@@ -113,7 +113,7 @@ describe('SteamLinkService (#935)', () => {
         { provide: AuthService, useValue: { isTrustedReturnAddress } },
         {
           provide: UpstreamAccountService,
-          useValue: { linkableUpstreams, assertNotLinked, privacyPolicy, create },
+          useValue: { linkDataGateway, assertNotLinked, privacyPolicy, create },
         },
       ],
     }).compile();
@@ -184,17 +184,18 @@ describe('SteamLinkService (#935)', () => {
       expect(store.start).not.toHaveBeenCalled();
     });
 
-    it('refuses to start when no enabled DataGateway declares Steam', async () => {
-      linkableUpstreams.mockResolvedValue([]);
+    it('refuses to start when no DataGateway declaring Steam is usable for the link', async () => {
+      const notLinkable = new CodedHttpException(
+        Http.Conflict,
+        UpstreamAccountErrorCode.NotLinkable,
+        t('errors.upstream_account.not_linkable', { upstream: Upstream.Steam }),
+      );
+      linkDataGateway.mockRejectedValue(notLinkable);
 
-      const error = await refusal(service.startSignIn(ME, RETURN_TO, undefined));
+      await expect(service.startSignIn(ME, RETURN_TO, undefined)).rejects.toBe(notLinkable);
 
-      expect(error.getStatus()).toBe(Http.Conflict);
-      expect(error.code).toBe(UpstreamAccountErrorCode.NotLinkable);
-      expect(error.code).toBe('UPSTREAM_NOT_LINKABLE');
-      expect(error.getResponse()).toMatchObject({
-        message: t('errors.upstream_account.not_linkable', { upstream: Upstream.Steam }),
-      });
+      expect(linkDataGateway).toHaveBeenCalledWith(Upstream.Steam);
+      expect(assertNotLinked).not.toHaveBeenCalled();
       expect(store.start).not.toHaveBeenCalled();
     });
 

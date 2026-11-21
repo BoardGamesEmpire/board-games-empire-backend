@@ -22,6 +22,7 @@ function fakeDriver(): jest.Mocked<DataGatewayDriver> {
     listPlatforms: answer('listPlatforms'),
     listCategories: answer('listCategories'),
     listMechanics: answer('listMechanics'),
+    findUpstreamAccount: answer('findUpstreamAccount'),
     dispose: jest.fn(),
   } as unknown as jest.Mocked<DataGatewayDriver>;
 }

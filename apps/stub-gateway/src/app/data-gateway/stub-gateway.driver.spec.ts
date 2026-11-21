@@ -313,6 +313,15 @@ describe('StubGatewayDriver', () => {
     });
   });
 
+  // It draws from no real upstream, so it has no upstream accounts to find (#1226).
+  describe('findUpstreamAccount', () => {
+    it('answers UNIMPLEMENTED', async () => {
+      await expect(
+        firstValueFrom(driver.findUpstreamAccount({ correlationId: 'find-account-1', username: 'ada' })),
+      ).rejects.toMatchObject({ code: 12, message: 'FindUpstreamAccount is not served by this DataGateway' });
+    });
+  });
+
   describe('fetchExpansions', () => {
     it("streams the base game's expansions, then SOURCE_DONE", async () => {
       const frames = await collect(

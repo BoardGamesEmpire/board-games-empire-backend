@@ -18,16 +18,31 @@
   "include": ["src/**/*.ts"],
   "references": [
     {
-      "path": "../system-settings/tsconfig.lib.json"
+      "path": "../../gateway/driver/contract/tsconfig.lib.json"
     },
     {
-      "path": "../../common/actor-context/tsconfig.lib.json"
+      "path": "../../gateway/driver/runtime/tsconfig.lib.json"
     },
     {
       "path": "../../common/testing/tsconfig.lib.json"
     },
     {
       "path": "../../common/shared/tsconfig.lib.json"
+    },
+    {
+      "path": "../../common/redis/tsconfig.lib.json"
+    },
+    {
+      "path": "../auth/tsconfig.lib.json"
+    },
+    {
+      "path": "../system-settings/tsconfig.lib.json"
+    },
+    {
+      "path": "../../proto/gateway/tsconfig.lib.json"
+    },
+    {
+      "path": "../gateway-coordinator-client/tsconfig.lib.json"
     },
     {
       "path": "../../common/permissions/tsconfig.lib.json"
@@ -39,10 +54,7 @@
       "path": "../../database/tsconfig.lib.json"
     },
     {
-      "path": "../../common/redis/tsconfig.lib.json"
-    },
-    {
-      "path": "../auth/tsconfig.lib.json"
+      "path": "../../common/actor-context/tsconfig.lib.json"
     }
   ],
   "exclude": ["jest.config.ts", "jest.config.cts", "src/**/*.spec.ts", "src/**/*.test.ts"]

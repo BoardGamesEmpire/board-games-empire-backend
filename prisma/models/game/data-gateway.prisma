@@ -97,6 +97,7 @@ enum DataGatewayCapability {
   ListCategories
   ListMechanics
   FetchGames
+  FindUpstreamAccount
 
   @@map("data_gateway_capabilities")
 }

@@ -1,5 +1,9 @@
 import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
-import { fetchEachGame } from '@boardgamesempire/gateway-driver-contract';
+import {
+  fetchEachGame,
+  invalidUpstreamAccountKey,
+  upstreamAccountKeyOf,
+} from '@boardgamesempire/gateway-driver-contract';
 import * as proto from '@boardgamesempire/proto-gateway';
 import type { Observable } from 'rxjs';
 import { concat, from, of, throwError } from 'rxjs';
@@ -69,8 +73,20 @@ export interface InMemoryGatewayFixtures {
    */
   throttledStreamRetryAfterMs?: number;
 
+  /**
+   * Usernames and external IDs findUpstreamAccount answers throttled, each
+   * with the milliseconds to wait: RATE_LIMITED and no account (#1226).
+   */
+  throttledUpstreamAccountKeys?: Record<string, number>;
+
   /** The upstream describe declares, none unless set (#925). */
   upstream?: proto.Upstream;
+
+  /**
+   * findUpstreamAccount finds these by username, exactly as keyed, and by
+   * each one's external ID (#1226).
+   */
+  upstreamAccountsByUsername?: Record<string, proto.UpstreamAccountData>;
 }
 
 /** gRPC's status code for an operation a DataGateway doesn't implement. */
@@ -374,6 +390,46 @@ export class InMemoryGatewayDriver implements DataGatewayDriver {
         correlationId: request.correlationId ?? 'in-memory',
         mechanics: this.fixtures.mechanics ?? [],
       })
+    );
+  }
+
+  /**
+   * An account from its fixtures, by username or by external ID: NOT_FOUND
+   * when none matches, and RATE_LIMITED when its fixtures throttle the key
+   * (#1226).
+   */
+  findUpstreamAccount(request: proto.FindUpstreamAccountRequest): Observable<proto.FindUpstreamAccountResponse> {
+    const refused = this.refused<proto.FindUpstreamAccountResponse>(proto.Capability.CAPABILITY_FIND_UPSTREAM_ACCOUNT);
+    if (refused) {
+      return refused;
+    }
+
+    const key = upstreamAccountKeyOf(request);
+    if (!key) {
+      return invalidUpstreamAccountKey();
+    }
+
+    const value = 'username' in key ? key.username : key.externalId;
+    // A Map, so a key such as `constructor` reads nothing off Object.prototype.
+    const retryAfterMs = new Map(Object.entries(this.fixtures.throttledUpstreamAccountKeys ?? {})).get(value);
+    if (retryAfterMs !== undefined) {
+      return of<proto.FindUpstreamAccountResponse>({
+        correlationId: request.correlationId,
+        status: proto.ResultStatus.RESULT_STATUS_RATE_LIMITED,
+        retryAfterMs,
+      });
+    }
+
+    const accounts = new Map(Object.entries(this.fixtures.upstreamAccountsByUsername ?? {}));
+    const account =
+      'username' in key
+        ? accounts.get(key.username)
+        : [...accounts.values()].find((candidate) => candidate.externalId === key.externalId);
+
+    return of<proto.FindUpstreamAccountResponse>(
+      account
+        ? { correlationId: request.correlationId, status: proto.ResultStatus.RESULT_STATUS_RESULT, account }
+        : { correlationId: request.correlationId, status: proto.ResultStatus.RESULT_STATUS_NOT_FOUND },
     );
   }
 

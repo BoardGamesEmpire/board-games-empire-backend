@@ -7,6 +7,8 @@ import type {
   FetchGameResponse,
   FetchGamesRequest,
   FetchGamesResponse,
+  FindUpstreamAccountRequest,
+  FindUpstreamAccountResponse,
   GatewayPingRequest,
   GatewayPingResponse,
   GatewaySearchRequest,
@@ -93,6 +95,10 @@ export class RemoteGatewayDriver implements DataGatewayDriver {
 
   listMechanics(request: ListMechanicsRequest): Observable<ListMechanicsResponse> {
     return this.client.listMechanics(request);
+  }
+
+  findUpstreamAccount(request: FindUpstreamAccountRequest): Observable<FindUpstreamAccountResponse> {
+    return this.client.findUpstreamAccount(request);
   }
 
   /**

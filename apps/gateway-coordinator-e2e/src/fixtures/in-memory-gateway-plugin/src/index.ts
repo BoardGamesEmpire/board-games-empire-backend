@@ -8,7 +8,8 @@ import type { FixtureBuild } from '../../../support/fixture-build.js';
 
 /**
  * The e2e suite's data-gateway plugin (#1083): the contract's in-memory
- * driver over one game, declaring Search, Fetch and FetchGames. The suite
+ * driver over one game and one upstream account, declaring Search, Fetch,
+ * FetchGames and FindUpstreamAccount. The suite
  * bundles it with esbuild, places it under a plugins root as an install
  * would, and has the built coordinator load it.
  *
@@ -58,10 +59,18 @@ class FixtureDriver extends InMemoryGatewayDriver {
         proto.Capability.CAPABILITY_SEARCH,
         proto.Capability.CAPABILITY_FETCH,
         proto.Capability.CAPABILITY_FETCH_GAMES,
+        proto.Capability.CAPABILITY_FIND_UPSTREAM_ACCOUNT,
       ],
       fetchGamesMaxIds: build.fetchGamesMaxIds,
       searchResults: [searchResult],
       games: [game],
+      upstreamAccountsByUsername: {
+        [build.upstreamAccount.username]: {
+          externalId: build.upstreamAccount.externalId,
+          displayName: build.upstreamAccount.displayName,
+          profileUrl: build.upstreamAccount.profileUrl,
+        },
+      },
     });
   }
 
