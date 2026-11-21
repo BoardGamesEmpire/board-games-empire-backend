@@ -33,6 +33,21 @@ describe('game.mapper', () => {
     });
   });
 
+  describe('bundles a game belongs to (#1394)', () => {
+    it('sends the bundles IGDB lists a game in as bundle ids, each once (#1394)', () => {
+      const data = toGameData({ id: 1, name: 'Hollow Knight', bundles: [1002, 1001, 1002] });
+
+      expect(data.bundleExternalIds).toEqual(['1002', '1001']);
+      expect(data.worksWithExternalIds).toEqual([]);
+      expect(data.contentExternalIds).toEqual([]);
+    });
+
+    it('sends no bundle ids when IGDB lists none (#1394)', () => {
+      expect(toGameData({ id: 1, name: 'Hollow Knight' }).bundleExternalIds).toEqual([]);
+      expect(toGameData({ id: 1, name: 'Hollow Knight', bundles: [] }).bundleExternalIds).toEqual([]);
+    });
+  });
+
   describe('release dates (proto ISO 8601 contract)', () => {
     it('emits a precise unix date as an ISO 8601 string', () => {
       const game: IgdbGame = {

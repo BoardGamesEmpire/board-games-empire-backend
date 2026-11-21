@@ -43,6 +43,23 @@ export interface LinkedBaseGameWire extends ExpansionLinkWire {
   readonly platformIds: readonly string[];
 }
 
+/**
+ * One of `GET /api/games/:id`'s `game.worksWith`, `game.contents` or
+ * `game.bundles` (#1392, #1394): the shape of an expansion's, with the linked
+ * game's own `isStandalone`.
+ */
+export interface GameLinkWire extends ExpansionLinkWire {
+  readonly game: LinkedGameWire;
+  readonly platformIds: readonly string[];
+}
+
+/** The works-with links, contents and bundles of `GET /api/games/:id` (#1392, #1394). */
+export interface GameLinksWire {
+  readonly bundles: readonly GameLinkWire[];
+  readonly contents: readonly GameLinkWire[];
+  readonly worksWith: readonly GameLinkWire[];
+}
+
 export interface ListGamesEnvelope {
   readonly games: readonly GameWire[];
   readonly total: number;
@@ -220,24 +237,50 @@ export function listRowBaseGames(
 }
 
 /**
- * `GET /api/games/:id`: the game's `expansions` and `baseGames` (#1069). As
- * with its platform games, an absent list fails rather than reading as empty.
+ * `GET /api/games/:id`: the game's lists named by `keys`, in their order. As
+ * with its platform games, an absent list fails rather than reading as empty,
+ * so a test that expects none cannot pass on a list the route stopped sending
+ * (#1069, #1392).
  */
+function gameLists<K extends string>(
+  response: HttpResponseLike,
+  request: RequestDescription,
+  keys: readonly K[],
+): Record<K, unknown[]> {
+  const { game } = gameEnvelope(response, request);
+  const fields = game as unknown as Record<string, unknown>;
+  const lists = {} as Record<K, unknown[]>;
+  for (const key of keys) {
+    const list = fields[key];
+    if (!Array.isArray(list)) {
+      return fail(`its 'game' carried no '${key}' array`, request, response);
+    }
+
+    lists[key] = list;
+  }
+
+  return lists;
+}
+
+/** `GET /api/games/:id`: the game's `expansions` and `baseGames` (#1069). */
 export function gameExpansionLinks(
   response: HttpResponseLike,
   request: RequestDescription,
 ): { readonly baseGames: readonly LinkedBaseGameWire[]; readonly expansions: readonly LinkedExpansionWire[] } {
-  const { game } = gameEnvelope(response, request);
-  const { expansions, baseGames } = game as unknown as Record<string, unknown>;
-  if (!Array.isArray(expansions)) {
-    return fail("its 'game' carried no 'expansions' array", request, response);
-  }
-
-  if (!Array.isArray(baseGames)) {
-    return fail("its 'game' carried no 'baseGames' array", request, response);
-  }
+  const { expansions, baseGames } = gameLists(response, request, ['expansions', 'baseGames']);
 
   return { expansions: expansions as LinkedExpansionWire[], baseGames: baseGames as LinkedBaseGameWire[] };
+}
+
+/** `GET /api/games/:id`: the game's `worksWith`, `contents` and `bundles` (#1392, #1394). */
+export function gameLinks(response: HttpResponseLike, request: RequestDescription): GameLinksWire {
+  const { worksWith, contents, bundles } = gameLists(response, request, ['worksWith', 'contents', 'bundles']);
+
+  return {
+    worksWith: worksWith as GameLinkWire[],
+    contents: contents as GameLinkWire[],
+    bundles: bundles as GameLinkWire[],
+  };
 }
 
 /**

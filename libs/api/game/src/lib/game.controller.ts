@@ -105,7 +105,11 @@ export class GameController {
       'read. Both are in title order. Each add-on link in either list carries the add-on’s `isStandalone` and ' +
       '`platformIds`: the platforms where both games have a platform game the actor may read, in platform name ' +
       'order. It is empty when there are none, so an API key with no `read:platform_game` gets empty lists. See ' +
-      '#1069 and #1391.',
+      '#1069 and #1391. `worksWith` lists the games this game is played together with, `contents` the games it ' +
+      'contains, such as the games in a bundle, and `bundles` the bundles it is part of. Each link holds when ' +
+      'either game’s DataGateway link names the other on the same DataGateway. These lists hold only games the ' +
+      'actor may read, in title order, and each entry carries the linked game’s `isStandalone` and the same ' +
+      '`platformIds`. See #1392 and #1394.',
   })
   @ApiParam({ name: 'id', type: String })
   @ApiResponse({ status: Http.Ok, type: GameResponseDto })

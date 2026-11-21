@@ -1,10 +1,11 @@
 import type { Prisma } from '@bge/database';
-import { ContentType, GameMedium, ListKind, PlatformType, Reach, ResourceType } from '@bge/database';
+import { AuthType, ContentType, GameMedium, ListKind, PlatformType, Reach, ResourceType } from '@bge/database';
 import type { Actors, AuthenticatedActor } from '@bge/testing-e2e';
 import { createActors } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import { setTimeout } from 'node:timers/promises';
 import request from 'supertest';
+import { gameLinks } from '../game/game-wire';
 import { arrangeList, arrangePlatformGame as arrangeSiblingPlatformGame, findWishlist } from '../list/list-fixtures';
 import type { Caller } from '../support/api-key';
 import { mintApiKey } from '../support/api-key';
@@ -333,6 +334,61 @@ describe('collection rows (#1070)', () => {
 
     expect(await flagFor(unpinned, 'a key holding read:list')).toBe(true);
     expect(await flagFor(pinned, 'a key holding read:list pinned to a custom list')).toBeNull();
+  });
+
+  /**
+   * A bundle is one product, so owning it is one collection entry (#1394). Its
+   * contents links name the games inside it on the game detail and add no
+   * entry of their own. The bundle's entry is the control on the same page,
+   * and the bundle's detail shows the contents link is there.
+   */
+  it('owning a bundle makes one collection entry, none for its contents (#1394)', async () => {
+    const owner = await actors.user();
+    const t = token();
+    // Disabled, so nothing reaches for a coordinator over it.
+    const gateway = await db.client.dataGateway.create({
+      data: {
+        name: `Bundle gateway ${t}`,
+        connectionUrl: 'localhost',
+        connectionPort: 50099,
+        authType: AuthType.None,
+        enabled: false,
+      },
+      select: { id: true },
+    });
+    const bundle = await arrangePlatformGame({
+      game: { title: `Dominion: Big Box ${t}`, reach: Reach.Public, contentType: ContentType.Bundle },
+    });
+    const contained = await arrangePlatformGame({ game: { title: `Dominion ${t}`, reach: Reach.Public } });
+    // What an import leaves: the bundle's DataGateway link names the game it contains.
+    await db.client.gameSource.create({
+      data: { gameId: bundle.gameId, gatewayId: gateway.id, externalId: '137166', contentExternalIds: ['36218'] },
+    });
+    await db.client.gameSource.create({
+      data: { gameId: contained.gameId, gatewayId: gateway.id, externalId: '36218' },
+    });
+
+    const created = await request(baseUrl)
+      .post(COLLECTIONS_PATH)
+      .set(owner.headers)
+      .send({ platformGameId: bundle.platformGameId, medium: GameMedium.Physical })
+      .expect(201);
+    const entryId = readCollectionEnvelope(created, `POST ${COLLECTIONS_PATH}`).collection.id;
+
+    const own = listCollectionsEnvelope(await listOwn(owner).expect(200), `GET ${COLLECTIONS_PATH} as the owner`);
+    expect(own.collections.map(({ id, platformGameId }) => ({ id, platformGameId }))).toEqual([
+      { id: entryId, platformGameId: bundle.platformGameId },
+    ]);
+    expect(own.total).toBe(1);
+    // No one's collection gained the contained game, the owner's or another's.
+    expect(await db.client.gameCollection.count({ where: { platformGame: { gameId: contained.gameId } } })).toBe(0);
+
+    // The control: the contents link holds, so the single entry above is not
+    // because the bundle names nothing.
+    const bundleDetail = await request(baseUrl).get(`/api/games/${bundle.gameId}`).set(owner.headers).expect(200);
+    expect(
+      gameLinks(bundleDetail, 'GET /api/games/:id of the bundle as the owner').contents.map((link) => link.gameId),
+    ).toEqual([contained.gameId]);
   });
 
   /**

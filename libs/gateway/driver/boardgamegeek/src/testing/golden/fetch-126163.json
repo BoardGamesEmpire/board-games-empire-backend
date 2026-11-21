@@ -217,6 +217,9 @@
     "complexityWeight": 3663,
     "baseGameExternalIds": [],
     "crossReferences": [],
+    "worksWithExternalIds": [],
+    "contentExternalIds": [],
+    "bundleExternalIds": [],
     "platforms": [
       {
         "externalId": "bgg-tabletop",

@@ -443,4 +443,16 @@ message GameData {
   // The game's ids at other upstreams. An import links to a game the server
   // already has only when one of these matches (#925).
   repeated CrossReference cross_references = 33;
+
+  // The external ids, on this DataGateway, of the games this one is played
+  // together with. The link is two-way and names neither game as the base
+  // game (#1392).
+  repeated string works_with_external_ids = 34;
+
+  // The external ids of the games this one contains, as a bundle does. Sent
+  // whatever this game's content type (#1394).
+  repeated string content_external_ids = 35;
+
+  // The external ids of the bundles this game belongs to (#1394).
+  repeated string bundle_external_ids = 36;
 }

@@ -482,6 +482,11 @@ function toBaseGameExternalIds(game: IgdbGame): string[] {
   return typeof ref === 'number' ? [String(ref)] : [];
 }
 
+/** The bundles IGDB lists the game in, each once, in IGDB's order (#1394). */
+function toBundleExternalIds(game: IgdbGame): string[] {
+  return [...new Set((game.bundles ?? []).map(String))];
+}
+
 /**
  * The game's Steam apps as cross-references, each once, in IGDB's order. An
  * entry at another service is left out until that service is an upstream, and
@@ -591,6 +596,9 @@ export function toGameData(game: IgdbGame, locale?: string): proto.GameData {
     averageRating: game.total_rating,
     baseGameExternalIds: toBaseGameExternalIds(game),
     crossReferences: toCrossReferences(game),
+    worksWithExternalIds: [],
+    contentExternalIds: [],
+    bundleExternalIds: toBundleExternalIds(game),
 
     categories,
     contentType: toContentType(game.game_type),

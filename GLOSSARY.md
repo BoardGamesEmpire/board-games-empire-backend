@@ -648,11 +648,11 @@ The link from an add-on to a base game it attaches to. An add-on can have severa
 _Avoid_: expansion link, parent link
 
 **Works-with link**:
-Planned: a two-way link between two games that are played together, such as Horizons of Spirit Island and Spirit Island, naming neither one as the base game.
+A two-way link between two games that are played together, such as Horizons of Spirit Island and Spirit Island, naming neither one as the base game. It is worked out from the ids the DataGateway sends, on either game.
 _Avoid_: integration, compatibility
 
 **Contents link**:
-Planned: the link from a bundle to each game it contains.
+The link from a game to each game it contains, usually from a bundle. It is worked out from the ids the DataGateway sends, on either game.
 _Avoid_: compilation link
 
 **Imported game**:

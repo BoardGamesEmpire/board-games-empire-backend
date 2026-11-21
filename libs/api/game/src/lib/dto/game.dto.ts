@@ -207,9 +207,11 @@ export class PlatformGameDetailDto implements PlatformGameDetail {
 }
 
 /**
- * The game at the far end of an expansion link (#1069). This class implements
- * the read's row type and the service annotates that read with this class, so
- * a column missing from either the select or this class fails the typecheck.
+ * The game at the far end of any link on `GET /games/:id`: an add-on link
+ * (#1069), a works-with link (#1392) or a contents link (#1394). This class
+ * implements the read's row type and the service annotates that read with
+ * this class, so a column missing from either the select or this class fails
+ * the typecheck.
  */
 export class LinkedGameDto implements LinkedGame {
   @ApiProperty({ description: 'Unique game identifier' })
@@ -229,10 +231,14 @@ export class LinkedGameDto implements LinkedGame {
   contentType!: ContentType;
 }
 
-/** `platformIds` on an add-on link of `GET /games/:id`, read the same from either end (#1391). */
+/**
+ * `platformIds` on every link of `GET /games/:id`, read the same from either
+ * end: add-on links (#1391), works-with links and contents links (#1392,
+ * #1394).
+ */
 const LINK_PLATFORM_IDS_DESCRIPTION =
-  'IDs of the platforms this add-on link holds on: those where both games have a platform game the actor may ' +
-  'read, in platform name order. Empty when there are none, such as for an API key with no `read:platform_game`.';
+  'IDs of the platforms this link holds on: those where both games have a platform game the actor may read, in ' +
+  'platform name order. Empty when there are none, such as for an API key with no `read:platform_game`.';
 
 /** One of a game's expansions on `GET /games/:id` (#1069). */
 export class LinkedExpansionDto extends ExpansionLinkDto {
@@ -249,6 +255,29 @@ export class LinkedExpansionDto extends ExpansionLinkDto {
 /** One of an expansion's base games on `GET /games/:id` (#1069). */
 export class LinkedBaseGameDto extends ExpansionLinkDto {
   @ApiProperty({ type: LinkedGameDto, description: 'The base game' })
+  game!: LinkedGameDto;
+
+  @ApiProperty({
+    type: [String],
+    description: LINK_PLATFORM_IDS_DESCRIPTION,
+  })
+  platformIds!: string[];
+}
+
+/**
+ * One entry of `worksWith`, `contents` or `bundles` on `GET /games/:id`
+ * (#1392, #1394): the shape of an `expansions` entry. `isStandalone` is described
+ * again because the linked game need not be an add-on.
+ */
+export class GameLinkDto extends ExpansionLinkDto {
+  @ApiProperty({
+    description:
+      'Whether the linked game is a standalone expansion, which plays without a base game, from its own content ' +
+      'type (#1392).',
+  })
+  override isStandalone!: boolean;
+
+  @ApiProperty({ type: LinkedGameDto, description: 'The linked game' })
   game!: LinkedGameDto;
 
   @ApiProperty({
@@ -303,6 +332,33 @@ export class GameDetailDto extends GameDto {
       'Each link carries the add-on’s `isStandalone`. Empty for any other game.',
   })
   baseGames!: LinkedBaseGameDto[];
+
+  @ApiProperty({
+    type: [GameLinkDto],
+    description:
+      'The games this game is played together with, neither one the base game, that the actor may read, in title ' +
+      'order, then game id. A works-with link holds when either game’s DataGateway link names the other on the ' +
+      'same DataGateway (#1392).',
+  })
+  worksWith!: GameLinkDto[];
+
+  @ApiProperty({
+    type: [GameLinkDto],
+    description:
+      'The games this game contains, such as the games in a bundle, that the actor may read, in title order, then ' +
+      'game id. A contents link holds when either game’s DataGateway link names the other on the same ' +
+      'DataGateway, whatever either game’s content type (#1394).',
+  })
+  contents!: GameLinkDto[];
+
+  @ApiProperty({
+    type: [GameLinkDto],
+    description:
+      'The bundles this game is part of that the actor may read, in title order, then game id. A contents link ' +
+      'holds when either game’s DataGateway link names the other on the same DataGateway, whatever either game’s ' +
+      'content type (#1394).',
+  })
+  bundles!: GameLinkDto[];
 }
 
 export class GameResponseDto {

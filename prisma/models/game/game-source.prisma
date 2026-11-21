@@ -16,6 +16,14 @@ model GameSource {
   // is made whichever of the two arrives first (#971).
   baseExternalIds String[] @default([]) @map("base_external_ids")
 
+  // The external ids, on this DataGateway, of the games this one works with,
+  // contains and belongs to, as the DataGateway last sent them. The reads of
+  // `GET /games/:id` match these either way round, on the same DataGateway, so
+  // no table stores the links (#1392, #1394).
+  worksWithExternalIds String[] @default([]) @map("works_with_external_ids")
+  contentExternalIds   String[] @default([]) @map("content_external_ids")
+  bundleExternalIds    String[] @default([]) @map("bundle_external_ids")
+
   metadata Json? @map("metadata")
 
   // Sync management
@@ -55,5 +63,8 @@ model GameSource {
   @@index([gatewayId])
   @@index([lastSynced])
   @@index([baseExternalIds], type: Gin)
+  @@index([worksWithExternalIds], type: Gin)
+  @@index([contentExternalIds], type: Gin)
+  @@index([bundleExternalIds], type: Gin)
   @@map("game_sources")
 }

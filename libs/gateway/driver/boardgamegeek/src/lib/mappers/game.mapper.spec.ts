@@ -232,7 +232,7 @@ describe('searchItemToGameSearchData', () => {
     expect(thingToGameData(thing).averageRating).toBeUndefined();
   });
 
-  it('keeps the title, content type, year and source URL search found, whatever the thing says, and dates the release by that year (#880)', () => {
+  it("keeps the title, year and source URL search found, whatever the thing says, takes the thing's content type, and dates the release by that year (#880, #1394)", () => {
     const item = makeBggSearchItem({
       id: 325,
       type: BggThingType.BoardGameExpansion,
@@ -250,7 +250,8 @@ describe('searchItemToGameSearchData', () => {
 
     expect(result).toMatchObject({
       title: 'Die Siedler von Catan: Seefahrer',
-      contentType: proto.ContentType.CONTENT_TYPE_EXPANSION,
+      // The thing's type, not the search item's (#1394).
+      contentType: proto.ContentType.CONTENT_TYPE_BASE_GAME,
       yearPublished: 1997,
       sourceUrl: 'https://boardgamegeek.com/boardgameexpansion/325',
     });
@@ -617,6 +618,99 @@ describe('base games (#971)', () => {
 
   it('sends no base game for a thing with no inbound expansion link', () => {
     expect(thingToGameData(makeBggThing({ links: [links[1]] })).baseGameExternalIds).toEqual([]);
+  });
+});
+
+describe('works-with links (#1392)', () => {
+  it('sends boardgameintegration links as works-with ids, each once, leaving out the thing itself (#1392)', () => {
+    const thing = makeBggThing({
+      id: 367498,
+      links: [
+        { type: BggLinkType.BoardGameIntegration, id: 162886, value: 'Spirit Island' },
+        { type: BggLinkType.BoardGameIntegration, id: 162886, value: 'Spirit Island', inbound: 'true' },
+        { type: BggLinkType.BoardGameIntegration, id: 367498, value: 'Itself' },
+      ],
+    });
+
+    expect(thingToGameData(thing).worksWithExternalIds).toEqual(['162886']);
+  });
+});
+
+describe('contents and bundles (#1394)', () => {
+  it('sends inbound boardgamecompilation links as contents and outbound ones as bundles (#1394)', () => {
+    const bundle = makeBggThing({
+      id: 182880,
+      links: [
+        { type: BggLinkType.BoardGameCompilation, id: 13, value: 'Catan', inbound: 'true' },
+        { type: BggLinkType.BoardGameCompilation, id: 27760, value: 'Other', inbound: 'true' },
+      ],
+    });
+    const contained = makeBggThing({
+      id: 13,
+      links: [{ type: BggLinkType.BoardGameCompilation, id: 182880, value: 'Big Box' }],
+    });
+
+    expect(thingToGameData(bundle).contentExternalIds).toEqual(['13', '27760']);
+    expect(thingToGameData(contained).bundleExternalIds).toEqual(['182880']);
+  });
+
+  it('lists each content and bundle once and never the thing itself, so a self link makes no bundle (#1394)', () => {
+    const thing = makeBggThing({
+      id: 182880,
+      links: [
+        { type: BggLinkType.BoardGameCompilation, id: 13, value: 'Catan', inbound: 'true' },
+        { type: BggLinkType.BoardGameCompilation, id: 13, value: 'Catan', inbound: 'true' },
+        { type: BggLinkType.BoardGameCompilation, id: 182880, value: 'Itself', inbound: 'true' },
+        { type: BggLinkType.BoardGameCompilation, id: 5, value: 'Box' },
+        { type: BggLinkType.BoardGameCompilation, id: 5, value: 'Box' },
+        { type: BggLinkType.BoardGameCompilation, id: 182880, value: 'Itself' },
+      ],
+    });
+    const selfOnly = makeBggThing({
+      id: 9,
+      links: [{ type: BggLinkType.BoardGameCompilation, id: 9, value: 'Itself', inbound: 'true' }],
+    });
+    const game = thingToGameData(thing);
+
+    expect(game.contentExternalIds).toEqual(['13']);
+    expect(game.bundleExternalIds).toEqual(['5']);
+    expect(thingToGameData(selfOnly).contentType).toBe(proto.ContentType.CONTENT_TYPE_BASE_GAME);
+  });
+
+  it('makes a board game that lists contents a bundle (#1394)', () => {
+    const thing = makeBggThing({
+      id: 182880,
+      type: BggThingType.BoardGame,
+      links: [{ type: BggLinkType.BoardGameCompilation, id: 13, value: 'Catan', inbound: 'true' }],
+    });
+
+    expect(thingToGameData(thing).contentType).toBe(proto.ContentType.CONTENT_TYPE_BUNDLE);
+  });
+
+  it('keeps an expansion that lists contents an expansion, so it keeps its add-on links (#1394)', () => {
+    const thing = makeBggThing({
+      id: 370721,
+      type: BggThingType.BoardGameExpansion,
+      links: [
+        { type: BggLinkType.BoardGameExpansion, id: 13, value: 'Catan', inbound: 'true' },
+        { type: BggLinkType.BoardGameCompilation, id: 27760, value: 'Pack', inbound: 'true' },
+      ],
+    });
+    const game = thingToGameData(thing);
+
+    expect(game.contentType).toBe(proto.ContentType.CONTENT_TYPE_EXPANSION);
+    expect(game.baseGameExternalIds).toEqual(['13']);
+    expect(game.contentExternalIds).toEqual(['27760']);
+  });
+
+  it('gives a search result built from a thing the content type its import gets (#1394)', () => {
+    const thing = makeBggThing({
+      id: 182880,
+      links: [{ type: BggLinkType.BoardGameCompilation, id: 13, value: 'Catan', inbound: 'true' }],
+    });
+    const item = makeBggSearchItem({ id: 182880, type: BggThingType.BoardGame });
+
+    expect(searchItemToGameSearchData(item, thing).contentType).toBe(proto.ContentType.CONTENT_TYPE_BUNDLE);
   });
 });
 

@@ -39,6 +39,9 @@ const game: proto.GameData = {
   metadataValues: [],
   dlc: [],
   crossReferences: [],
+  worksWithExternalIds: [],
+  contentExternalIds: [],
+  bundleExternalIds: [],
 };
 
 const searchResult: proto.GameSearchData = {

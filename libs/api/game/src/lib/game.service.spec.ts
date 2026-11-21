@@ -71,6 +71,9 @@ describe('GameService', () => {
     compose = jest.spyOn(ctx.module.get(ScopeComposer), 'compose');
     // Both game routes read expansion links (#1069); a game with none is the default.
     db.gameExpansion.findMany.mockResolvedValue([]);
+    // `GET /games/:id` reads the game's DataGateway links for its works-with
+    // links, contents and bundles (#1392, #1394); a game with none is the default.
+    db.gameSource.findMany.mockResolvedValue([]);
   });
 
   afterEach(() => jest.clearAllMocks());
@@ -441,7 +444,15 @@ describe('GameService', () => {
         select: PLATFORM_GAME_DETAIL_SELECT,
         orderBy: { platform: { name: 'asc' } },
       });
-      expect(game).toEqual({ id: 'game-1', platformGames: [row], expansions: [], baseGames: [] });
+      expect(game).toEqual({
+        id: 'game-1',
+        platformGames: [row],
+        expansions: [],
+        baseGames: [],
+        worksWith: [],
+        contents: [],
+        bundles: [],
+      });
     });
 
     // A platform game's own content type is one of its overrides, so it is
@@ -470,19 +481,23 @@ describe('GameService', () => {
       await expect(service.getGame('game-1')).rejects.toThrow(exception);
 
       expect(db.platformGame.findMany).not.toHaveBeenCalled();
-      // Nor its expansion links (#1069): they would name the games linked to
-      // a game the actor was refused.
+      // Nor its add-on links (#1069), works-with links, contents or
+      // bundles (#1392, #1394): they would name the games linked to a game the
+      // actor was refused.
       expect(db.gameExpansion.findMany).not.toHaveBeenCalled();
+      expect(db.gameSource.findMany).not.toHaveBeenCalled();
     });
 
     // The log line and the 404/403 mapping are written for the game read, and
-    // these reads have already got past it: the platform games (#791), and the
-    // expansion links and platform ids (#1069).
+    // these reads have already got past it: the platform games (#791), the
+    // add-on links and platform ids (#1069), and the DataGateway links the
+    // works-with links, contents and bundles are matched from (#1392, #1394).
     it.each([
       ['its platform games or platform ids', (db: MockDatabaseService) => db.platformGame.findMany],
-      ['its expansion links', (db: MockDatabaseService) => db.gameExpansion.findMany],
+      ['its add-on links', (db: MockDatabaseService) => db.gameExpansion.findMany],
+      ['its DataGateway links', (db: MockDatabaseService) => db.gameSource.findMany],
     ])(
-      'does not report a failure of a read of %s as a failure of the game read (#791, #1069)',
+      'does not report a failure of a read of %s as a failure of the game read (#791, #1069, #1392)',
       async (_read, delegate) => {
         const failure = new Error('connection lost');
         const errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
@@ -815,6 +830,185 @@ describe('GameService', () => {
         { gameId: 'b1', isStandalone: true },
         { gameId: 'b2', isStandalone: true },
       ]);
+    });
+  });
+
+  /**
+   * #1392, #1394. The games a game works with, contains and belongs to,
+   * worked out from the ids its DataGateway links store and those naming it.
+   * Each entry has the shape of an `expansions` entry, and the linked game is
+   * named only if the actor could open it.
+   */
+  describe('getGame, with its works-with links, contents and bundles (#1392, #1394)', () => {
+    const linkedGame = (id: string, title: string, contentType: ContentType) => ({
+      id,
+      title,
+      thumbnail: null,
+      contentType,
+    });
+
+    type Lists = { bundles?: unknown[]; contents?: unknown[]; worksWith?: unknown[] };
+
+    // Each relationship's game read is told apart by the field of the other
+    // game's DataGateway link that would name this one, the key of its "named
+    // by" arm: the works-with ids for works-with, the bundle ids for contents,
+    // and the content ids for bundles. The DataGateway link names nothing, so
+    // that arm is the read's only one; any other shape fails the test.
+    type LinkRead = { where: { AND: [unknown, unknown, { gameSources: { some: { OR: [object] } } }] } };
+
+    const stubGameLinks = ({ worksWith = [], contents = [], bundles = [] }: Lists) => {
+      db.gameSource.findMany.mockResolvedValue([
+        {
+          gatewayId: 'gw-bgg',
+          externalId: '13',
+          worksWithExternalIds: [],
+          contentExternalIds: [],
+          bundleExternalIds: [],
+        },
+      ] as never);
+      const byNamedByField: Record<string, unknown[]> = {
+        worksWithExternalIds: worksWith,
+        bundleExternalIds: contents,
+        contentExternalIds: bundles,
+      };
+      db.game.findMany.mockImplementation(((args: LinkRead) => {
+        const arms = args.where.AND[2].gameSources.some.OR;
+        const fields = arms.flatMap((arm) => Object.keys(arm).filter((key) => key in byNamedByField));
+        if (arms.length !== 1 || fields.length !== 1) {
+          throw new Error(`unexpected game read: ${JSON.stringify(args.where)}`);
+        }
+
+        return Promise.resolve(byNamedByField[fields[0]]);
+      }) as never);
+    };
+
+    // The game's own platform games and the linked games' platform ids are
+    // told apart by their select, as for the add-on links.
+    const stubPlatformReads = (ownPlatformIds: readonly string[], linkedRows: unknown[]) =>
+      db.platformGame.findMany.mockImplementation(((args: { select: unknown }) =>
+        Promise.resolve(
+          args.select === PLATFORM_GAME_DETAIL_SELECT ? ownPlatformIds.map((id) => ({ platform: { id } })) : linkedRows,
+        )) as never);
+
+    beforeEach(() => {
+      db.game.findUniqueOrThrow.mockResolvedValue({ id: 'g1', contentType: ContentType.BaseGame } as Game);
+      stubPlatformReads([], []);
+    });
+
+    it('returns works-with, contents and bundles, each with the platforms both games are on (#1392, #1394)', async () => {
+      stubGameLinks({
+        worksWith: [linkedGame('w1', 'Works with', ContentType.BaseGame)],
+        contents: [linkedGame('c1', 'Contained', ContentType.Expansion)],
+        bundles: [linkedGame('b1', 'Big Box', ContentType.Bundle)],
+      });
+      stubPlatformReads(
+        ['p-tab'],
+        [
+          { gameId: 'w1', platformId: 'p-pc' },
+          { gameId: 'w1', platformId: 'p-tab' },
+          { gameId: 'c1', platformId: 'p-tab' },
+          { gameId: 'b1', platformId: 'p-tab' },
+        ],
+      );
+
+      const game = await service.getGame('g1');
+
+      // Each game read is held to the live games the actor could open, the
+      // ceiling the add-on links use, at the top of its own `where` (#1392).
+      const linkedGameWhere = { deletedAt: null, AND: [COND] };
+      const ceilings = db.game.findMany.mock.calls.map(([args]) => (args?.where?.AND as unknown[] | undefined)?.[0]);
+      expect(ceilings).toEqual([linkedGameWhere, linkedGameWhere, linkedGameWhere]);
+
+      expect(game.worksWith).toEqual([
+        {
+          gameId: 'w1',
+          isStandalone: false,
+          game: linkedGame('w1', 'Works with', ContentType.BaseGame),
+          platformIds: ['p-tab'],
+        },
+      ]);
+      expect(game.contents).toEqual([
+        {
+          gameId: 'c1',
+          isStandalone: false,
+          game: linkedGame('c1', 'Contained', ContentType.Expansion),
+          platformIds: ['p-tab'],
+        },
+      ]);
+      expect(game.bundles).toEqual([
+        {
+          gameId: 'b1',
+          isStandalone: false,
+          game: linkedGame('b1', 'Big Box', ContentType.Bundle),
+          platformIds: ['p-tab'],
+        },
+      ]);
+      // One platform id read covers every linked game, under the platform
+      // game ceiling (#1391).
+      expect(db.platformGame.findMany).toHaveBeenCalledTimes(2);
+      expect(db.platformGame.findMany).toHaveBeenCalledWith({
+        where: { gameId: { in: ['w1', 'c1', 'b1'] }, AND: [COND] },
+        select: { gameId: true, platformId: true },
+        orderBy: { platform: { name: 'asc' } },
+      });
+    });
+
+    // A works-with link between a PC game and a tabletop game holds on no
+    // platform, and is still listed, as an add-on link is (#1391, #1392).
+    it('lists a link that holds on no platform, with empty platformIds (#1392)', async () => {
+      stubGameLinks({ worksWith: [linkedGame('w1', 'Works with', ContentType.BaseGame)] });
+      stubPlatformReads(['p-tab'], [{ gameId: 'w1', platformId: 'p-pc' }]);
+
+      const game = await service.getGame('g1');
+
+      expect(game.worksWith.map(({ gameId, platformIds }) => ({ gameId, platformIds }))).toEqual([
+        { gameId: 'w1', platformIds: [] },
+      ]);
+    });
+
+    // No platform is in view on this route, so `isStandalone` is the linked
+    // game's own, from its content type, as on `expansions` (#1392).
+    it("sets isStandalone from the linked game's own content type (#1392)", async () => {
+      stubGameLinks({
+        worksWith: [
+          linkedGame('w1', 'A', ContentType.StandaloneExpansion),
+          linkedGame('w2', 'B', ContentType.BaseGame),
+        ],
+      });
+
+      const game = await service.getGame('g1');
+
+      expect(game.worksWith.map(({ gameId, isStandalone }) => ({ gameId, isStandalone }))).toEqual([
+        { gameId: 'w1', isStandalone: true },
+        { gameId: 'w2', isStandalone: false },
+      ]);
+    });
+
+    // A contents link means "this item contains that one", whatever either
+    // game's content type, so no content type gates it (#1394).
+    it("lists contents whatever the game's content type (#1394)", async () => {
+      stubGameLinks({ contents: [linkedGame('c1', 'Contained', ContentType.BaseGame)] });
+
+      const game = await service.getGame('g1');
+
+      expect(game.contents.map(({ gameId }) => gameId)).toEqual(['c1']);
+    });
+
+    // A works-with link is no add-on link: the two games stay separate, even
+    // beside a real add-on link of the same game (#1392).
+    it('never lists a works-with game among expansions or base games (#1392)', async () => {
+      db.game.findUniqueOrThrow.mockResolvedValue({ id: 'g1', contentType: ContentType.Expansion } as Game);
+      db.gameExpansion.findMany.mockImplementation(((args: { where: Record<string, unknown> }) =>
+        Promise.resolve(
+          'baseGameId' in args.where ? [{ expansionGame: linkedGame('e1', 'Expansion', ContentType.Expansion) }] : [],
+        )) as never);
+      stubGameLinks({ worksWith: [linkedGame('w1', 'Works with', ContentType.Expansion)] });
+
+      const game = await service.getGame('g1');
+
+      expect(game.worksWith.map(({ gameId }) => gameId)).toEqual(['w1']);
+      expect(game.expansions.map(({ gameId }) => gameId)).toEqual(['e1']);
+      expect(game.baseGames.map(({ gameId }) => gameId)).not.toContain('w1');
     });
   });
 
