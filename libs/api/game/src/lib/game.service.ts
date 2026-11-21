@@ -22,7 +22,9 @@ import type { DataGatewayLink } from './data-gateway-link';
 import type { GameDetailDto, GameListItemDto, GameSort } from './dto';
 import { CreateGameDto, GAME_DESCRIPTION_MAX_LENGTH, ListGamesQueryDto, UpdateGameDto } from './dto';
 import { GAME_DETAIL_INCLUDE } from './game-detail.include';
+import { readGameLinks } from './game-links.read';
 import { gameListScope } from './game-list-scope';
+import type { LinkedGame } from './linked-game.select';
 import { LINKED_GAME_SELECT } from './linked-game.select';
 import { PLATFORM_GAME_DETAIL_SELECT } from './platform-game-detail.select';
 
@@ -146,12 +148,18 @@ export class GameService {
    * allowed to read the game, which is what protects a private game's
    * platform games, and outside the game read's `try`, so a failure of one is
    * never reported as a 404 or 403 of the game.
+   *
+   * It also lists the games it works with, contains and belongs to (#1392,
+   * #1394), worked out from the ids its DataGateway links store and those
+   * naming it, whatever either game's content type. Each entry has the shape
+   * of an expansion's, with the linked game's own `isStandalone`, and is
+   * listed even when it holds on no platform.
    */
   async getGame(id: string): Promise<GameDetailDto> {
     const game = await this.readGame(id);
     const linkedGameWhere = this.linkedGameWhere();
 
-    const [platformGames, linkedExpansionRows, baseGameRows] = await Promise.all([
+    const [platformGames, linkedExpansionRows, baseGameRows, { worksWith, contents, bundles }] = await Promise.all([
       this.db.platformGame.findMany({
         where: this.scopeComposer.compose(ResourceType.PlatformGame, Action.read, { gameId: id }),
         select: PLATFORM_GAME_DETAIL_SELECT,
@@ -172,6 +180,8 @@ export class GameService {
             orderBy: [{ baseGame: { title: 'asc' } }, { baseGameId: 'asc' }],
           })
         : [],
+
+      readGameLinks(this.db, id, linkedGameWhere),
     ]);
 
     // A link of a game that is no add-on can still be stored (#1178), and is
@@ -181,9 +191,13 @@ export class GameService {
       ADD_ON_CONTENT_TYPES.has(expansionGame.contentType),
     );
 
+    // A game can be on more than one list, and is read once.
     const platformIds = await this.readPlatformIds([
-      ...expansionRows.map(({ expansionGame }) => expansionGame.id),
-      ...baseGameRows.map(({ baseGame }) => baseGame.id),
+      ...new Set([
+        ...expansionRows.map(({ expansionGame }) => expansionGame.id),
+        ...baseGameRows.map(({ baseGame }) => baseGame.id),
+        ...[...worksWith, ...contents, ...bundles].map((linked) => linked.id),
+      ]),
     ]);
     // A link holds on the platforms both its games are on (#1391). This
     // game's side is the platform games already read under the ceiling, so an
@@ -193,22 +207,28 @@ export class GameService {
     // On its base games' links this game is the add-on, so its own content
     // type decides them all (#1391).
     const isStandalone = isStandaloneAddOn(game.contentType);
+    // On its expansions, works-with links, contents and bundles the linked
+    // game's own content type decides `isStandalone` (#1391, #1392).
+    const linkTo = (linked: LinkedGame) => ({
+      gameId: linked.id,
+      isStandalone: isStandaloneAddOn(linked.contentType),
+      game: linked,
+      platformIds: linkPlatformIdsWith(linked.id),
+    });
 
     return {
       ...game,
       platformGames,
-      expansions: expansionRows.map(({ expansionGame }) => ({
-        gameId: expansionGame.id,
-        isStandalone: isStandaloneAddOn(expansionGame.contentType),
-        game: expansionGame,
-        platformIds: linkPlatformIdsWith(expansionGame.id),
-      })),
+      expansions: expansionRows.map(({ expansionGame }) => linkTo(expansionGame)),
       baseGames: baseGameRows.map(({ baseGame }) => ({
         gameId: baseGame.id,
         isStandalone,
         game: baseGame,
         platformIds: linkPlatformIdsWith(baseGame.id),
       })),
+      worksWith: worksWith.map(linkTo),
+      contents: contents.map(linkTo),
+      bundles: bundles.map(linkTo),
     };
   }
 
