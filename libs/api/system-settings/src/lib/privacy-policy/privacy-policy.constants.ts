@@ -1,4 +1,11 @@
 /**
+ * Where the privacy policy is read: `PrivacyPolicyController`'s route, under
+ * the api's global prefix (#934). A route that shows the policy before an act,
+ * such as linking an upstream account (#935), points a client here.
+ */
+export const PRIVACY_POLICY_PATH = '/api/privacy-policy';
+
+/**
  * The most characters a privacy policy's Markdown may have, before it is
  * sanitized: a policy file's body and a server admin's replacement alike
  * (#934). The sanitizer keeps longer Markdown as plain text with its markup

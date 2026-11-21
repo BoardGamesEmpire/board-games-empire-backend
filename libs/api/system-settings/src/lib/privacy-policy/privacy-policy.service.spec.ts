@@ -1,4 +1,5 @@
 import { Prisma, ResourceType } from '@bge/database';
+import { LocaleResolutionService } from '@bge/i18n';
 import type { MockDatabaseService } from '@bge/testing';
 import { createMockDatabaseService, createTestingModuleWithDb, rawQueryText, unwrapTransaction } from '@bge/testing';
 import { HttpStatus } from '@nestjs/common';
@@ -66,6 +67,7 @@ describe('PrivacyPolicyService (#934)', () => {
   let db: MockDatabaseService;
   let texts: Map<string, PolicyText>;
   let emitter: { emit: jest.Mock };
+  const storedLanguage = jest.fn<Promise<string | null>, [string]>();
 
   /** The policy files the server booted with. */
   function givenFiles(...files: PolicyText[]): void {
@@ -107,6 +109,7 @@ describe('PrivacyPolicyService (#934)', () => {
   beforeEach(async () => {
     texts = new Map();
     emitter = { emit: jest.fn() };
+    storedLanguage.mockReset().mockResolvedValue(null);
     const files = {
       get: (language: string) => texts.get(language),
       languages: () => [...texts.keys()].sort(),
@@ -117,6 +120,7 @@ describe('PrivacyPolicyService (#934)', () => {
         PrivacyPolicyService,
         { provide: PrivacyPolicyFilesService, useValue: files },
         { provide: EventEmitter2, useValue: emitter },
+        { provide: LocaleResolutionService, useValue: { storedLanguage } },
       ],
     });
 
@@ -226,6 +230,26 @@ describe('PrivacyPolicyService (#934)', () => {
     expect(await languageFor({ storedLanguage: 'de-AT', acceptLanguage: 'fr' })).toBe('de');
     expect(await languageFor({ storedLanguage: 'es', acceptLanguage: 'fr' })).toBe('fr');
     expect(await languageFor({ storedLanguage: null, acceptLanguage: 'fr' })).toBe('fr');
+  });
+
+  // The route and a link's answer both choose the language this way, so a
+  // reader sees the same policy in both (#934, #935).
+  describe('readFor', () => {
+    it("tries a signed-in reader's stored language after lang and before Accept-Language", async () => {
+      givenFiles(file('en'), file('de'), file('fr'));
+      storedLanguage.mockResolvedValue('de-AT');
+
+      expect((await service.readFor({ userId: 'user-1', acceptLanguage: 'fr' })).language).toBe('de');
+      expect((await service.readFor({ userId: 'user-1', lang: 'fr', acceptLanguage: 'en' })).language).toBe('fr');
+      expect(storedLanguage).toHaveBeenCalledWith('user-1');
+    });
+
+    it('reads no stored language for a reader who is not signed in', async () => {
+      givenFiles(file('en'), file('de'), file('fr'));
+
+      expect((await service.readFor({ userId: null, acceptLanguage: 'fr' })).language).toBe('fr');
+      expect(storedLanguage).not.toHaveBeenCalled();
+    });
   });
 
   it('matches a regional request to the base language', async () => {

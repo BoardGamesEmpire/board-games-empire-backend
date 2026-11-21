@@ -23,6 +23,7 @@ import { HouseholdModule } from '@bge/household';
 import { I18nConfigModule, I18nExceptionFilter, I18nResponseInterceptor, UnknownErrorFilter } from '@bge/i18n';
 import { LanguageModule } from '@bge/language';
 import { ListModule } from '@bge/list';
+import { buildRequestSerializer } from '@bge/logger';
 import { MediaModule } from '@bge/media';
 import { MetricsModule } from '@bge/metrics';
 import { NotificationsModule } from '@bge/notifications';
@@ -39,6 +40,7 @@ import { CACHE_REDIS_CLIENT, createCacheStore, QUEUE_REDIS_CLIENT, RedisModule }
 import { SafeHttpModule } from '@bge/safe-http';
 import { SecureHttpModule } from '@bge/secure-http';
 import { PrivacyPolicyModule, SystemSettingsModule } from '@bge/system-settings';
+import { UpstreamAccountModule } from '@bge/upstream-account';
 import { UserModule } from '@bge/user';
 import { WebhookSubscriptionModule } from '@bge/webhook-subscription';
 import { WellKnownModule } from '@bge/well-known';
@@ -63,6 +65,7 @@ import { GameSearchGateway } from './gateways/game/search.gateway';
 import { TransactionDeadlockInterceptor } from './interceptors/transaction-deadlock.interceptor';
 import { UserAwareCacheInterceptor } from './interceptors/user-aware-cache.interceptor';
 import { baseLogger } from './lib/logger';
+import { PATHS_WITHOUT_QUERY } from './lib/paths-without-query';
 import { RateLimitGuard } from './lib/rate-limit.guard';
 import { RedisThrottlerStorage } from './lib/redis-throttler.storage';
 import { createThrottlers } from './lib/throttlers';
@@ -150,10 +153,17 @@ import { apiPluginModuleOptions } from './plugin-module.options';
     // `component: 'bootstrap'` binding intended for pre-Nest log lines,
     // and passing it here would tag every runtime log as a bootstrap
     // log.
+    //
+    // The Steam sign-in return is logged by path alone: its query carries the
+    // SteamID, which stays out of the logs because unlinking deletes it. The
+    // same list keeps it out of the trace spans, from main.ts (#935).
     LoggerModule.forRoot({
       forRoutes: ['*'],
       pinoHttp: {
         logger: baseLogger,
+        serializers: {
+          req: buildRequestSerializer({ pathsWithoutQuery: PATHS_WITHOUT_QUERY }),
+        },
       },
     }),
 
@@ -239,6 +249,8 @@ import { apiPluginModuleOptions } from './plugin-module.options';
     QuotasModule,
     SafeHttpModule,
     SystemSettingsModule,
+    // A user's own upstream accounts under users/me/upstream-accounts (#935).
+    UpstreamAccountModule,
     UserModule,
     WebhookSubscriptionModule,
     // Webhook delivery PRODUCER: the onAny dispatcher that turns the Event

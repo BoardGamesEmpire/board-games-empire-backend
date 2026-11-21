@@ -1,5 +1,5 @@
 import { DatabaseService, isPrismaDependentRecordNotFoundError, Prisma } from '@bge/database';
-import { CodedHttpException, FALLBACK_LOCALE, t } from '@bge/i18n';
+import { CodedHttpException, FALLBACK_LOCALE, LocaleResolutionService, t } from '@bge/i18n';
 import { canonicalizeTag, lookupTag, parseAcceptLanguage } from '@bge/locale';
 import { Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -23,6 +23,12 @@ export interface PrivacyPolicyLanguageRequest {
 
   /** The language a signed-in reader stored as their preference, tried after `lang`. */
   storedLanguage?: string | null;
+}
+
+/** What a reader asks the privacy policy to be in, the reader named rather than their stored language. */
+export interface PrivacyPolicyReaderRequest extends Omit<PrivacyPolicyLanguageRequest, 'storedLanguage'> {
+  /** The signed-in reader whose stored language is tried after `lang`, or null for none. */
+  userId: string | null;
 }
 
 /** The columns a write reads and returns: its events' snapshot. */
@@ -58,7 +64,23 @@ export class PrivacyPolicyService {
     private readonly db: DatabaseService,
     private readonly files: PrivacyPolicyFilesService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly localeResolution: LocaleResolutionService,
   ) {}
+
+  /**
+   * The policy a reader is served: {@link read}, with a signed-in reader's
+   * stored language read for them. `GET /api/privacy-policy` and a route that
+   * shows the policy before an act, such as linking an upstream account
+   * (#935), both read it here, so a reader sees the same policy in both. The
+   * stored language, not the request's interface language: that is matched
+   * against the catalogs, and a policy can exist in a language they don't
+   * (#934).
+   */
+  async readFor({ userId, ...request }: PrivacyPolicyReaderRequest): Promise<PrivacyPolicyDto> {
+    const storedLanguage = userId === null ? null : await this.localeResolution.storedLanguage(userId);
+
+    return this.read({ ...request, storedLanguage });
+  }
 
   /**
    * The policy in the best language the server has it in, from rows and files

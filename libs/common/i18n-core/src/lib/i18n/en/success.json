@@ -95,6 +95,9 @@
   "quota": {
     "set": "Quota set"
   },
+  "upstream_account": {
+    "unlinked": "Your {upstream} account is unlinked. Its sync history is deleted, and the games already in your collection stay."
+  },
   "webhook_subscription": {
     "created": "Webhook subscription created",
     "updated": "Webhook subscription {id} updated",

@@ -115,6 +115,22 @@ export class AuthService {
   }
 
   /**
+   * Whether a route that sends the browser to `url` afterwards may send it
+   * there: an absolute address at one of the trusted origins
+   * (`TRUSTED_ORIGINS`, matched as better-auth matches them), as a password
+   * reset's link is checked. A relative path is refused.
+   *
+   * `DISABLE_ORIGIN_CHECK` does not lift it. That setting lets requests in
+   * from any origin; sending the browser on to any address it was given would
+   * make the route an open redirect (#935).
+   */
+  async isTrustedReturnAddress(url: string): Promise<boolean> {
+    const context = await this.auth.$context;
+
+    return context.isTrustedOrigin(url, { allowRelativePaths: false });
+  }
+
+  /**
    * Verifies an API key via the BetterAuth `apiKey` plugin. Returns the
    * resolved key (id + owning userId) on success, or `null` for any failure
    * (unknown / revoked / expired / rate-limited).

@@ -493,6 +493,24 @@ The Socket.IO streams adapter connection is managed in
 it requires `node-redis` rather than `iovalkey` and has different lifecycle
 requirements than the queue and cache connections.
 
+### Pending Steam sign-ins
+
+Linking a Steam account as an upstream account starts a Steam sign-in, and the
+cache connection keeps it until Steam sends the browser back (#935). Two keys:
+
+- `bge:upstream-link:steam:state:<state>` holds the pending sign-in (user,
+  return address, start time). It lives **30 minutes** and is removed when the
+  return takes it, so a state works once.
+- `bge:upstream-link:steam:user:<userId>` holds that user's current state, so
+  starting again deletes the earlier one. A return is honoured only for the
+  state this key names, so an earlier state the delete missed stays unusable.
+  It carries the same 30 minutes.
+
+`FLUSHDB` on the cache database drops pending sign-ins; the user starts the
+link again. The store needs `GETDEL` and `SET … GET`, which both need Redis 6.2
+or later. The api e2e suite exercises them, so the redis-compat workflow checks
+the compatible servers above in the same run.
+
 ### Future considerations
 
 **Optional WebSockets for lean deployments.** WebSockets are currently

@@ -365,6 +365,11 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     'read:households:friends',
     'read:household_member:friends',
 
+    // upstream accounts
+    'create:upstream_account:own',
+    'read:upstream_account:own',
+    'delete:upstream_account:own',
+
     // game
     'create:game',
     'delete:game:own',

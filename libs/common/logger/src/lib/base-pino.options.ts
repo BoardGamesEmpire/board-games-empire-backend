@@ -1,4 +1,4 @@
-import type { LoggerOptions, TransportTargetOptions } from 'pino';
+import type { LoggerOptions, SerializedRequest, TransportTargetOptions } from 'pino';
 
 /**
  * Default log level when `NODE_ENV === 'production'` and `LOG_LEVEL`
@@ -123,5 +123,75 @@ export function buildBasePinoOptions(
     transport: {
       targets: transportTargets,
     },
+  };
+}
+
+/** The character code of `/`. */
+const SLASH = 0x2f;
+
+/**
+ * Options for {@link buildRequestSerializer}.
+ */
+export interface RequestSerializerOptions {
+  /**
+   * Request paths, global prefix included (`/api/...`), whose query string
+   * never reaches a log line. The caller supplies them, so this lib imports
+   * no feature lib.
+   */
+  readonly pathsWithoutQuery: readonly string[];
+}
+
+/**
+ * A request path as Express matches it to a route: case-insensitively, and
+ * ignoring a trailing slash. Two paths that reach the same route compare equal
+ * once both are normalized, so a list of paths whose query is withheld, from
+ * a log line here or from a trace span in `@bge/otel`, matches any spelling
+ * that reaches the route (#935).
+ *
+ * Every request's path passes through here, so the trailing slashes are
+ * trimmed by a scan back from the end. A `/\/+$/` replace retries the slash
+ * run from each position in it, which is quadratic in the path's length: a
+ * path of slashes ending in another character, at the request line's 16 KB
+ * limit, held the event loop for about 90 ms, twice per request (#935).
+ */
+export function normalizeRequestPath(path: string): string {
+  let end = path.length;
+  while (end > 0 && path.charCodeAt(end - 1) === SLASH) {
+    end -= 1;
+  }
+
+  return path.slice(0, end).toLowerCase() || '/';
+}
+
+/**
+ * Returns a pino-http `req` serializer that logs only the path, with no
+ * `query` object, for a request to one of `pathsWithoutQuery`; every other
+ * request is logged unchanged. pino-http logs `req.url` as the original URL,
+ * query string included, so a route whose query carries an identifier the
+ * user can later delete (the Steam sign-in answer carries the SteamID, and
+ * unlinking deletes it) keeps it out of the logs this way (#935).
+ */
+export function buildRequestSerializer({
+  pathsWithoutQuery,
+}: RequestSerializerOptions): (req: SerializedRequest) => SerializedRequest {
+  const unlogged = new Set(pathsWithoutQuery.map(normalizeRequestPath));
+
+  return (req) => {
+    if (typeof req.url !== 'string') {
+      return req;
+    }
+
+    // Node passes an absolute-form request target (`GET http://host/path`)
+    // through as `req.url`, and Express still routes it by its path, so the
+    // scheme and host go before the match, as `@bge/otel` does for spans.
+    const [target = req.url] = req.url.split('?', 1);
+    const path = URL.canParse(target) ? new URL(target).pathname : target;
+    if (!unlogged.has(normalizeRequestPath(path))) {
+      return req;
+    }
+
+    req.url = path;
+    Reflect.deleteProperty(req, 'query');
+    return req;
   };
 }

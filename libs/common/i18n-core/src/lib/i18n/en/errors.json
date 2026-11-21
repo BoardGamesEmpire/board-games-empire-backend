@@ -353,6 +353,16 @@
     "too_long": "Shorten the privacy policy to at most {max} characters and try again.",
     "too_complex": "The privacy policy uses bold, italic or strikethrough too many times for its headings and lists to be kept. Use that formatting in fewer places and try again."
   },
+  "upstream_account": {
+    "not_linkable": "You can't link a {upstream} account on this server right now. A server admin can allow it by turning on a DataGateway for {upstream}.",
+    "already_linked": "Your {upstream} account is already linked. To link a different {upstream} account, unlink this one first.",
+    "taken": "This {upstream} account is already linked to another user on this server, so it can't be linked to yours. If it is yours, ask a server admin for help.",
+    "not_found": "You have no {upstream} account linked, so there's nothing to unlink.",
+    "session_required": "Only you can link your {upstream} account, signed in to this server as yourself. An API key can't link one.",
+    "unknown_upstream": "There's no upstream called '{key}'. Use one of these: {keys}.",
+    "link_return_address_refused": "The app asked to come back to an address this server doesn't send you back to, so the {upstream} sign-in didn't start. Update the app, or ask the server's operator to add the app's address.",
+    "link_expired": "This {upstream} sign-in has expired or was already used. If your {upstream} account isn't linked yet, start linking again and finish within {minutes} minutes."
+  },
   "well_known": {
     "security_txt_not_configured": "security.txt is not configured for this BGE instance. Set SECURITY_CONTACT to enable this endpoint."
   },

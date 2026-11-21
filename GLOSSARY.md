@@ -880,6 +880,9 @@ _Avoid_: ping handshake
 A user's own account on an upstream, such as their BoardGameGeek username, used to sync their collection.
 _Avoid_: gateway connection, gateway account, external profile, linked account (a sign-in method)
 
+**Steam sign-in**:
+Signing in at Steam to prove that a Steam upstream account belongs to the user. It is never a way to sign in to this server. A pending Steam sign-in lasts 30 minutes.
+
 **Capability**:
 Something a DataGateway can do that the server routes requests by: an operation it serves, or a kind of game it covers.
 _Avoid_: feature (a plugin's consent grouping)

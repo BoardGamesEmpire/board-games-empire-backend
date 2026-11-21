@@ -1,11 +1,18 @@
 import http from 'node:http';
+import type { AddressInfo } from 'node:net';
+import net from 'node:net';
 import { Writable } from 'node:stream';
-import type { TransportTargetOptions } from 'pino';
+import type { LoggerOptions, TransportTargetOptions } from 'pino';
 import pino from 'pino';
 import pinoHttp from 'pino-http';
 import request from 'supertest';
 import type { LogDestination } from './base-pino.options';
-import { buildBasePinoOptions, resolvePinoLevel } from './base-pino.options';
+import {
+  buildBasePinoOptions,
+  buildRequestSerializer,
+  normalizeRequestPath,
+  resolvePinoLevel,
+} from './base-pino.options';
 
 /**
  * Narrows the loose `LoggerOptions['transport']` to the multi-target
@@ -25,6 +32,25 @@ const getTargets = (transport: unknown): TransportTargetOptions[] => {
 
 // Passed explicitly so no assertion depends on whether Jest itself runs on a terminal.
 const TERMINAL = { isTTY: true };
+
+/**
+ * The base options at debug, without their transport, for a logger writing to
+ * a stream the spec reads: pino refuses a destination stream alongside a
+ * transport.
+ */
+const optionsWithoutTransport = (): LoggerOptions => {
+  const options = buildBasePinoOptions({ LOG_LEVEL: 'debug' });
+  delete options.transport;
+
+  return options;
+};
+
+/** Headers carrying a credential of each kind the base options redact. */
+const CREDENTIAL_HEADERS = {
+  Authorization: 'Bearer bearer-secret',
+  Cookie: 'bge.session=cookie-secret',
+  'X-API-Key': 'key-secret',
+};
 
 describe('resolvePinoLevel', () => {
   it('uses LOG_LEVEL when set', () => {
@@ -142,12 +168,6 @@ describe('buildBasePinoOptions', () => {
 describe('credential redaction (#748)', () => {
   type LogRecord = Record<string, any>;
 
-  const CREDENTIAL_HEADERS = {
-    Authorization: 'Bearer bearer-secret',
-    Cookie: 'bge.session=cookie-secret',
-    'X-API-Key': 'key-secret',
-  };
-
   let server: http.Server;
   let lines: string[];
 
@@ -182,8 +202,7 @@ describe('credential redaction (#748)', () => {
   };
 
   beforeEach(() => {
-    // Strip the transport: pino refuses a destination stream alongside one.
-    const { transport: _transport, ...options } = buildBasePinoOptions({ LOG_LEVEL: 'debug' });
+    const options = optionsWithoutTransport();
     lines = [];
     const sink = new Writable({
       write(chunk, _encoding, done) {
@@ -248,5 +267,152 @@ describe('credential redaction (#748)', () => {
     expect(req.headers).not.toHaveProperty('authorization');
     expect(req.headers).not.toHaveProperty('cookie');
     expect(req.headers).not.toHaveProperty('x-api-key');
+  });
+});
+
+describe('normalizeRequestPath (#935)', () => {
+  it.each([
+    ['/API/Users/Me', '/api/users/me'],
+    ['/api/users/', '/api/users'],
+    ['/api/users///', '/api/users'],
+    ['/api//users', '/api//users'],
+    ['/', '/'],
+    ['///', '/'],
+    ['', '/'],
+  ])('normalizes %j to %j', (path, expected) => {
+    expect(normalizeRequestPath(path)).toBe(expected);
+  });
+
+  // A run of slashes that does not end the path is the input a trailing-slash
+  // regular expression backtracks on; the scan leaves it as it is.
+  it('keeps a long run of slashes that does not end the path', () => {
+    const path = `/${'/'.repeat(16_384)}X`;
+
+    expect(normalizeRequestPath(path)).toBe(path.toLowerCase());
+  });
+});
+
+describe('buildRequestSerializer (#935)', () => {
+  type LogRecord = { msg?: string; req: { headers: Record<string, unknown>; query?: unknown; url: string } };
+
+  const RETURN_PATH = '/api/users/me/upstream-accounts/steam/return';
+  const STEAM_ID = '76561197960287930';
+  const QUERY = `openid.claimed_id=https%3A%2F%2Fsteamcommunity.com%2Fopenid%2Fid%2F${STEAM_ID}&state=spent-state`;
+
+  let server: http.Server;
+  let lines: string[];
+
+  const accessLine = async (): Promise<LogRecord> => {
+    for (let attempt = 0; attempt < 100; attempt++) {
+      const record = lines
+        .join('')
+        .split('\n')
+        .filter((line) => line.length > 0)
+        .map((line): LogRecord => JSON.parse(line))
+        .find((r) => r.msg === 'request completed');
+      if (record) {
+        return record;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    throw new Error('the access line was never logged');
+  };
+
+  beforeEach(() => {
+    const options = optionsWithoutTransport();
+    lines = [];
+    const sink = new Writable({
+      write(chunk, _encoding, done) {
+        lines.push(String(chunk));
+        done();
+      },
+    });
+    const httpLogger = pinoHttp({
+      logger: pino(options, sink),
+      serializers: { req: buildRequestSerializer({ pathsWithoutQuery: [RETURN_PATH] }) },
+    });
+
+    server = http.createServer((req, res) => {
+      // Express sets `query`; the bare http server stands in for it.
+      Object.assign(req, { query: Object.fromEntries(new URL(req.url ?? '/', 'http://localhost').searchParams) });
+      httpLogger(req, res);
+      res.end();
+    });
+  });
+
+  afterEach(() => {
+    server.close();
+  });
+
+  it('logs only the path for a listed route, so the SteamID stays out of the logs', async () => {
+    await request(server).get(`${RETURN_PATH}?${QUERY}`);
+
+    const { req } = await accessLine();
+
+    expect(req.url).toBe(RETURN_PATH);
+    expect(req).not.toHaveProperty('query');
+    expect(lines.join('')).not.toContain(STEAM_ID);
+    expect(lines.join('')).not.toContain('spent-state');
+  });
+
+  it('matches the listed route however Express would, ignoring case and a trailing slash', async () => {
+    await request(server).get(`${RETURN_PATH.toUpperCase()}/?${QUERY}`);
+
+    const { req } = await accessLine();
+
+    expect(req.url).toBe(`${RETURN_PATH.toUpperCase()}/`);
+    expect(lines.join('')).not.toContain(STEAM_ID);
+  });
+
+  // An absolute-form target reaches the same route through Express, and Node
+  // passes it through as `req.url`, scheme, host and query included (#935).
+  it('logs only the path for a listed route requested in absolute form', async () => {
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address() as AddressInfo;
+
+    await new Promise<void>((resolve, reject) => {
+      const socket = net.connect(port, '127.0.0.1', () => {
+        socket.end(
+          `GET http://api.example${RETURN_PATH}?${QUERY} HTTP/1.1\r\nHost: api.example\r\nConnection: close\r\n\r\n`,
+        );
+      });
+      socket.on('error', reject);
+      socket.on('close', () => resolve());
+      socket.resume();
+    });
+
+    const { req } = await accessLine();
+
+    expect(req.url).toBe(RETURN_PATH);
+    expect(req).not.toHaveProperty('query');
+    expect(lines.join('')).not.toContain(STEAM_ID);
+    expect(lines.join('')).not.toContain('spent-state');
+  });
+
+  // The serializer replaces pino-http's own, so the base options' redaction
+  // must still reach the request it returns (#748).
+  it('still redacts the credentials on a listed route', async () => {
+    await request(server).get(`${RETURN_PATH}?${QUERY}`).set(CREDENTIAL_HEADERS);
+
+    const { req } = await accessLine();
+
+    expect(req.headers['authorization']).toBe('[Redacted]');
+    expect(req.headers['cookie']).toBe('[Redacted]');
+    expect(req.headers['x-api-key']).toBe('[Redacted]');
+    const output = lines.join('');
+    expect(output).not.toContain('bearer-secret');
+    expect(output).not.toContain('cookie-secret');
+    expect(output).not.toContain('key-secret');
+  });
+
+  it('logs the full URL and query for any other route', async () => {
+    await request(server).get('/api/games?search=catan');
+
+    const { req } = await accessLine();
+
+    expect(req.url).toBe('/api/games?search=catan');
+    expect(req.query).toEqual({ search: 'catan' });
   });
 });

@@ -67,6 +67,7 @@ import { NodeSDK } from '@opentelemetry/sdk-node';
 import { BatchSpanProcessor } from '@opentelemetry/sdk-trace';
 import { noopActorContextProvider } from '../processors/actor-context-provider';
 import { ActorSpanProcessor } from '../processors/actor-span.processor';
+import { QueryWithholdingSpanProcessor } from '../processors/query-withholding.span-processor';
 import { initOtel } from './init-otel';
 import { metricExportTiming, pinMetricExportTiming } from './metric-export-env';
 import type { OtelInitConfig } from './otel.config';
@@ -151,11 +152,30 @@ describe('initOtel', () => {
       expect(spanProcessors).toEqual(expect.arrayContaining([expect.any(ActorSpanProcessor)]));
     });
 
+    it('registers the QueryWithholdingSpanProcessor first, ahead of every processor that reads a span (#935)', () => {
+      process.env['OTEL_EXPORTER_OTLP_ENDPOINT'] = 'http://localhost:4318';
+
+      initOtel(baseConfig);
+
+      const { spanProcessors } = lastSdkConfig();
+      expect(spanProcessors[0]).toBeInstanceOf(QueryWithholdingSpanProcessor);
+    });
+
+    it("hands the handle's withheld paths to the QueryWithholdingSpanProcessor (#935)", () => {
+      const handle = initOtel(baseConfig);
+      const [queryWithholding] = lastSdkConfig().spanProcessors as [QueryWithholdingSpanProcessor];
+      const withhold = jest.spyOn(queryWithholding, 'withholdQueryFor');
+
+      handle.withholdQueryFor(['/api/users/me/upstream-accounts/steam/return']);
+
+      expect(withhold).toHaveBeenCalledWith(['/api/users/me/upstream-accounts/steam/return']);
+    });
+
     it('does NOT register a BatchSpanProcessor when no OTLP endpoint is set', () => {
       initOtel(baseConfig);
 
       const { spanProcessors } = lastSdkConfig();
-      expect(spanProcessors).toHaveLength(1);
+      expect(spanProcessors).toHaveLength(2);
       expect(BatchSpanProcessorMock).not.toHaveBeenCalled();
     });
 
@@ -165,7 +185,7 @@ describe('initOtel', () => {
       initOtel(baseConfig);
 
       const { spanProcessors } = lastSdkConfig();
-      expect(spanProcessors).toHaveLength(2);
+      expect(spanProcessors).toHaveLength(3);
       expect(BatchSpanProcessorMock).toHaveBeenCalledTimes(1);
     });
   });

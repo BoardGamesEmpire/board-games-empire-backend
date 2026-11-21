@@ -158,6 +158,38 @@ describe('AuthService', () => {
     });
   });
 
+  describe('isTrustedReturnAddress', () => {
+    const service = serviceWith({ disableOriginCheck: false });
+
+    it.each([
+      ['an address at a trusted origin', `${TRUSTED}/settings/upstream-accounts?tab=steam`],
+      ['an address at an origin a trusted pattern matches', 'https://pr-12.preview.example/settings'],
+      ["an address at the server's own origin", 'http://localhost:3000/settings'],
+    ])('accepts %s (#935)', async (_, url) => {
+      await expect(service.isTrustedReturnAddress(url)).resolves.toBe(true);
+    });
+
+    it.each([
+      ['an address at an untrusted origin', `${UNTRUSTED}/settings`],
+      ['a trusted host over the wrong scheme', 'http://app.example/settings'],
+      ['a trusted origin as the userinfo of an untrusted one', `https://app.example@evil.example/settings`],
+      // A route that redirects there afterwards needs an absolute address.
+      ['a relative path', '/settings/upstream-accounts'],
+      ['a protocol-relative address', '//evil.example/settings'],
+    ])('refuses %s (#935)', async (_, url) => {
+      await expect(service.isTrustedReturnAddress(url)).resolves.toBe(false);
+    });
+
+    // Turning the origin check off lets requests in from anywhere; it must not
+    // let a redirect go anywhere (#935).
+    it('still refuses an untrusted address when the origin check is disabled (#935)', async () => {
+      const unchecked = serviceWith({ disableOriginCheck: true, disableCSRFCheck: true });
+
+      await expect(unchecked.isTrustedReturnAddress(`${UNTRUSTED}/settings`)).resolves.toBe(false);
+      await expect(unchecked.isTrustedReturnAddress(`${TRUSTED}/settings`)).resolves.toBe(true);
+    });
+  });
+
   describe('verifyApiKey', () => {
     it("resolves a valid key to its id and its owner's user id", async () => {
       const verifyApiKey = jest
