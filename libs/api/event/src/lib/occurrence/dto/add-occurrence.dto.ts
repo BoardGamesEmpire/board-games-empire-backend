@@ -34,7 +34,7 @@ export class AddOccurrenceDto {
   @IsOptional()
   status?: OccurrenceStatus;
 
-  @ApiPropertyOptional({ default: 0 })
+  @ApiPropertyOptional({ default: 0, type: 'integer', format: 'int32' })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(0, { message: i18nValidationMessage('validation.min') })
   @Max(INT32_MAX, { message: i18nValidationMessage('validation.max') })

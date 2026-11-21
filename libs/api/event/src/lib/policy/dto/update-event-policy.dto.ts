@@ -44,7 +44,7 @@ export class UpdateEventPolicyDto {
   @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
   allowGuestInvites?: boolean;
 
-  @ApiPropertyOptional({ nullable: true, description: '`null` removes the limit.' })
+  @ApiPropertyOptional({ nullable: true, description: '`null` removes the limit.', type: 'integer', format: 'int32' })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })
   @Max(INT32_MAX, { message: i18nValidationMessage('validation.max') })
@@ -63,7 +63,7 @@ export class UpdateEventPolicyDto {
   @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
   allowSpectators?: boolean;
 
-  @ApiPropertyOptional({ nullable: true, description: '`null` removes the limit.' })
+  @ApiPropertyOptional({ nullable: true, description: '`null` removes the limit.', type: 'integer', format: 'int32' })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })
   @Max(INT32_MAX, { message: i18nValidationMessage('validation.max') })
@@ -130,7 +130,12 @@ export class UpdateEventPolicyDto {
   @IsEnum(OccurrenceOverrideScope, { message: i18nValidationMessage('validation.isEnum') })
   occurrenceOverrideScope?: OccurrenceOverrideScope;
 
-  @ApiPropertyOptional({ nullable: true, description: 'Minutes. `null` permits no fillers.' })
+  @ApiPropertyOptional({
+    nullable: true,
+    description: 'Minutes. `null` permits no fillers.',
+    type: 'integer',
+    format: 'int32',
+  })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })
   @Max(INT32_MAX, { message: i18nValidationMessage('validation.max') })
@@ -150,6 +155,8 @@ export class UpdateEventPolicyDto {
       `Required for Supermajority (${MIN_SUPERMAJORITY_PERCENT} to ${MAX_PERCENT}) and FixedCount (e.g. 3), sent or ` +
       'already stored, by the event and by ' +
       'every date whose own threshold type relies on it.',
+    type: 'integer',
+    format: 'int32',
   })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })
@@ -167,6 +174,8 @@ export class UpdateEventPolicyDto {
     description:
       'Required for PercentOfAttendees and FixedCount quorum types, sent or already stored, by the event and by ' +
       'every date whose own quorum type relies on it. A PercentOfAttendees percentage is at most 100.',
+    type: 'integer',
+    format: 'int32',
   })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })
@@ -187,6 +196,8 @@ export class UpdateEventPolicyDto {
   @ApiPropertyOptional({
     nullable: true,
     description: 'Hours a nomination stays open for votes. `null` means the host closes it.',
+    type: 'integer',
+    format: 'int32',
   })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })

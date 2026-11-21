@@ -9,7 +9,11 @@ export class CastVoteDto {
   @IsEnum(VoteType, { message: i18nValidationMessage('validation.isEnum') })
   voteType!: VoteType;
 
-  @ApiPropertyOptional({ description: 'Rank preference (1 = highest). Used for ranked-choice tallying.' })
+  @ApiPropertyOptional({
+    description: 'Rank preference (1 = highest). Used for ranked-choice tallying.',
+    type: 'integer',
+    format: 'int32',
+  })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })
   @Max(INT32_MAX, { message: i18nValidationMessage('validation.max') })

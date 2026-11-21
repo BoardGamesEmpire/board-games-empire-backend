@@ -13,7 +13,7 @@ import { CreateEventOccurrenceDto } from './create-event-occurrence.dto';
  * missing key, so `null` reached the non-nullable column as a 500 (#1275).
  */
 export class UpdateEventOccurrenceDto extends PartialType(OmitType(CreateEventOccurrenceDto, ['sortOrder'] as const)) {
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ type: 'integer', format: 'int32' })
   @ValidateIf((_, value) => value !== undefined)
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(0, { message: i18nValidationMessage('validation.min') })

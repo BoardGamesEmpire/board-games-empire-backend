@@ -102,14 +102,14 @@ export class UpdateOccurrencePolicyDto {
 
   // --- Capacity ---
 
-  @ApiPropertyOptional({ nullable: true, description: NULL_MEANS_EVENTS })
+  @ApiPropertyOptional({ nullable: true, description: NULL_MEANS_EVENTS, type: 'integer', format: 'int32' })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })
   @Max(INT32_MAX, { message: i18nValidationMessage('validation.max') })
   @IsOptional()
   maxAttendees?: number | null;
 
-  @ApiPropertyOptional({ nullable: true, description: NULL_MEANS_EVENTS })
+  @ApiPropertyOptional({ nullable: true, description: NULL_MEANS_EVENTS, type: 'integer', format: 'int32' })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })
   @Max(INT32_MAX, { message: i18nValidationMessage('validation.max') })
@@ -159,7 +159,12 @@ export class UpdateOccurrencePolicyDto {
   @IsOptional()
   restrictToAttendeePool?: boolean | null;
 
-  @ApiPropertyOptional({ nullable: true, description: `Minutes. ${NULL_MEANS_EVENTS}` })
+  @ApiPropertyOptional({
+    nullable: true,
+    description: `Minutes. ${NULL_MEANS_EVENTS}`,
+    type: 'integer',
+    format: 'int32',
+  })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })
   @Max(INT32_MAX, { message: i18nValidationMessage('validation.max') })
@@ -179,6 +184,8 @@ export class UpdateOccurrencePolicyDto {
       `Supermajority (${MIN_SUPERMAJORITY_PERCENT} to ${MAX_PERCENT}) and FixedCount (e.g. 3) need a value, the ` +
       "date's or the event's. " +
       NULL_MEANS_EVENTS,
+    type: 'integer',
+    format: 'int32',
   })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })
@@ -196,6 +203,8 @@ export class UpdateOccurrencePolicyDto {
     description:
       "PercentOfAttendees and FixedCount quorum types need a value, the date's or the event's. A " +
       `PercentOfAttendees percentage is at most 100. ${NULL_MEANS_EVENTS}`,
+    type: 'integer',
+    format: 'int32',
   })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })
@@ -216,6 +225,8 @@ export class UpdateOccurrencePolicyDto {
   @ApiPropertyOptional({
     nullable: true,
     description: `Hours a nomination for this date stays open for votes. ${NULL_MEANS_EVENTS}`,
+    type: 'integer',
+    format: 'int32',
   })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })
