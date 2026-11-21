@@ -1,4 +1,4 @@
-import { Reach } from '@bge/database';
+import { Reach, VoteThresholdType } from '@bge/database';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { CreateEventDto } from './create-event.dto';
@@ -55,6 +55,58 @@ describe('CreateEventDto', () => {
     await expect(validate(dto, { whitelist: true, forbidNonWhitelisted: true })).resolves.toEqual([]);
     expect(dto.type).toBeUndefined();
     expect(dto.schedulingMode).toBeUndefined();
+  });
+
+  // IsOptional skipped null as well as a missing key, and the service reads a
+  // null invite list as a list, which threw a TypeError as a 500 (#1275).
+  it('refuses null for inviteUserIds, which the event has no way to read (#1275)', async () => {
+    await expect(propertiesWithErrors({ title: 'Game night', inviteUserIds: null })).resolves.toEqual([
+      'inviteUserIds',
+    ]);
+  });
+
+  it('accepts a create that leaves inviteUserIds out, so no one is invited (#1275)', async () => {
+    await expect(propertiesWithErrors({ title: 'Game night', inviteUserIds: undefined })).resolves.toEqual([]);
+  });
+
+  describe('policy fields whose columns cannot be null (#1275)', () => {
+    async function policyErrors(policy: PlainPayload) {
+      const dto = plainToInstance(CreateEventDto, { title: 'Game night', policy }, { enableImplicitConversion: true });
+
+      return validate(dto, { whitelist: true, forbidNonWhitelisted: true });
+    }
+
+    it.each([
+      'allowMemberInvites',
+      'allowGuestInvites',
+      'requireHostApprovalToJoin',
+      'allowSpectators',
+      'strictCapacity',
+      'restrictToAttendeePool',
+      'restrictToGameCategories',
+      'gameAdditionMode',
+      'voteThresholdType',
+      'voteQuorumType',
+      'voteEligibility',
+      'interestedWeight',
+    ])('refuses null for policy.%s (#1275)', async (field) => {
+      const errors = await policyErrors({ [field]: null });
+
+      // A nested error surfaces on its parent.
+      expect(errors.map((error) => error.property)).toEqual(['policy']);
+      expect(errors[0].children?.map((child) => child.property)).toEqual([field]);
+    });
+
+    it('accepts a policy that leaves them all out, so their defaults apply (#1275)', async () => {
+      await expect(policyErrors({})).resolves.toEqual([]);
+    });
+
+    it.each(['maxAttendees', 'maxTotalParticipants', 'fillerMaxPlayTime', 'votingWindowHours'])(
+      'accepts null for policy.%s, which leaves it empty (#1275)',
+      async (field) => {
+        await expect(policyErrors({ [field]: null })).resolves.toEqual([]);
+      },
+    );
   });
 
   // The create check reads an empty string as a household id, which no
@@ -120,5 +172,27 @@ describe('CreateEventDto', () => {
     await expect(propertiesWithErrors(policy('TightenOnly'))).resolves.toEqual([]);
     await expect(propertiesWithErrors(policy(null))).resolves.toEqual(['policy']);
     await expect(propertiesWithErrors(policy('Loose'))).resolves.toEqual(['policy']);
+  });
+
+  // The number fields are checked whenever sent, as the policy edit checks
+  // them: a type that reads no number used to skip every check, so a bad one
+  // reached the database (#1274).
+  it.each([['abc'], [0], [-5]])(
+    'refuses voteThresholdValue %p under SimpleMajority, as edit does (#1274)',
+    async (voteThresholdValue) => {
+      await expect(
+        propertiesWithErrors({
+          title: 'Game night',
+          policy: { voteThresholdType: VoteThresholdType.SimpleMajority, voteThresholdValue },
+        }),
+      ).resolves.toEqual(['policy']);
+    },
+  );
+
+  // A missing number is the service's to refuse, with the edit's code (#1274).
+  it('accepts a Supermajority with no number, which the service judges (#1274)', async () => {
+    await expect(
+      propertiesWithErrors({ title: 'Game night', policy: { voteThresholdType: VoteThresholdType.Supermajority } }),
+    ).resolves.toEqual([]);
   });
 });

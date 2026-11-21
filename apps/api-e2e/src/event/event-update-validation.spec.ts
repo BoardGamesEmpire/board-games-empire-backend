@@ -1,3 +1,4 @@
+import { EventSchedulingMode, EventType } from '@bge/database';
 import type { Actors, AuthenticatedActor } from '@bge/testing-e2e';
 import { createActors } from '@bge/testing-e2e';
 import request from 'supertest';
@@ -6,6 +7,7 @@ import { expectErrorEnvelope } from '../support/error-envelope';
 import type { TestDatabase } from '../support/test-db';
 import { createTestDatabase } from '../support/test-db';
 import { createEventClient, EVENTS_PATH } from './event-request';
+import { occurrenceEnvelope } from './event-wire';
 
 /**
  * What an event's fields accept over the real routes (#1404).
@@ -16,6 +18,10 @@ import { createEventClient, EVENTS_PATH } from './event-request';
  * `CreateEventDto`'s own `IsOptional` did the same for `type` and
  * `schedulingMode` on create. A blank title passed on create and update alike. The nullable columns still
  * clear with `null`.
+ *
+ * The same `IsOptional` let `null` through for the create's invite list and
+ * its policy's non-nullable fields, and for a date's `sortOrder` on edit
+ * (#1275).
  */
 describe("an event's fields on create and update (#1404)", () => {
   const baseUrl = requireBaseUrl(process.env);
@@ -64,6 +70,76 @@ describe("an event's fields on create and update (#1404)", () => {
     const host = await actors.user();
 
     expectErrorEnvelope(await createEvent(host, body), { status: 400, code: null });
+  });
+
+  // A left-out field must still take its column's default: ValidateIf skips
+  // only a missing key (#1404, #1275).
+  it('POST without type or schedulingMode stores their defaults (#1275)', async () => {
+    const host = await actors.user();
+    const eventId = await createdEventId(host);
+
+    expect(await storedEvent(eventId)).toMatchObject({
+      type: EventType.CasualGathering,
+      schedulingMode: EventSchedulingMode.Fixed,
+    });
+  });
+
+  // The service read a null invite list as a list, a TypeError and a 500
+  // (#1275).
+  it('POST answers 400 to a null inviteUserIds and creates nothing (#1275)', async () => {
+    const host = await actors.user();
+    const title = `e2e null invites ${host.user.id}`;
+
+    expectErrorEnvelope(await createEvent(host, { title, inviteUserIds: null }), { status: 400, code: null });
+
+    expect(await db.client.event.count({ where: { title } })).toBe(0);
+  });
+
+  it.each([
+    'allowMemberInvites',
+    'allowGuestInvites',
+    'requireHostApprovalToJoin',
+    'allowSpectators',
+    'strictCapacity',
+    'restrictToAttendeePool',
+    'restrictToGameCategories',
+    'gameAdditionMode',
+    'voteThresholdType',
+    'voteQuorumType',
+    'voteEligibility',
+    'interestedWeight',
+  ])('POST answers 400 to null for policy.%s and creates nothing (#1275)', async (field) => {
+    const host = await actors.user();
+    const title = `e2e null ${field} ${host.user.id}`;
+
+    expectErrorEnvelope(await createEvent(host, { title, policy: { [field]: null } }), { status: 400, code: null });
+
+    expect(await db.client.event.count({ where: { title } })).toBe(0);
+  });
+
+  // PartialType's IsOptional let null through to a date's non-nullable
+  // sortOrder as a 500 (#1275).
+  it('PATCH a date with sortOrder null answers 400 and leaves the date as it was (#1275)', async () => {
+    const host = await actors.user();
+    const eventId = await createdEventId(host);
+    const occurrencesPath = `${EVENTS_PATH}/${eventId}/occurrences`;
+    const added = occurrenceEnvelope(
+      await request(baseUrl)
+        .post(occurrencesPath)
+        .set(host.headers)
+        .send({ label: 'Saturday', sortOrder: 2 })
+        .expect(201),
+      'POST /api/events/:eventId/occurrences',
+    );
+
+    expectErrorEnvelope(
+      await request(baseUrl).patch(`${occurrencesPath}/${added.id}`).set(host.headers).send({ sortOrder: null }),
+      { status: 400, code: null },
+    );
+
+    expect(await db.client.eventOccurrence.findUniqueOrThrow({ where: { id: added.id } })).toMatchObject({
+      sortOrder: 2,
+    });
   });
 
   it('PATCH clears description, image, location and url with null', async () => {

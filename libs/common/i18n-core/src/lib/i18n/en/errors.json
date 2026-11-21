@@ -83,10 +83,11 @@
     "not_archivable": "Only a cancelled event, or one whose dates have all passed, can be archived."
   },
   "event_policy": {
-    "threshold_value_required": "A vote threshold of a set percentage or a fixed number of votes needs that percentage or number, and this change would leave the event, or one of its dates, without it. Enter the percentage or number, or choose another vote threshold.",
-    "quorum_value_required": "A quorum of a set percentage or a fixed number of eligible voters needs that percentage or number, and this change would leave the event, or one of its dates, without it. Enter the percentage or number, or choose another quorum.",
-    "threshold_percent_too_high": "A vote threshold can't be more than 100 percent of the votes, and this change would leave the event, or one of its dates, asking for more. Enter a percentage from 1 to 100.",
-    "quorum_percent_too_high": "A quorum can't be more than 100 percent of the eligible voters, and this change would leave the event, or one of its dates, asking for more. Enter a percentage from 1 to 100.",
+    "threshold_value_required": "A vote threshold of a set percentage or a fixed number of votes needs that percentage or number, and the event, or one of its dates, would be left without it. Enter the percentage or number, or choose another vote threshold.",
+    "quorum_value_required": "A quorum of a set percentage or a fixed number of eligible voters needs that percentage or number, and the event, or one of its dates, would be left without it. Enter the percentage or number, or choose another quorum.",
+    "threshold_percent_too_low": "A vote threshold of a set percentage needs more than half of the votes, and the event, or one of its dates, would be left asking for less. A date that sets a percentage threshold but no number of its own takes the event's number as its percentage. Enter a percentage from {min} to {max}, or change the date's threshold.",
+    "threshold_percent_too_high": "A vote threshold can't be more than {max} percent of the votes, and the event, or one of its dates, would be left asking for more. A date that sets a percentage threshold but no number of its own takes the event's number as its percentage. Enter a percentage from {min} to {max}, or change the date's threshold.",
+    "quorum_percent_too_high": "A quorum can't be more than {max} percent of the eligible voters, and the event, or one of its dates, would be left asking for more. A date that sets a percentage quorum but no number of its own takes the event's number as its percentage. Enter a percentage from 1 to {max}, or change the date's quorum.",
     "unknown_platform": "One of the platforms you chose doesn't exist. Check the platforms and try again.",
     "unknown_category": "One of the categories you chose doesn't exist. Check the categories and try again.",
     "occurrence_override_not_allowed": "This event's policy doesn't let a date change which games are allowed or how many may come like this. Keep the date within the event's restrictions, or change how far the event lets its dates override them.",

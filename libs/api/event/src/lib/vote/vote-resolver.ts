@@ -167,8 +167,10 @@ export class VoteResolver {
       }
 
       case VoteThresholdType.Unanimous: {
-        // All eligible voters must vote For (against = 0, every eligible voter participated as For)
-        return tally.againstCount === 0 && tally.forCount === eligibleCount;
+        // All eligible voters must vote For (against = 0, every eligible voter
+        // participated as For). No eligible voter means no one agreed, so the
+        // vote fails, as the other thresholds do with no votes (#1140).
+        return eligibleCount > 0 && tally.againstCount === 0 && tally.forCount === eligibleCount;
       }
 
       case VoteThresholdType.FixedCount: {

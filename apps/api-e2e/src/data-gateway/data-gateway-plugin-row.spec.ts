@@ -212,5 +212,30 @@ describe('a plugin DataGateway’s row', () => {
       expectErrorEnvelope(updated, { status: 400, code: null });
       expect(await db.client.dataGateway.findMany({ where: { pluginId: plugin.id } })).toEqual([]);
     });
+
+    // IsOptional, and PartialType's copy of it on update, skipped null as
+    // well as a missing key, so a null reached the non-nullable name and
+    // enabled columns as a 500 (#1275).
+    it('refuse null for name and enabled on update, and for enabled on create (#1275)', async () => {
+      const remote = await insert({ ...CONNECTION });
+      const before = await stored(remote.id);
+      const name = `Created With A Null Enabled ${remote.id}`;
+
+      const created = await request(baseUrl)
+        .post(GATEWAYS)
+        .set(admin.headers)
+        .send({ name, enabled: null, ...CONNECTION });
+      const nullName = await request(baseUrl).patch(`${GATEWAYS}/${remote.id}`).set(admin.headers).send({ name: null });
+      const nullEnabled = await request(baseUrl)
+        .patch(`${GATEWAYS}/${remote.id}`)
+        .set(admin.headers)
+        .send({ enabled: null });
+
+      expectErrorEnvelope(created, { status: 400, code: null });
+      expectErrorEnvelope(nullName, { status: 400, code: null });
+      expectErrorEnvelope(nullEnabled, { status: 400, code: null });
+      expect(await stored(remote.id)).toEqual(before);
+      expect(await db.client.dataGateway.count({ where: { name } })).toBe(0);
+    });
   });
 });

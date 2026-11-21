@@ -40,3 +40,21 @@ describe('UpdateDataGatewayDto disabledCapabilities', () => {
     expect(failed['disabledCapabilities']).toContain('isArray');
   });
 });
+
+// PartialType's IsOptional skipped null as well as a missing key, so a null
+// reached the non-nullable name and enabled columns as a 500 (#1275).
+describe('UpdateDataGatewayDto fields a DataGateway always has (#1275)', () => {
+  it.each(['name', 'enabled'])('refuses null for %s (#1275)', async (field) => {
+    const failed = await constraintsFailed({ [field]: null });
+
+    expect(Object.keys(failed)).toEqual([field]);
+  });
+
+  it('accepts a patch that leaves name and enabled out (#1275)', async () => {
+    await expect(constraintsFailed({ description: 'Board games' })).resolves.toEqual({});
+  });
+
+  it('accepts null for description, which clears it (#1275)', async () => {
+    await expect(constraintsFailed({ description: null })).resolves.toEqual({});
+  });
+});

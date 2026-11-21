@@ -10,18 +10,28 @@ import {
 import { i18nValidationMessage } from '@bge/i18n';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsArray, IsBoolean, IsEnum, IsInt, IsOptional, IsString, Min, ValidateIf } from 'class-validator';
+import { MAX_PERCENT, MIN_SUPERMAJORITY_PERCENT } from '../policy/effective-policy';
 
+/**
+ * An event's policy, set when the event is created. Each field is optional: one
+ * left out takes its column's default.
+ *
+ * A column that can't be null takes `ValidateIf` rather than `IsOptional`,
+ * which skips `null` as well as a missing key and so let `null` through to the
+ * write as a 500 (#1275). A nullable column keeps `IsOptional`, and `null`
+ * leaves it empty.
+ */
 export class CreateEventPolicyDto {
   // --- Invite controls ---
 
   @ApiPropertyOptional({ default: true })
+  @ValidateIf((_, value) => value !== undefined)
   @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
-  @IsOptional()
   allowMemberInvites?: boolean;
 
   @ApiPropertyOptional({ default: true })
+  @ValidateIf((_, value) => value !== undefined)
   @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
-  @IsOptional()
   allowGuestInvites?: boolean;
 
   @ApiPropertyOptional()
@@ -33,13 +43,13 @@ export class CreateEventPolicyDto {
   // --- Participation controls ---
 
   @ApiPropertyOptional({ default: false })
+  @ValidateIf((_, value) => value !== undefined)
   @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
-  @IsOptional()
   requireHostApprovalToJoin?: boolean;
 
   @ApiPropertyOptional({ default: true })
+  @ValidateIf((_, value) => value !== undefined)
   @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
-  @IsOptional()
   allowSpectators?: boolean;
 
   @ApiPropertyOptional()
@@ -49,25 +59,25 @@ export class CreateEventPolicyDto {
   maxTotalParticipants?: number;
 
   @ApiPropertyOptional({ default: false })
+  @ValidateIf((_, value) => value !== undefined)
   @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
-  @IsOptional()
   strictCapacity?: boolean;
 
   // --- Game controls ---
 
   @ApiPropertyOptional({ enum: GameAdditionMode, default: GameAdditionMode.Direct })
+  @ValidateIf((_, value) => value !== undefined)
   @IsEnum(GameAdditionMode, { message: i18nValidationMessage('validation.isEnum') })
-  @IsOptional()
   gameAdditionMode?: GameAdditionMode;
 
   @ApiPropertyOptional({ default: true })
+  @ValidateIf((_, value) => value !== undefined)
   @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
-  @IsOptional()
   restrictToAttendeePool?: boolean;
 
   @ApiPropertyOptional({ default: false })
+  @ValidateIf((_, value) => value !== undefined)
   @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
-  @IsOptional()
   restrictToGameCategories?: boolean;
 
   // Checked whenever sent, since the ids reach the existence check whatever
@@ -114,41 +124,43 @@ export class CreateEventPolicyDto {
   // --- Voting controls (only meaningful when gameAdditionMode = RequiresVote) ---
 
   @ApiPropertyOptional({ enum: VoteThresholdType, default: VoteThresholdType.SimpleMajority })
+  @ValidateIf((_, value) => value !== undefined)
   @IsEnum(VoteThresholdType, { message: i18nValidationMessage('validation.isEnum') })
-  @IsOptional()
   voteThresholdType?: VoteThresholdType;
 
-  @ApiPropertyOptional({ description: 'Required for Supermajority (e.g. 66) and FixedCount (e.g. 3)' })
+  // Checked whenever sent, as the policy edit checks it. A missing number is
+  // the service's to refuse, with the edit's code (#1274).
+  @ApiPropertyOptional({
+    nullable: true,
+    description: `Required for Supermajority (${MIN_SUPERMAJORITY_PERCENT} to ${MAX_PERCENT}) and FixedCount (e.g. 3).`,
+  })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })
-  @ValidateIf(
-    (o: CreateEventPolicyDto) =>
-      o.voteThresholdType === VoteThresholdType.Supermajority || o.voteThresholdType === VoteThresholdType.FixedCount,
-  )
-  voteThresholdValue?: number;
+  @IsOptional()
+  voteThresholdValue?: number | null;
 
   @ApiPropertyOptional({ enum: VoteQuorumType, default: VoteQuorumType.None })
+  @ValidateIf((_, value) => value !== undefined)
   @IsEnum(VoteQuorumType, { message: i18nValidationMessage('validation.isEnum') })
-  @IsOptional()
   voteQuorumType?: VoteQuorumType;
 
-  @ApiPropertyOptional({ description: 'Required for PercentOfAttendees and FixedCount quorum types' })
+  @ApiPropertyOptional({
+    nullable: true,
+    description: 'Required for PercentOfAttendees (1 to 100) and FixedCount quorum types.',
+  })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })
-  @ValidateIf(
-    (o: CreateEventPolicyDto) =>
-      o.voteQuorumType === VoteQuorumType.PercentOfAttendees || o.voteQuorumType === VoteQuorumType.FixedCount,
-  )
-  voteQuorumValue?: number;
+  @IsOptional()
+  voteQuorumValue?: number | null;
 
   @ApiPropertyOptional({ enum: VoteEligibility, default: VoteEligibility.ConfirmedOnly })
+  @ValidateIf((_, value) => value !== undefined)
   @IsEnum(VoteEligibility, { message: i18nValidationMessage('validation.isEnum') })
-  @IsOptional()
   voteEligibility?: VoteEligibility;
 
   @ApiPropertyOptional({ enum: InterestedWeight, default: InterestedWeight.AsAbstain })
+  @ValidateIf((_, value) => value !== undefined)
   @IsEnum(InterestedWeight, { message: i18nValidationMessage('validation.isEnum') })
-  @IsOptional()
   interestedWeight?: InterestedWeight;
 
   @ApiPropertyOptional({ description: 'Hours a nomination stays open for votes. Null = host closes manually.' })

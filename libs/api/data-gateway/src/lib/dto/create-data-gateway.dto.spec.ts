@@ -46,3 +46,17 @@ describe('CreateDataGatewayDto', () => {
     });
   });
 });
+
+// IsOptional skipped null as well as a missing key, so a null reached the
+// non-nullable enabled column as a 500 (#1275).
+describe('CreateDataGatewayDto enabled (#1275)', () => {
+  it('refuses null for enabled (#1275)', async () => {
+    const failed = await constraintsFailed({ ...REMOTE, enabled: null });
+
+    expect(Object.keys(failed)).toEqual(['enabled']);
+  });
+
+  it('accepts a create without enabled, so it defaults to on (#1275)', async () => {
+    await expect(constraintsFailed(REMOTE)).resolves.toEqual({});
+  });
+});

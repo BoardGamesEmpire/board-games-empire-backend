@@ -44,6 +44,7 @@ import type { ListEventsQueryDto } from './dto/list-events.query.dto';
 import type { UpdateEventDto } from './dto/update-event.dto';
 import { EventCreatedEvent, EventDeletedEvent, EventUpdatedEvent } from './events/event.events';
 import { countLiveDates } from './occurrence/live-dates.util';
+import { assertValidCreatedVotingPolicy } from './policy/effective-policy';
 import {
   eventPolicyReadArgs,
   readEventPolicyView,
@@ -413,6 +414,10 @@ export class EventService {
         this.abilityService.assertCurrentActorCan(Action.create, ResourceType.Event, { householdId });
 
         this.validateOccurrencesForMode(dto.schedulingMode ?? EventSchedulingMode.Fixed, occurrences);
+
+        // Create judges the policy as the policy edit does (#1274). Its dates
+        // start with empty policies, so only the event's own needs judging.
+        assertValidCreatedVotingPolicy(policy);
 
         const created = await this.db.$transaction(async (tx) => {
           // The check above cannot settle whether the household is still live.

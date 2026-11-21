@@ -41,7 +41,8 @@ export class EventPolicyController {
   @ApiResponse({
     status: Http.BadRequest,
     description:
-      'Invalid patch, or a vote threshold or quorum left without a value (code EVENT_POLICY_INVALID); a platform ' +
+      'Invalid patch, or a vote threshold or quorum left without a value or out of bounds (code ' +
+      'EVENT_POLICY_INVALID, with `occurrenceIds` naming the date when a date’s policy is the one refused); a platform ' +
       'or category id that names none (code EVENT_POLICY_UNKNOWN_REFERENCE); or a change that would leave a ' +
       'date’s own policy past the override scope (code EVENT_POLICY_OCCURRENCES_EXCEED_SCOPE, with ' +
       '`occurrenceIds`)',

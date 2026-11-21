@@ -10,6 +10,7 @@ import { i18nValidationMessage } from '@bge/i18n';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { IsArray, IsBoolean, IsEnum, IsInt, IsOptional, IsString, Min, ValidateIf } from 'class-validator';
+import { MAX_PERCENT, MIN_SUPERMAJORITY_PERCENT } from '../effective-policy';
 
 const NULL_MEANS_EVENTS = "`null` means the event's.";
 
@@ -171,8 +172,9 @@ export class UpdateOccurrencePolicyDto {
   @ApiPropertyOptional({
     nullable: true,
     description:
-      "Supermajority (e.g. 66) and FixedCount (e.g. 3) need a value, the date's or the event's. A Supermajority " +
-      `percentage is at most 100. ${NULL_MEANS_EVENTS}`,
+      `Supermajority (${MIN_SUPERMAJORITY_PERCENT} to ${MAX_PERCENT}) and FixedCount (e.g. 3) need a value, the ` +
+      "date's or the event's. " +
+      NULL_MEANS_EVENTS,
   })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })
