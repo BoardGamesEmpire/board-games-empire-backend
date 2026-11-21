@@ -40,6 +40,7 @@ export const GAME_FETCH_FIELDS = [
   'age_ratings.organization',
   'age_ratings.rating_category',
   'age_ratings.synopsis',
+  'bundles',
   'collections.id',
   'collections.name',
   'franchises.id',

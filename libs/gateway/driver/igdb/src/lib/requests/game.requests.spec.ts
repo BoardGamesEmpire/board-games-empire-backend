@@ -189,6 +189,11 @@ describe('GameRequests', () => {
       expect(GAME_FETCH_FIELDS).not.toContain('standalone_expansions');
     });
 
+    it('asks for bundles when fetching a game, not when searching (#1394)', () => {
+      expect(GAME_FETCH_FIELDS).toContain('bundles');
+      expect(GAME_SEARCH_FIELDS).not.toContain('bundles');
+    });
+
     it('sets limit to 1', async () => {
       const client = buildMockClient();
       await fetchGameRequest('1942')(client, signal);

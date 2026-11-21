@@ -40,6 +40,9 @@
         "rating_category": 4
       }
     ],
+    "bundles": [
+      116151
+    ],
     "cover": {
       "id": 533941,
       "url": "//images.igdb.com/igdb/image/upload/t_thumb/cobfzp.jpg"
@@ -116,9 +119,9 @@
         "external_game_source": 54
       },
       {
-        "id": 281231,
-        "uid": "490147",
-        "external_game_source": 14
+        "id": 3001946,
+        "uid": "amzn1.adg.product.a1584183-9c48-4a33-aa64-89aec9293992",
+        "external_game_source": 23
       },
       {
         "id": 2083282,
@@ -131,29 +134,29 @@
         "external_game_source": 11
       },
       {
-        "id": 8579,
-        "uid": "367520",
-        "external_game_source": 1
-      },
-      {
         "id": 2924282,
         "uid": "amzn1.adg.product.7e589b03-c4d6-43f3-9224-9bdf10f6989f",
         "external_game_source": 23
       },
       {
-        "id": 77292,
-        "uid": "1308320804",
-        "external_game_source": 5
+        "id": 281231,
+        "uid": "490147",
+        "external_game_source": 14
       },
       {
-        "id": 3001946,
-        "uid": "amzn1.adg.product.a1584183-9c48-4a33-aa64-89aec9293992",
-        "external_game_source": 23
+        "id": 8579,
+        "uid": "367520",
+        "external_game_source": 1
       },
       {
         "id": 3202837,
         "uid": "amzn1.adg.product.a1584183-9c48-4a33-aa64-89aec9293992",
         "external_game_source": 22
+      },
+      {
+        "id": 77292,
+        "uid": "1308320804",
+        "external_game_source": 5
       },
       {
         "id": 2175741,
@@ -379,8 +382,8 @@
         "name": "Fantasy"
       }
     ],
-    "total_rating": 91.52329563027182,
-    "total_rating_count": 2285,
+    "total_rating": 91.52298810492486,
+    "total_rating_count": 2290,
     "url": "https://www.igdb.com/games/hollow-knight",
     "language_supports": [
       {

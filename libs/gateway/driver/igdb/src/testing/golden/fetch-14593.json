@@ -27,7 +27,7 @@
       }
     ],
     "artists": [],
-    "averageRating": 91.52329563027182,
+    "averageRating": 91.52298810492486,
     "baseGameExternalIds": [],
     "crossReferences": [
       {
@@ -37,7 +37,9 @@
     ],
     "worksWithExternalIds": [],
     "contentExternalIds": [],
-    "bundleExternalIds": [],
+    "bundleExternalIds": [
+      "116151"
+    ],
     "categories": [
       {
         "externalId": "8",
@@ -142,7 +144,7 @@
         "website": "http://teamcherry.com.au/"
       }
     ],
-    "ratingsCount": 2285,
+    "ratingsCount": 2290,
     "releases": [
       {
         "externalId": "607803",

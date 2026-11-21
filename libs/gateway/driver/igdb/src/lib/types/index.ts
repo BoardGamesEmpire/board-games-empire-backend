@@ -234,6 +234,13 @@ export interface IgdbExternalGame {
 
 export interface IgdbGame {
   age_ratings?: IgdbAgeRating[];
+
+  /**
+   * The bundles IGDB lists the game in. A bundle names no contents of its
+   * own, so the link is read from the game's side (#1394).
+   */
+  bundles?: number[];
+
   collections?: IgdbNamedEntity[];
   cover?: IgdbCover;
   external_games?: IgdbExternalGame[];
