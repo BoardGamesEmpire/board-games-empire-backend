@@ -189,8 +189,9 @@ export function parseSearch(xml: string): BggSearchResult {
 }
 
 /**
- * A `/user` answer: the user, or undefined when BGG doesn't know the name,
- * which it answers with a `<user>` whose `id` is empty. An answer without a
+ * A `/user` answer: the user, or undefined for a `<user>` whose `id` is
+ * empty, as BGG's documentation shows an unknown name. Live, BGG answers an
+ * unknown name with a 404 instead, which the client reads. An answer without a
  * `<user>` element, such as a proxy's HTML page sent as 200, fails, so it
  * never reads as an unknown user (#1226). So does a `<user>` with an id but
  * no name: the id says BGG found the account, so the answer is incomplete,

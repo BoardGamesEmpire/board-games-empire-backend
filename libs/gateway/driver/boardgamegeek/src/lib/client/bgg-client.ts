@@ -12,6 +12,8 @@ import { parseSearch, parseThings, parseUser } from './bgg-xml';
 
 export const BGG_BASE_URL = 'https://boardgamegeek.com/xmlapi2';
 
+const NOT_FOUND = 404;
+
 export interface BggClientOptions {
   /** How many times to ask again after a 202 before giving up. Defaults to 5. */
   acceptedRetries?: number;
@@ -103,8 +105,19 @@ export function createBggClient(options: BggClientOptions): BggClientLike {
       ],
     },
     user: {
-      query: async (params: BggUserQueryParams, signal?: AbortSignal) =>
-        parseUser(await get('user', { ...params }, signal)),
+      query: async (params: BggUserQueryParams, signal?: AbortSignal) => {
+        try {
+          return parseUser(await get('user', { ...params }, signal));
+        } catch (err) {
+          // BGG answers a name it doesn't know with a 404 and an HTML page,
+          // not with a `<user>` element (checked live, #1226).
+          if (err instanceof BggHttpError && err.status === NOT_FOUND) {
+            return undefined;
+          }
+
+          throw err;
+        }
+      },
     },
   };
 }

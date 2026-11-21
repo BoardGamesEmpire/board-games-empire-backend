@@ -26,8 +26,10 @@ const driverOver = (fetch: DriverOptions['fetch'], timing: DriverOptions['timing
     timing: { rateLimitRetryMs: 1, ...timing },
   });
 
-// The answers in `testing/fixtures/user__*.xml` are built from BoardGameGeek's
-// documented `xmlapi2/user` shape, not recorded from a live call (#1226).
+// `testing/fixtures/user__*` follow BoardGameGeek's live `xmlapi2/user`
+// answers, checked 2026-11-20: a known user is a `<user>` with `id` and `name`
+// in BoardGameGeek's capitals, and an unknown name is a 404 HTML page (#1226).
+// The known user is made up, so the fixture names no real person.
 describe('BoardGameGeekDriver findUpstreamAccount (#1226)', () => {
   const find = (request: Partial<proto.FindUpstreamAccountRequest>, driver = driverOver(bggFixtureFetch(FIXTURES))) =>
     firstValueFrom(driver.findUpstreamAccount({ correlationId: 'find', ...request }));
@@ -68,8 +70,16 @@ describe('BoardGameGeekDriver findUpstreamAccount (#1226)', () => {
     });
   });
 
-  it('answers NOT_FOUND, not an error, when the user element has no id', async () => {
+  it('answers NOT_FOUND, not an error, when BoardGameGeek answers 404 for the name', async () => {
     const answer = await find({ username: 'nobody-by-this-name' });
+
+    expect(answer).toEqual({ correlationId: 'find', status: proto.ResultStatus.RESULT_STATUS_NOT_FOUND });
+  });
+
+  it('answers NOT_FOUND, not an error, when the user element has no id', async () => {
+    const fetch = createFakeFetch(() => ({ body: '<user id="" termsofuse=""></user>' }));
+
+    const answer = await find({ username: 'nobody-by-this-name' }, driverOver(fetch));
 
     expect(answer).toEqual({ correlationId: 'find', status: proto.ResultStatus.RESULT_STATUS_NOT_FOUND });
   });
