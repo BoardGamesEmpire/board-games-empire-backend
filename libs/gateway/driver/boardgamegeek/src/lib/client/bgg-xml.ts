@@ -192,7 +192,9 @@ export function parseSearch(xml: string): BggSearchResult {
  * A `/user` answer: the user, or undefined when BGG doesn't know the name,
  * which it answers with a `<user>` whose `id` is empty. An answer without a
  * `<user>` element, such as a proxy's HTML page sent as 200, fails, so it
- * never reads as an unknown user (#1226).
+ * never reads as an unknown user (#1226). So does a `<user>` with an id but
+ * no name: the id says BGG found the account, so the answer is incomplete,
+ * not a "no such user".
  */
 export function parseUser(xml: string): BggUser | undefined {
   const document = asElement(parser.parse(xml));
@@ -210,7 +212,16 @@ export function parseUser(xml: string): BggUser | undefined {
   }
 
   const id = attribute(element, 'id');
+
+  if (!id) {
+    return undefined;
+  }
+
   const name = attribute(element, 'name');
 
-  return id && name ? { id, name } : undefined;
+  if (!name) {
+    throw new Error('BGG answered a <user> with an id but no name');
+  }
+
+  return { id, name };
 }

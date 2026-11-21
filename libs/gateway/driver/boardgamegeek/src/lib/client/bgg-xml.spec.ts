@@ -189,8 +189,18 @@ describe('parseUser', () => {
     expect(parseUser(userXml(''))).toBeUndefined();
   });
 
-  it('reads a user element with an id and no name as no user', () => {
-    expect(parseUser(userXml('id="5"'))).toBeUndefined();
+  it('reads a user element with an empty id and a name, as BGG echoes an unknown username, as no user', () => {
+    expect(parseUser(userXml('id="" name="nobody"'))).toBeUndefined();
+  });
+
+  // An id means BGG found the account, so a missing name is an incomplete
+  // answer; reading it as no user would tell the person a real username is unknown.
+  it('fails on a user element with an id and no name', () => {
+    expect(() => parseUser(userXml('id="5"'))).toThrow('BGG answered a <user> with an id but no name');
+  });
+
+  it('fails on a user element with an id and an empty name', () => {
+    expect(() => parseUser(userXml('id="5" name=""'))).toThrow('BGG answered a <user> with an id but no name');
   });
 
   it('fails on an answer with no user element, so a proxy page never reads as an unknown user', () => {
