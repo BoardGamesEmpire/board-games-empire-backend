@@ -210,7 +210,7 @@
     "@types/openid": "2.0.5",
     "@types/pg": "8.23.1",
     "@types/semver": "7.8.0",
-    "@types/serve-static": "1.15.10",
+    "@types/serve-static": "2.2.0",
     "@types/supertest": "6.0.3",
     "auth": "1.7.25",
     "esbuild": "0.28.1",
