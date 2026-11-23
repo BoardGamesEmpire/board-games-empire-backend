@@ -193,7 +193,7 @@
     "@nx/webpack": "22.7.12",
     "@nx/workspace": "22.7.12",
     "@prisma/get-dmmf": "7.10.1",
-    "@stylistic/eslint-plugin": "5.10.0",
+    "@stylistic/eslint-plugin": "6.0.1",
     "@swc-node/register": "1.12.1",
     "@swc/core": "1.16.22",
     "@swc/helpers": "0.5.24",
