@@ -1,3 +1,4 @@
+import { AuditContextModule } from '@bge/actor-context';
 import { DatabaseModule } from '@bge/database';
 import { FlowProducerNames, QueueNames } from '@bge/game-import';
 import { GatewayGameSearchModule } from '@bge/gateway-game-search';
@@ -9,6 +10,8 @@ import { GameImportEnqueuerService } from './services/game-import-enqueuer.servi
 
 @Module({
   imports: [
+    // AuditContextModule is not global; the enqueuer reads the CLS actor (#650).
+    AuditContextModule,
     DatabaseModule,
     BullModule.registerQueue({ name: QueueNames.GamesImport }, { name: QueueNames.GatewayFetch }),
     BullModule.registerFlowProducer({ name: FlowProducerNames.GamesImport }),

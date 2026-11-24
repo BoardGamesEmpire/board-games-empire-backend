@@ -1,3 +1,4 @@
+import type { Actor, AuditContextService } from '@bge/actor-context';
 import type { DatabaseService } from '@bge/database';
 import { extractJobMeta } from '@bge/queue-actor-context';
 import type { FlowJob, FlowProducer } from 'bullmq';
@@ -8,6 +9,7 @@ describe('GameImportEnqueuerService', () => {
   let service: GameImportEnqueuerService;
   let add: jest.Mock;
   let create: jest.Mock;
+  let getActor: jest.Mock;
 
   const baseInput: StartGameImportInput = {
     correlationId: 'corr-1',
@@ -23,7 +25,12 @@ describe('GameImportEnqueuerService', () => {
     create = jest.fn().mockResolvedValue({ id: 'job-base' });
 
     const db = { job: { create } };
-    service = new GameImportEnqueuerService(db as unknown as DatabaseService, { add } as unknown as FlowProducer);
+    getActor = jest.fn().mockReturnValue(null);
+    service = new GameImportEnqueuerService(
+      db as unknown as DatabaseService,
+      { add } as unknown as FlowProducer,
+      { getActor } as unknown as AuditContextService,
+    );
   });
 
   afterEach(() => jest.clearAllMocks());
@@ -68,13 +75,26 @@ describe('GameImportEnqueuerService', () => {
     expect((flow.children?.[0]?.data as { origin?: string }).origin).toBe('Requested');
   });
 
-  it('stamps the base import + fetch nodes with the originating actor + correlation', async () => {
+  it('falls back to a user actor from userId when CLS holds none (#650)', async () => {
     await service.enqueue(baseInput);
 
     const flow = add.mock.calls[0][0] as FlowJob;
     const expected = { actor: { kind: 'user', userId: 'user-7' }, correlationId: 'corr-1' };
     expect(extractJobMeta(flow.data)).toEqual(expected); // base import
     expect(extractJobMeta(flow.children?.[0]?.data)).toEqual(expected); // base fetch
+  });
+
+  it('stamps both flow nodes with the API-key actor in CLS (#650)', async () => {
+    const actor: Actor = { kind: 'apiKey', apiKeyId: 'key-1', userId: 'user-7' };
+    getActor.mockReturnValue(actor);
+
+    await service.enqueue(baseInput);
+
+    const flow = add.mock.calls[0][0] as FlowJob;
+    const expected = { actor, correlationId: 'corr-1' };
+    expect(extractJobMeta(flow.data)).toEqual(expected);
+    expect(extractJobMeta(flow.children?.[0]?.data)).toEqual(expected);
+    expect(create.mock.calls[0][0].data.initiatorType).toBe('User');
   });
 
   it('falls back to a system actor when no userId is present', async () => {
