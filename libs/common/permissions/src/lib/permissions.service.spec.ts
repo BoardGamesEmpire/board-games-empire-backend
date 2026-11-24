@@ -618,6 +618,85 @@ describe('PermissionsService', () => {
     });
   });
 
+  describe('evicting an API key scope graph (#440)', () => {
+    it('evicts the key scope graph and replaces its version token (#440)', async () => {
+      const del = jest.spyOn(cache, 'del');
+      const set = jest.spyOn(cache, 'set');
+
+      await service.invalidateApiKey('key-1');
+
+      expect(del).toHaveBeenCalledTimes(1);
+      expect(del).toHaveBeenCalledWith('bge:apikey:scopes:key-1');
+      expect(set).toHaveBeenCalledTimes(1);
+      expect(set).toHaveBeenCalledWith(
+        'bge:cache-version:bge:apikey:scopes:key-1',
+        expect.any(String),
+        PermissionsService.CACHE_VERSION_TTL_IN_MILLISECONDS,
+      );
+    });
+
+    it('does nothing for a nullish id (#440)', async () => {
+      const del = jest.spyOn(cache, 'del');
+      const set = jest.spyOn(cache, 'set');
+
+      await service.invalidateApiKey(null);
+      await service.invalidateApiKey(undefined);
+      await service.invalidateApiKeys([null, undefined]);
+
+      expect(del).not.toHaveBeenCalled();
+      expect(set).not.toHaveBeenCalled();
+    });
+
+    it('dedupes and batches a bulk eviction (#440)', async () => {
+      const del = jest.spyOn(cache, 'del');
+      const unique = PermissionsService.EVICTION_BATCH_SIZE * 2 + 1;
+      const ids = Array.from({ length: unique }, (_, i) => `key-${i}`);
+
+      await service.invalidateApiKeys([...ids, 'key-0', null]);
+
+      expect(del).toHaveBeenCalledTimes(unique);
+      expect(del).toHaveBeenCalledWith('bge:apikey:scopes:key-0');
+      expect(del).toHaveBeenCalledWith(`bge:apikey:scopes:key-${unique - 1}`);
+    });
+
+    it('logs and swallows a failed eviction (#440)', async () => {
+      const logError = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      jest.spyOn(cache, 'del').mockRejectedValueOnce(new Error('redis unreachable'));
+
+      await expect(service.invalidateApiKey('key-1')).resolves.toBeUndefined();
+
+      expect(logError).toHaveBeenCalledTimes(1);
+      expect(logError).toHaveBeenCalledWith(
+        expect.stringContaining('API key scope graph for key key-1'),
+        expect.any(Error),
+      );
+    });
+
+    it('a load that began before the eviction is not served afterwards (#440)', async () => {
+      // The load reads the scopes, the key's scopes change and evict, and only
+      // then does the load write what it read (#588's race, for a key).
+      const stale = makeApiKeyGraph();
+      const current = makeApiKeyGraph();
+      let begin!: () => void;
+      let release!: () => void;
+      const started = new Promise<void>((resolve) => (begin = resolve));
+      const released = new Promise<void>((resolve) => (release = resolve));
+      db.apikey.findUnique.mockImplementationOnce((() => {
+        begin();
+        return released.then(() => stale);
+      }) as never);
+      db.apikey.findUnique.mockResolvedValueOnce(current);
+
+      const inFlight = service.getApiKeyScopeGraph('key-1');
+      await started;
+      await service.invalidateApiKey('key-1');
+      release();
+
+      await expect(inFlight).resolves.toBe(stale);
+      await expect(service.getApiKeyScopeGraph('key-1')).resolves.toBe(current);
+    });
+  });
+
   describe('an eviction and a load of the same graph', () => {
     it('reloads a graph evicted since it was cached', async () => {
       const before = makeUserGraph({ householdMember: [{ householdId: 'hh-1', role: null }] });
