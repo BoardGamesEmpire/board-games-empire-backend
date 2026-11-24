@@ -360,9 +360,11 @@ export class AbilityService {
       case 'anonymous':
         return [await this.buildUserAbility(actor.userId)];
 
+      // One owner-graph load builds both halves: the owner's ability, and the
+      // key's, whose key scopes render where the owner holds them (#266).
       case 'apiKey':
         return this.abilityFactory.createForApiKeyActor(
-          await this.buildUserAbility(actor.userId),
+          await this.permissionsService.getUserRoleGraph(actor.userId),
           await this.requireApiKeyScopeGraph(actor.apiKeyId),
         );
 

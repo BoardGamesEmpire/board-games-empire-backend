@@ -20,7 +20,13 @@ export type TemplateProblem =
  * the caller rejects the permission before any rendering happens.
  *
  * Returns the first problem found, or `null` when the template renders to what
- * it says. Walks the parsed token tree: interpolations (`name`/`&`) and section
+ * it says. A passing check proves only that each variable is a non-empty
+ * string: render contexts are meant for id-like leaves, since Mustache
+ * HTML-escapes `{{ }}` output (a value with `&`, `<` or a quote comes out
+ * changed) and a value with a backslash would break the JSON parse. The API
+ * key path renders against the whole owner graph, so a template there should
+ * name ids, as the catalog's do (#266).
+ * Walks the parsed token tree: interpolations (`name`/`&`) and section
  * openers (`#`/`^`) all name variables, and section bodies are walked
  * recursively. The implicit iterator `.` never resolves (the context holds no
  * lists) and is reported as out-of-context.
@@ -57,7 +63,9 @@ export function findTemplateProblem(template: string, context: Record<string, un
  * non-object, array or empty conditions, so the caller can treat the rule as
  * type-level. Throws nothing the caller hasn't checked: call
  * {@link findTemplateProblem} on the serialized conditions first, since a
- * variable the context lacks renders to `''` here without complaint.
+ * variable the context lacks renders to `''` here without complaint. That
+ * check passing proves only that each variable is a non-empty string, so the
+ * context's leaves are meant to be id-like (see {@link findTemplateProblem}).
  */
 export function renderPermissionConditions(
   conditions: unknown,

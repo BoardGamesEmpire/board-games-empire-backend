@@ -206,7 +206,7 @@ describe('AbilityService', () => {
 
       // A rule pinned to one plugin passes a check on installedAt, and an
       // identity-column grant beside it does not. Built from both, the clause
-      // is `{}`: the key's conditions are dropped, so the identity grant reads
+      // is `{}`: the identity grant here carries no conditions, so it reads
       // every row.
       it('builds the clause only from the rules that read the field', () => {
         const key = ability([
@@ -425,28 +425,43 @@ describe('AbilityService', () => {
     });
 
     // The factory pairs them, as it does for a webhook subscription made
-    // through the key (#723), so the two can't drift apart.
-    it("apiKey → the factory's pair of the owner's ability and the key's", async () => {
+    // through the key (#723), so the two can't drift apart. Both halves come
+    // from the one owner graph: the key's scopes render where its owner
+    // holds them (#266).
+    it('resolves an apiKey actor from one owner-graph load', async () => {
       const ownerAbility = ability([{ action: Action.read, subject: 'Household' }]);
       const keyAbility = ability([{ action: Action.read, subject: 'Event' }]);
+      const ownerGraph = { id: 'owner-1' } as UserWithRoles;
       const keyGraph = { id: 'key-1' } as ApikeyWithScopes;
-      permissionsService.getUserRoleGraph.mockResolvedValue({ id: 'owner-1' } as UserWithRoles);
-      abilityFactory.createForUser.mockReturnValue(ownerAbility);
+      permissionsService.getUserRoleGraph.mockResolvedValue(ownerGraph);
       permissionsService.getApiKeyScopeGraph.mockResolvedValue(keyGraph);
       abilityFactory.createForApiKeyActor.mockReturnValue([ownerAbility, keyAbility]);
 
       const actor: Actor = { kind: 'apiKey', apiKeyId: 'key-1', userId: 'owner-1' };
       const result = await service.resolveAbilitiesForActor(actor);
 
+      expect(permissionsService.getUserRoleGraph).toHaveBeenCalledTimes(1);
       expect(permissionsService.getUserRoleGraph).toHaveBeenCalledWith('owner-1');
       expect(permissionsService.getApiKeyScopeGraph).toHaveBeenCalledWith('key-1');
-      expect(abilityFactory.createForApiKeyActor).toHaveBeenCalledWith(ownerAbility, keyGraph);
+      expect(abilityFactory.createForApiKeyActor).toHaveBeenCalledWith(ownerGraph, keyGraph);
+      expect(abilityFactory.createForUser).not.toHaveBeenCalled();
       expect(result).toEqual([ownerAbility, keyAbility]);
+    });
+
+    // A deleted owner has no graph; the factory turns that into a deny-all key.
+    it('passes a missing owner graph to the factory as null', async () => {
+      const keyGraph = { id: 'key-1' } as ApikeyWithScopes;
+      permissionsService.getUserRoleGraph.mockResolvedValue(null);
+      permissionsService.getApiKeyScopeGraph.mockResolvedValue(keyGraph);
+      abilityFactory.createForApiKeyActor.mockReturnValue([ability([]), ability([])]);
+
+      await service.resolveAbilitiesForActor({ kind: 'apiKey', apiKeyId: 'key-1', userId: 'gone' });
+
+      expect(abilityFactory.createForApiKeyActor).toHaveBeenCalledWith(null, keyGraph);
     });
 
     it('apiKey → ForbiddenException when the key cannot be loaded (revoked)', async () => {
       permissionsService.getUserRoleGraph.mockResolvedValue({ id: 'owner-1' } as UserWithRoles);
-      abilityFactory.createForUser.mockReturnValue(ability([]));
       permissionsService.getApiKeyScopeGraph.mockResolvedValue(null);
 
       const actor: Actor = { kind: 'apiKey', apiKeyId: 'gone', userId: 'owner-1' };

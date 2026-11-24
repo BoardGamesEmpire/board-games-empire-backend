@@ -291,9 +291,8 @@ describe('installed-plugin inventory (#354)', () => {
     });
 
     // The pinned grant passes the gate, and the identity-column grant beside
-    // it reads every row once a key's conditions are dropped. The ceiling
-    // comes from the rules that read the gate's column, so the second adds
-    // nothing.
+    // it reads every installed plugin. The ceiling comes from the rules that
+    // read the gate's column, so the second adds nothing.
     it('keeps a key to its pinned plugin when it also holds the identity-column grant', async () => {
       const admin = await actors.admin();
       const [scoped, other] = await Promise.all([arrangePlugin(), arrangePlugin()]);

@@ -31,8 +31,11 @@ export interface ApiKeyScope {
  * a key grants that differ by resource: `read` on every subscription beside
  * `manage` on one, say.
  *
- * No route writes a key's scope rows yet (#266), so they are arranged
- * directly. Moving this into `@bge/testing-e2e` as an actor factory is #270.
+ * A key scope renders only where `owner` holds its permission, with that
+ * permission's conditions (#266), so a slug the owner doesn't hold gives the
+ * key nothing. The scope rows are arranged directly until #1418's route for
+ * writing them exists. Moving this into `@bge/testing-e2e` as an actor
+ * factory is #270.
  */
 export const mintApiKey = async (
   baseUrl: string,

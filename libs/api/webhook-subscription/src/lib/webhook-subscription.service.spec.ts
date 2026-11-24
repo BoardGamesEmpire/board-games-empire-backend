@@ -1,7 +1,7 @@
 import type { WebhookSubscriptionEventType } from '@bge/database';
 import { Action, Prisma, QuotaScope, ResourceType, WebhookSubscriptionStatus } from '@bge/database';
 import { t } from '@bge/i18n';
-import type { ApikeyWithScopes, AppAbility } from '@bge/permissions';
+import type { ApikeyWithScopes, AppAbility, UserWithRoles } from '@bge/permissions';
 import { AbilityFactory, AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
 import type { QuotaCheckResult, QuotaSoftOverageEvent } from '@bge/quota';
 import { QuotaExceededException, QuotaService } from '@bge/quota';
@@ -74,7 +74,7 @@ describe('WebhookSubscriptionService', () => {
   let visibility: jest.Mocked<Pick<WebhookVisibilityService, 'isVisibleTo'>>;
   let encryption: jest.Mocked<Pick<EncryptionService, 'encrypt' | 'decrypt'>>;
   let ability: MockAbilityService;
-  let permissions: jest.Mocked<Pick<PermissionsService, 'loadApiKeyScopeGraphs'>>;
+  let permissions: jest.Mocked<Pick<PermissionsService, 'loadApiKeyScopeGraphs' | 'getUserRoleGraph'>>;
   let quotas: jest.Mocked<Pick<QuotaService, 'consume' | 'emitSoftOverages'>>;
   let compose: jest.SpyInstance;
 
@@ -84,16 +84,41 @@ describe('WebhookSubscriptionService', () => {
   /** Sets the abilities the service will read from `getCurrentAbilities()`. */
   const primeAbilities = (...abilities: AppAbility[]) => ability.getCurrentAbilities.mockReturnValue(abilities);
 
+  /** The permission row for `[action, subject]`: the same row in a key's scope and in its owner's graph. */
+  const permissionFor = ([action, subject]: [Action, ResourceType]) => ({
+    id: `perm-${action}-${subject}`,
+    action,
+    subject,
+    inverted: false,
+    conditions: null,
+    fields: [],
+  });
+
   /** A usable key of the acting user's, reaching only what `slugs` name, as the key read returns it. */
   const usableKey = (slugs: [Action, ResourceType][], referenceId = ACTING_USER_ID) =>
     ({
       id: 'key-1',
       referenceId,
-      scopes: slugs.map(([action, subject]) => ({
-        resourceId: null,
-        permission: { action, subject, inverted: false, fields: [] },
-      })),
+      scopes: slugs.map((slug) => {
+        const permission = permissionFor(slug);
+
+        return { permissionId: permission.id, resourceId: null, permission };
+      }),
     }) as unknown as ApikeyWithScopes;
+
+  /**
+   * The key creator's graph, holding what `slugs` name through a server role.
+   * A key scope renders only where its owner holds it (#266), so the key
+   * reaches what its own scopes name, within this.
+   */
+  const ownerHolding = (slugs: [Action, ResourceType][]) =>
+    ({
+      id: ACTING_USER_ID,
+      roles: [{ role: { name: 'User', permissions: slugs.map((slug) => ({ permission: permissionFor(slug) })) } }],
+      householdMember: [],
+      eventsAttended: [],
+      permissions: [],
+    }) as unknown as UserWithRoles;
 
   beforeEach(async () => {
     visibility = { isVisibleTo: jest.fn().mockResolvedValue(true) };
@@ -108,7 +133,16 @@ describe('WebhookSubscriptionService', () => {
     ability = createMockAbilityService();
     ability.getActingUserId.mockReturnValue(ACTING_USER_ID);
     primeAbilities(allowAll);
-    permissions = { loadApiKeyScopeGraphs: jest.fn().mockResolvedValue(new Map()) };
+    permissions = {
+      loadApiKeyScopeGraphs: jest.fn().mockResolvedValue(new Map()),
+      // The key's creator holds both reads; each key narrows them to its own scopes.
+      getUserRoleGraph: jest.fn().mockResolvedValue(
+        ownerHolding([
+          [Action.read, ResourceType.Event],
+          [Action.read, ResourceType.Household],
+        ]),
+      ),
+    };
     quotas = { consume: jest.fn().mockResolvedValue(UNCONSTRAINED), emitSoftOverages: jest.fn() };
 
     const { module, db: mockDb } = await createTestingModuleWithDb({
@@ -1118,6 +1152,9 @@ describe('WebhookSubscriptionService', () => {
         expect(db.webhookSubscription.update).not.toHaveBeenCalled();
       });
 
+      // The key's half renders its scopes where its creator holds them, so it
+      // is built from the creator's graph; the owner's half is the session's
+      // own ability (#266).
       it('re-checks the user’s session against the key too, as dispatch will judge it', async () => {
         permissions.loadApiKeyScopeGraphs.mockResolvedValue(
           new Map([['key-1', usableKey([[Action.read, ResourceType.Event]])]]),
@@ -1126,9 +1163,29 @@ describe('WebhookSubscriptionService', () => {
         await service.reactivate('sub-1');
 
         const [, , abilities] = visibility.isVisibleTo.mock.calls[0];
+        expect(permissions.getUserRoleGraph).toHaveBeenCalledWith(ACTING_USER_ID);
         expect(abilities).toHaveLength(2);
         expect(abilities[0]).toBe(allowAll);
+        expect(abilities[1].can(Action.read, 'Event')).toBe(true);
+        expect(abilities[1].can(Action.read, 'Household')).toBe(false);
         expect(db.webhookSubscription.update).toHaveBeenCalled();
+      });
+
+      // With no creator graph there is nowhere for the key's scopes to render,
+      // and dispatch would deliver nothing through it.
+      it('refuses with api_key_unusable when the key’s owner graph is gone', async () => {
+        permissions.loadApiKeyScopeGraphs.mockResolvedValue(
+          new Map([['key-1', usableKey([[Action.read, ResourceType.Event]])]]),
+        );
+        permissions.getUserRoleGraph.mockResolvedValue(null);
+
+        const rejection: unknown = await service.reactivate('sub-1').catch((error: unknown) => error);
+
+        expect(rejection).toBeInstanceOf(ConflictException);
+        expect((rejection as ConflictException).getResponse()).toEqual(
+          t('errors.webhook_subscription.api_key_unusable'),
+        );
+        expect(db.webhookSubscription.update).not.toHaveBeenCalled();
       });
 
       it('reads no key when the key reactivates its own', async () => {

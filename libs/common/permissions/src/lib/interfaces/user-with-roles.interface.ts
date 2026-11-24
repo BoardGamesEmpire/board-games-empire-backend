@@ -33,11 +33,16 @@ export interface Permissions {
 /**
  * A direct {@link UserPermission} row joined to the slice of its {@link Permission}
  * the AbilityFactory needs to materialize a CASL rule:
+ * - `id` — the permission row, which an API key's key scope names: a key scope
+ *   renders in each context where its owner holds that row, a direct grant
+ *   among them (#266).
  * - `action` / `subject` — the rule's verb and target. `subject` is checked against
  *   the `'all'` wildcard, which is never directly assignable (wildcard authority is
  *   role-gated only and is blocked in the factory).
- * - `conditions` — ABAC template, rendered with a user-only context then merged with
- *   the instance pin (`{ ...rendered, id: resourceId }`) when a `resourceId` is set.
+ * - `conditions` — ABAC template, rendered with a user-only context. On the user's
+ *   own rule the instance pin is merged in (`{ ...rendered, id: resourceId }`) when
+ *   a `resourceId` is set; on an API key's rule the pin is ANDed with the rendered
+ *   conditions instead, so a condition that names `id` is narrowed, never replaced.
  * - `fields` — field-level restriction, honored exactly as on role-derived rules.
  * - `inverted` (base) — the permission's default polarity, inherited when the
  *   `UserPermission.inverted` override is `null`.
@@ -50,5 +55,5 @@ export interface UserPermissionWithPermission extends Pick<
   UserPermission,
   'inverted' | 'resourceType' | 'resourceId' | 'expiresAt'
 > {
-  permission: Pick<Permission, 'action' | 'subject' | 'conditions' | 'fields' | 'inverted'>;
+  permission: Pick<Permission, 'id' | 'action' | 'subject' | 'conditions' | 'fields' | 'inverted'>;
 }

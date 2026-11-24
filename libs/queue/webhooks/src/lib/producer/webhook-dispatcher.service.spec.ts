@@ -60,10 +60,9 @@ describe('WebhookDispatcherService', () => {
     };
     abilityFactory = {
       createForUser: jest.fn().mockReturnValue(ability),
-      createForApiKeyActor: jest.fn<[AppAbility, AppAbility], [AppAbility, ApikeyWithScopes]>((owner) => [
-        owner,
-        keyAbility,
-      ]),
+      createForApiKeyActor: jest.fn<[AppAbility, AppAbility], [UserWithRoles | null, ApikeyWithScopes, AppAbility?]>(
+        (_owner, _apiKey, ownerAbility) => [ownerAbility ?? ability, keyAbility],
+      ),
     };
 
     const { module, db: mockDb } = await createTestingModuleWithDb({
@@ -269,6 +268,9 @@ describe('WebhookDispatcherService', () => {
   });
 
   describe('a webhook subscription made through an API key (#723)', () => {
+    // The key's scopes render where its creator holds them, so the factory
+    // gets the creator's graph, and the creator's ability already built from
+    // it (#266).
     it("judges it by its creator's ability and the key's, the key read from the database", async () => {
       db.webhookSubscription.findMany.mockResolvedValue([
         { id: 'sub-1', createdById: 'owner-1', apiKeyId: 'key-1' },
@@ -279,7 +281,7 @@ describe('WebhookDispatcherService', () => {
       await dispatch(WebhookEventType.EventCreated, event());
 
       expect(permissions.loadApiKeyScopeGraphs).toHaveBeenCalledWith(['key-1']);
-      expect(abilityFactory.createForApiKeyActor).toHaveBeenCalledWith(ability, keyGraph);
+      expect(abilityFactory.createForApiKeyActor).toHaveBeenCalledWith({ id: 'owner-1' }, keyGraph, ability);
       expect(visibility.isVisibleTo).toHaveBeenCalledWith(
         ResourceType.Event,
         'event-1',

@@ -364,8 +364,9 @@ export class PermissionsService {
 
   /**
    * Loads an API key with its scopes and each scope's permission
-   * (action/subject/inverted/fields) — the shape `AbilityFactory.createForApiKey`
-   * consumes. The actor only carries the key id, so the scope graph must be
+   * (id/action/subject/inverted/conditions/fields) — the shape
+   * `AbilityFactory.createForApiKey` renders against the key owner's graph
+   * (#266). The actor only carries the key id, so the scope graph must be
    * resolved here.
    *
    * Returns `null` when the key no longer exists (e.g. revoked between auth and
@@ -596,6 +597,7 @@ export class PermissionsService {
           expiresAt: true,
           permission: {
             select: {
+              id: true,
               action: true,
               subject: true,
               conditions: true,
@@ -1006,7 +1008,7 @@ export class PermissionsService {
         where: { permission: { retiredAt: null } },
         include: {
           permission: {
-            select: { action: true, subject: true, inverted: true, fields: true },
+            select: { id: true, action: true, subject: true, inverted: true, conditions: true, fields: true },
           },
         },
       },

@@ -106,7 +106,9 @@ describe('PermissionsService', () => {
       expect(db.apikey.findUnique).toHaveBeenCalledTimes(1);
     });
 
-    it('loads the key with scopes + permission triple and caches it on a miss', async () => {
+    // The key's rules render its permissions' conditions against its owner's
+    // graph, matched by permission id (#266).
+    it('loads the key with scopes, each with its permission and conditions, and caches it on a miss', async () => {
       const set = jest.spyOn(cache, 'set');
       const apiKey = makeApiKeyGraph();
       db.apikey.findUnique.mockResolvedValue(apiKey);
@@ -120,7 +122,11 @@ describe('PermissionsService', () => {
             scopes: expect.objectContaining({
               // A scope over a retired catalog row confers nothing (#235).
               where: { permission: { retiredAt: null } },
-              include: { permission: { select: { action: true, subject: true, inverted: true, fields: true } } },
+              include: {
+                permission: {
+                  select: { id: true, action: true, subject: true, inverted: true, conditions: true, fields: true },
+                },
+              },
             }),
           }),
         }),
@@ -349,6 +355,7 @@ describe('PermissionsService', () => {
                 expiresAt: true,
                 permission: {
                   select: {
+                    id: true,
                     action: true,
                     subject: true,
                     conditions: true,
@@ -1520,7 +1527,14 @@ function makeApiKeyGraph(scopes: ApikeyWithScopes['scopes'] = []): ApikeyWithSco
             resourceType: 'Household' as ApikeyWithScopes['scopes'][number]['resourceType'],
             resourceId: null,
             createdAt: new Date(),
-            permission: { action: Action.read, subject: 'Household', inverted: false },
+            permission: {
+              id: 'perm-1',
+              action: Action.read,
+              subject: 'Household',
+              inverted: false,
+              conditions: null,
+              fields: [],
+            },
           },
         ],
   };
@@ -1544,6 +1558,6 @@ function makeGraphPermission(expiresAt: Date | null): UserPermissionWithPermissi
     resourceType: ResourceType.Game,
     resourceId: null,
     expiresAt,
-    permission: { action: Action.read, subject: 'Game', conditions: {}, fields: [], inverted: false },
+    permission: { id: 'perm-1', action: Action.read, subject: 'Game', conditions: {}, fields: [], inverted: false },
   };
 }
