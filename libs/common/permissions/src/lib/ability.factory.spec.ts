@@ -3275,9 +3275,12 @@ function grantOf(
   permission: Permission,
   overrides: Partial<Omit<UserPermissionWithPermission, 'permission'>> = {},
 ): UserPermissionWithPermission {
-  const { id, action, subject, conditions, fields, inverted } = permission;
+  const { id, action, subject, conditions, fields, inverted, slug, riskLevel, retiredAt } = permission;
 
-  return makeUserPermission({ ...overrides, permission: { id, action, subject, conditions, fields, inverted } });
+  return makeUserPermission({
+    ...overrides,
+    permission: { id, action, subject, conditions, fields, inverted, slug, riskLevel, retiredAt },
+  });
 }
 
 function makeApiKey(scopes: ApiKeyScopeWithPermission[] = []): ApikeyWithScopes {
@@ -3376,6 +3379,9 @@ function makeUserPermission(
       conditions: {},
       fields: [],
       inverted: false,
+      slug: 'read:household:direct',
+      riskLevel: RiskLevel.Low,
+      retiredAt: null,
       ...permission,
     },
     ...rest,

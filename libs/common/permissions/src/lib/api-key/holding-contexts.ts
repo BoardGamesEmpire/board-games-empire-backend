@@ -13,8 +13,11 @@ export interface HoldingContext {
   /** The Mustache context the owner's own rule renders with: { user, role } | { user, role, householdId } | { user, role, eventId } | { user }. */
   readonly context: Record<string, unknown>;
 
-  /** The permission row as the owner's graph holds it. */
-  readonly permission: Pick<Permission, 'id' | 'action' | 'subject' | 'conditions' | 'fields' | 'inverted'>;
+  /**
+   * The permission row as the owner's graph holds it, with the slug, risk
+   * level and retirement an API key's create screen reads (#1417).
+   */
+  readonly permission: UserPermissionWithPermission['permission'];
 
   /** A direct permission's own pin, carried over as the owner's rule carries it; null otherwise. */
   readonly resourceId: string | null;
