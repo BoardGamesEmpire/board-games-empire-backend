@@ -45,4 +45,12 @@ describe('permission descriptions (#1417)', () => {
     expect(isI18nMessage(message)).toBe(true);
     expect(message.key).toBe('permissions.read:game');
   });
+
+  // A permission an Owner edited stays live after a later catalog stops
+  // shipping it; its i18n key must not reach a screen reader as text.
+  it('gives a slug the catalog does not describe a generic sentence, not its key', () => {
+    const message = permissionDescription('read:retired_thing');
+
+    expect(message.key).toBe('common.permission_without_description');
+  });
 });

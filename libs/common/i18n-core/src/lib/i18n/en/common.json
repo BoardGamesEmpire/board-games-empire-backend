@@ -1,5 +1,6 @@
 {
   "at_least_one_field": "At least one field must be provided for update",
+  "permission_without_description": "A permission on this server that has no description.",
   "forbidden": {
     "view": "You don't have permission to view this resource.",
     "update": "You don't have permission to update this resource.",
