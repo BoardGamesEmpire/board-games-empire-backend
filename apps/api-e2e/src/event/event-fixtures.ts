@@ -96,14 +96,11 @@ export async function platformOfType(prisma: PrismaClient, platformType: Platfor
 /**
  * An offered game on `eventId`, arranged directly in the database (#1187): a
  * fresh game with `facts`, on a platform of the type named, in `ownerId`'s
- * collection, offered by `ownerId`'s attendee row, or by
- * `attendeeId` when given. A guest added by name has no user, so their offer
- * names its attendee and someone else's collection entry, as a host's offer
- * for them does today (#1210).
+ * collection, offered by `ownerId`'s attendee row.
  */
 export async function arrangeOfferedGame(
   prisma: PrismaClient,
-  options: { attendeeId?: string; eventId: string; ownerId: string } & OfferedGameFacts,
+  options: { eventId: string; ownerId: string } & OfferedGameFacts,
 ): Promise<ArrangedOfferedGame> {
   const { eventId, ownerId, medium = GameMedium.Physical, platformType = PlatformType.Tabletop, ...facts } = options;
   const game = await prisma.game.create({
@@ -127,14 +124,10 @@ export async function arrangeOfferedGame(
     data: { userId: ownerId, platformGameId: platformGame.id, medium },
     select: { id: true },
   });
-  const attendeeId =
-    options.attendeeId ??
-    (
-      await prisma.eventAttendee.findUniqueOrThrow({
-        where: { eventId_userId: { eventId, userId: ownerId } },
-        select: { id: true },
-      })
-    ).id;
+  const { id: attendeeId } = await prisma.eventAttendee.findUniqueOrThrow({
+    where: { eventId_userId: { eventId, userId: ownerId } },
+    select: { id: true },
+  });
   const entry = await prisma.eventAttendeeGameList.create({
     data: { attendeeId, collectionId: collection.id },
     select: { id: true },

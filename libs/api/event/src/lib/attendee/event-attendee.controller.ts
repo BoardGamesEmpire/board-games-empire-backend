@@ -191,6 +191,12 @@ export class EventAttendeeController {
   @ApiParam({ name: 'eventId', type: String })
   @ApiParam({ name: 'attendeeId', type: String })
   @ApiResponse({ status: Http.Created, description: 'Game added to list' })
+  @ApiResponse({
+    status: Http.BadRequest,
+    description:
+      'The attendee was added by name, so has no collection to offer from (code ATTENDEE_HAS_NO_COLLECTION), ' +
+      'the entry was removed from its collection, or a malformed body',
+  })
   @ApiResponse({ status: Http.Conflict, description: 'Game already in list' })
   @CheckPolicies((ability) => ability.can(Action.create, ResourceType.EventAttendeeGameList))
   @Post(':attendeeId/games')
@@ -215,7 +221,8 @@ export class EventAttendeeController {
       '`alreadyOffered`, each with its `entry` in the offered-game shape, or `refused`, with a stable `reason` ' +
       `(${OFFER_REFUSALS.join(', ')}) beside a translated \`message\`. The expansions of a refused game are ` +
       '`baseRefused`; those of a game already offered go ahead. An expansion linked to its game but on another ' +
-      'platform is `differentPlatform`.',
+      'platform is `differentPlatform`. For an attendee added by name, who has no collection, every entry is ' +
+      'refused, even one already offered: `attendeeHasNoCollection`, or `notFound` for an id that names no entry.',
   })
   @ApiParam({ name: 'eventId', type: String })
   @ApiParam({ name: 'attendeeId', type: String })

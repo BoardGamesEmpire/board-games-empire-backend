@@ -1,6 +1,7 @@
 import { ContentType, GameMedium, PlatformType, Reach, SystemRole } from '@bge/database';
 import type { Actors, AuthenticatedActor } from '@bge/testing-e2e';
 import { createActors } from '@bge/testing-e2e';
+import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { arrangeCollectionEntry } from '../game-collection/game-collection-fixtures';
 import { requireBaseUrl } from '../support/e2e-env';
@@ -194,6 +195,29 @@ describe('POST /api/events/:eventId/attendees/:attendeeId/games/batch (#1188)', 
     expect(results[1]).toEqual(
       expect.objectContaining({ message: "Cannot add a game from another user's collection." }),
     );
+  });
+
+  it('refuses every id for an attendee added by name as attendeeHasNoCollection, and adds nothing (#1210)', async () => {
+    const { host, eventId } = await arrangeEvent();
+    const stranger = await actors.user();
+    const guestId = attendeeEnvelope(
+      await request(baseUrl)
+        .post(attendeesPath(eventId))
+        .set(host.headers)
+        .send({ guestName: 'Sam', guestEmail: `e2e-guest-${randomUUID().slice(0, 8)}@example.com` })
+        .expect(201),
+      'POST /api/events/:eventId/attendees as the host',
+    ).id;
+    const hosts = await arrangeCollectionEntry(db.client, host.user.id, Reach.Private);
+    const strangers = await arrangeCollectionEntry(db.client, stranger.user.id, Reach.Private);
+
+    const results = await offered(host, eventId, guestId, [{ collectionId: hosts }, { collectionId: strangers }]);
+
+    expect(outcomes(results)).toEqual([
+      [hosts, 'attendeeHasNoCollection'],
+      [strangers, 'attendeeHasNoCollection'],
+    ]);
+    expect(await db.client.eventAttendeeGameList.count({ where: { attendeeId: guestId } })).toBe(0);
   });
 
   it('refuses 101 ids, and a repeated id, with 400', async () => {

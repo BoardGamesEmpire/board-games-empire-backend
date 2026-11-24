@@ -10,6 +10,8 @@ import type { OfferedGame } from '../offered-game/offered-game.types';
 export const OfferRefusal = {
   /** No collection entry has this id. */
   NotFound: 'notFound',
+  /** The attendee was added by name, so has no collection to offer from (#1210). */
+  AttendeeHasNoCollection: 'attendeeHasNoCollection',
   /** The entry is in someone else's collection. */
   NotInAttendeesCollection: 'notInAttendeesCollection',
   /** The entry was removed from the collection: a game the attendee no longer owns. */
@@ -48,6 +50,8 @@ export function offerRefusalMessage(reason: OfferRefusal, collectionId: string):
   switch (reason) {
     case OfferRefusal.NotFound:
       return t('errors.attendee.game_collection_entry_not_found', { collectionId });
+    case OfferRefusal.AttendeeHasNoCollection:
+      return t('errors.attendee.attendee_has_no_collection');
     case OfferRefusal.NotInAttendeesCollection:
       return t('errors.attendee.game_from_other_collection');
     case OfferRefusal.RemovedFromCollection:

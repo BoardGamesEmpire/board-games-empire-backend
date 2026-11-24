@@ -12,7 +12,7 @@ import {
   ResourceType,
   SystemRole,
 } from '@bge/database';
-import { t } from '@bge/i18n';
+import { CodedHttpException, t } from '@bge/i18n';
 import { LineupRemovalReason } from '@bge/notifications-service';
 import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
 import type { MockAbilityService, MockDatabaseService } from '@bge/testing';
@@ -29,6 +29,7 @@ import {
 } from '@bge/testing';
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { Http } from '@status/codes';
 import { ATTENDEE_USER_AND_ROLE_INCLUDE } from '../constants/attendee-user-and-role.constant';
 import {
   GameRemovedFromEventEvent,
@@ -1211,6 +1212,35 @@ describe('EventAttendeeService', () => {
       );
     });
 
+    it('addGameToList refuses an attendee added by name with 400 ATTENDEE_HAS_NO_COLLECTION, and writes nothing (#1210)', async () => {
+      db.event.findUnique.mockResolvedValue({ id: 'event-1', householdId: null } as Event);
+      db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1', userId: null } as EventAttendee);
+      db.gameCollection.findUnique.mockResolvedValue({ userId: 'user-2', deletedAt: null } as GameCollection);
+
+      const attempt = service.addGameToList('event-1', 'att-1', { collectionId: 'col-1' });
+
+      await expect(attempt).rejects.toThrow(
+        new CodedHttpException(
+          Http.BadRequest,
+          'ATTENDEE_HAS_NO_COLLECTION',
+          t('errors.attendee.attendee_has_no_collection'),
+        ),
+      );
+      await expect(attempt).rejects.toMatchObject({ code: 'ATTENDEE_HAS_NO_COLLECTION', status: Http.BadRequest });
+      expect(db.eventAttendeeGameList.create).not.toHaveBeenCalled();
+      expect(db.eventAttendeeGameList.update).not.toHaveBeenCalled();
+    });
+
+    it('addGameToList answers 404 for a missing entry before the attendee check (#1210)', async () => {
+      db.event.findUnique.mockResolvedValue({ id: 'event-1', householdId: null } as Event);
+      db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1', userId: null } as EventAttendee);
+      db.gameCollection.findUnique.mockResolvedValue(null);
+
+      await expect(service.addGameToList('event-1', 'att-1', { collectionId: 'col-1' })).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
     it('addGameToList refuses before writing when the instance check denies', async () => {
       db.event.findUnique.mockResolvedValue({ id: 'event-1', householdId: null } as Event);
       db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1', userId: 'user-1' } as EventAttendee);
@@ -1684,6 +1714,60 @@ describe('EventAttendeeService', () => {
 
     const outcomes = (results: { collectionId: string; outcome: string; reason?: string }[]) =>
       results.map(({ collectionId, outcome, reason }) => [collectionId, reason ?? outcome]);
+
+    it('refuses every id for an attendee added by name as attendeeHasNoCollection, a missing id as notFound (#1210)', async () => {
+      arrange({ collections: [owned('col-1', 'game-1', { userId: 'user-2' })] });
+      db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1', userId: null } as EventAttendee);
+
+      const results = await service.offerGames('event-1', 'att-1', {
+        items: [{ collectionId: 'col-1' }, { collectionId: 'col-missing' }],
+      });
+
+      expect(results).toMatchObject([
+        { outcome: 'refused', reason: 'attendeeHasNoCollection' },
+        { outcome: 'refused', reason: 'notFound' },
+      ]);
+      expect(db.eventAttendeeGameList.create).not.toHaveBeenCalled();
+      expect(db.eventAttendeeGameList.update).not.toHaveBeenCalled();
+    });
+
+    it('refuses an id already on the list of an attendee added by name (#1210)', async () => {
+      arrange({
+        collections: [owned('col-1', 'game-1', { userId: 'user-2' })],
+        entries: [listed('col-1', 'gl-1')],
+      });
+      db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1', userId: null } as EventAttendee);
+
+      const results = await service.offerGames('event-1', 'att-1', { items: [{ collectionId: 'col-1' }] });
+
+      expect(results).toMatchObject([{ outcome: 'refused', reason: 'attendeeHasNoCollection' }]);
+      expect(db.eventAttendeeGameList.create).not.toHaveBeenCalled();
+    });
+
+    // The game is refused because the attendee has no collection, so its
+    // expansions are refused for that too, not because their game was (#1210).
+    it('refuses the expansions of an attendee added by name as attendeeHasNoCollection, not baseRefused (#1210)', async () => {
+      arrange({
+        collections: [
+          owned('col-base', 'game-base', { userId: 'user-2' }),
+          owned('col-exp', 'game-exp', { userId: 'user-2' }),
+        ],
+        links: [{ baseGameId: 'game-base', expansionGameId: 'game-exp' }],
+      });
+      db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1', userId: null } as EventAttendee);
+
+      const results = await service.offerGames('event-1', 'att-1', {
+        items: [{ collectionId: 'col-base', expansionCollectionIds: ['col-exp', 'col-missing'] }],
+      });
+
+      expect(outcomes(results)).toEqual([
+        ['col-base', 'attendeeHasNoCollection'],
+        ['col-exp', 'attendeeHasNoCollection'],
+        ['col-missing', 'notFound'],
+      ]);
+      expect(db.eventAttendeeGameList.create).not.toHaveBeenCalled();
+      expect(db.eventAttendeeGameList.update).not.toHaveBeenCalled();
+    });
 
     it('judges every id with two reads, not one per id', async () => {
       arrange({

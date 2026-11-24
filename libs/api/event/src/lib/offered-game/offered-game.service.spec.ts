@@ -446,22 +446,6 @@ describe('OfferedGameService (#1185, #1187)', () => {
       expect(listed.rows[0].attendee?.status).toBe(EventParticipationStatus.NotAttending);
     });
 
-    // A host can offer games for a guest added by name (#1210), whose row has
-    // no user.
-    it('serves a guest attendee with a null user', async () => {
-      db.eventAttendeeGameList.findMany.mockResolvedValue([makeOfferedGameEntry('a', 'game-1', 'att-guest')] as never);
-      db.eventAttendee.findMany.mockResolvedValue([attendee('att-guest', { user: null, guestName: 'Sam' })] as never);
-
-      const listed = await service.listOfferedGames('event-1', query());
-
-      expect(listed.rows[0].attendee).toEqual({
-        id: 'att-guest',
-        status: EventParticipationStatus.Attending,
-        guestName: 'Sam',
-        user: null,
-      });
-    });
-
     it("answers 404 for an event that doesn't exist, before reading", async () => {
       db.event.count.mockResolvedValue(0);
 
