@@ -11,7 +11,7 @@ import type { Actors, AuthenticatedActor } from '@bge/testing-e2e';
 import { arrangeExtendedNetwork, arrangeFriendship, befriend, createActors } from '@bge/testing-e2e';
 import request from 'supertest';
 import type { Caller } from '../support/api-key';
-import { mintApiKey } from '../support/api-key';
+import { mintApiKey, mintApiKeyWithArrangedScopes } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import type { TestDatabase } from '../support/test-db';
 import { createTestDatabase } from '../support/test-db';
@@ -364,7 +364,8 @@ describe('browsing upcoming events (#962)', () => {
     const pinnedId = await createdEventId(host, { reach: Reach.Friends, ...dated(2) });
     const otherId = await createdEventId(host, { reach: Reach.Friends, ...dated(2) });
 
-    const key = await mintApiKey(baseUrl, db.client, owner, {
+    // Arranged: the route refuses an Event pin (#1418).
+    const key = await mintApiKeyWithArrangedScopes(baseUrl, db.client, owner, {
       slugs: ['read:event:friends'],
       resourceType: ResourceType.Event,
       resourceId: pinnedId,

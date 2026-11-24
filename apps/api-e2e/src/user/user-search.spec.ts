@@ -4,7 +4,7 @@ import { arrangeExtendedNetwork, arrangeFriendship, befriend, createActors } fro
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import type { Caller } from '../support/api-key';
-import { mintApiKey } from '../support/api-key';
+import { mintApiKey, mintApiKeyWithArrangedScopes } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import type { TestDatabase } from '../support/test-db';
 import { createTestDatabase } from '../support/test-db';
@@ -244,11 +244,18 @@ describe('user search', () => {
   });
 
   describe('through an API key', () => {
-    const keyOf = (owner: SessionActor, pins: { profileId?: string; userId?: string } = {}) =>
-      mintApiKey(baseUrl, db.client, owner, [
+    // The route mints an unpinned key and a User pin. It refuses a UserProfile
+    // pin, so only that key's scopes are arranged (#1418).
+    const keyOf = (owner: SessionActor, pins: { profileId?: string; userId?: string } = {}) => {
+      const scope = [
         { slugs: ['read:user:searchable'], resourceType: ResourceType.User, resourceId: pins.userId },
         { slugs: ['read:user:profile:public'], resourceType: ResourceType.UserProfile, resourceId: pins.profileId },
-      ]);
+      ];
+
+      return pins.profileId === undefined
+        ? mintApiKey(baseUrl, db.client, owner, scope)
+        : mintApiKeyWithArrangedScopes(baseUrl, db.client, owner, scope);
+    };
 
     // The control: unpinned, the key finds what its owner finds, so the page
     // below is the pin's narrowing and not a key that finds nothing.
@@ -271,7 +278,8 @@ describe('user search', () => {
 
     // Each row carries its profile's name and avatar, so the key's profile
     // scope clips the rows as its user scope does. Without it, a key pinned to
-    // one profile was served every matched user's.
+    // one profile was served every matched user's. Arranged: the route refuses
+    // a UserProfile pin, so only such a stored row reaches this (#1418).
     it('narrows the page to the one profile its scope names', async () => {
       const { term, caller, found } = await arrange();
       const profile = await db.client.userProfile.findUniqueOrThrow({

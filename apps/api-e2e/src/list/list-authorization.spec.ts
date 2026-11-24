@@ -2,7 +2,7 @@ import { FriendshipStatus, ListKind, Reach, ResourceType } from '@bge/database';
 import type { Actors, AuthenticatedActor } from '@bge/testing-e2e';
 import { arrangeExtendedNetwork, arrangeFriendship, befriend, createActors } from '@bge/testing-e2e';
 import request from 'supertest';
-import { mintApiKey } from '../support/api-key';
+import { mintApiKey, mintApiKeyWithArrangedScopes } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import type { TestDatabase } from '../support/test-db';
 import { createTestDatabase } from '../support/test-db';
@@ -188,7 +188,7 @@ describe('list authorization (#1241)', () => {
     const wishlist = await findWishlist(db.client, owner.user.id);
     const custom = await arrangeList(db.client, owner.user.id, { position: 1 });
     const update = { slugs: ['update:list'], resourceType: ResourceType.List };
-    const pinned = await mintApiKey(baseUrl, db.client, owner, { ...update, resourceId: custom.id });
+    const pinned = await mintApiKeyWithArrangedScopes(baseUrl, db.client, owner, { ...update, resourceId: custom.id });
     const unpinned = await mintApiKey(baseUrl, db.client, owner, update);
     const positions = () =>
       db.client.list.findMany({
@@ -228,7 +228,7 @@ describe('list authorization (#1241)', () => {
     const owner = await actors.user();
     const custom = await arrangeList(db.client, owner.user.id);
     const create = { slugs: ['create:list'], resourceType: ResourceType.List };
-    const pinned = await mintApiKey(baseUrl, db.client, owner, { ...create, resourceId: custom.id });
+    const pinned = await mintApiKeyWithArrangedScopes(baseUrl, db.client, owner, { ...create, resourceId: custom.id });
     const unpinned = await mintApiKey(baseUrl, db.client, owner, create);
     const held = () => db.client.list.count({ where: { userId: owner.user.id } });
     const before = await held();

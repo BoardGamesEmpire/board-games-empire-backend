@@ -27,11 +27,14 @@ export interface ApiKeyRouteBlock {
  *
  * A user manages API keys at `/api/api-keys`, where every key scope is checked
  * against what the owner may grant. better-auth's routes would create, edit or
- * delete a key past that check, so they are closed to clients. The whole prefix is refused, not a list of
- * routes, so a route a later plugin version adds is closed too.
+ * delete a key past that check, so they are closed to clients. The whole
+ * prefix is refused, not a list of routes, so a route a later plugin version
+ * adds is closed too.
  *
- * The server's own calls still go through: `AuthService` creates a key and
- * verifies one through `auth.api.*`, which carries no request.
+ * The server's own calls still go through: `AuthService` creates a key
+ * through `auth.api.createApiKey`, which carries no request. Verifying a key
+ * never reaches the block at all: better-auth registers verify as a
+ * server-only endpoint with no path.
  *
  * The message is rendered in the fallback locale, as the settings gates' are:
  * `/api/auth/*` runs ahead of Nest's i18n.

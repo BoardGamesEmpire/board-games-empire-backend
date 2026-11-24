@@ -4,7 +4,7 @@ import { befriend, createActors } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import type { Caller } from '../support/api-key';
-import { mintApiKey } from '../support/api-key';
+import { mintApiKey, mintApiKeyWithArrangedScopes } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import type { TestDatabase } from '../support/test-db';
 import { createTestDatabase } from '../support/test-db';
@@ -200,7 +200,7 @@ describe('platform games on GET /games/:id (#791)', () => {
     const game = await arrangeGame(keyOwner.user.id, Reach.Public);
     const first = await arrangePlatformGame(game.id, 'Alpha');
     const second = await arrangePlatformGame(game.id, 'Beta');
-    const pinned = await mintApiKey(baseUrl, db.client, keyOwner, [
+    const pinned = await mintApiKeyWithArrangedScopes(baseUrl, db.client, keyOwner, [
       { slugs: ['read:game'], resourceType: ResourceType.Game },
       { slugs: ['read:platform_game'], resourceType: ResourceType.PlatformGame, resourceId: first.id },
     ]);

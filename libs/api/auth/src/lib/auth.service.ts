@@ -192,6 +192,9 @@ export class AuthService {
   async createApiKey({ userId, name, expiresInSeconds }: CreateApiKeyInput): Promise<CreatedApiKey> {
     const created = await this.auth.api.createApiKey({ body: { userId, name, expiresIn: expiresInSeconds } });
 
+    // Unreachable with the current plugin options: `expiresIn` is always sent
+    // and `defaultExpiresIn` is null. If it ever fired, the key row better-auth
+    // wrote would stay behind, since the caller gets no id to delete (#1418).
     if (created.expiresAt === null) {
       throw new Error(`better-auth stored API key ${created.id} without an expiry, though one was given (#1418)`);
     }

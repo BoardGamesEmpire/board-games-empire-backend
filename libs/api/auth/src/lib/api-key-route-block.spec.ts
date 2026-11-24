@@ -52,11 +52,11 @@ describe('createApiKeyRouteBlock', () => {
     });
   });
 
-  // The server's own calls, such as creating a key for /api/api-keys or
-  // verifying one on a request, go through `auth.api.*` with no request (#1418).
+  // The server's own calls, such as creating a key for /api/api-keys, go
+  // through `auth.api.*` with no request (#1418).
   it('lets a server-side call through: no request (#1418)', () => {
     expect(refusalOf(() => block.beforeRoute({ path: '/api-key/create', request: undefined }))).toBeUndefined();
-    expect(refusalOf(() => block.beforeRoute({ path: '/api-key/verify' }))).toBeUndefined();
+    expect(refusalOf(() => block.beforeRoute({ path: '/api-key/get' }))).toBeUndefined();
   });
 
   it('ignores other paths (#1418)', () => {

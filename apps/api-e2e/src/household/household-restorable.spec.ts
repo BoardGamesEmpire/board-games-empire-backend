@@ -3,7 +3,7 @@ import type { Actors, SessionActor } from '@bge/testing-e2e';
 import { createActors } from '@bge/testing-e2e';
 import request from 'supertest';
 import type { Caller } from '../support/api-key';
-import { mintApiKey } from '../support/api-key';
+import { mintApiKey, mintApiKeyWithArrangedScopes } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import type { TestDatabase } from '../support/test-db';
 import { createTestDatabase } from '../support/test-db';
@@ -268,7 +268,12 @@ describe('restorable households (#542)', () => {
 
     const scope = (slugs: readonly string[]) => ({ slugs, resourceType: ResourceType.Household });
     const readOnly = await mintApiKey(baseUrl, db.client, owner, scope(['read:households']));
-    const updater = await mintApiKey(baseUrl, db.client, owner, scope(['read:households', 'update:household']));
+    const updater = await mintApiKeyWithArrangedScopes(
+      baseUrl,
+      db.client,
+      owner,
+      scope(['read:households', 'update:household']),
+    );
     const restorer = await mintApiKey(baseUrl, db.client, owner, scope(['read:households', RESTORE_SLUG]));
 
     // Floored by its key scopes: what the key may not restore, it does not see.

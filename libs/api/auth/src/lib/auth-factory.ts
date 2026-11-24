@@ -28,6 +28,7 @@ import type { User } from 'better-auth/types';
 import type { I18nService } from 'nestjs-i18n';
 import process from 'node:process';
 import { ADMIN_PLUGIN_OPTIONS } from './access/admin-roles';
+import { createApiKeyRouteBlock } from './api-key-route-block';
 import { appSignIn } from './app-sign-in';
 import type { CompleteAuthStorage } from './auth-storage';
 import { createBanFlagGate } from './ban-flag-gate';
@@ -170,6 +171,7 @@ export function authFactory(
   }
 
   const gateDeps = settingGateDeps(prisma, i18n);
+  const apiKeyRouteBlock = createApiKeyRouteBlock(gateDeps.render);
   const settingGates = createSettingGates(gateDeps);
   const banFlagGate = createBanFlagGate(gateDeps.render);
   const userRemovalGate = createUserRemovalGate(userRemovalGateDeps(prisma, gateDeps.render));
@@ -316,6 +318,11 @@ export function authFactory(
     },
     hooks: {
       before: createAuthMiddleware(async (context) => {
+        // First: better-auth's API key routes are gone for clients (keys are
+        // managed at /api/api-keys), so no other gate should answer for one
+        // with its own refusal (#1418).
+        apiKeyRouteBlock.beforeRoute(context);
+
         // Resets switched off is the answer whatever the mail settings, so the
         // gate runs before the mail checks.
         await settingGates.beforeRoute(context);

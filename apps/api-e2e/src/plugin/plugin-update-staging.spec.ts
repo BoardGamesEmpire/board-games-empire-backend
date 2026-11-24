@@ -5,7 +5,7 @@ import { createActors, pollUntil } from '@bge/testing-e2e';
 import type { PluginManifest, PluginManifestOverrides } from '@boardgamesempire/plugin-manifest';
 import { join } from 'node:path';
 import request from 'supertest';
-import { mintApiKey } from '../support/api-key';
+import { mintApiKeyWithArrangedScopes } from '../support/api-key';
 import { deferredRequest } from '../support/deferred-request';
 import { requireBaseUrl } from '../support/e2e-env';
 import { expectErrorEnvelope } from '../support/error-envelope';
@@ -499,8 +499,11 @@ describe('staging a plugin update from a plugin artifact (#1096)', () => {
     const other = await installFirstVersion(admin);
     const next = await nextVersion(first, WAITS_FOR_APPROVAL);
     await upload(admin, next).expect(200);
+    // Arranged: the route refuses a pinned manage:plugin, because a pinned key
+    // can still upload an artifact; #1366 re-admits it once the upload checks
+    // the pin (#1418).
     const keyFor = async (slug: string) =>
-      mintApiKey(baseUrl, db.client, admin, {
+      mintApiKeyWithArrangedScopes(baseUrl, db.client, admin, {
         slugs: ['manage:plugin'],
         resourceType: ResourceType.Plugin,
         resourceId: (await pluginRow(slug)).id,
