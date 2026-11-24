@@ -112,6 +112,11 @@
   "feedback": {
     "submitted": "Feedback report submitted successfully"
   },
+  "api_key": {
+    "created": "API key created. Copy the key now: it is shown only this once.",
+    "updated": "API key updated",
+    "deleted": "API key deleted"
+  },
   "plugin": {
     "enabled": "Plugin '{slug}' enabled successfully",
     "disabled": "Plugin '{slug}' disabled successfully",
