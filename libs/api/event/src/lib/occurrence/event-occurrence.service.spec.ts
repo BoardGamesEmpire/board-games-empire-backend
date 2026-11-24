@@ -1252,6 +1252,7 @@ describe('EventOccurrenceService', () => {
                       },
                     },
                   },
+                  { collection: { is: { deletedAt: { not: null } } } },
                 ],
               },
             },
@@ -1265,6 +1266,32 @@ describe('EventOccurrenceService', () => {
         expect(db.eventGame.deleteMany).toHaveBeenCalledWith({ where: { id: { in: ['eg-off'] } } });
         expect(db.eventGame.deleteMany.mock.invocationCallOrder[0]).toBeGreaterThan(
           db.eventOccurrence[op].mock.invocationCallOrder[0],
+        );
+      },
+    );
+
+    // A game removed from its owner's collection is supplied by nobody, though
+    // its offer stays in place, so a date write takes it off a lineup it puts
+    // ahead again, as it does a game whose offer was taken back (#1221).
+    // This pins the read's filter only; the mock finds the game whatever the
+    // filter says.
+    it.each(dateWrites)(
+      'writeEventDates counts a game whose collection entry was removed as nobody bringing it, on $name (#1221)',
+      async ({ name }) => {
+        gamesTakenOff();
+
+        await run(name);
+
+        expect(db.eventGame.findMany).toHaveBeenLastCalledWith(
+          expect.objectContaining({
+            where: expect.objectContaining({
+              suppliedBy: {
+                is: expect.objectContaining({
+                  OR: expect.arrayContaining([{ collection: { is: { deletedAt: { not: null } } } }]),
+                }),
+              },
+            }),
+          }),
         );
       },
     );

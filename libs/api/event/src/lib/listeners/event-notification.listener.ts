@@ -415,7 +415,8 @@ export class EventNotificationListener {
   /**
    * #769. Every removal tells the attendees still coming, whatever the reason
    * (a host's removal, the supplier leaving, a date write that found nobody
-   * bringing it), except the person acting. A supplier who left is out of
+   * bringing it, the supplier removing the game from their collection,
+   * #1221), except the person acting. A supplier who left is out of
    * that audience already. The reason rides on the notification so the client
    * can say why.
    */

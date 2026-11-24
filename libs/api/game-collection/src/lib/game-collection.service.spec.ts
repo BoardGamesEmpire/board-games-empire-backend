@@ -9,13 +9,38 @@ import {
   Reach,
   ResourceType,
 } from '@bge/database';
+import type { CollectionSupplyChange } from '@bge/event';
+import { emitCollectionSupplyChanges, syncCollectionEntrySupply } from '@bge/event';
 import { t } from '@bge/i18n';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
 import type { MockDatabaseService } from '@bge/testing';
-import { batchTransactionCall, createTestingModuleWithDb, paginationQuery } from '@bge/testing';
+import {
+  batchTransactionCall,
+  createTestingModuleWithDb,
+  paginationQuery,
+  rawQueryText,
+  unwrapTransaction,
+} from '@bge/testing';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { COLLECTION_INCLUDE } from './collection-row';
 import { GameCollectionService } from './game-collection.service';
+
+// The supply sync has its own spec in `@bge/event`; here it is a seam, so the
+// tests below pin when a removal or an add-back runs it and what they pass
+// (#1221).
+jest.mock('@bge/event', () => ({
+  syncCollectionEntrySupply: jest.fn(),
+  emitCollectionSupplyChanges: jest.fn(),
+}));
+
+const syncSupply = jest.mocked(syncCollectionEntrySupply);
+const emitSupply = jest.mocked(emitCollectionSupplyChanges);
+
+/** What the sync changed in one event, as a removal or an add-back hands it to the emit (#1221). */
+const SUPPLY_CHANGES: CollectionSupplyChange[] = [
+  { eventId: 'ev-1', changes: { paused: [], resumed: [], removedGames: [] } },
+];
 
 const dependentRecordNotFound = () =>
   new Prisma.PrismaClientKnownRequestError('Dependent record not found', { code: 'P2025', clientVersion: 'test' });
@@ -83,8 +108,11 @@ describe('GameCollectionService', () => {
     Pick<AbilityService, 'getCurrentResourceConditions' | 'getActingUserId' | 'getCurrentAccess'>
   >;
   let compose: jest.SpyInstance;
+  let eventEmitter: { emit: jest.Mock };
 
   beforeEach(async () => {
+    eventEmitter = { emit: jest.fn() };
+
     abilityService = {
       getCurrentResourceConditions: jest.fn().mockReturnValue([COND]),
       getActingUserId: jest.fn().mockReturnValue(ME),
@@ -99,10 +127,15 @@ describe('GameCollectionService', () => {
         // clauses asserted below are the merge the lists actually run.
         ScopeComposer,
         { provide: AbilityService, useValue: abilityService },
+        { provide: EventEmitter2, useValue: eventEmitter },
       ],
     });
 
     db = ctx.db;
+    // A removal and an add-back write in a callback transaction, the list
+    // reads in a batch one; the mock runs both (#1221).
+    unwrapTransaction(db);
+    syncSupply.mockResolvedValue([]);
     // Each read that returns rows also reads their base-game links (#1070).
     db.gameExpansion.findMany.mockResolvedValue([]);
     // The actor's wishlist is readable, unless a spec says otherwise (#1241).
@@ -113,6 +146,26 @@ describe('GameCollectionService', () => {
   });
 
   afterEach(() => jest.clearAllMocks());
+
+  /**
+   * Records a callback transaction's start as `begin` and its commit as
+   * `commit` in `order`, running the callback against the mock, so a test can
+   * pin which writes run inside it and that the emit waits for the commit
+   * (#1221).
+   */
+  function recordTransaction(order: string[]): void {
+    db.$transaction.mockImplementation((async (operations: unknown) => {
+      if (Array.isArray(operations)) {
+        return Promise.all(operations);
+      }
+
+      order.push('begin');
+      const result = await (operations as (tx: MockDatabaseService) => Promise<unknown>)(db);
+      order.push('commit');
+
+      return result;
+    }) as never);
+  }
 
   /**
    * #514. `GET /game-collections` declares its own set, the acting user's
@@ -490,9 +543,12 @@ describe('GameCollectionService', () => {
   });
 
   describe('addToCollection', () => {
+    /** The upsert's answer for a genuine create: the row under the id the service minted (#1221). */
+    const created = (async ({ create }: { create: { id: string } }) => entry({ id: create.id })) as never;
+
     beforeEach(() => {
       db.platformGame.findUnique.mockResolvedValue({ id: 'pg-1' } as PlatformGame);
-      db.gameCollection.upsert.mockResolvedValue(entry());
+      db.gameCollection.upsert.mockImplementation(created);
     });
 
     it('404s when the platform game does not exist', async () => {
@@ -510,7 +566,7 @@ describe('GameCollectionService', () => {
       expect(db.gameCollection.upsert).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { userId_platformGameId_medium: { userId: ME, platformGameId: 'pg-1', medium: GameMedium.Physical } },
-          create: expect.objectContaining({ userId: ME, platformGameId: 'pg-1', quantity: 2 }),
+          create: expect.objectContaining({ id: expect.any(String), userId: ME, platformGameId: 'pg-1', quantity: 2 }),
         }),
       );
     });
@@ -525,6 +581,103 @@ describe('GameCollectionService', () => {
       expect(update).not.toHaveProperty('lastPlayed');
       expect(update).not.toHaveProperty('favorite');
       expect(update).not.toHaveProperty('playAgain');
+    });
+
+    // The add-back locks the entry's row before it writes, and that lock is
+    // the transaction's first, so a nomination naming the entry, or its
+    // attendee coming back, takes turns with it. The transaction keeps the
+    // default isolation, READ COMMITTED, so each statement of the sync reads
+    // what had committed when it started (#1221).
+    it('addToCollection of a removed entry locks the row, clears the removal and resumes its offers (#1221)', async () => {
+      const order: string[] = [];
+      recordTransaction(order);
+      db.$queryRaw.mockImplementation((async () => {
+        order.push('lock');
+        return [{ deletedAt: new Date('2026-11-01') }];
+      }) as never);
+      db.gameCollection.upsert.mockImplementation((async () => {
+        order.push('upsert');
+        return entry();
+      }) as never);
+      syncSupply.mockImplementation(async () => {
+        order.push('sync');
+        return SUPPLY_CHANGES;
+      });
+      emitSupply.mockImplementation(() => {
+        order.push('emit');
+      });
+
+      await service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical });
+
+      const [lock] = db.$queryRaw.mock.calls[0] as unknown as [Prisma.Sql];
+      expect(rawQueryText(lock)).toBe(
+        'SELECT deleted_at AS "deletedAt" FROM game_collections WHERE user_id = ? AND platform_game_id = ? AND medium = ?::game_mediums FOR UPDATE',
+      );
+      expect(lock.values).toEqual([ME, 'pg-1', GameMedium.Physical]);
+
+      const { update } = db.gameCollection.upsert.mock.calls[0][0];
+      expect(update).toMatchObject({ deletedAt: null, deleteReason: null });
+      expect(syncSupply).toHaveBeenCalledWith(db, { id: 'gc-1', deletedAt: null }, update.lastUpdated);
+      expect(emitSupply).toHaveBeenCalledWith(eventEmitter, SUPPLY_CHANGES, ME, update.lastUpdated);
+      expect(order).toEqual(['begin', 'lock', 'upsert', 'sync', 'commit', 'emit']);
+      expect(db.$transaction.mock.calls[0]).toHaveLength(1);
+    });
+
+    // The pre-read found no row, but another request created one before the
+    // upsert, which then updates that row rather than creating its own: its
+    // id is not the one minted here. The row may have been removed in that
+    // window, so the sync reads it as the add-back leaves it, live. The
+    // upsert's UPDATE is the first lock on it (#1221).
+    it('addToCollection of an entry another request created after its pre-read resumes its offers (#1221)', async () => {
+      const order: string[] = [];
+      recordTransaction(order);
+      db.$queryRaw.mockImplementation((async () => {
+        order.push('lock');
+        return [];
+      }) as never);
+      db.gameCollection.upsert.mockImplementation((async () => {
+        order.push('upsert');
+        return entry({ id: 'gc-other' });
+      }) as never);
+      syncSupply.mockImplementation(async () => {
+        order.push('sync');
+        return SUPPLY_CHANGES;
+      });
+      emitSupply.mockImplementation(() => {
+        order.push('emit');
+      });
+
+      await service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical });
+
+      const { update } = db.gameCollection.upsert.mock.calls[0][0];
+      expect(syncSupply).toHaveBeenCalledWith(db, { id: 'gc-other', deletedAt: null }, update.lastUpdated);
+      expect(emitSupply).toHaveBeenCalledWith(eventEmitter, SUPPLY_CHANGES, ME, update.lastUpdated);
+      expect(order).toEqual(['begin', 'lock', 'upsert', 'sync', 'commit', 'emit']);
+    });
+
+    // A plain add locks the entry's row too, but has no paused offers to
+    // resume, so it reads no event and emits nothing. A genuine create
+    // answers the id it was given (#1221).
+    it.each([
+      ['a new entry', [], created],
+      ['a live entry', [{ deletedAt: null }], (async () => entry()) as never],
+    ])('addToCollection of a new or live entry runs no sync (#1221): %s', async (_, locked, answer) => {
+      const order: string[] = [];
+      recordTransaction(order);
+      db.$queryRaw.mockImplementation((async () => {
+        order.push('lock');
+        return locked;
+      }) as never);
+      db.gameCollection.upsert.mockImplementation((async (args: never) => {
+        order.push('upsert');
+        return (answer as (args: never) => Promise<GameCollection>)(args);
+      }) as never);
+
+      await service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical });
+
+      expect(order).toEqual(['begin', 'lock', 'upsert', 'commit']);
+      expect(syncSupply).not.toHaveBeenCalled();
+      expect(emitSupply).not.toHaveBeenCalled();
     });
 
     it('404s when the release does not exist', async () => {
@@ -647,6 +800,59 @@ describe('GameCollectionService', () => {
       db.gameCollection.update.mockRejectedValue(dependentRecordNotFound());
 
       await expect(service.remove('gc-404', {})).rejects.toMatchObject(ENTRY_NOT_FOUND);
+    });
+
+    // The removal's `UPDATE` is the transaction's first lock, on the entry's
+    // row, and the sync reads the state written under it. The emit waits for
+    // the commit, so no listener hears of a pause that rolled back (#1221).
+    it("remove runs the supply sync in the removal's transaction with the removed row, and emits after it commits (#1221)", async () => {
+      const order: string[] = [];
+      recordTransaction(order);
+      db.gameCollection.update.mockImplementation((async () => {
+        order.push('update');
+        return entry({ deletedAt: new Date() });
+      }) as never);
+      syncSupply.mockImplementation(async () => {
+        order.push('sync');
+        return SUPPLY_CHANGES;
+      });
+      emitSupply.mockImplementation(() => {
+        order.push('emit');
+      });
+
+      // The owner's answer is the removed entry, whatever the sync changed (#1221).
+      expect(await service.remove('gc-1', {})).toMatchObject({ id: 'gc-1', deletedAt: expect.any(Date) });
+
+      const { data } = db.gameCollection.update.mock.calls[0][0];
+      expect(syncSupply).toHaveBeenCalledWith(db, { id: 'gc-1', deletedAt: data.deletedAt }, data.deletedAt);
+      expect(emitSupply).toHaveBeenCalledWith(eventEmitter, SUPPLY_CHANGES, ME, data.deletedAt);
+      expect(order).toEqual(['begin', 'update', 'sync', 'commit', 'emit']);
+      // The default isolation, READ COMMITTED: the sync relies on each of its
+      // statements reading what had committed when it started (#1221).
+      expect(db.$transaction.mock.calls[0]).toHaveLength(1);
+    });
+
+    // The scoped update misses, the transaction rolls back, and the client
+    // still reads the 404 as "already removed" (#634, #1221).
+    it('remove of an entry already removed answers 404 and syncs nothing (#1221)', async () => {
+      db.gameCollection.update.mockRejectedValue(dependentRecordNotFound());
+
+      await expect(service.remove('gc-1', {})).rejects.toMatchObject(ENTRY_NOT_FOUND);
+      expect(syncSupply).not.toHaveBeenCalled();
+      expect(emitSupply).not.toHaveBeenCalled();
+    });
+
+    // The emit runs after the removal committed, so an actor with no user
+    // behind it is named as nobody rather than refused then (#1221).
+    it('remove by an actor with no user emits its changes as nobody’s (#1221)', async () => {
+      abilityService.getActingUserId.mockImplementation(() => {
+        throw new ForbiddenException();
+      });
+      syncSupply.mockResolvedValue(SUPPLY_CHANGES);
+
+      await service.remove('gc-1', {});
+
+      expect(emitSupply).toHaveBeenCalledWith(eventEmitter, SUPPLY_CHANGES, null, expect.any(Date));
     });
 
     it('uses delete conditions for the write', async () => {

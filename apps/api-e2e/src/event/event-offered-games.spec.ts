@@ -1,4 +1,4 @@
-import { ContentType, EventParticipationStatus, GameMedium, PlatformType, Reach, ResourceType } from '@bge/database';
+import { ContentType, GameMedium, PlatformType, Reach, ResourceType } from '@bge/database';
 import type { Actors, AuthenticatedActor } from '@bge/testing-e2e';
 import { createActors } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
@@ -277,9 +277,9 @@ describe('GET /api/events/:eventId/offered-games (#1187)', () => {
     });
   });
 
-  // A host can offer a game for an attendee added by name (#1210), whose row
-  // has no user.
-  it("serves a guest attendee's offer with a null user and their guest name", async () => {
+  // An attendee added by name has no collection, so no game can be offered
+  // for them until they claim an account (#488, #1210).
+  it('refuses to offer a game for an attendee added by name, with 400 ATTENDEE_HAS_NO_COLLECTION, and lists nothing (#1210)', async () => {
     const { host, eventId } = await arrangeEvent(0);
     const guestId = attendeeEnvelope(
       await request(baseUrl)
@@ -289,18 +289,22 @@ describe('GET /api/events/:eventId/offered-games (#1187)', () => {
         .expect(201),
       'POST /api/events/:eventId/attendees as the host',
     ).id;
-    await arrangeOfferedGame(db.client, { eventId, ownerId: host.user.id, attendeeId: guestId, title: "Sam's game" });
+    const hosts = await arrangeCollectionEntry(db.client, host.user.id, Reach.Private);
 
-    const { offeredGames } = await offered(host, eventId);
+    const refused = await request(baseUrl)
+      .post(attendeeGamesPath(eventId, guestId))
+      .set(host.headers)
+      .send({ collectionId: hosts })
+      .expect(400);
 
-    expect(offeredGames).toHaveLength(1);
-    expect(offeredGames[0].attendeeId).toBe(guestId);
-    expect(offeredGames[0].attendee).toEqual({
-      id: guestId,
-      status: EventParticipationStatus.Invited,
-      guestName: 'Sam',
-      user: null,
+    // The code and the message, so another cause of a 400 can't pass this test.
+    expect(refused.body).toMatchObject({
+      statusCode: 400,
+      code: 'ATTENDEE_HAS_NO_COLLECTION',
+      message: 'This attendee was added by name and has no collection, so no games can be offered for them.',
     });
+
+    expect((await offered(host, eventId)).total).toBe(0);
   });
 
   it('filters players, play time and year, with include-unknown', async () => {

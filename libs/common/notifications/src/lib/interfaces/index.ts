@@ -191,6 +191,8 @@ export const LineupRemovalReason = {
   SupplierLeft: 'SupplierLeft',
   /** A write to the event's dates put its lineup ahead again, with nobody bringing the game. */
   NobodyBringing: 'NobodyBringing',
+  /** The attendee supplying it removed the game from their collection (#1221). */
+  RemovedFromCollection: 'RemovedFromCollection',
 } as const;
 
 export type LineupRemovalReason = (typeof LineupRemovalReason)[keyof typeof LineupRemovalReason];

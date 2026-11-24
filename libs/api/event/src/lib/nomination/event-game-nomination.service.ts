@@ -31,6 +31,7 @@ import type { LineupGameSnapshot, LockedSupplier } from '../attendee/attendance'
 import { LINEUP_GAME_SNAPSHOT_SELECT, lockSupplier } from '../attendee/attendance';
 import type { AttendeeSummary } from '../attendee/attendee-summary';
 import { readableAttendees } from '../attendee/attendee-summary';
+import { LIVE_OFFER } from '../constants/live-offer.constant';
 import { NOT_REMOVED } from '../constants/not-removed.constant';
 import { PLATFORM_GAME_SUMMARY_SELECT } from '../constants/platform-game-summary.constant';
 import { CastVoteDto } from '../dto/cast-vote.dto';
@@ -839,10 +840,11 @@ export class EventGameNominationService {
    * What makes a game-list entry a valid supplier, for a nomination, a direct
    * add and a nomination's game joining the lineup alike:
    *
-   * - It belongs to an attendee of this event, and neither the entry nor the
-   *   attendee was removed. Otherwise it is not found, as any row outside the
-   *   event is: this keeps a write in one event from naming another event's
-   *   attendee as bringing the game.
+   * - It belongs to an attendee of this event, and none of the entry, its
+   *   collection entry or the attendee was removed: a game removed from its
+   *   owner's collection is supplied by nobody (#1221). Otherwise it is not
+   *   found, as any row outside the event is: this keeps a write in one event
+   *   from naming another event's attendee as bringing the game.
    * - It is for the game being added, so no one is recorded as bringing a
    *   game their entry is not for.
    * - Its attendee is attending, or may be (#551). Someone who is not
@@ -855,7 +857,12 @@ export class EventGameNominationService {
     gameListId: string,
     platformGameId: string,
   ): asserts supplier is LockedSupplier {
-    if (supplier?.eventId !== eventId || supplier.attendeeRemovedAt !== null || supplier.entryRemovedAt !== null) {
+    if (
+      supplier?.eventId !== eventId ||
+      supplier.attendeeRemovedAt !== null ||
+      supplier.entryRemovedAt !== null ||
+      supplier.collectionRemovedAt !== null
+    ) {
       throw new NotFoundException(t('errors.nomination.supplier_not_found', { gameListId }));
     }
 
@@ -1030,14 +1037,16 @@ function markVotes(votes: NominationRow['votes'], voteEligibility: VoteEligibili
 
 /**
  * What decides whether a voter's vote counts (`VoteResolver.isEligibleVoter`).
- * One entry on their list is enough to tell whether they offer games, so no
- * more are read. Their account and their event role's grant of the game vote
- * decide it too (#759).
+ * One live offer is enough to tell whether they offer games, so no more are
+ * read. An offer whose collection entry was removed is not live, so a voter
+ * whose only offered game was removed from their collection doesn't count as
+ * offering games until it is added back (#1221). Their account and their
+ * event role's grant of the game vote decide it too (#759).
  */
 const VOTER_SELECT = {
   status: true,
   removedAt: true,
-  availableGames: { where: NOT_REMOVED, select: { id: true }, take: 1 },
+  availableGames: { where: LIVE_OFFER, select: { id: true }, take: 1 },
   ...voterGrantSelect(GAME_VOTE_SLUG),
 } as const satisfies Prisma.EventAttendeeSelect;
 

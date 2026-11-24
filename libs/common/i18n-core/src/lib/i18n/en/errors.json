@@ -118,6 +118,7 @@
     "game_still_supplied": "This game can't come off the attendee's offered games while it supplies the event: {nominations} nomination(s) awaiting an outcome and {scheduled} game(s) in the lineup.",
     "forbidden_remove_game": "You don't have permission to remove this game.",
     "game_from_other_collection": "Cannot add a game from another user's collection.",
+    "attendee_has_no_collection": "This attendee was added by name and has no collection, so no games can be offered for them.",
     "game_removed_from_collection": "Cannot add a game that has been removed from the collection.",
     "not_an_expansion_of_base": "This game isn't an expansion of the game it was offered with.",
     "different_platform": "This expansion is on a different platform from the game it was offered with.",

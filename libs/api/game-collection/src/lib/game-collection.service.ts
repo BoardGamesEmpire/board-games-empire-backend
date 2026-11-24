@@ -1,3 +1,4 @@
+import type { GameCollection } from '@bge/database';
 import {
   Action,
   DatabaseService,
@@ -8,10 +9,13 @@ import {
   readWishlistedPlatformGames,
   ResourceType,
 } from '@bge/database';
+import { emitCollectionSupplyChanges, syncCollectionEntrySupply } from '@bge/event';
 import { CodedHttpException, t } from '@bge/i18n';
 import { AbilityService, resolveActingUserIdOrNull, resolveScopeSubjectId, ScopeComposer } from '@bge/permissions';
 import { PaginatedRows, PaginationQueryDto, pickDefined } from '@bge/shared';
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { createId } from '@paralleldrive/cuid2';
 import { Http } from '@status/codes';
 import type { GameCollectionRow, GameCollectionWithRelations } from './collection-row';
 import { changedSince, COLLECTION_INCLUDE } from './collection-row';
@@ -52,6 +56,7 @@ export class GameCollectionService {
     private readonly db: DatabaseService,
     private readonly abilityService: AbilityService,
     private readonly scopeComposer: ScopeComposer,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   /**
@@ -211,9 +216,27 @@ export class GameCollectionService {
   /**
    * Add a game to the acting user's collection. Idempotent upsert on the
    * `(user, platformGame, medium)` identity: re-adding an active entry updates
-   * the provided fields, and re-adding a removed entry resurrects it — the
-   * tombstone is cleared while server-managed play history (`playCount`,
-   * `lastPlayed`) and any unspecified fields survive the remove→re-add cycle.
+   * the provided fields, and adding back a removed entry clears its removal,
+   * while server-managed play history (`playCount`, `lastPlayed`) and any
+   * unspecified fields survive the removal and the add-back.
+   *
+   * Adding back a removed entry also resumes the nominations its removal
+   * paused, in every live event that offers it
+   * (`syncCollectionEntrySupply`, #1221). The entry's row is locked
+   * `FOR UPDATE` before the write, as the transaction's first lock, so a
+   * nomination naming the entry, or an attendee offering it coming back,
+   * takes turns with the add-back: whichever comes second waits, then reads
+   * what the first committed. A new entry, or one never removed, has nothing
+   * paused, so it runs no sync. The changes are emitted once the transaction
+   * commits.
+   *
+   * When the pre-read finds no row, the `FOR UPDATE` locks nothing, and
+   * another request may create the entry, offer it and remove it before the
+   * upsert, which then adds that row back. The id the create would use is
+   * minted here, so an upsert that answers another id updated a row it did
+   * not create, and runs the sync on it as well. Its `UPDATE` is then the
+   * first lock on the row. A genuine create answers the minted id and runs
+   * no sync.
    */
   async addToCollection(dto: CreateGameCollectionDto): Promise<GameCollectionDto> {
     const userId = this.abilityService.getActingUserId();
@@ -233,15 +256,37 @@ export class GameCollectionService {
 
     const provided = pickDefined({ ...attributes, releaseId });
     const lastUpdated = new Date();
+    // The schema's own default, cuid2, minted here so the upsert's answer
+    // says whether it created the row (#1221).
+    const newId = createId();
 
     return this.writtenRow(
       () =>
-        this.db.gameCollection.upsert({
-          where: { userId_platformGameId_medium: { userId, platformGameId, medium } },
-          create: { userId, platformGameId, medium, ...provided, lastUpdated },
-          update: { ...provided, deletedAt: null, deleteReason: null, lastUpdated },
-          include: COLLECTION_INCLUDE,
-        }),
+        this.writeThenSyncSupply(
+          async (tx) => {
+            const [locked] = await tx.$queryRaw<{ deletedAt: Date | null }[]>(Prisma.sql`
+              SELECT deleted_at AS "deletedAt"
+              FROM game_collections
+              WHERE user_id = ${userId} AND platform_game_id = ${platformGameId} AND medium = ${medium}::game_mediums
+              FOR UPDATE
+            `);
+
+            const row = await tx.gameCollection.upsert({
+              where: { userId_platformGameId_medium: { userId, platformGameId, medium } },
+              create: { id: newId, userId, platformGameId, medium, ...provided, lastUpdated },
+              update: { ...provided, deletedAt: null, deleteReason: null, lastUpdated },
+              include: COLLECTION_INCLUDE,
+            });
+
+            // Removed when locked, or created by another request since the
+            // pre-read and possibly removed in that window.
+            const addedBack = locked === undefined ? row.id !== newId : locked.deletedAt !== null;
+
+            return { row, synced: addedBack ? { id: row.id, deletedAt: null } : null };
+          },
+          userId,
+          lastUpdated,
+        ),
       (error) => {
         this.logger.error(`Error adding platform game ${platformGameId} to collection for user ${userId}`, error);
 
@@ -299,30 +344,81 @@ export class GameCollectionService {
   }
 
   /**
-   * Remove a game from the collection — "I no longer own this", not "never
-   * played". A tombstone, never a hard delete: play history must survive a
-   * remove→re-add cycle, and child rows (locations, event game lists, loans)
-   * would otherwise cascade away.
+   * Remove a game from the collection: "I no longer own this", not "never
+   * played". The entry stays, marked removed, so play history and the rows
+   * that name it (locations, offers, loans) survive a removal and an add-back.
+   *
+   * Every live event that offers the entry stops counting it as supplied
+   * (`syncCollectionEntrySupply`, #1221): the nominations of its game that
+   * await an outcome pause, and it leaves the lineup of every date still
+   * ahead. The offers themselves stay, and resume supplying when the game is
+   * added back. The removal's `UPDATE` is the transaction's first lock, on
+   * the entry's row, so a nomination naming the entry takes turns with it.
+   * The changes are emitted once the transaction commits. The owner's answer
+   * is the removed entry, whatever the sync changed.
    */
   async remove(id: string, { reason }: RemoveGameCollectionQueryDto): Promise<GameCollectionDto> {
     const now = new Date();
+    const actingUserId = resolveActingUserIdOrNull(this.abilityService);
 
     // Single scoped write: `deletedAt: null` in the filter makes a repeat
-    // delete (or a foreign/missing row) miss and surface as 404.
+    // removal (or a foreign/missing row) miss and surface as 404, which rolls
+    // the transaction back before the sync runs.
     return this.writtenRow(
       () =>
-        this.db.gameCollection.update({
-          where: {
-            id,
-            deletedAt: null,
-            // eslint-disable-next-line no-restricted-syntax -- single-row soft delete by id, not a collection read
-            AND: this.abilityService.getCurrentResourceConditions(ResourceType.GameCollection, Action.delete),
+        this.writeThenSyncSupply(
+          async (tx) => {
+            const row = await tx.gameCollection.update({
+              where: {
+                id,
+                deletedAt: null,
+                // eslint-disable-next-line no-restricted-syntax -- single-row removal by id, not a collection read
+                AND: this.abilityService.getCurrentResourceConditions(ResourceType.GameCollection, Action.delete),
+              },
+              data: { deletedAt: now, deleteReason: reason ?? null, lastUpdated: now },
+              include: COLLECTION_INCLUDE,
+            });
+
+            return { row, synced: { id: row.id, deletedAt: now } };
           },
-          data: { deletedAt: now, deleteReason: reason ?? null, lastUpdated: now },
-          include: COLLECTION_INCLUDE,
-        }),
+          actingUserId,
+          now,
+        ),
       (error) => this.mapMissingToNotFound(error, id),
     );
+  }
+
+  /**
+   * Runs `write`, then `syncCollectionEntrySupply` on the entry state it
+   * answers, in one transaction, and emits what the sync changed once that
+   * commits (#1221). A `write` that answers `synced: null` runs no sync and
+   * emits nothing. Its first statement must lock the entry's row, as the
+   * transaction's first lock, so every write that changes what the entry
+   * supplies takes turns with it (`syncCollectionEntrySupply`).
+   *
+   * The transaction keeps the default isolation, READ COMMITTED: the sync
+   * relies on each of its statements reading what had committed when it
+   * started.
+   */
+  private async writeThenSyncSupply(
+    write: (tx: Prisma.TransactionClient) => Promise<{
+      row: GameCollectionWithRelations;
+      synced: Pick<GameCollection, 'id' | 'deletedAt'> | null;
+    }>,
+    actingUserId: string | null,
+    now: Date,
+  ): Promise<GameCollectionWithRelations> {
+    const { row, supplyChanges } = await this.db.$transaction(async (tx) => {
+      const { row, synced } = await write(tx);
+
+      return { row, supplyChanges: synced ? await syncCollectionEntrySupply(tx, synced, now) : null };
+    });
+
+    if (supplyChanges) {
+      emitCollectionSupplyChanges(this.eventEmitter, supplyChanges, actingUserId, now);
+    }
+
+    return row;
   }
 
   /**

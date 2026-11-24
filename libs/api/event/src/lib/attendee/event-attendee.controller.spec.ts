@@ -250,6 +250,7 @@ describe('EventAttendeeController', () => {
       expect(refused.properties.reason.enum).toEqual(OFFER_REFUSALS);
       expect(OFFER_REFUSALS).toEqual([
         'notFound',
+        'attendeeHasNoCollection',
         'notInAttendeesCollection',
         'removedFromCollection',
         'notAnExpansionOfBase',
