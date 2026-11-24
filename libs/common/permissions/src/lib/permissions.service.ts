@@ -603,6 +603,10 @@ export class PermissionsService {
               conditions: true,
               fields: true,
               inverted: true,
+              // What an API key's create screen lists for a direct grant (#1417).
+              slug: true,
+              riskLevel: true,
+              retiredAt: true,
             },
           },
         },

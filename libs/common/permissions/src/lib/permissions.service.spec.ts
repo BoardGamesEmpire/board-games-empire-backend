@@ -361,6 +361,10 @@ describe('PermissionsService', () => {
                     conditions: true,
                     fields: true,
                     inverted: true,
+                    // What an API key's create screen lists for a direct grant (#1417).
+                    slug: true,
+                    riskLevel: true,
+                    retiredAt: true,
                   },
                 },
               }),
@@ -1558,6 +1562,16 @@ function makeGraphPermission(expiresAt: Date | null): UserPermissionWithPermissi
     resourceType: ResourceType.Game,
     resourceId: null,
     expiresAt,
-    permission: { id: 'perm-1', action: Action.read, subject: 'Game', conditions: {}, fields: [], inverted: false },
+    permission: {
+      id: 'perm-1',
+      action: Action.read,
+      subject: 'Game',
+      conditions: {},
+      fields: [],
+      inverted: false,
+      slug: 'read:game',
+      riskLevel: RiskLevel.Low,
+      retiredAt: null,
+    },
   };
 }

@@ -181,14 +181,14 @@ function makeGrant(
   permission: Permission,
   overrides: Partial<Omit<UserPermissionWithPermission, 'permission'>> = {},
 ): UserPermissionWithPermission {
-  const { id, action, subject, conditions, fields, inverted } = permission;
+  const { id, action, subject, conditions, fields, inverted, slug, riskLevel, retiredAt } = permission;
 
   return {
     inverted: null,
     resourceType: ResourceType.Household,
     resourceId: null,
     expiresAt: null,
-    permission: { id, action, subject, conditions, fields, inverted },
+    permission: { id, action, subject, conditions, fields, inverted, slug, riskLevel, retiredAt },
     ...overrides,
   };
 }

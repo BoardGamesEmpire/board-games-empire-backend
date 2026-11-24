@@ -13,7 +13,8 @@ import {
   isDirectPermissionDenial,
   ownerContexts,
 } from './api-key/holding-contexts';
-import type { TemplateProblem } from './condition-template';
+import type { KeyScopeRenderRefusal } from './api-key/key-scope-render';
+import { renderHeldAllow, renderKeyScopeConditions } from './api-key/key-scope-render';
 import { findTemplateProblem, renderPermissionConditions } from './condition-template';
 import { PluginAbilityRenderRejectionError } from './errors/plugin-ability-render-rejection.error';
 import type {
@@ -362,18 +363,16 @@ export class AbilityFactory {
     let built = false;
 
     for (const held of holdingContexts(owner, scope.permissionId)) {
-      const { action, conditions, fields, inverted } = held.permission;
+      const { action, fields } = held.permission;
+      const render = renderHeldAllow(held);
 
-      // The owner graph's copy can be flipped between the two graph loads; a
-      // denial's conditions must never build a `can` (#266).
-      if (inverted) {
-        continue;
-      }
-
-      const render = renderKeyScopeConditions(conditions, held.context);
-
-      if ('unbuildable' in render) {
-        skipped.push(`${describeContext(held)}, because the permission's conditions ${render.unbuildable}`);
+      if ('refusal' in render) {
+        // A denial copy builds no allow, which is not a fault to log (#266).
+        if (render.refusal.reason !== 'denial') {
+          skipped.push(
+            `${describeContext(held)}, because the permission's conditions ${describeRenderRefusal(render.refusal)}`,
+          );
+        }
 
         continue;
       }
@@ -424,7 +423,7 @@ export class AbilityFactory {
     for (const context of ownerContexts(owner)) {
       const render = renderKeyScopeConditions(conditions, context);
 
-      if ('unbuildable' in render) {
+      if ('refusal' in render) {
         continue;
       }
 
@@ -540,43 +539,17 @@ export class AbilityFactory {
   }
 }
 
-/** A key scope's conditions rendered in one context, or why they can't be (#266). */
-type KeyScopeRender = { readonly conditions: Record<string, unknown> | undefined } | { readonly unbuildable: string };
-
-/**
- * Renders a key scope's conditions in one context (#266). Only null and `{}`
- * mean "no conditions" here. Conditions that aren't an object (a list, a
- * string, a number) can't be read as a bound, and a template naming a
- * variable the context lacks would render `''` into the clause, so both come
- * back unbuildable, with the reason worded for the log line. No catalog row is
- * either; this fails closed on a row written some other way.
- */
-function renderKeyScopeConditions(conditions: unknown, context: Record<string, unknown>): KeyScopeRender {
-  if (conditions === null || conditions === undefined) {
-    return { conditions: undefined };
-  }
-
-  if (typeof conditions !== 'object' || Array.isArray(conditions)) {
-    return { unbuildable: "aren't an object" };
-  }
-
-  const problem = Object.keys(conditions).length > 0 ? findTemplateProblem(JSON.stringify(conditions), context) : null;
-
-  if (problem) {
-    return { unbuildable: describeTemplateProblem(problem) };
-  }
-
-  return { conditions: renderPermissionConditions(conditions, context) };
-}
-
-function describeTemplateProblem(problem: TemplateProblem): string {
-  switch (problem.reason) {
+/** Words a key scope's render refusal for the log line of a dropped key scope (#266). */
+function describeRenderRefusal(refusal: KeyScopeRenderRefusal): string {
+  switch (refusal.reason) {
+    case 'not-an-object':
+      return "aren't an object";
     case 'out-of-context-variable':
-      return `name {{ ${problem.variable} }}, which that context doesn't supply`;
+      return `name {{ ${refusal.variable} }}, which that context doesn't supply`;
     case 'malformed-template':
       return "don't parse as a template";
     case 'unsupported-token-type':
-      return `use a '${problem.tokenType}' template tag, which conditions don't support`;
+      return `use a '${refusal.tokenType}' template tag, which conditions don't support`;
   }
 }
 

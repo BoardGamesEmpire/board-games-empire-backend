@@ -46,6 +46,10 @@ export interface Permissions {
  * - `fields` — field-level restriction, honored exactly as on role-derived rules.
  * - `inverted` (base) — the permission's default polarity, inherited when the
  *   `UserPermission.inverted` override is `null`.
+ * - `slug` / `riskLevel` / `retiredAt` — what the list of permissions an API key
+ *   may hold reads, so a permission held only through a direct grant is listed
+ *   with its slug and risk, and a retired row a stale graph carries is left out
+ *   (#1417).
  *
  * `resourceType`, `resourceId`, and `expiresAt` come from the `UserPermission` row.
  * `UserPermission.inverted` is a tri-state override: `true`/`false` force the rule's
@@ -55,5 +59,8 @@ export interface UserPermissionWithPermission extends Pick<
   UserPermission,
   'inverted' | 'resourceType' | 'resourceId' | 'expiresAt'
 > {
-  permission: Pick<Permission, 'id' | 'action' | 'subject' | 'conditions' | 'fields' | 'inverted'>;
+  permission: Pick<
+    Permission,
+    'id' | 'action' | 'subject' | 'conditions' | 'fields' | 'inverted' | 'slug' | 'riskLevel' | 'retiredAt'
+  >;
 }
