@@ -22,16 +22,37 @@ export const API_KEY_PINNABLE_TYPES: ReadonlySet<ResourceType> = new Set<Resourc
 ]);
 
 /**
- * A pin is accepted on an allowlisted type, never on a create permission: no
- * row exists yet to pin (#1417). A `manage` permission still accepts one, and
- * `manage` covers create, so a pinned `manage` scope does not stop a create
- * route that checks only the type. The key create route (#1418) must refuse
- * that pairing.
+ * The types a `manage` permission may be pinned to. `manage` covers create, and
+ * a create route that checks only the type lets a pinned `manage` key through,
+ * so a type joins only when its create route checks the pinned row. Webhook
+ * subscriptions do. `Plugin` stays off: its artifact upload routes check the
+ * type alone, so a pinned `manage:plugin` key could upload. #1366 re-admits it
+ * once they check the pin (#1418).
+ */
+export const API_KEY_MANAGE_PINNABLE_TYPES: ReadonlySet<ResourceType> = new Set<ResourceType>([
+  ResourceType.WebhookSubscription,
+]);
+
+/**
+ * Whether a key scope over `permission` accepts a pinned row. It refuses a
+ * `create` permission, since no row exists yet to pin (#1417), and a `manage`
+ * permission unless its type is in {@link API_KEY_MANAGE_PINNABLE_TYPES},
+ * because `manage` covers create. Any other action accepts a pin on a type in
+ * {@link API_KEY_PINNABLE_TYPES} (#1418).
  */
 export function acceptsPin(permission: Pick<Permission, 'action' | 'subject'>): boolean {
   const pinnable: ReadonlySet<string> = API_KEY_PINNABLE_TYPES;
+  const managePinnable: ReadonlySet<string> = API_KEY_MANAGE_PINNABLE_TYPES;
 
-  return permission.action !== Action.create && pinnable.has(permission.subject);
+  if (permission.action === Action.create) {
+    return false;
+  }
+
+  if (permission.action === Action.manage && !managePinnable.has(permission.subject)) {
+    return false;
+  }
+
+  return pinnable.has(permission.subject);
 }
 
 /** One permission an owner's API key may hold, as the key's create screen lists it (#1417). */
@@ -74,6 +95,8 @@ export function grantablePermissions(owner: UserWithRoles): GrantablePermission[
  * edit (#1417). A key may hold a permission when all of these hold:
  *
  * - it is an allow: a denial is refused for now;
+ * - its subject isn't `all`: a key scope over it would reach every type, and no
+ *   pin can narrow it (#1418);
  * - it isn't retired (the loader already leaves retired rows out; a stale
  *   cached graph must not bring one back);
  * - it renders in at least one context where its owner holds it, with every
@@ -85,7 +108,8 @@ export function grantablePermissions(owner: UserWithRoles): GrantablePermission[
  * list and the factory agree on which contexts build. The retirement check is
  * the list's alone: the loaders drop retired rows, so the factory meets one
  * only in a stale cached graph, where the owner's own ability still holds it
- * too. Risk excludes nothing.
+ * too. So is the `all` check: the factory still builds an allow from an
+ * existing `all`-subject scope row, and create and edit refuse such slugs. Risk excludes nothing.
  */
 export function mayKeyHold(owner: UserWithRoles, permissionId: string): boolean {
   return firstGrantableContext(owner, permissionId, Date.now()) !== undefined;
@@ -94,11 +118,14 @@ export function mayKeyHold(owner: UserWithRoles, permissionId: string): boolean 
 /**
  * The first context where the owner holds `permissionId` and a key scope over
  * it builds an allow. {@link renderHeldAllow} refuses a denial and a condition
- * the context can't resolve, exactly as the factory does (#1417).
+ * the context can't resolve, exactly as the factory does (#1417). A permission
+ * on `all` never qualifies, so the list and {@link mayKeyHold} share the rule
+ * (#1418).
  */
 function firstGrantableContext(owner: UserWithRoles, permissionId: string, now: number): HoldingContext | undefined {
   return holdingContexts(owner, permissionId, now).find(
-    (held) => held.permission.retiredAt == null && !('refusal' in renderHeldAllow(held)),
+    (held) =>
+      held.permission.retiredAt == null && held.permission.subject !== 'all' && !('refusal' in renderHeldAllow(held)),
   );
 }
 

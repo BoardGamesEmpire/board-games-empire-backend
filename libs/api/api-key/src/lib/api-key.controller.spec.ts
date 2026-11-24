@@ -18,7 +18,12 @@ describe('ApiKeyController (#1417)', () => {
   beforeEach(() => {
     service = {
       grantableFor: jest.fn().mockResolvedValue([
-        { id: 'perm-manage-all', slug: 'manage:all', riskLevel: RiskLevel.Critical, pinnable: false },
+        {
+          id: 'perm-manage-safe-http-policy',
+          slug: 'manage:safe_http_policy',
+          riskLevel: RiskLevel.Critical,
+          pinnable: false,
+        },
         { id: 'perm-read-ban', slug: 'read:household_ban', riskLevel: RiskLevel.Low, pinnable: true },
       ]),
     };
@@ -36,8 +41,8 @@ describe('ApiKeyController (#1417)', () => {
       expect(service.grantableFor).toHaveBeenCalledWith(USER_ID);
       expect(permissions).toEqual([
         {
-          slug: 'manage:all',
-          description: expect.objectContaining({ key: 'permissions.manage:all' }),
+          slug: 'manage:safe_http_policy',
+          description: expect.objectContaining({ key: 'permissions.manage:safe_http_policy' }),
           riskLevel: RiskLevel.Critical,
           pinnable: false,
         },
