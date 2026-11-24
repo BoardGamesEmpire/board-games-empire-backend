@@ -708,14 +708,15 @@ export class EventAttendeeService {
       judged.push({ collectionId: item.collectionId, refusal: gameRefusal });
 
       // An attendee added by name has no collection, so each expansion is
-      // refused for that, as its game is, not as `baseRefused` (#1210).
+      // judged on its own, `attendeeHasNoCollection` or `notFound`, never
+      // `baseRefused`, even when its game names no entry (#1210).
       for (const expansionId of item.expansionCollectionIds ?? []) {
         const expansion = collectionById.get(expansionId);
         const refusal = goesAheadUnjudged(expansionId)
           ? null
           : gameRefusal === null
             ? (judgeCollectionEntry(attendee, expansion) ?? judgeExpansionOfBase(game, expansion, links))
-            : gameRefusal === OfferRefusal.AttendeeHasNoCollection
+            : attendee.userId === null
               ? judgeCollectionEntry(attendee, expansion)
               : OfferRefusal.BaseRefused;
         judged.push({ collectionId: expansionId, baseId: item.collectionId, refusal });

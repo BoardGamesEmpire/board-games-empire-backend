@@ -1893,6 +1893,26 @@ describe('EventAttendeeService', () => {
       expect(db.eventAttendeeGameList.update).not.toHaveBeenCalled();
     });
 
+    // A game id that names no entry is notFound, but an attendee added by name
+    // still has no collection, so each expansion is judged on its own, not
+    // refused as baseRefused (#1210).
+    it('judges the expansions of an attendee added by name on their own when the game names no entry (#1210)', async () => {
+      arrange({ collections: [owned('col-exp', 'game-exp', { userId: 'user-2' })] });
+      db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1', userId: null } as EventAttendee);
+
+      const results = await service.offerGames('event-1', 'att-1', {
+        items: [{ collectionId: 'col-missing-base', expansionCollectionIds: ['col-exp', 'col-missing-exp'] }],
+      });
+
+      expect(outcomes(results)).toEqual([
+        ['col-missing-base', 'notFound'],
+        ['col-exp', 'attendeeHasNoCollection'],
+        ['col-missing-exp', 'notFound'],
+      ]);
+      expect(db.eventAttendeeGameList.create).not.toHaveBeenCalled();
+      expect(db.eventAttendeeGameList.update).not.toHaveBeenCalled();
+    });
+
     it('judges every id with two reads, not one per id', async () => {
       arrange({
         collections: [owned('col-base', 'game-base'), owned('col-exp', 'game-exp'), owned('col-other', 'game-other')],
