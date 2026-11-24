@@ -109,6 +109,9 @@
       "path": "./libs/api/feedback"
     },
     {
+      "path": "./libs/api/api-key"
+    },
+    {
       "path": "./libs/common/services"
     },
     {
