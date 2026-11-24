@@ -1,6 +1,7 @@
 export * from './lib/ability.factory';
 export * from './lib/ability.service';
 export * from './lib/access';
+export * from './lib/condition-template';
 export * from './lib/decorators';
 export * from './lib/errors/ability-context-not-primed.error';
 export * from './lib/errors/plugin-ability-render-rejection.error';

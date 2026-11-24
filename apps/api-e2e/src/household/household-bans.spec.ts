@@ -77,7 +77,7 @@ describe('household bans (#782)', () => {
   const banUser = (actor: SessionActor, householdId: string, body: Record<string, unknown>) =>
     request(baseUrl).post(bansRoute(householdId)).set(actor.headers).send(body);
 
-  const listBans = (actor: SessionActor, householdId: string) =>
+  const listBans = (actor: Caller, householdId: string) =>
     request(baseUrl).get(bansRoute(householdId)).set(actor.headers);
 
   const changeReason = (actor: Caller, householdId: string, userId: string, body: Record<string, unknown>) =>
@@ -373,6 +373,47 @@ describe('household bans (#782)', () => {
 
     await expect(storedBan(h.householdId, first.user.id)).resolves.toBeNull();
     await expect(storedBan(h.householdId, second.user.id)).resolves.toMatchObject({ reason: null });
+  });
+
+  // A key scope whose condition names `{{ householdId }}` renders once for
+  // each membership through which its owner holds the permission, and is not
+  // dropped for lacking a household of its own (#266). These show the
+  // rendered scope serving its owner's household and no other; they are not a
+  // regression proof, since before #266 the owner's ability bounded the same
+  // rows. The second household is one the owner isn't in, with a ban of its
+  // own, so a key that reached it would have a row to read. Arranged per test:
+  // the sweep empties the database before each one (#255).
+  describe('a key scoped to read:household_ban, unpinned (#266)', () => {
+    const arrange = async () => {
+      const [h, elsewhere] = await Promise.all([household(), household()]);
+      const [banned, bannedElsewhere] = await Promise.all([actors.user(), actors.user()]);
+      await banUser(h.owner, h.householdId, { userId: banned.user.id }).expect(201);
+      await banUser(elsewhere.owner, elsewhere.householdId, { userId: bannedElsewhere.user.id }).expect(201);
+      const key = await mintApiKey(baseUrl, db.client, h.admin, {
+        slugs: ['read:household_ban'],
+        resourceType: ResourceType.HouseholdBan,
+      });
+
+      return { h, elsewhere, banned, key };
+    };
+
+    it("lists its owner's household's bans", async () => {
+      const { h, banned, key } = await arrange();
+
+      const { bans } = bansPage(await listBans(key, h.householdId).expect(200), 'GET /api/households/:id/bans');
+
+      expect(bans.map((ban) => ban.user.id)).toEqual([banned.user.id]);
+    });
+
+    // The owner's own session gets the same 403 there, as any caller outside
+    // the household does. The control: the same key lists its own household.
+    it("gets 403 on a household its owner isn't in", async () => {
+      const { h, elsewhere, key } = await arrange();
+
+      await listBans(key, h.householdId).expect(200);
+      await listBans(h.admin, elsewhere.householdId).expect(403);
+      await listBans(key, elsewhere.householdId).expect(403);
+    });
   });
 
   it('the owner and admin list the bans newest first, in the pagination envelope', async () => {

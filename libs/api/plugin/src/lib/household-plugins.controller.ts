@@ -459,14 +459,19 @@ export class HouseholdPluginsController {
    * Refuses a deleted household to an actor the liveness guard let through.
    *
    * The guard answers liveness only for an actor every one of whose abilities
-   * reads households, and lets anyone else through untouched, such as a staff
-   * member's API key scoped to the plugin routes. Its owner reads every
-   * household's plugins, and a soft delete leaves them in place, so without a
-   * check here the key would read a deleted household's plugins, its consent
-   * decisions and its feature states (#790). The reads check for that actor
-   * alone, so one the guard answered is not probed twice. Each runs it after
-   * its instance check, so only an actor who may read the route is answered
-   * at all.
+   * reads households, and lets anyone else through untouched, such as an API
+   * key scoped to the plugin routes and not to households. A key scope renders
+   * only where its owner holds the permission (#266), so such a key reaches a
+   * household through its owner's membership there, rendered as
+   * `{ householdId }`. A soft delete leaves the plugin rows in place, and the
+   * owner's cached graph can still hold the deleted household's membership:
+   * between the delete's commit and the cache eviction, or until the cache
+   * expires when a delete bypasses the route. Without a check here the key
+   * would read that household's plugins, its consent decisions and its feature
+   * states in that window (#790). Kept as defence in depth. The reads check for
+   * that actor alone, so one the guard answered is not probed twice. Each runs
+   * it after its instance check, so only an actor who may read the route is
+   * answered at all.
    *
    * The answer is the instance check's 403, the one these routes give any
    * actor they refuse: a 404 would tell a key scoped away from households which

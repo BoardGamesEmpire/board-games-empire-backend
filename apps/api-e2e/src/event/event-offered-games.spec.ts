@@ -410,8 +410,9 @@ describe('GET /api/events/:eventId/offered-games (#1187)', () => {
   });
 
   // In the entry's select, the attendee's name and avatar, and the counts,
-  // would reach a key that can read neither (#404, #559). A key's grant keeps
-  // its action and type but not the permission's conditions (#266).
+  // would reach a key that can read neither (#404, #559). A key scope keeps
+  // its permission's conditions, rendered where its owner holds the
+  // permission (#266), and this key holds no read on attendees at all.
   it('serves a key with read on offered games alone no attendee and no counts', async () => {
     const { host, eventId, hostAttendeeId } = await arrangeEvent(0);
     await offer(eventId, host, { title: 'Read by a key' });

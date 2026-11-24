@@ -6,8 +6,18 @@ import { AbilityBuilder, detectSubjectType, ExtractSubjectType } from '@casl/abi
 import { createPrismaAbility } from '@casl/prisma';
 import { Injectable, Logger } from '@nestjs/common';
 import * as Mustache from 'mustache';
+import type { HoldingContext } from './api-key/holding-contexts';
+import {
+  buildsDirectPermissionRule,
+  holdingContexts,
+  isDirectPermissionDenial,
+  ownerContexts,
+} from './api-key/holding-contexts';
+import type { TemplateProblem } from './condition-template';
+import { findTemplateProblem, renderPermissionConditions } from './condition-template';
 import { PluginAbilityRenderRejectionError } from './errors/plugin-ability-render-rejection.error';
 import type {
+  ApiKeyScopeWithPermission,
   ApikeyWithScopes,
   AppAbility,
   PluginGrantSnapshot,
@@ -117,16 +127,54 @@ export class AbilityFactory {
    * floor of the two. A request through the key and a webhook subscription
    * made through it are judged by the same pair (#723), so a change to how a
    * key clamps its owner belongs here.
+   *
+   * Both are built from the one owner graph (#266). A caller that already
+   * holds the owner's ability passes it as `ownerAbility`, so the owner half
+   * is that ability and not a rebuilt one. A key whose owner is gone has no
+   * context to render a key scope in, so its own ability denies everything.
    */
-  createForApiKeyActor(owner: AppAbility, apiKey: ApikeyWithScopes): [AppAbility, AppAbility] {
-    return [owner, this.createForApiKey(apiKey)];
+  createForApiKeyActor(
+    owner: UserWithRoles | null,
+    apiKey: ApikeyWithScopes,
+    ownerAbility?: AppAbility,
+  ): [AppAbility, AppAbility] {
+    const ownerHalf = ownerAbility ?? this.createForUser(owner);
+
+    if (!owner) {
+      return [ownerHalf, this.createDenyAll()];
+    }
+
+    return [ownerHalf, this.createForApiKey(owner, apiKey)];
   }
 
   /**
    * An API key's own ability, which `PoliciesGuard` and the ceilings AND with
-   * its owner's. Each scope becomes one rule, pinned to `resourceId` when it
-   * names one. The permission's conditions are dropped (#266), so the owner's
-   * ability bounds the rows.
+   * its owner's. A key scope keeps its permission's conditions (#266),
+   * rendered in each context where `owner` holds the permission
+   * ({@link holdingContexts}): one rule per server role, household
+   * membership, event attendance or direct permission that gives it to the
+   * owner, each rendered with the context the owner's own rule renders with
+   * there, but more strictly than the owner's rule (below). Which permissions
+   * a key holds is fixed when it is made; which households and events they
+   * reach follows the owner's graph as it loads now.
+   *
+   * A pin is ANDed with the rendered conditions, never spread into them: some
+   * conditions name `id` themselves (`update:household` binds `id` to the
+   * household), and a spread pin would replace the household instead of
+   * narrowing it. A direct permission's own pin is ANDed the same way.
+   *
+   * An allow that can't be built in a context is left out there, and the key
+   * keeps its other rules: its condition names a variable that context lacks,
+   * or its conditions aren't an object. The owner's own rules apply both in
+   * some form (an empty string, a field list or no conditions), so this is
+   * where a key's rule and its owner's part. An allow that builds in no
+   * context at all is logged as a warning. An owner who no longer holds the
+   * permission gets no rule, which is not an error.
+   *
+   * A denial only narrows, so it renders in every context the owner has
+   * ({@link ownerContexts}), held or not. Dropping a denial would widen the
+   * key, so one that renders in no context denies the whole key. Denials are
+   * applied after every allow, so a denial wins.
    *
    * An allow keeps its grant's field list, so a check that names a field sees
    * the slug's reach. Without it, a staff member's key holding only
@@ -135,20 +183,25 @@ export class AbilityFactory {
    * check that names no field, and almost none does, so bound to its fields the
    * denial would stop denying.
    */
-  createForApiKey(apiKey: ApikeyWithScopes): AppAbility {
+  createForApiKey(owner: UserWithRoles, apiKey: ApikeyWithScopes): AppAbility {
     const ability = new AbilityBuilder<AppAbility>(createPrismaAbility);
 
-    for (const scope of apiKey.scopes) {
-      const { action, subject, inverted, fields } = scope.permission;
-      const access: RuleApplier = inverted ? ability.cannot : ability.can;
-      const fieldList = !inverted && fields?.length ? fields : undefined;
-      const pin = scope.resourceId ? { id: scope.resourceId } : undefined;
-
-      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Prisma types a Permission's subject as a plain string; the Permission catalog keeps it to Subjects names (#1321)
-      access.call(ability, action, subject as ExtractSubjectType<Subjects>, ...[fieldList, pin].filter(Boolean));
+    for (const scope of apiKey.scopes.filter(({ permission }) => !permission.inverted)) {
+      this.applyApiKeyAllow(ability, owner, apiKey, scope);
     }
 
-    return ability.build();
+    for (const scope of apiKey.scopes.filter(({ permission }) => permission.inverted)) {
+      if (!this.applyApiKeyDenial(ability, owner, scope)) {
+        this.logger.warn(
+          `API key ${apiKey.id}: its denial over permission ${scope.permissionId} renders in none of its owner's ` +
+            `contexts, so the key denies everything (#266)`,
+        );
+
+        return this.createDenyAll();
+      }
+    }
+
+    return ability.build({ detectSubjectType: detectAppSubjectType });
   }
 
   /**
@@ -217,6 +270,9 @@ export class AbilityFactory {
       if (Object.keys(permission.conditions || {}).length > 0) {
         const template = JSON.stringify(permission.conditions);
         this.assertTemplateWithinContext(template, context, permission.slug, snapshot);
+        // Rendered inline, not through `renderPermissionConditions`, so the plugin
+        // path handles any conditions shape exactly as before: that helper reads a
+        // non-object as "no conditions", and only the key path refuses one (#266).
         parsedConditions = JSON.parse(Mustache.render(template, context));
       }
 
@@ -267,9 +323,10 @@ export class AbilityFactory {
   /**
    * The one place a permission triple becomes a CASL rule: fields honored,
    * `inverted` selects can/cannot. Shared by the user-role path
-   * ({@link parseConditions}) and the plugin path ({@link createForPlugin}),
-   * whose only legitimate difference is WHAT happens before rendering, not
-   * how a rendered rule is applied.
+   * ({@link parseConditions}), the plugin path ({@link createForPlugin}) and
+   * the API key path ({@link createForApiKey}), whose only legitimate
+   * difference is WHAT happens before rendering, not how a rendered rule is
+   * applied.
    */
   private applyRule(
     ability: AbilityBuilder<AppAbility>,
@@ -285,18 +342,108 @@ export class AbilityFactory {
   }
 
   /**
-   * The fail-loud rule: every variable a condition template references
-   * must resolve to a value in the unit-coordinate context. Mustache renders
-   * missing variables to `''` — for user abilities that lands on a clause
-   * that matches nothing and is accepted as an operator concern
-   * ({@link applyUserPermissions}), but for a PLUGIN a malformed clause like
-   * `{ userId: '' }` is an authorization boundary rendered wrong, so the
-   * permission is rejected before any rendering happens.
-   *
-   * Walks the parsed token tree: interpolations (`name`/`&`) and section
-   * openers (`#`/`^`) all name variables; section bodies are walked
-   * recursively. The implicit iterator `.` never resolves here (the context
-   * holds no lists) and is treated as out-of-context.
+   * One allow key scope, as one rule per context where `owner` holds its
+   * permission, each the owner's own rule there with the key scope's pin
+   * ANDed on, and a rule that renders the same in two contexts applied once
+   * (#266). A context the rule can't be built in is left out, and
+   * the key keeps its other rules. One warning names every context tried when
+   * the scope builds nowhere; when it builds somewhere, the contexts it
+   * skipped are logged at debug level, since the key still reaches what the
+   * owner holds.
+   */
+  private applyApiKeyAllow(
+    ability: AbilityBuilder<AppAbility>,
+    owner: UserWithRoles,
+    apiKey: ApikeyWithScopes,
+    scope: ApiKeyScopeWithPermission,
+  ): void {
+    const skipped: string[] = [];
+    const applied = new Set<string>();
+    let built = false;
+
+    for (const held of holdingContexts(owner, scope.permissionId)) {
+      const { action, conditions, fields, inverted } = held.permission;
+
+      // The owner graph's copy can be flipped between the two graph loads; a
+      // denial's conditions must never build a `can` (#266).
+      if (inverted) {
+        continue;
+      }
+
+      const render = renderKeyScopeConditions(conditions, held.context);
+
+      if ('unbuildable' in render) {
+        skipped.push(`${describeContext(held)}, because the permission's conditions ${render.unbuildable}`);
+
+        continue;
+      }
+
+      const allowed = allOf([render.conditions, pinOf(held.resourceId), pinOf(scope.resourceId)]);
+      built = true;
+
+      if (firstSighting(applied, [held.subject, fields, allowed])) {
+        this.applyRule(ability, { action, subject: held.subject, inverted: false, fields }, allowed);
+      }
+    }
+
+    if (skipped.length === 0) {
+      return;
+    }
+
+    if (built) {
+      this.logger.debug(
+        `API key ${apiKey.id}: its key scope over permission ${scope.permissionId} builds no rule in ` +
+          `${skipped.join('; ')} (#266)`,
+      );
+
+      return;
+    }
+
+    this.logger.warn(
+      `API key ${apiKey.id}: leaving out its key scope over permission ${scope.permissionId}, which builds no rule ` +
+        `in any context where its owner holds it: ${skipped.join('; ')} (#266)`,
+    );
+  }
+
+  /**
+   * One key scope over a denial, as one `cannot` per context the owner has,
+   * held or not, with the key scope's pin ANDed on and no field list, and a
+   * `cannot` that renders the same in two contexts applied once (#266).
+   * Returns whether it rendered anywhere: the caller denies the whole key
+   * when it didn't, since dropping a denial would widen the key.
+   */
+  private applyApiKeyDenial(
+    ability: AbilityBuilder<AppAbility>,
+    owner: UserWithRoles,
+    scope: ApiKeyScopeWithPermission,
+  ): boolean {
+    const { action, subject, conditions } = scope.permission;
+    const applied = new Set<string>();
+    let rendered = false;
+
+    for (const context of ownerContexts(owner)) {
+      const render = renderKeyScopeConditions(conditions, context);
+
+      if ('unbuildable' in render) {
+        continue;
+      }
+
+      const denied = allOf([render.conditions, denialPinOf(scope.resourceId)]);
+      rendered = true;
+
+      if (firstSighting(applied, [denied])) {
+        this.applyRule(ability, { action, subject, inverted: true }, denied);
+      }
+    }
+
+    return rendered;
+  }
+
+  /**
+   * The plugin path's fail-loud rule: a condition template that names anything
+   * outside the unit-coordinate context rejects the permission before any
+   * rendering. The check itself is {@link findTemplateProblem}, shared with the
+   * API key path; this maps its verdict onto the typed rejection.
    */
   private assertTemplateWithinContext(
     template: string,
@@ -304,100 +451,17 @@ export class AbilityFactory {
     permissionSlug: string,
     snapshot: PluginGrantSnapshot,
   ): void {
-    const reject = (variable: string): never => {
+    const problem = findTemplateProblem(template, context);
+
+    if (problem) {
       throw new PluginAbilityRenderRejectionError({
-        reason: 'out-of-context-variable',
-        pluginId: snapshot.plugin.id,
-        pluginSlug: snapshot.plugin.slug,
-        permissionSlug,
-        variable,
-        unit: snapshot.unit,
-      });
-    };
-
-    // Own-property resolution to a STRING leaf, or it does not resolve.
-    // Both halves are load-bearing: `in`-style lookup would admit
-    // prototype-chain names (`unit.constructor` is "in" every object), and
-    // a non-leaf resolution (`{{ unit }}`) would render `[object Object]`
-    // into the clause — junk, not authority. Every legitimate context value
-    // is a non-empty string (ids, slugs, the scope type).
-    const resolves = (path: string): boolean => {
-      if (path === '.') {
-        return false;
-      }
-
-      let value: unknown = context;
-      for (const segment of path.split('.')) {
-        if (typeof value !== 'object' || value === null || !Object.prototype.hasOwnProperty.call(value, segment)) {
-          return false;
-        }
-
-        // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- TypeScript has no narrowing from `object` to an indexable record, and the own-property check above doesn't narrow a computed key (#1321)
-        value = (value as Record<string, unknown>)[segment];
-      }
-
-      return typeof value === 'string' && value.length > 0;
-    };
-
-    // The parse is inside the typed contract too: a template that does not
-    // even parse (unclosed tag) can no more be rendered safely than one
-    // referencing unknown variables, and must not escape as Mustache's raw
-    // Error (a 500 instead of the typed rejection's 403).
-    let tokens: Mustache.TemplateSpans;
-    try {
-      tokens = Mustache.parse(template);
-    } catch {
-      throw new PluginAbilityRenderRejectionError({
-        reason: 'malformed-template',
+        ...problem,
         pluginId: snapshot.plugin.id,
         pluginSlug: snapshot.plugin.slug,
         permissionSlug,
         unit: snapshot.unit,
       });
     }
-
-    // Mustache token tuples: [type, name, start, end, subTokens?]. The walk
-    // is a WHITELIST: 'text' carries no variable; 'name'/'&' interpolate
-    // (triple-stache parses as '&'); sections '#'/'^' name a variable and
-    // nest their body at index 4. Anything else — partials ('>') and
-    // comments ('!') both render to empty string, delimiter changes ('=')
-    // reshape parsing — is rejected outright rather than silently rendered.
-    const walk = (tokens: Mustache.TemplateSpans): void => {
-      for (const token of tokens) {
-        const [type, name, , , subTokens] = token;
-
-        if (type === 'text') {
-          continue;
-        }
-
-        if (type === 'name' || type === '&' || type === '#' || type === '^') {
-          if (!resolves(name)) {
-            reject(name);
-          }
-
-          if ((type === '#' || type === '^') && Array.isArray(subTokens)) {
-            walk(subTokens);
-          }
-
-          continue;
-        }
-
-        // Not a variable problem — the token TYPE is forbidden, and `name`
-        // here is a partial name or comment text, not a context path. A
-        // distinct reason keeps the operator from hunting for a variable
-        // that does not exist.
-        throw new PluginAbilityRenderRejectionError({
-          reason: 'unsupported-token-type',
-          pluginId: snapshot.plugin.id,
-          pluginSlug: snapshot.plugin.slug,
-          permissionSlug,
-          tokenType: type,
-          unit: snapshot.unit,
-        });
-      }
-    };
-
-    walk(tokens);
   }
 
   private parseConditions(
@@ -409,8 +473,6 @@ export class AbilityFactory {
       let parsedConditions: Record<string, unknown> | undefined = undefined;
 
       if (Object.keys(permission.conditions || {}).length > 0) {
-        // `permission.conditions` is only read (serialized) here, so render it
-        // directly — JSON.stringify never mutates, so no defensive clone is needed.
         const rendered = Mustache.render(JSON.stringify(permission.conditions), context);
         parsedConditions = JSON.parse(rendered);
       }
@@ -448,37 +510,27 @@ export class AbilityFactory {
     ability: AbilityBuilder<AppAbility>,
     user: UserWithRoles,
   ): void {
+    // The one predicate `holdingContexts` asks too, so an API key's rule never
+    // borrows a direct permission its owner's own ability leaves out (#266).
     const now = Date.now();
-    const active = userPermissions.filter((up) => {
-      if (up.expiresAt === null) {
-        return true;
-      }
+    const building = userPermissions.filter((up) => buildsDirectPermissionRule(up, now));
 
-      // The user graph round-trips through Redis (Keyv/Valkey), where Date values
-      // deserialize to ISO strings on a cache hit; normalize before comparing.
-      return new Date(up.expiresAt).getTime() > now;
-    });
-
-    // `UserPermission.inverted` overrides the base permission's polarity; `null`
-    // inherits it. Grants first, denials last → a denial wins any same-target
-    // contradiction.
-    const isDenial = (up: UserPermissionWithPermission): boolean => up.inverted ?? up.permission.inverted;
-    const ordered = [...active.filter((up) => !isDenial(up)), ...active.filter(isDenial)];
+    // Grants first, denials last → a denial wins any same-target contradiction.
+    const ordered = [
+      ...building.filter((up) => !isDirectPermissionDenial(up)),
+      ...building.filter(isDirectPermissionDenial),
+    ];
 
     for (const userPermission of ordered) {
       const { permission, resourceType, resourceId } = userPermission;
 
-      // The 'all' wildcard is never directly assignable — wildcard authority is
-      // role-gated only.
-      if (permission.subject === 'all') {
-        continue;
-      }
-
-      const rendered = this.renderConditions(permission.conditions, user);
+      // `{ user }` is the sole variable available outside a role, household or
+      // event scope.
+      const rendered = renderPermissionConditions(permission.conditions, { user });
       const conditions = resourceId ? { ...(rendered ?? {}), id: resourceId } : rendered;
       const fields = permission.fields?.length ? permission.fields : undefined;
 
-      const access: RuleApplier = isDenial(userPermission) ? ability.cannot : ability.can;
+      const access: RuleApplier = isDirectPermissionDenial(userPermission) ? ability.cannot : ability.can;
       if (fields) {
         access.call(ability, permission.action, resourceType, fields, conditions);
       } else {
@@ -486,27 +538,102 @@ export class AbilityFactory {
       }
     }
   }
+}
 
-  /**
-   * Renders a permission's templated conditions against a user-only context
-   * (`{ user }` is the sole variable available outside a role/household/event
-   * scope). Returns `undefined` for empty or non-object conditions so the caller
-   * can treat the rule as type-level.
-   */
-  private renderConditions(
-    conditions: Permission['conditions'],
-    user: UserWithRoles,
-  ): Record<string, unknown> | undefined {
-    if (conditions === null || typeof conditions !== 'object' || Array.isArray(conditions)) {
-      return undefined;
-    }
+/** A key scope's conditions rendered in one context, or why they can't be (#266). */
+type KeyScopeRender = { readonly conditions: Record<string, unknown> | undefined } | { readonly unbuildable: string };
 
-    if (Object.keys(conditions).length === 0) {
-      return undefined;
-    }
-
-    const rendered = Mustache.render(JSON.stringify(conditions), { user });
-    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- the server's own rendered condition template, not outside data (#1322)
-    return JSON.parse(rendered) as Record<string, unknown>;
+/**
+ * Renders a key scope's conditions in one context (#266). Only null and `{}`
+ * mean "no conditions" here. Conditions that aren't an object (a list, a
+ * string, a number) can't be read as a bound, and a template naming a
+ * variable the context lacks would render `''` into the clause, so both come
+ * back unbuildable, with the reason worded for the log line. No catalog row is
+ * either; this fails closed on a row written some other way.
+ */
+function renderKeyScopeConditions(conditions: unknown, context: Record<string, unknown>): KeyScopeRender {
+  if (conditions === null || conditions === undefined) {
+    return { conditions: undefined };
   }
+
+  if (typeof conditions !== 'object' || Array.isArray(conditions)) {
+    return { unbuildable: "aren't an object" };
+  }
+
+  const problem = Object.keys(conditions).length > 0 ? findTemplateProblem(JSON.stringify(conditions), context) : null;
+
+  if (problem) {
+    return { unbuildable: describeTemplateProblem(problem) };
+  }
+
+  return { conditions: renderPermissionConditions(conditions, context) };
+}
+
+function describeTemplateProblem(problem: TemplateProblem): string {
+  switch (problem.reason) {
+    case 'out-of-context-variable':
+      return `name {{ ${problem.variable} }}, which that context doesn't supply`;
+    case 'malformed-template':
+      return "don't parse as a template";
+    case 'unsupported-token-type':
+      return `use a '${problem.tokenType}' template tag, which conditions don't support`;
+  }
+}
+
+/** A blank pin (`''`) still pins: `{ id: '' }` matches no row, so it fails closed (#266). */
+function pinOf(resourceId: string | null | undefined): Record<string, unknown> | undefined {
+  return resourceId != null ? { id: resourceId } : undefined;
+}
+
+/**
+ * A denial's pin. Failing closed runs the other way for a denial: `{ id: '' }`
+ * would deny no row, so a blank pin denies the whole subject instead (#266).
+ */
+function denialPinOf(resourceId: string | null | undefined): Record<string, unknown> | undefined {
+  return resourceId ? { id: resourceId } : undefined;
+}
+
+/**
+ * Records a key scope's rule in `applied` and says whether it is new. A scope
+ * whose conditions name no context variable renders the same rule in every
+ * context, one per role, membership and attendance, and each copy would be
+ * another arm in every query through the key, so only the first is applied
+ * (#266).
+ */
+function firstSighting(applied: Set<string>, rule: unknown[]): boolean {
+  const key = JSON.stringify(rule);
+
+  if (applied.has(key)) {
+    return false;
+  }
+
+  applied.add(key);
+
+  return true;
+}
+
+/** Names where the owner holds a permission, for the log line of a dropped key scope (#266). */
+function describeContext({ source, context }: HoldingContext): string {
+  switch (source) {
+    case 'serverRole':
+      return `the owner's server role ${String(context['role'])}`;
+    case 'household':
+      return `the owner's household membership (householdId ${String(context['householdId'])})`;
+    case 'event':
+      return `the owner's event attendance (eventId ${String(context['eventId'])})`;
+    case 'directPermission':
+      return "the owner's direct permission";
+  }
+}
+
+/**
+ * ANDs a key's rule parts: its rendered conditions and any pins. One part
+ * stands alone, as the role path passes its rendered conditions. Two or more
+ * go under `AND`, so a pin narrows a condition that names `id` instead of
+ * replacing it (#266).
+ */
+function allOf(parts: (Record<string, unknown> | undefined)[]): Record<string, unknown> | undefined {
+  const present = parts.filter((part): part is Record<string, unknown> => part !== undefined);
+
+  return present.length > 1 ? { AND: present } : present[0];
 }

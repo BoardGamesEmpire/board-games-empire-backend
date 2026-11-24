@@ -346,6 +346,10 @@ export class WebhookSubscriptionService {
    * reach, and get a 200 for a webhook subscription that never delivers. The
    * key is read as dispatch reads it, so one that is deleted, disabled,
    * expired or not the creator's own is refused.
+   *
+   * The key's scopes render where its creator holds them (#266), so its
+   * ability is built from the creator's graph. A creator with no graph left
+   * gives the key nowhere to render, and is refused the same way.
    */
   private async withRecordedKey(
     existing: WebhookSubscriptionWithEventTypes,
@@ -362,10 +366,15 @@ export class WebhookSubscriptionService {
       throw new ConflictException(t('errors.webhook_subscription.api_key_unusable'));
     }
 
+    const owner = await this.permissions.getUserRoleGraph(existing.createdById);
+    if (!owner) {
+      throw new ConflictException(t('errors.webhook_subscription.api_key_unusable'));
+    }
+
     // The session's one ability is the key owner's: getById reads only the
     // acting user's own webhook subscriptions.
     const [ownerAbility] = abilities;
-    return this.abilityFactory.createForApiKeyActor(ownerAbility, key);
+    return this.abilityFactory.createForApiKeyActor(owner, key, ownerAbility);
   }
 
   /**

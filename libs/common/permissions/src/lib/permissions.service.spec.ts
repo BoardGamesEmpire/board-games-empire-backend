@@ -106,7 +106,9 @@ describe('PermissionsService', () => {
       expect(db.apikey.findUnique).toHaveBeenCalledTimes(1);
     });
 
-    it('loads the key with scopes + permission triple and caches it on a miss', async () => {
+    // The key's rules render its permissions' conditions against its owner's
+    // graph, matched by permission id (#266).
+    it('loads the key with scopes, each with its permission and conditions, and caches it on a miss (#266)', async () => {
       const set = jest.spyOn(cache, 'set');
       const apiKey = makeApiKeyGraph();
       db.apikey.findUnique.mockResolvedValue(apiKey);
@@ -120,7 +122,11 @@ describe('PermissionsService', () => {
             scopes: expect.objectContaining({
               // A scope over a retired catalog row confers nothing (#235).
               where: { permission: { retiredAt: null } },
-              include: { permission: { select: { action: true, subject: true, inverted: true, fields: true } } },
+              include: {
+                permission: {
+                  select: { id: true, action: true, subject: true, inverted: true, conditions: true, fields: true },
+                },
+              },
             }),
           }),
         }),
@@ -349,6 +355,7 @@ describe('PermissionsService', () => {
                 expiresAt: true,
                 permission: {
                   select: {
+                    id: true,
                     action: true,
                     subject: true,
                     conditions: true,
@@ -615,6 +622,85 @@ describe('PermissionsService', () => {
       await service.invalidateUsers(ids);
 
       expect(del).toHaveBeenCalledTimes(ids.length);
+    });
+  });
+
+  describe('evicting an API key scope graph (#440)', () => {
+    it('evicts the key scope graph and replaces its version token (#440)', async () => {
+      const del = jest.spyOn(cache, 'del');
+      const set = jest.spyOn(cache, 'set');
+
+      await service.invalidateApiKey('key-1');
+
+      expect(del).toHaveBeenCalledTimes(1);
+      expect(del).toHaveBeenCalledWith('bge:apikey:scopes:key-1');
+      expect(set).toHaveBeenCalledTimes(1);
+      expect(set).toHaveBeenCalledWith(
+        'bge:cache-version:bge:apikey:scopes:key-1',
+        expect.any(String),
+        PermissionsService.CACHE_VERSION_TTL_IN_MILLISECONDS,
+      );
+    });
+
+    it('does nothing for a nullish id (#440)', async () => {
+      const del = jest.spyOn(cache, 'del');
+      const set = jest.spyOn(cache, 'set');
+
+      await service.invalidateApiKey(null);
+      await service.invalidateApiKey(undefined);
+      await service.invalidateApiKeys([null, undefined]);
+
+      expect(del).not.toHaveBeenCalled();
+      expect(set).not.toHaveBeenCalled();
+    });
+
+    it('dedupes and batches a bulk eviction (#440)', async () => {
+      const del = jest.spyOn(cache, 'del');
+      const unique = PermissionsService.EVICTION_BATCH_SIZE * 2 + 1;
+      const ids = Array.from({ length: unique }, (_, i) => `key-${i}`);
+
+      await service.invalidateApiKeys([...ids, 'key-0', null]);
+
+      expect(del).toHaveBeenCalledTimes(unique);
+      expect(del).toHaveBeenCalledWith('bge:apikey:scopes:key-0');
+      expect(del).toHaveBeenCalledWith(`bge:apikey:scopes:key-${unique - 1}`);
+    });
+
+    it('logs and swallows a failed eviction (#440)', async () => {
+      const logError = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      jest.spyOn(cache, 'del').mockRejectedValueOnce(new Error('redis unreachable'));
+
+      await expect(service.invalidateApiKey('key-1')).resolves.toBeUndefined();
+
+      expect(logError).toHaveBeenCalledTimes(1);
+      expect(logError).toHaveBeenCalledWith(
+        expect.stringContaining('API key scope graph for key key-1'),
+        expect.any(Error),
+      );
+    });
+
+    it('a load that began before the eviction is not served afterwards (#440)', async () => {
+      // The load reads the scopes, the key's scopes change and evict, and only
+      // then does the load write what it read (#588's race, for a key).
+      const stale = makeApiKeyGraph();
+      const current = makeApiKeyGraph();
+      let begin!: () => void;
+      let release!: () => void;
+      const started = new Promise<void>((resolve) => (begin = resolve));
+      const released = new Promise<void>((resolve) => (release = resolve));
+      db.apikey.findUnique.mockImplementationOnce((() => {
+        begin();
+        return released.then(() => stale);
+      }) as never);
+      db.apikey.findUnique.mockResolvedValueOnce(current);
+
+      const inFlight = service.getApiKeyScopeGraph('key-1');
+      await started;
+      await service.invalidateApiKey('key-1');
+      release();
+
+      await expect(inFlight).resolves.toBe(stale);
+      await expect(service.getApiKeyScopeGraph('key-1')).resolves.toBe(current);
     });
   });
 
@@ -1441,7 +1527,14 @@ function makeApiKeyGraph(scopes: ApikeyWithScopes['scopes'] = []): ApikeyWithSco
             resourceType: 'Household' as ApikeyWithScopes['scopes'][number]['resourceType'],
             resourceId: null,
             createdAt: new Date(),
-            permission: { action: Action.read, subject: 'Household', inverted: false },
+            permission: {
+              id: 'perm-1',
+              action: Action.read,
+              subject: 'Household',
+              inverted: false,
+              conditions: null,
+              fields: [],
+            },
           },
         ],
   };
@@ -1465,6 +1558,6 @@ function makeGraphPermission(expiresAt: Date | null): UserPermissionWithPermissi
     resourceType: ResourceType.Game,
     resourceId: null,
     expiresAt,
-    permission: { action: Action.read, subject: 'Game', conditions: {}, fields: [], inverted: false },
+    permission: { id: 'perm-1', action: Action.read, subject: 'Game', conditions: {}, fields: [], inverted: false },
   };
 }

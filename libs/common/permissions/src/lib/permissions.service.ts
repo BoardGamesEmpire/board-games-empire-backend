@@ -57,8 +57,9 @@ export class PermissionsService {
   static readonly MIN_CACHE_TTL_IN_MILLISECONDS = 5 * 1000;
 
   /**
-   * Max concurrent cache evictions per batch in {@link invalidateUsers}. Bounds
-   * the burst of cache calls when a mutation touches many users at once.
+   * Max concurrent cache evictions per batch in {@link invalidateUsers} and
+   * {@link invalidateApiKeys}. Bounds the burst of cache calls when a mutation
+   * touches many users or API keys at once.
    */
   static readonly EVICTION_BATCH_SIZE = 50;
 
@@ -239,6 +240,60 @@ export class PermissionsService {
   }
 
   /**
+   * Evict one API key's cached scope graph so its key scopes are rebuilt from
+   * the DB on next resolution (#440). MUST be called after any change to a
+   * key's scopes, and when a key is deleted or disabled, otherwise the stale
+   * scopes persist up to the cache TTL ({@link CACHE_TTL_IN_MILLISECONDS}).
+   * A key's scopes are cached apart from its owner's graph, so
+   * {@link invalidateUser} never reaches them.
+   */
+  async invalidateApiKey(apiKeyId: string | null | undefined): Promise<void> {
+    // Tolerate a nullish id: there is nothing to evict, so no-op rather than
+    // delete a garbage key.
+    if (!apiKeyId) {
+      return;
+    }
+
+    // Success/failure is logged inside evictApiKeyScopeGraph (which swallows
+    // failures), so nothing is logged here.
+    await this.evictApiKeyScopeGraph(apiKeyId);
+  }
+
+  /**
+   * Bulk counterpart to {@link invalidateApiKey} for a change that touches
+   * several keys at once (#440). De-dupes ids, drops nullish ids, and no-ops on
+   * an empty set. Evicts in fixed-size batches ({@link EVICTION_BATCH_SIZE}), as
+   * {@link invalidateUsers} does, and {@link evictApiKeyScopeGraph} swallows
+   * per-key failures, so one bad eviction can't abandon the rest.
+   */
+  async invalidateApiKeys(apiKeyIds: readonly (string | null | undefined)[]): Promise<void> {
+    const unique = [...new Set(apiKeyIds)].filter((apiKeyId): apiKeyId is string => Boolean(apiKeyId));
+    if (unique.length === 0) {
+      return;
+    }
+
+    for (let i = 0; i < unique.length; i += PermissionsService.EVICTION_BATCH_SIZE) {
+      const batch = unique.slice(i, i + PermissionsService.EVICTION_BATCH_SIZE);
+      await Promise.all(batch.map((apiKeyId) => this.evictApiKeyScopeGraph(apiKeyId)));
+    }
+
+    this.logger.debug(`Requested scope-graph invalidation for ${unique.length} API key(s)`);
+  }
+
+  /**
+   * Best-effort eviction of a single API key's scope graph, with the same
+   * failure posture as {@link evictUserGraph}: a cache failure is logged and
+   * swallowed, and the graph TTL is the backstop (#440).
+   */
+  private async evictApiKeyScopeGraph(apiKeyId: string): Promise<void> {
+    const label = `API key scope graph for key ${apiKeyId}`;
+
+    if (await this.evict(PermissionsService.apiKeyScopeCacheKey(apiKeyId), label)) {
+      this.logger.debug(`Invalidated ${label}`);
+    }
+  }
+
+  /**
    * Best-effort eviction of a single user graph. A cache failure is logged and
    * swallowed rather than thrown: the build-time `expiresAt` re-check and the
    * graph TTL are the correctness backstop, so a transient cache outage degrades
@@ -309,8 +364,9 @@ export class PermissionsService {
 
   /**
    * Loads an API key with its scopes and each scope's permission
-   * (action/subject/inverted/fields) — the shape `AbilityFactory.createForApiKey`
-   * consumes. The actor only carries the key id, so the scope graph must be
+   * (id/action/subject/inverted/conditions/fields) — the shape
+   * `AbilityFactory.createForApiKey` renders against the key owner's graph
+   * (#266). The actor only carries the key id, so the scope graph must be
    * resolved here.
    *
    * Returns `null` when the key no longer exists (e.g. revoked between auth and
@@ -541,6 +597,7 @@ export class PermissionsService {
           expiresAt: true,
           permission: {
             select: {
+              id: true,
               action: true,
               subject: true,
               conditions: true,
@@ -951,7 +1008,7 @@ export class PermissionsService {
         where: { permission: { retiredAt: null } },
         include: {
           permission: {
-            select: { action: true, subject: true, inverted: true, fields: true },
+            select: { id: true, action: true, subject: true, inverted: true, conditions: true, fields: true },
           },
         },
       },

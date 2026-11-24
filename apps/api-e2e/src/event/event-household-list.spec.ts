@@ -170,14 +170,16 @@ describe("a household's upcoming events (#506)", () => {
    * The liveness guard answers a session 404, and passes a key that can't read
    * `Household`. A household delete stamps only the household, so the scope's
    * shared liveness clause is what keeps its events off this list, and the
-   * event reads as gone by id too (#992).
+   * event reads as gone by id too (#992). The key reads the event through
+   * `read:event:participant`, which its owner holds as the event's host: a
+   * key scope renders only where its owner holds the permission (#266).
    */
   it('answers the household owner 404 for a deleted household, and a key the guard passes an empty page', async () => {
     const owner = await actors.user();
     const householdId = await householdOf(owner);
     const eventId = await createdEventId(owner, { householdId, reach: Reach.Public, ...dated(2) });
     const key = await mintApiKey(baseUrl, db.client, owner, {
-      slugs: ['read:event'],
+      slugs: ['read:event:participant'],
       resourceType: ResourceType.Event,
     });
 

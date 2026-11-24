@@ -60,7 +60,8 @@ export class HouseholdController {
       'and can carry a live one past the boundary unseen. Treat what a walk missed as something to re-check, not as ' +
       'proof. An **API key** is additionally floored by its own permissions (effective access is key ∩ owner), so ' +
       'absence under a key also admits \u201coutside this key\u2019s scope\u201d — do not purge a cache from a ' +
-      'key-authenticated read. Restricted keys are unbuilt (#266). Paginated: `?page=` (1-based) and `?limit=`, with ' +
+      'key-authenticated read. Each of a key\u2019s scopes keeps its permission\u2019s conditions, applied where the ' +
+      'key\u2019s owner holds that permission (#266). Paginated: `?page=` (1-based) and `?limit=`, with ' +
       'a `pagination` envelope carrying `total`, `totalPages` and `hasMore`; `total` counts the caller\u2019s ' +
       'visible memberships. See #230.',
   })
@@ -95,8 +96,8 @@ export class HouseholdController {
       '`GET /admin/households?status=deleted` (#419). Read on demand, for instance by the screen that offers the ' +
       'undo: it is not part of the client’s hydrate. Nor is it a membership list, so a client never purges a ' +
       'household because it is missing here. An **API key** is floored by its key scopes (effective access is what ' +
-      'both the key and its key owner may do): a key lists nothing unless its key scopes also allow updating ' +
-      'households. Paginated: `?page=` (1-based) and `?limit=`, with the `pagination` envelope `GET /households` ' +
+      'both the key and its key owner may do): a key lists a household only when its key scopes allow reading ' +
+      'households and restoring that household (#266). Paginated: `?page=` (1-based) and `?limit=`, with the `pagination` envelope `GET /households` ' +
       'carries. See #542.',
   })
   @ApiPaginatedEnvelope('households')

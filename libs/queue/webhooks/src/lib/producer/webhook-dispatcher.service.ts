@@ -301,9 +301,14 @@ export class WebhookDispatcherService implements OnModuleInit, OnApplicationShut
       return false;
     }
 
+    // The key's scopes render where its subscriber holds them, so both halves
+    // come from the subscriber's graph, and the ability already built from it
+    // is reused (#266).
     subscriber.ability ??= this.abilityFactory.createForUser(subscriber.graph);
     const abilities =
-      keyGraph === null ? [subscriber.ability] : this.abilityFactory.createForApiKeyActor(subscriber.ability, keyGraph);
+      keyGraph === null
+        ? [subscriber.ability]
+        : this.abilityFactory.createForApiKeyActor(subscriber.graph, keyGraph, subscriber.ability);
 
     const visible = await this.visibility.isVisibleTo(descriptor.subject, subjectId, abilities, {
       action: descriptor.requiredAction,

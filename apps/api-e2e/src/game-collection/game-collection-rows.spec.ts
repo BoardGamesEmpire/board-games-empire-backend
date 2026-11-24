@@ -317,7 +317,10 @@ describe('collection rows (#1070)', () => {
     await db.client.listEntry.create({ data: { listId: viewersWishlist.id, gameId: wished.gameId, position: 0 } });
     const custom = await arrangeList(db.client, viewer.user.id, { kind: ListKind.Custom });
 
-    const collectionRead = { slugs: ['read:game_collection'], resourceType: ResourceType.GameCollection };
+    // The row is another user's Public one, which the viewer reads through
+    // `read:game_collection:public`: `read:game_collection` is their own rows
+    // alone, and a key scope keeps that condition (#266).
+    const collectionRead = { slugs: ['read:game_collection:public'], resourceType: ResourceType.GameCollection };
     const listRead = { slugs: ['read:list'], resourceType: ResourceType.List };
     const unpinned = await mintApiKey(baseUrl, db.client, viewer, [collectionRead, listRead]);
     const pinned = await mintApiKey(baseUrl, db.client, viewer, [

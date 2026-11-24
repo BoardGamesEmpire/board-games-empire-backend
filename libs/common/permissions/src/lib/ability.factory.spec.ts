@@ -16,6 +16,7 @@ import {
 import { catalogPermission } from '@bge/testing';
 import { subject } from '@casl/ability';
 import { accessibleBy } from '@casl/prisma';
+import { Logger } from '@nestjs/common';
 import type { TestingModule } from '@nestjs/testing';
 import { Test } from '@nestjs/testing';
 import { AbilityFactory } from './ability.factory';
@@ -41,129 +42,534 @@ describe('AbilityFactory', () => {
     factory = module.get(AbilityFactory);
   });
 
-  describe('createForApiKeyActor (#723)', () => {
-    it("pairs the key owner's ability, first and unchanged, with the key's own", () => {
-      const owner = factory.createForUser(null);
+  describe('createForApiKeyActor (#723, #266)', () => {
+    const readHousehold = catalogPermission('read:household');
+    const owner = makeUser({
+      householdMember: [{ householdId: 'hh-A', role: makeRole('HouseholdMember', [readHousehold]) }],
+    });
 
-      const [first, second] = factory.createForApiKeyActor(
-        owner,
-        makeApiKey([makeScope(Action.read, 'Household', 'hh-alpha')]),
-      );
+    it("returns the given owner ability first, and the key's second", () => {
+      const ownerAbility = factory.createForUser(owner);
 
-      expect(first).toBe(owner);
-      expect(second.can(Action.read, subject('Household', { id: 'hh-alpha' }))).toBe(true);
-      expect(second.can(Action.read, subject('Household', { id: 'hh-beta' }))).toBe(false);
+      const [first, second] = factory.createForApiKeyActor(owner, makeApiKey([makeScope(readHousehold)]), ownerAbility);
+
+      expect(first).toBe(ownerAbility);
+      expect(second.can(Action.read, asEntity('Household', { id: 'hh-A' }))).toBe(true);
+      expect(second.can(Action.read, asEntity('Household', { id: 'hh-B' }))).toBe(false);
+    });
+
+    it("builds the owner's ability from the same graph when none is given", () => {
+      const [first] = factory.createForApiKeyActor(owner, makeApiKey([makeScope(readHousehold)]));
+
+      expect(first.can(Action.read, asEntity('Household', { id: 'hh-A' }))).toBe(true);
+    });
+
+    // A key whose owner is gone has no context to render a key scope in (#266).
+    it('a null owner gives a deny-all key', () => {
+      const [first, second] = factory.createForApiKeyActor(null, makeApiKey([makeScope(readHousehold)]));
+
+      expect(first.rules).toHaveLength(0);
+      expect(second.rules).toHaveLength(0);
+      expect(second.can(Action.read, 'Household')).toBe(false);
     });
   });
 
-  describe('createForApiKey', () => {
-    describe('empty scopes', () => {
-      it('produces no rules when the scopes array is empty', () => {
-        const ability = factory.createForApiKey(makeApiKey([]));
+  // A key scope keeps its permission's conditions, rendered in each context
+  // where the key's owner holds that permission, as the owner's own rule
+  // renders there (#266).
+  describe('createForApiKey (#266)', () => {
+    let warn: jest.SpyInstance;
+    let debug: jest.SpyInstance;
+
+    beforeEach(() => {
+      warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      debug = jest.spyOn(Logger.prototype, 'debug').mockImplementation(() => undefined);
+    });
+
+    afterEach(() => {
+      warn.mockRestore();
+      debug.mockRestore();
+    });
+
+    const publicGame = { deletedAt: null, reach: 'Public', createdById: 'someone-else' };
+    const ownersPrivateGame = { deletedAt: null, reach: 'Private', createdById: 'owner-1' };
+
+    it('denies everything for a key with no scopes', () => {
+      const owner = makeUser({ roles: [makeRole('User', [catalogPermission('read:game:public')])] });
+
+      const ability = factory.createForApiKey(owner, makeApiKey([]));
+
+      expect(ability.rules).toHaveLength(0);
+      expect(ability.can(Action.read, 'Game')).toBe(false);
+    });
+
+    it("a key scoped to read:game:public reads a Public game and not its owner's Private one (#266)", () => {
+      const readGame = catalogPermission('read:game');
+      const readGamePublic = catalogPermission('read:game:public');
+      const owner = makeUser({ id: 'owner-1', roles: [makeRole('User', [readGame, readGamePublic])] });
+
+      const ability = factory.createForApiKey(owner, makeApiKey([makeScope(readGamePublic)]));
+
+      expect(ability.can(Action.read, asEntity('Game', publicGame))).toBe(true);
+      expect(ability.can(Action.read, asEntity('Game', ownersPrivateGame))).toBe(false);
+      expect(accessibleBy(ability, Action.read).ofType('Game')).toEqual({ OR: [{ deletedAt: null, reach: 'Public' }] });
+      // The owner reads it, so the key's own rule is what keeps it out.
+      expect(factory.createForUser(owner).can(Action.read, asEntity('Game', ownersPrivateGame))).toBe(true);
+    });
+
+    it('renders a household permission once per membership that grants it', () => {
+      const readHousehold = catalogPermission('read:household');
+      const owner = makeUser({
+        householdMember: [
+          { householdId: 'hh-A', role: makeRole('HouseholdMember', [readHousehold]) },
+          { householdId: 'hh-B', role: makeRole('HouseholdAdmin', [readHousehold]) },
+          { householdId: 'hh-C', role: makeRole('HouseholdGuest', [catalogPermission('read:household_member')]) },
+        ],
+      });
+
+      const ability = factory.createForApiKey(owner, makeApiKey([makeScope(readHousehold)]));
+
+      expect(ability.can(Action.read, asEntity('Household', { id: 'hh-A' }))).toBe(true);
+      expect(ability.can(Action.read, asEntity('Household', { id: 'hh-B' }))).toBe(true);
+      expect(ability.can(Action.read, asEntity('Household', { id: 'hh-C' }))).toBe(false);
+      expect(accessibleBy(ability, Action.read).ofType('Household')).toEqual({ OR: [{ id: 'hh-B' }, { id: 'hh-A' }] });
+    });
+
+    // Spreading the pin into `{ id: '{{ householdId }}', ... }` would replace
+    // the household the owner holds the permission in with the pinned one.
+    it('ANDs a key-scope pin with a condition that names id', () => {
+      const updateHousehold = catalogPermission('update:household');
+      const owner = makeUser({
+        id: 'owner-1',
+        householdMember: [{ householdId: 'hh-A', role: makeRole('HouseholdAdmin', [updateHousehold]) }],
+      });
+      const adminRoster = { members: [{ userId: 'owner-1', role: { role: { name: 'HouseholdAdmin' } } }] };
+
+      const ability = factory.createForApiKey(owner, makeApiKey([makeScope(updateHousehold, 'hh-B')]));
+
+      expect(ability.can(Action.update, asEntity('Household', { id: 'hh-A', ...adminRoster }))).toBe(false);
+      expect(ability.can(Action.update, asEntity('Household', { id: 'hh-B', ...adminRoster }))).toBe(false);
+      expect(accessibleBy(ability, Action.update).ofType('Household')).toEqual({
+        OR: [
+          {
+            AND: [
+              {
+                id: 'hh-A',
+                members: {
+                  some: {
+                    userId: 'owner-1',
+                    role: { is: { role: { is: { name: { in: ['HouseholdOwner', 'HouseholdAdmin'] } } } } },
+                  },
+                },
+              },
+              { id: 'hh-B' },
+            ],
+          },
+        ],
+      });
+    });
+
+    it('a pin over a condition that names id reaches the household both name', () => {
+      const readHousehold = catalogPermission('read:household');
+      const owner = makeUser({
+        householdMember: [
+          { householdId: 'hh-A', role: makeRole('HouseholdMember', [readHousehold]) },
+          { householdId: 'hh-B', role: makeRole('HouseholdMember', [readHousehold]) },
+        ],
+      });
+
+      const ability = factory.createForApiKey(owner, makeApiKey([makeScope(readHousehold, 'hh-A')]));
+
+      expect(ability.can(Action.read, asEntity('Household', { id: 'hh-A' }))).toBe(true);
+      expect(ability.can(Action.read, asEntity('Household', { id: 'hh-B' }))).toBe(false);
+      expect(accessibleBy(ability, Action.read).ofType('Household')).toEqual({
+        OR: [{ AND: [{ id: 'hh-B' }, { id: 'hh-A' }] }, { AND: [{ id: 'hh-A' }, { id: 'hh-A' }] }],
+      });
+    });
+
+    it("carries a direct permission's own pin, ANDed with its conditions", () => {
+      const readHouseholds = catalogPermission('read:households');
+      const owner = makeUser({
+        id: 'owner-1',
+        permissions: [grantOf(readHouseholds, { resourceType: ResourceType.Household, resourceId: 'hh-9' })],
+      });
+
+      const ability = factory.createForApiKey(owner, makeApiKey([makeScope(readHouseholds)]));
+
+      expect(ability.rules).toHaveLength(1);
+      expect(ability.rules[0].conditions).toEqual({
+        AND: [{ members: { some: { userId: 'owner-1' } } }, { id: 'hh-9' }],
+      });
+    });
+
+    it('keeps a pin on a type-level permission', () => {
+      const readPlugins = makePermission({ action: Action.read, subject: 'Plugin', conditions: {} });
+      const owner = makeUser({ roles: [makeRole('Admin', [readPlugins])] });
+
+      const ability = factory.createForApiKey(owner, makeApiKey([makeScope(readPlugins, 'plugin-1')]));
+
+      expect(ability.rules).toHaveLength(1);
+      expect(ability.rules[0].conditions).toEqual({ id: 'plugin-1' });
+      expect(ability.can(Action.read, asEntity('Plugin', { id: 'plugin-1' }))).toBe(true);
+      expect(ability.can(Action.read, asEntity('Plugin', { id: 'plugin-2' }))).toBe(false);
+    });
+
+    it('leaves a type-level permission held by a server role unconditioned', () => {
+      const readPlugins = makePermission({ action: Action.read, subject: 'Plugin', conditions: {} });
+      const owner = makeUser({ roles: [makeRole('Admin', [readPlugins])] });
+
+      const ability = factory.createForApiKey(owner, makeApiKey([makeScope(readPlugins)]));
+
+      expect(ability.rules).toHaveLength(1);
+      expect(ability.rules[0].conditions).toBeUndefined();
+      expect(ability.can(Action.read, 'Plugin')).toBe(true);
+      expect(ability.can(Action.read, 'Event')).toBe(false);
+    });
+
+    // A catalog edit can leave a granted permission naming a variable its
+    // holder's context lacks. That rule goes, and the key keeps working.
+    it("drops an allow scope whose condition names householdId, which none of its contexts supply, warns once, and keeps the key's other scopes (#266)", () => {
+      const readHouseholdMember = catalogPermission('read:household_member');
+      const readGamePublic = catalogPermission('read:game:public');
+      const owner = makeUser({
+        roles: [makeRole('User', [readGamePublic])],
+        permissions: [grantOf(readHouseholdMember, { resourceType: ResourceType.HouseholdMember })],
+      });
+
+      const ability = factory.createForApiKey(
+        owner,
+        makeApiKey([makeScope(readHouseholdMember), makeScope(readGamePublic)]),
+      );
+
+      expect(ability.rules.map(({ subject }) => subject)).toEqual(['Game']);
+      expect(ability.can(Action.read, 'HouseholdMember')).toBe(false);
+      expect(ability.can(Action.read, asEntity('Game', publicGame))).toBe(true);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0][0]).toEqual(expect.stringContaining('key-1'));
+      expect(warn.mock.calls[0][0]).toEqual(expect.stringContaining(readHouseholdMember.id));
+      expect(warn.mock.calls[0][0]).toEqual(expect.stringContaining('householdId'));
+      expect(warn.mock.calls[0][0]).toEqual(expect.stringContaining("the owner's direct permission"));
+    });
+
+    // One context renders and another's condition names a variable it lacks:
+    // the key still reaches what the owner holds, so the skipped context is a
+    // debug line, not a warning.
+    it("keeps a membership's rule when a direct permission over the same permission can't render, and logs that only at debug (#266)", () => {
+      const readOwnHousehold = makePermission({
+        action: Action.read,
+        subject: 'Household',
+        conditions: { id: '{{ householdId }}' },
+      });
+      const owner = makeUser({
+        householdMember: [{ householdId: 'hh-A', role: makeRole('HouseholdMember', [readOwnHousehold]) }],
+        permissions: [grantOf(readOwnHousehold, { resourceType: ResourceType.Household })],
+      });
+
+      const ability = factory.createForApiKey(owner, makeApiKey([makeScope(readOwnHousehold)]));
+
+      expect(ability.rules).toHaveLength(1);
+      expect(ability.can(Action.read, asEntity('Household', { id: 'hh-A' }))).toBe(true);
+      expect(ability.can(Action.read, asEntity('Household', { id: 'hh-B' }))).toBe(false);
+      expect(warn).not.toHaveBeenCalled();
+      expect(debug).toHaveBeenCalledTimes(1);
+      expect(debug.mock.calls[0][0]).toEqual(expect.stringContaining(readOwnHousehold.id));
+      expect(debug.mock.calls[0][0]).toEqual(expect.stringContaining("the owner's direct permission"));
+    });
+
+    it("names the household in the log line when a membership's rule is dropped (#266)", () => {
+      const readMemberOfEvent = makePermission({
+        action: Action.read,
+        subject: 'Event',
+        conditions: { id: '{{ eventId }}' },
+      });
+      const owner = makeUser({
+        householdMember: [{ householdId: 'hh-A', role: makeRole('HouseholdMember', [readMemberOfEvent]) }],
+      });
+
+      factory.createForApiKey(owner, makeApiKey([makeScope(readMemberOfEvent)]));
+
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0][0]).toEqual(expect.stringContaining('householdId hh-A'));
+    });
+
+    // A household or event context also carries `role`, so the log names a
+    // context by what gives the owner the permission there, not by its keys.
+    it('names the server role and the event in one warning for a scope dropped in both (#266)', () => {
+      const readOwnHousehold = makePermission({
+        action: Action.read,
+        subject: 'Household',
+        conditions: { id: '{{ householdId }}' },
+      });
+      const owner = makeUser({
+        roles: [makeRole('User', [readOwnHousehold])],
+        eventsAttended: [{ eventId: 'ev-1', role: makeRole('EventGuest', [readOwnHousehold]) }],
+      });
+
+      factory.createForApiKey(owner, makeApiKey([makeScope(readOwnHousehold)]));
+
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0][0]).toEqual(expect.stringContaining("the owner's server role User"));
+      expect(warn.mock.calls[0][0]).toEqual(expect.stringContaining("the owner's event attendance (eventId ev-1)"));
+      expect(debug).not.toHaveBeenCalled();
+    });
+
+    // A blank pin is still a pin: `{ id: '' }` matches no row, so it fails closed.
+    it('a key scope with a blank resourceId reaches no row (#266)', () => {
+      const readPlugins = makePermission({ action: Action.read, subject: 'Plugin', conditions: {} });
+      const owner = makeUser({ roles: [makeRole('Admin', [readPlugins])] });
+
+      const ability = factory.createForApiKey(owner, makeApiKey([makeScope(readPlugins, '')]));
+
+      expect(ability.rules[0].conditions).toEqual({ id: '' });
+      expect(ability.can(Action.read, asEntity('Plugin', { id: 'plugin-1' }))).toBe(false);
+    });
+
+    // The permission row can flip between the owner graph's load and the
+    // key's; a denial's conditions must not become a `can`.
+    it("builds no rule from the owner graph's copy of a permission that has turned into a denial (#266)", () => {
+      const readEveryGame = makePermission({ action: Action.read, subject: 'Game', conditions: {} });
+      const flipped = { ...readEveryGame, inverted: true };
+      const owner = makeUser({ roles: [makeRole('User', [flipped])] });
+
+      const ability = factory.createForApiKey(owner, makeApiKey([makeScope(readEveryGame)]));
+
+      expect(ability.rules).toHaveLength(0);
+      expect(ability.can(Action.read, asEntity('Game', publicGame))).toBe(false);
+    });
+
+    // The direct permission's pin, the key scope's pin and the permission's
+    // conditions all narrow the same rule.
+    it("ANDs a direct permission's pin, a key scope's pin and the permission's conditions (#266)", () => {
+      const readPublicGame = makePermission({ action: Action.read, subject: 'Game', conditions: { reach: 'Public' } });
+      const holder = (grantPin: string) =>
+        makeUser({
+          permissions: [grantOf(readPublicGame, { resourceType: ResourceType.Game, resourceId: grantPin })],
+        });
+
+      const distinct = factory.createForApiKey(holder('g-grant'), makeApiKey([makeScope(readPublicGame, 'g-key')]));
+
+      expect(distinct.rules).toHaveLength(1);
+      expect(distinct.rules[0].conditions).toEqual({
+        AND: [{ reach: 'Public' }, { id: 'g-grant' }, { id: 'g-key' }],
+      });
+      expect(distinct.can(Action.read, asEntity('Game', { id: 'g-grant', reach: 'Public' }))).toBe(false);
+      expect(distinct.can(Action.read, asEntity('Game', { id: 'g-key', reach: 'Public' }))).toBe(false);
+
+      const same = factory.createForApiKey(holder('g-1'), makeApiKey([makeScope(readPublicGame, 'g-1')]));
+
+      expect(same.can(Action.read, asEntity('Game', { id: 'g-1', reach: 'Public' }))).toBe(true);
+      expect(same.can(Action.read, asEntity('Game', { id: 'g-1', reach: 'Private' }))).toBe(false);
+      expect(same.can(Action.read, asEntity('Game', { id: 'g-2', reach: 'Public' }))).toBe(false);
+    });
+
+    // No catalog row is like this; a row written some other way fails closed.
+    it("drops an allow scope whose conditions aren't an object, and logs it", () => {
+      const listShaped = makePermission({ action: Action.read, subject: 'Game', conditions: ['Public'] });
+      const owner = makeUser({ roles: [makeRole('User', [listShaped])] });
+
+      const ability = factory.createForApiKey(owner, makeApiKey([makeScope(listShaped)]));
+
+      expect(ability.rules).toHaveLength(0);
+      expect(ability.can(Action.read, 'Game')).toBe(false);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(listShaped.id));
+    });
+
+    // Which permissions a key holds is fixed when it's made; the owner no
+    // longer holding one is not an error.
+    it("builds no rule for a permission the owner doesn't hold", () => {
+      const owner = makeUser({ roles: [makeRole('User', [catalogPermission('read:game:public')])] });
+
+      const ability = factory.createForApiKey(owner, makeApiKey([makeScope(catalogPermission('read:household'))]));
+
+      expect(ability.rules).toHaveLength(0);
+      expect(ability.can(Action.read, 'Household')).toBe(false);
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    describe('a key scope over a denial', () => {
+      const readEveryGame = makePermission({ action: Action.read, subject: 'Game', conditions: {} });
+
+      it('a denial carries its conditions onto the cannot', () => {
+        const denyPrivate = makePermission({
+          action: Action.read,
+          subject: 'Game',
+          conditions: { reach: 'Private' },
+          inverted: true,
+        });
+        const owner = makeUser({ id: 'owner-1', roles: [makeRole('User', [readEveryGame])] });
+
+        const ability = factory.createForApiKey(owner, makeApiKey([makeScope(readEveryGame), makeScope(denyPrivate)]));
+
+        expect(ability.rules.find(({ inverted }) => inverted)).toMatchObject({ conditions: { reach: 'Private' } });
+        expect(ability.can(Action.read, asEntity('Game', publicGame))).toBe(true);
+        expect(ability.can(Action.read, asEntity('Game', ownersPrivateGame))).toBe(false);
+      });
+
+      // `{ id: '' }` would deny no row, so a blank pin on a denial must deny
+      // the whole subject rather than nothing.
+      it('a denial with a blank resourceId denies every row of its subject (#266)', () => {
+        const denyEveryGame = makePermission({ action: Action.read, subject: 'Game', conditions: {}, inverted: true });
+        const owner = makeUser({ id: 'owner-1', roles: [makeRole('User', [readEveryGame])] });
+
+        const ability = factory.createForApiKey(
+          owner,
+          makeApiKey([makeScope(readEveryGame), makeScope(denyEveryGame, '')]),
+        );
+
+        expect(ability.can(Action.read, asEntity('Game', publicGame))).toBe(false);
+        expect(ability.can(Action.read, asEntity('Game', ownersPrivateGame))).toBe(false);
+      });
+
+      // A denial only narrows, so it goes wherever the owner might act,
+      // whether or not the owner holds it there.
+      it('renders a denial in every context the owner has, held or not', () => {
+        const deleteEveryHousehold = makePermission({ action: Action.delete, subject: 'Household', conditions: {} });
+        const denyOwnHousehold = makePermission({
+          action: Action.delete,
+          subject: 'Household',
+          conditions: { id: '{{ householdId }}' },
+          inverted: true,
+        });
+        const owner = makeUser({
+          roles: [makeRole('Admin', [deleteEveryHousehold])],
+          householdMember: [
+            { householdId: 'hh-A', role: makeRole('HouseholdMember', []) },
+            { householdId: 'hh-B', role: null },
+          ],
+        });
+
+        const ability = factory.createForApiKey(
+          owner,
+          makeApiKey([makeScope(deleteEveryHousehold), makeScope(denyOwnHousehold)]),
+        );
+
+        expect(ability.can(Action.delete, asEntity('Household', { id: 'hh-A' }))).toBe(false);
+        expect(ability.can(Action.delete, asEntity('Household', { id: 'hh-B' }))).toBe(false);
+        expect(ability.can(Action.delete, asEntity('Household', { id: 'hh-C' }))).toBe(true);
+      });
+
+      // Dropping a `cannot` would widen the key, so one that can't be built
+      // takes the whole key down instead.
+      it('a denial that renders in no context denies the whole key', () => {
+        const denyOwnHousehold = makePermission({
+          action: Action.delete,
+          subject: 'Household',
+          conditions: { id: '{{ householdId }}' },
+          inverted: true,
+        });
+        const owner = makeUser({ roles: [makeRole('User', [readEveryGame])] });
+
+        const ability = factory.createForApiKey(
+          owner,
+          makeApiKey([makeScope(readEveryGame), makeScope(denyOwnHousehold)]),
+        );
+
         expect(ability.rules).toHaveLength(0);
+        expect(ability.can(Action.read, asEntity('Game', publicGame))).toBe(false);
+        expect(ability.can(Action.delete, 'Household')).toBe(false);
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining(denyOwnHousehold.id));
       });
 
-      it('denies all actions when scopes are empty', () => {
-        const ability = factory.createForApiKey(makeApiKey([]));
-        expect(ability.can(Action.read, 'Household')).toBe(false);
+      it("a denial whose conditions aren't an object denies the whole key", () => {
+        const listShaped = makePermission({
+          action: Action.read,
+          subject: 'Game',
+          conditions: ['Private'],
+          inverted: true,
+        });
+        const owner = makeUser({ roles: [makeRole('User', [readEveryGame])] });
+
+        const ability = factory.createForApiKey(owner, makeApiKey([makeScope(readEveryGame), makeScope(listShaped)]));
+
+        expect(ability.rules).toHaveLength(0);
+        expect(ability.can(Action.read, asEntity('Game', publicGame))).toBe(false);
+      });
+
+      it('a denial wins over an allow on the same rows', () => {
+        const denyEveryGame = makePermission({ action: Action.read, subject: 'Game', conditions: {}, inverted: true });
+        const owner = makeUser({ roles: [makeRole('User', [readEveryGame])] });
+
+        // The denial is listed first; the factory still applies it last.
+        const ability = factory.createForApiKey(
+          owner,
+          makeApiKey([makeScope(denyEveryGame), makeScope(readEveryGame)]),
+        );
+
+        expect(ability.can(Action.read, asEntity('Game', publicGame))).toBe(false);
+        expect(ability.rules.map(({ inverted }) => inverted ?? false)).toEqual([false, true]);
+      });
+
+      // The owner's own server-role rules render with `{ user, role }`, so a
+      // denial naming `role` renders there too, for an owner with no household
+      // or event, instead of denying the whole key.
+      it("renders a denial that names role in the owner's server-role context (#266)", () => {
+        const denyByRole = makePermission({
+          action: Action.read,
+          subject: 'Game',
+          conditions: { audience: '{{ role }}' },
+          inverted: true,
+        });
+        const owner = makeUser({ roles: [makeRole('User', [readEveryGame])] });
+
+        const ability = factory.createForApiKey(owner, makeApiKey([makeScope(readEveryGame), makeScope(denyByRole)]));
+
+        expect(ability.can(Action.read, asEntity('Game', { audience: 'User' }))).toBe(false);
+        expect(ability.can(Action.read, asEntity('Game', { audience: 'Admin' }))).toBe(true);
+        expect(warn).not.toHaveBeenCalled();
+      });
+
+      // A denial naming no context variable renders the same in every
+      // context, and each copy would be another clause in every query.
+      it('applies a denial that renders the same in every context once (#266)', () => {
+        const denyEveryGame = makePermission({ action: Action.read, subject: 'Game', conditions: {}, inverted: true });
+        const owner = makeUser({
+          roles: [makeRole('User', [readEveryGame])],
+          householdMember: [{ householdId: 'hh-A', role: makeRole('HouseholdMember', []) }],
+          eventsAttended: [
+            { eventId: 'ev-1', role: makeRole('EventGuest', []) },
+            { eventId: 'ev-2', role: makeRole('EventGuest', []) },
+          ],
+        });
+
+        const ability = factory.createForApiKey(
+          owner,
+          makeApiKey([makeScope(readEveryGame), makeScope(denyEveryGame)]),
+        );
+
+        expect(ability.rules.filter(({ inverted }) => inverted)).toHaveLength(1);
+        expect(ability.can(Action.read, asEntity('Game', publicGame))).toBe(false);
       });
     });
 
-    describe('unpinned scope (resourceId = null)', () => {
-      it('grants the action on the full subject type', () => {
-        const ability = factory.createForApiKey(makeApiKey([makeScope(Action.read, 'Household')]));
-        expect(ability.can(Action.read, 'Household')).toBe(true);
+    // An allow held through several roles renders the same wherever its
+    // conditions name no context variable; one copy is enough.
+    it('applies an allow that renders the same in every holding context once (#266)', () => {
+      const readEveryGame = makePermission({ action: Action.read, subject: 'Game', conditions: {} });
+      const owner = makeUser({
+        roles: [makeRole('User', [readEveryGame])],
+        eventsAttended: [
+          { eventId: 'ev-1', role: makeRole('EventGuest', [readEveryGame]) },
+          { eventId: 'ev-2', role: makeRole('EventGuest', [readEveryGame]) },
+        ],
       });
 
-      it('does not add a condition — row filtering is delegated to userAbility', () => {
-        const ability = factory.createForApiKey(makeApiKey([makeScope(Action.read, 'Household')]));
-        expect(ability.rules[0].conditions).toBeUndefined();
-      });
+      const ability = factory.createForApiKey(owner, makeApiKey([makeScope(readEveryGame)]));
 
-      it('does not grant actions on other subjects', () => {
-        const ability = factory.createForApiKey(makeApiKey([makeScope(Action.read, 'Household')]));
-        expect(ability.can(Action.read, 'Event')).toBe(false);
-      });
-
-      it('adds a cannot rule for an inverted unpinned scope', () => {
-        const ability = factory.createForApiKey(makeApiKey([makeScope(Action.delete, 'Household', null, true)]));
-        expect(ability.cannot(Action.delete, 'Household')).toBe(true);
-      });
-    });
-
-    describe('pinned scope (resourceId is set)', () => {
-      it('generates a rule with an { id } condition matching the pinned resourceId', () => {
-        const ability = factory.createForApiKey(makeApiKey([makeScope(Action.read, 'Household', 'hh-alpha')]));
-        expect(ability.rules[0].conditions).toEqual({ id: 'hh-alpha' });
-      });
-
-      it('allows access to the pinned resource', () => {
-        const ability = factory.createForApiKey(makeApiKey([makeScope(Action.read, 'Household', 'hh-alpha')]));
-        expect(ability.can(Action.read, subject('Household', { id: 'hh-alpha' }))).toBe(true);
-      });
-
-      it('denies access to a different resource of the same type', () => {
-        const ability = factory.createForApiKey(makeApiKey([makeScope(Action.read, 'Household', 'hh-alpha')]));
-        expect(ability.can(Action.read, subject('Household', { id: 'hh-beta' }))).toBe(false);
-      });
-
-      it('adds a cannot rule with an { id } condition for an inverted pinned scope', () => {
-        const ability = factory.createForApiKey(makeApiKey([makeScope(Action.delete, 'Household', 'hh-alpha', true)]));
-        expect(ability.rules[0].conditions).toEqual({ id: 'hh-alpha' });
-        expect(ability.cannot(Action.delete, subject('Household', { id: 'hh-alpha' }))).toBe(true);
-      });
-    });
-
-    describe('multiple scopes', () => {
-      it('emits one rule per scope', () => {
-        const scopes = [
-          makeScope(Action.read, 'Household'),
-          makeScope(Action.update, 'Household', 'hh-1'),
-          makeScope(Action.read, 'Event'),
-        ];
-        const ability = factory.createForApiKey(makeApiKey(scopes));
-        expect(ability.rules).toHaveLength(3);
-      });
-
-      it('correctly mixes unpinned and pinned scopes for the same subject', () => {
-        // Unpinned read + pinned update on a specific household
-        const scopes = [makeScope(Action.read, 'Household'), makeScope(Action.update, 'Household', 'hh-1')];
-        const ability = factory.createForApiKey(makeApiKey(scopes));
-
-        expect(ability.can(Action.read, 'Household')).toBe(true);
-        expect(ability.can(Action.update, subject('Household', { id: 'hh-1' }))).toBe(true);
-        expect(ability.can(Action.update, subject('Household', { id: 'hh-2' }))).toBe(false);
-      });
-
-      it('scopes for different subjects are independent', () => {
-        const scopes = [makeScope(Action.read, 'Household', 'hh-1'), makeScope(Action.read, 'Event', 'ev-1')];
-        const ability = factory.createForApiKey(makeApiKey(scopes));
-
-        expect(ability.can(Action.read, subject('Household', { id: 'hh-1' }))).toBe(true);
-        expect(ability.can(Action.read, subject('Event', { id: 'ev-1' }))).toBe(true);
-        // Cross-subject: Household scope does not bleed into Event
-        expect(ability.can(Action.read, subject('Event', { id: 'hh-1' }))).toBe(false);
-      });
-
-      it('a cannot rule from one scope does not affect a can rule from another', () => {
-        const scopes = [
-          makeScope(Action.read, 'Household'),
-          makeScope(Action.delete, 'Household', null, true), // inverted
-        ];
-        const ability = factory.createForApiKey(makeApiKey(scopes));
-
-        expect(ability.can(Action.read, 'Household')).toBe(true);
-        expect(ability.cannot(Action.delete, 'Household')).toBe(true);
-      });
+      expect(ability.rules).toHaveLength(1);
+      expect(ability.can(Action.read, asEntity('Game', publicGame))).toBe(true);
     });
 
     // A key's rule is held to its grant's field list, as a user's is, so a
     // check that names a field sees the slug's reach and not only the owner's.
     describe("a grant's field list", () => {
+      const pluginReadOf = (fields: string[]) =>
+        makePermission({ action: Action.read, subject: 'Plugin', conditions: {}, fields });
+      const holding = (permission: Permission) => makeUser({ roles: [makeRole('Admin', [permission])] });
+
       it('holds an allow rule to the fields its grant names', () => {
-        const ability = factory.createForApiKey(
-          makeApiKey([makeScope(Action.read, 'Plugin', null, false, ['id', 'slug'])]),
-        );
+        const readSome = pluginReadOf(['id', 'slug']);
+
+        const ability = factory.createForApiKey(holding(readSome), makeApiKey([makeScope(readSome)]));
 
         expect(ability.can(Action.read, 'Plugin')).toBe(true);
         expect(ability.can(Action.read, 'Plugin', 'slug')).toBe(true);
@@ -171,17 +577,19 @@ describe('AbilityFactory', () => {
       });
 
       it('keeps the pin beside the field list', () => {
-        const ability = factory.createForApiKey(
-          makeApiKey([makeScope(Action.read, 'Plugin', 'plugin-1', false, ['slug'])]),
-        );
+        const readSlug = pluginReadOf(['slug']);
+
+        const ability = factory.createForApiKey(holding(readSlug), makeApiKey([makeScope(readSlug, 'plugin-1')]));
 
         expect(ability.rules[0]).toMatchObject({ fields: ['slug'], conditions: { id: 'plugin-1' } });
-        expect(ability.can(Action.read, subject('Plugin', { id: 'plugin-1' }), 'slug')).toBe(true);
-        expect(ability.can(Action.read, subject('Plugin', { id: 'plugin-2' }), 'slug')).toBe(false);
+        expect(ability.can(Action.read, asEntity('Plugin', { id: 'plugin-1' }), 'slug')).toBe(true);
+        expect(ability.can(Action.read, asEntity('Plugin', { id: 'plugin-2' }), 'slug')).toBe(false);
       });
 
       it('reads an empty field list as every field', () => {
-        const ability = factory.createForApiKey(makeApiKey([makeScope(Action.read, 'Plugin', null, false, [])]));
+        const readAll = pluginReadOf([]);
+
+        const ability = factory.createForApiKey(holding(readAll), makeApiKey([makeScope(readAll)]));
 
         expect(ability.rules[0].fields).toBeUndefined();
         expect(ability.can(Action.read, 'Plugin', 'installedAt')).toBe(true);
@@ -190,22 +598,22 @@ describe('AbilityFactory', () => {
       // CASL skips a field-bound denial on any check that names no field, and
       // almost none does, so bound to its fields the denial would stop denying.
       it('keeps a denial whole, whatever fields its grant names', () => {
+        const updateHousehold = makePermission({ action: Action.update, subject: 'Household', conditions: {} });
+        const denyName = makePermission({
+          action: Action.update,
+          subject: 'Household',
+          conditions: {},
+          fields: ['name'],
+          inverted: true,
+        });
+
         const ability = factory.createForApiKey(
-          makeApiKey([
-            makeScope(Action.update, 'Household'),
-            makeScope(Action.update, 'Household', null, true, ['name']),
-          ]),
+          holding(updateHousehold),
+          makeApiKey([makeScope(updateHousehold), makeScope(denyName)]),
         );
 
         expect(ability.rules[1].fields).toBeUndefined();
         expect(ability.can(Action.update, 'Household')).toBe(false);
-      });
-
-      // A graph cached before the loader selected `fields` has none.
-      it('reads a permission without a field list as every field', () => {
-        const ability = factory.createForApiKey(makeApiKey([makeScope(Action.read, 'Plugin', null, false, undefined)]));
-
-        expect(ability.can(Action.read, 'Plugin', 'installedAt')).toBe(true);
       });
     });
   });
@@ -2843,31 +3251,33 @@ describe('AbilityFactory', () => {
   });
 });
 
-function makePermissionStub(
-  action: Action,
-  subject: string,
-  inverted = false,
-  fields?: string[],
-): ApiKeyScopeWithPermission['permission'] {
-  return { action, subject, inverted, fields };
-}
+/**
+ * A key scope over `permission`, as the key's graph loader reads it. The
+ * owner's graph holds the same row (same id) where the owner holds it, which
+ * is how the factory finds the contexts to render it in (#266).
+ */
+function makeScope(permission: Permission, resourceId: string | null = null): ApiKeyScopeWithPermission {
+  const { id, action, subject, conditions, fields, inverted } = permission;
 
-function makeScope(
-  action: Action,
-  subject: string,
-  resourceId: string | null = null,
-  inverted = false,
-  fields: string[] | undefined = [],
-): ApiKeyScopeWithPermission {
   return {
     id: `scope-${Math.random()}`,
     apiKeyId: 'key-1',
-    permissionId: `perm-${Math.random()}`,
+    permissionId: id,
     resourceType: subject as ApiKeyScopeWithPermission['resourceType'], // ResourceType enum value when real
     resourceId,
     createdAt: new Date(),
-    permission: makePermissionStub(action, subject, inverted, fields),
+    permission: { id, action, subject, conditions, fields, inverted },
   };
+}
+
+/** The owner's direct permission over `permission`, the same row a key scope names. */
+function grantOf(
+  permission: Permission,
+  overrides: Partial<Omit<UserPermissionWithPermission, 'permission'>> = {},
+): UserPermissionWithPermission {
+  const { id, action, subject, conditions, fields, inverted } = permission;
+
+  return makeUserPermission({ ...overrides, permission: { id, action, subject, conditions, fields, inverted } });
 }
 
 function makeApiKey(scopes: ApiKeyScopeWithPermission[] = []): ApikeyWithScopes {
@@ -2960,6 +3370,7 @@ function makeUserPermission(
     resourceId: null,
     expiresAt: null,
     permission: {
+      id: 'perm-direct',
       action: Action.read,
       subject: 'Household',
       conditions: {},

@@ -291,9 +291,8 @@ describe('installed-plugin inventory (#354)', () => {
     });
 
     // The pinned grant passes the gate, and the identity-column grant beside
-    // it reads every row once a key's conditions are dropped. The ceiling
-    // comes from the rules that read the gate's column, so the second adds
-    // nothing.
+    // it reads every installed plugin. The ceiling comes from the rules that
+    // read the gate's column, so the second adds nothing.
     it('keeps a key to its pinned plugin when it also holds the identity-column grant', async () => {
       const admin = await actors.admin();
       const [scoped, other] = await Promise.all([arrangePlugin(), arrangePlugin()]);
@@ -648,46 +647,67 @@ describe('installed-plugin inventory (#354)', () => {
     });
 
     /**
-     * Owned by Admin, so the instance check admits the household whatever its
-     * state: a deleted household drops out of a member's graph and a member's
-     * key would meet 403 there instead. The key reads no households, so the
-     * route's liveness guard lets it through, and the list checks liveness
-     * itself. It answers such a key 403, as the writes' re-check does, so the
-     * key is not told which household was deleted.
+     * A key scope renders only where its owner holds the permission (#266).
+     * A member holds `read:plugin:household` through their household role.
+     * Staff hold no such role in a household they aren't in: they read its
+     * plugins through `read:public_content`, a read on every type, so a
+     * staff key carrying that scope reads households too, and the route's
+     * liveness guard answers it 404 for a deleted household, as it answers
+     * its owner's session.
      */
-    describe("through a staff member's API key", () => {
-      const keyOf = (owner: SessionActor, pluginId?: string) =>
+    describe('through an API key', () => {
+      /** A household owner's key, which holds the household read through the owner's role there. */
+      const memberKeyOf = (owner: SessionActor, pluginId?: string) =>
         mintApiKey(baseUrl, db.client, owner, [
           { slugs: ['read:plugin:household'], resourceType: ResourceType.HouseholdPlugin },
           { slugs: ['read:plugin:installed'], resourceType: ResourceType.Plugin, resourceId: pluginId },
         ]);
 
-      it('narrows the list to the one plugin its scope names, and refuses it once the household is deleted', async () => {
-        const admin = await actors.admin();
-        const { household } = await actors.householdWithMembers({ owner: await actors.user() });
+      /** A staff member's key, which reads a household it is no member of. */
+      const staffKeyOf = (owner: SessionActor) =>
+        mintApiKey(baseUrl, db.client, owner, [
+          { slugs: ['read:public_content'], resourceType: ResourceType.HouseholdPlugin },
+          { slugs: ['read:plugin:installed'], resourceType: ResourceType.Plugin },
+        ]);
+
+      it('narrows the list to the one plugin its scope names', async () => {
+        const owner = await actors.user();
+        const { household } = await actors.householdWithMembers({ owner });
         const [scoped, other] = await Promise.all([arrangeHouseholdPlugin(), arrangeHouseholdPlugin()]);
 
         // The control: unpinned, the key lists both.
-        const unpinned = await listHousehold(await keyOf(admin), household.id, '?limit=100').expect(200);
+        const unpinned = await listHousehold(await memberKeyOf(owner), household.id, '?limit=100').expect(200);
         expect(slugsOf(unpinned.body)).toEqual(expect.arrayContaining([scoped.slug, other.slug]));
 
-        const key = await keyOf(admin, scoped.id);
-        const pinned = await listHousehold(key, household.id, '?limit=100').expect(200);
+        const pinned = await listHousehold(await memberKeyOf(owner, scoped.id), household.id, '?limit=100').expect(200);
         expect(slugsOf(pinned.body)).toEqual([scoped.slug]);
         expect(pinned.body.pagination.total).toBe(1);
-
-        await db.client.household.update({ where: { id: household.id }, data: { deletedAt: new Date() } });
-
-        await listHousehold(key, household.id).expect(403);
       });
 
-      // The single reads have no write to re-check liveness in either, so they
-      // check it as the list does, and answer the same 403.
-      it('refuses the consent and feature-state reads once the household is deleted (#790)', async () => {
+      it("answers a staff member's key 404 from the liveness guard for the list once the household is deleted, as it answers their session (#266)", async () => {
         const admin = await actors.admin();
         const { household } = await actors.householdWithMembers({ owner: await actors.user() });
         const plugin = await arrangeHouseholdPlugin();
-        const key = await keyOf(admin);
+        const key = await staffKeyOf(admin);
+
+        // The control: the household is live, so the key lists it.
+        const live = await listHousehold(key, household.id, '?limit=100').expect(200);
+        expect(slugsOf(live.body)).toEqual(expect.arrayContaining([plugin.slug]));
+
+        await db.client.household.update({ where: { id: household.id }, data: { deletedAt: new Date() } });
+
+        await listHousehold(admin, household.id).expect(404);
+        await listHousehold(key, household.id).expect(404);
+      });
+
+      // The single reads sit behind the same liveness guard as the list: the
+      // staff key's `read:public_content` scope reads households (#266), so
+      // the guard answers it, as it answers the key's owner's session.
+      it("answers a staff member's key 404 from the liveness guard for the consent and feature-state reads once the household is deleted (#266)", async () => {
+        const admin = await actors.admin();
+        const { household } = await actors.householdWithMembers({ owner: await actors.user() });
+        const plugin = await arrangeHouseholdPlugin();
+        const key = await staffKeyOf(admin);
         const reads = (path: string) =>
           request(baseUrl).get(`/api/households/${household.id}/plugins/${plugin.slug}/${path}`).set(key.headers);
 
@@ -697,20 +717,49 @@ describe('installed-plugin inventory (#354)', () => {
 
         await db.client.household.update({ where: { id: household.id }, data: { deletedAt: new Date() } });
 
+        await reads('consent').expect(404);
+        await reads('features').expect(404);
+      });
+
+      // A member's key reads no households, so the liveness guard lets it
+      // through. A delete that bypasses the route evicts no graph, so the
+      // owner's cached graph still holds the membership and the key's scope
+      // still renders there: only the controller's own re-check stands
+      // between the key and the deleted household's rows (#790).
+      it("refuses a member's key the list, consent and feature-state reads while the owner's cached graph still holds the deleted household (#266, #790)", async () => {
+        const owner = await actors.user();
+        const { household } = await actors.householdWithMembers({ owner });
+        const plugin = await arrangeHouseholdPlugin();
+        const key = await memberKeyOf(owner);
+        const reads = (path: string) =>
+          request(baseUrl).get(`/api/households/${household.id}/plugins/${plugin.slug}/${path}`).set(key.headers);
+
+        // The control: the household is live, so the key reads all three, and
+        // the owner's graph is now cached with the membership.
+        const live = await listHousehold(key, household.id, '?limit=100').expect(200);
+        expect(slugsOf(live.body)).toEqual(expect.arrayContaining([plugin.slug]));
+        await reads('consent').expect(200);
+        await reads('features').expect(200);
+
+        await db.client.household.update({ where: { id: household.id }, data: { deletedAt: new Date() } });
+
+        await listHousehold(key, household.id).expect(403);
         await reads('consent').expect(403);
         await reads('features').expect(403);
       });
 
       // The rows are plugins. A key with no rule on them is refused, not served
-      // an empty page.
+      // an empty page. Its owner holds both reads, so the refusal is the key's
+      // missing scope, and the same owner's key with both lists.
       it('refuses a key that reads household plugins but not plugins', async () => {
-        const admin = await actors.admin();
-        const { household } = await actors.householdWithMembers({ owner: await actors.user() });
-        const key = await mintApiKey(baseUrl, db.client, admin, {
+        const owner = await actors.user();
+        const { household } = await actors.householdWithMembers({ owner });
+        const key = await mintApiKey(baseUrl, db.client, owner, {
           slugs: ['read:plugin:household'],
           resourceType: ResourceType.HouseholdPlugin,
         });
 
+        await listHousehold(await memberKeyOf(owner), household.id).expect(200);
         await listHousehold(key, household.id).expect(403);
       });
     });

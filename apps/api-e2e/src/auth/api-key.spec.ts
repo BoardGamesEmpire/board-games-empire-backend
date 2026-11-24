@@ -1,9 +1,11 @@
-import { ResourceType } from '@bge/database';
+import { Reach, ResourceType } from '@bge/database';
 import type { Actors, SessionActor } from '@bge/testing-e2e';
 import { createActors } from '@bge/testing-e2e';
+import { randomUUID } from 'node:crypto';
 import request from 'supertest';
+import { listGamesEnvelope } from '../game/game-wire';
 import { apiCacheHas, responseCacheKey } from '../support/api-cache';
-import type { ApiKeyCaller } from '../support/api-key';
+import type { ApiKeyCaller, Caller } from '../support/api-key';
 import { API_KEY_HEADER, mintApiKey } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import type { TestDatabase } from '../support/test-db';
@@ -19,6 +21,9 @@ const ME_PATH = '/api/users/me';
 /** A route that opts into the response cache (#530), and one any caller reaches. */
 const LANGUAGES_PATH = '/api/languages';
 
+/** Games, whose read permissions carry conditions. */
+const GAMES_PATH = '/api/games';
+
 /**
  * Requests that carry an API key (#529).
  *
@@ -29,9 +34,11 @@ const LANGUAGES_PATH = '/api/languages';
  * where no unit test of either one could see it.
  *
  * Keys are minted through better-auth's own route, as their owner would mint
- * them. No route writes a key's scope rows yet (#266), and a key with none is
- * denied everywhere, so a key that should pass a policy gets one row arranged
- * directly. Generalizing this into a fixture is #270.
+ * them. A key with no key scope is denied everywhere, so a key that should
+ * pass a policy gets its scope rows arranged directly, until #1418's route
+ * writes them. Each key scope keeps its permission's conditions, rendered
+ * where the key's owner holds the permission (#266). Generalizing this into
+ * a fixture is #270.
  */
 describe('API key requests', () => {
   const baseUrl = requireBaseUrl(process.env);
@@ -150,6 +157,66 @@ describe('API key requests', () => {
       });
 
       await request(baseUrl).get(UNREAD_PATH).set(key.headers).expect(200);
+    });
+  });
+
+  /**
+   * A key scope keeps its permission's conditions, rendered where the key's
+   * owner holds the permission (#266). Before, the key's own ability dropped
+   * them, and only the owner's ability bounded the rows: a key scoped to
+   * `read:game:public` read every game its owner could, Private ones
+   * included.
+   *
+   * Each denial has its control in this describe: the owner's session reads
+   * the same Private game, and a key scoped to `read:game` reads it too, so a
+   * refusal is about the key's scope, not about the row or the route.
+   */
+  describe('key scopes keep their conditions (#266)', () => {
+    const readGame = (caller: Caller, id: string) => request(baseUrl).get(`${GAMES_PATH}/${id}`).set(caller.headers);
+
+    const listedGameIds = async (caller: Caller, who: string) =>
+      listGamesEnvelope(
+        await request(baseUrl).get(GAMES_PATH).set(caller.headers).expect(200),
+        `GET ${GAMES_PATH} as ${who}`,
+      ).games.map((game) => game.id);
+
+    const arrangeGame = (createdById: string, reach: Reach) =>
+      db.client.game.create({
+        data: { title: `e2e game ${randomUUID().slice(0, 8)}`, reach, createdById },
+        select: { id: true },
+      });
+
+    // The route answers 403, not 404, when the game exists and the caller may
+    // not read it, as it does for another user's session.
+    it("a key scoped to read:game:public reads a Public game and gets 403 on its owner's Private one, which the owner's session reads", async () => {
+      const owner = await actors.user();
+      const [publicGame, privateGame] = await Promise.all([
+        arrangeGame(owner.user.id, Reach.Public),
+        arrangeGame(owner.user.id, Reach.Private),
+      ]);
+      const key = await mintApiKey(baseUrl, db.client, owner, {
+        slugs: ['read:game:public'],
+        resourceType: ResourceType.Game,
+      });
+
+      await readGame(owner, privateGame.id).expect(200);
+      expect((await listedGameIds(owner, 'the owner')).sort()).toEqual([publicGame.id, privateGame.id].sort());
+
+      await readGame(key, publicGame.id).expect(200);
+      await readGame(key, privateGame.id).expect(403);
+      expect(await listedGameIds(key, 'the key')).toEqual([publicGame.id]);
+    });
+
+    it("a key scoped to read:game reads its owner's Private game", async () => {
+      const owner = await actors.user();
+      const privateGame = await arrangeGame(owner.user.id, Reach.Private);
+      const key = await mintApiKey(baseUrl, db.client, owner, {
+        slugs: ['read:game'],
+        resourceType: ResourceType.Game,
+      });
+
+      await readGame(key, privateGame.id).expect(200);
+      expect(await listedGameIds(key, 'the key')).toEqual([privateGame.id]);
     });
   });
 

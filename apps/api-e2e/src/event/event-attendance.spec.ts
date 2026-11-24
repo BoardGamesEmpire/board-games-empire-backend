@@ -274,11 +274,14 @@ describe("the acting user's attendance on event reads (#867)", () => {
   /**
    * The ceiling is what keeps a key with no read on attendees from reading the
    * key owner's row, and a deny-all ceiling is enforced only by the real extension,
-   * in a top-level `where` (#559). A key's grant keeps its action and type but
-   * not the permission's conditions (#266), so the key is limited by type here.
+   * in a top-level `where` (#559). A key scope keeps its permission's
+   * conditions, rendered where the key's owner holds the permission (#266), so
+   * the key reads the event through `read:event:participant`, which its owner
+   * holds as the event's host. `read:event` is a staff grant a user doesn't
+   * hold, and would give the key nothing.
    */
   describe('an API key', () => {
-    const READ_EVENT = { slugs: ['read:event'], resourceType: ResourceType.Event };
+    const READ_EVENT = { slugs: ['read:event:participant'], resourceType: ResourceType.Event };
     const READ_ATTENDEE = { slugs: ['read:event_attendee'], resourceType: ResourceType.EventAttendee };
 
     it('with no read on attendees lists the event with null attendance, where the key owner gets the row', async () => {

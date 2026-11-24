@@ -259,7 +259,7 @@ describe('restorable households (#542)', () => {
     expect(await restorableIds(coOwner)).toEqual([id]);
   });
 
-  it('lists to an API key only when its key scopes also allow updating households', async () => {
+  it('lists to an API key only when its key scopes allow restoring the household (#266)', async () => {
     const owner = await actors.user();
     const fixture = await actors.householdWithMembers({ owner, name: 'Restored by a key' });
     const id = fixture.household.id;
@@ -275,10 +275,12 @@ describe('restorable households (#542)', () => {
     expect(await restorableIds(readOnly)).toEqual([]);
     await restore(readOnly, id).expect(404);
 
-    // Any `update` scope on Household will do, not only the restore slug: a key
-    // scope carries none of its permission's conditions, so the key owner's
-    // restore grant is what picks the household.
-    expect(await restorableIds(updater)).toEqual([id]);
+    // Not any `update` scope on Household: a key scope keeps its permission's
+    // conditions, rendered where the key's owner holds it (#266). The owner
+    // holds `update:household` through a membership, and a deleted household's
+    // memberships grant nothing, so only the restore scope reaches it.
+    expect(await restorableIds(updater)).toEqual([]);
+    await restore(updater, id).expect(404);
 
     expect(await restorableIds(restorer)).toEqual([id]);
     await restore(restorer, id).expect(200);

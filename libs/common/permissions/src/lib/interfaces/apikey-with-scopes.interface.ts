@@ -5,6 +5,7 @@ export interface ApikeyWithScopes extends Apikey {
 }
 
 export interface ApiKeyScopeWithPermission extends ApiKeyScope {
-  // `fields` is optional: a graph cached before the loader selected it has none.
-  permission: Pick<Permission, 'action' | 'subject' | 'inverted'> & Partial<Pick<Permission, 'fields'>>;
+  // A key scope keeps its permission's conditions, rendered in each context
+  // where the key's owner holds the permission (#266).
+  permission: Pick<Permission, 'id' | 'action' | 'subject' | 'inverted' | 'conditions' | 'fields'>;
 }
