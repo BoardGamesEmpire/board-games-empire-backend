@@ -1173,7 +1173,7 @@ describe('WebhookSubscriptionService', () => {
 
       // With no creator graph there is nowhere for the key's scopes to render,
       // and dispatch would deliver nothing through it.
-      it('refuses with api_key_unusable when the key’s owner graph is gone', async () => {
+      it('refuses with api_key_unusable when the key’s owner graph is gone (#266)', async () => {
         permissions.loadApiKeyScopeGraphs.mockResolvedValue(
           new Map([['key-1', usableKey([[Action.read, ResourceType.Event]])]]),
         );

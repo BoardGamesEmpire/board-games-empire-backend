@@ -428,7 +428,7 @@ describe('AbilityService', () => {
     // through the key (#723), so the two can't drift apart. Both halves come
     // from the one owner graph: the key's scopes render where its owner
     // holds them (#266).
-    it('resolves an apiKey actor from one owner-graph load', async () => {
+    it('resolves an apiKey actor from one owner-graph load (#266)', async () => {
       const ownerAbility = ability([{ action: Action.read, subject: 'Household' }]);
       const keyAbility = ability([{ action: Action.read, subject: 'Event' }]);
       const ownerGraph = { id: 'owner-1' } as UserWithRoles;
@@ -449,7 +449,7 @@ describe('AbilityService', () => {
     });
 
     // A deleted owner has no graph; the factory turns that into a deny-all key.
-    it('passes a missing owner graph to the factory as null', async () => {
+    it('passes a missing owner graph to the factory as null (#266)', async () => {
       const keyGraph = { id: 'key-1' } as ApikeyWithScopes;
       permissionsService.getUserRoleGraph.mockResolvedValue(null);
       permissionsService.getApiKeyScopeGraph.mockResolvedValue(keyGraph);

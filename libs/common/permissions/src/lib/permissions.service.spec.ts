@@ -108,7 +108,7 @@ describe('PermissionsService', () => {
 
     // The key's rules render its permissions' conditions against its owner's
     // graph, matched by permission id (#266).
-    it('loads the key with scopes, each with its permission and conditions, and caches it on a miss', async () => {
+    it('loads the key with scopes, each with its permission and conditions, and caches it on a miss (#266)', async () => {
       const set = jest.spyOn(cache, 'set');
       const apiKey = makeApiKeyGraph();
       db.apikey.findUnique.mockResolvedValue(apiKey);

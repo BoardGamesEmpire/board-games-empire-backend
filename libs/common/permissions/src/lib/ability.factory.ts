@@ -6,7 +6,13 @@ import { AbilityBuilder, detectSubjectType, ExtractSubjectType } from '@casl/abi
 import { createPrismaAbility } from '@casl/prisma';
 import { Injectable, Logger } from '@nestjs/common';
 import * as Mustache from 'mustache';
-import { holdingContexts, isActiveDirectGrant, isDirectGrantDenial, ownerContexts } from './api-key/holding-contexts';
+import type { HoldingContext } from './api-key/holding-contexts';
+import {
+  buildsDirectPermissionRule,
+  holdingContexts,
+  isDirectPermissionDenial,
+  ownerContexts,
+} from './api-key/holding-contexts';
 import type { TemplateProblem } from './condition-template';
 import { findTemplateProblem, renderPermissionConditions } from './condition-template';
 import { PluginAbilityRenderRejectionError } from './errors/plugin-ability-render-rejection.error';
@@ -146,19 +152,23 @@ export class AbilityFactory {
    * its owner's. A key scope keeps its permission's conditions (#266),
    * rendered in each context where `owner` holds the permission
    * ({@link holdingContexts}): one rule per server role, household
-   * membership, event attendance or direct grant that gives it to the owner,
-   * each rendered as the owner's own rule renders there. Which permissions a
-   * key holds is fixed when it is made; which households and events they
+   * membership, event attendance or direct permission that gives it to the
+   * owner, each rendered with the context the owner's own rule renders with
+   * there, but more strictly than the owner's rule (below). Which permissions
+   * a key holds is fixed when it is made; which households and events they
    * reach follows the owner's graph as it loads now.
    *
    * A pin is ANDed with the rendered conditions, never spread into them: some
    * conditions name `id` themselves (`update:household` binds `id` to the
    * household), and a spread pin would replace the household instead of
-   * narrowing it. A direct grant's own pin is ANDed the same way.
+   * narrowing it. A direct permission's own pin is ANDed the same way.
    *
-   * An allow that can't be built in a context (its template names a variable
-   * that context lacks, or its conditions aren't an object) is left out and
-   * logged; the key keeps its other rules. An owner who no longer holds the
+   * An allow that can't be built in a context is left out there, and the key
+   * keeps its other rules: its condition names a variable that context lacks,
+   * or its conditions aren't an object. The owner's own rules apply both in
+   * some form (an empty string, a field list or no conditions), so this is
+   * where a key's rule and its owner's part. An allow that builds in no
+   * context at all is logged as a warning. An owner who no longer holds the
    * permission gets no rule, which is not an error.
    *
    * A denial only narrows, so it renders in every context the owner has
@@ -334,8 +344,11 @@ export class AbilityFactory {
   /**
    * One allow key scope, as one rule per context where `owner` holds its
    * permission, each the owner's own rule there with the key scope's pin
-   * ANDed on (#266). A context the rule can't be built in is left out and
-   * logged, and the key keeps its other rules.
+   * ANDed on (#266). A context the rule can't be built in is left out, and
+   * the key keeps its other rules. One warning names every context tried when
+   * the scope builds nowhere; when it builds somewhere, the contexts it
+   * skipped are logged at debug level, since the key still reaches what the
+   * owner holds.
    */
   private applyApiKeyAllow(
     ability: AbilityBuilder<AppAbility>,
@@ -343,8 +356,11 @@ export class AbilityFactory {
     apiKey: ApikeyWithScopes,
     scope: ApiKeyScopeWithPermission,
   ): void {
+    const skipped: string[] = [];
+    let built = false;
+
     for (const held of holdingContexts(owner, scope.permissionId)) {
-      const { id, action, conditions, fields, inverted } = held.permission;
+      const { action, conditions, fields, inverted } = held.permission;
 
       // The owner graph's copy can be flipped between the two graph loads; a
       // denial's conditions must never build a `can` (#266).
@@ -355,10 +371,7 @@ export class AbilityFactory {
       const render = renderKeyScopeConditions(conditions, held.context);
 
       if ('unbuildable' in render) {
-        this.logger.warn(
-          `API key ${apiKey.id}: leaving out its key scope over permission ${id} in ${describeContext(held.context)}, ` +
-            `because the permission's conditions ${render.unbuildable} (#266)`,
-        );
+        skipped.push(`${describeContext(held)}, because the permission's conditions ${render.unbuildable}`);
 
         continue;
       }
@@ -368,12 +381,31 @@ export class AbilityFactory {
         { action, subject: held.subject, inverted: false, fields },
         allOf([render.conditions, pinOf(held.resourceId), pinOf(scope.resourceId)]),
       );
+      built = true;
     }
+
+    if (skipped.length === 0) {
+      return;
+    }
+
+    if (built) {
+      this.logger.debug(
+        `API key ${apiKey.id}: its key scope over permission ${scope.permissionId} builds no rule in ` +
+          `${skipped.join('; ')} (#266)`,
+      );
+
+      return;
+    }
+
+    this.logger.warn(
+      `API key ${apiKey.id}: leaving out its key scope over permission ${scope.permissionId}, which builds no rule ` +
+        `in any context where its owner holds it: ${skipped.join('; ')} (#266)`,
+    );
   }
 
   /**
-   * One inverted key scope, as one `cannot` per context the owner has, held
-   * or not, with the key scope's pin ANDed on and no field list (#266).
+   * One key scope over a denial, as one `cannot` per context the owner has,
+   * held or not, with the key scope's pin ANDed on and no field list (#266).
    * Returns whether it rendered anywhere: the caller denies the whole key
    * when it didn't, since dropping a denial would widen the key.
    */
@@ -437,8 +469,6 @@ export class AbilityFactory {
       let parsedConditions: Record<string, unknown> | undefined = undefined;
 
       if (Object.keys(permission.conditions || {}).length > 0) {
-        // `permission.conditions` is only read (serialized) here, so render it
-        // directly — JSON.stringify never mutates, so no defensive clone is needed.
         const rendered = Mustache.render(JSON.stringify(permission.conditions), context);
         parsedConditions = JSON.parse(rendered);
       }
@@ -476,22 +506,19 @@ export class AbilityFactory {
     ability: AbilityBuilder<AppAbility>,
     user: UserWithRoles,
   ): void {
-    // The same skips `holdingContexts` makes, so an API key's rule never
-    // borrows a direct grant its owner's own ability leaves out (#266).
+    // The one predicate `holdingContexts` asks too, so an API key's rule never
+    // borrows a direct permission its owner's own ability leaves out (#266).
     const now = Date.now();
-    const active = userPermissions.filter((up) => isActiveDirectGrant(up, now));
+    const building = userPermissions.filter((up) => buildsDirectPermissionRule(up, now));
 
     // Grants first, denials last → a denial wins any same-target contradiction.
-    const ordered = [...active.filter((up) => !isDirectGrantDenial(up)), ...active.filter(isDirectGrantDenial)];
+    const ordered = [
+      ...building.filter((up) => !isDirectPermissionDenial(up)),
+      ...building.filter(isDirectPermissionDenial),
+    ];
 
     for (const userPermission of ordered) {
       const { permission, resourceType, resourceId } = userPermission;
-
-      // The 'all' wildcard is never directly assignable — wildcard authority is
-      // role-gated only.
-      if (permission.subject === 'all') {
-        continue;
-      }
 
       // `{ user }` is the sole variable available outside a role, household or
       // event scope.
@@ -499,7 +526,7 @@ export class AbilityFactory {
       const conditions = resourceId ? { ...(rendered ?? {}), id: resourceId } : rendered;
       const fields = permission.fields?.length ? permission.fields : undefined;
 
-      const access: RuleApplier = isDirectGrantDenial(userPermission) ? ability.cannot : ability.can;
+      const access: RuleApplier = isDirectPermissionDenial(userPermission) ? ability.cannot : ability.can;
       if (fields) {
         access.call(ability, permission.action, resourceType, fields, conditions);
       } else {
@@ -563,20 +590,17 @@ function denialPinOf(resourceId: string | null | undefined): Record<string, unkn
 }
 
 /** Names where the owner holds a permission, for the log line of a dropped key scope (#266). */
-function describeContext(context: Record<string, unknown>): string {
-  if ('householdId' in context) {
-    return `the owner's household membership (householdId ${String(context['householdId'])})`;
+function describeContext({ source, context }: HoldingContext): string {
+  switch (source) {
+    case 'serverRole':
+      return `the owner's server role ${String(context['role'])}`;
+    case 'household':
+      return `the owner's household membership (householdId ${String(context['householdId'])})`;
+    case 'event':
+      return `the owner's event attendance (eventId ${String(context['eventId'])})`;
+    case 'directPermission':
+      return "the owner's direct permission";
   }
-
-  if ('eventId' in context) {
-    return `the owner's event attendance (eventId ${String(context['eventId'])})`;
-  }
-
-  if ('role' in context) {
-    return `the owner's server role ${String(context['role'])}`;
-  }
-
-  return "the owner's direct grant";
 }
 
 /**

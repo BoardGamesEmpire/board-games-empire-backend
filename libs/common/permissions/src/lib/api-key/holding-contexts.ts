@@ -1,6 +1,9 @@
 import type { Permission } from '@bge/database';
 import type { RoleWithPermissions, UserPermissionWithPermission, UserWithRoles } from '../interfaces';
 
+/** What gives the owner a permission in a holding context (#266). */
+export type HoldingSource = 'directPermission' | 'event' | 'household' | 'serverRole';
+
 /**
  * One place where an API key's owner holds a permission, as the owner's own
  * ability renders it there. A key scope over that permission gets one rule per
@@ -13,22 +16,25 @@ export interface HoldingContext {
   /** The permission row as the owner's graph holds it. */
   readonly permission: Pick<Permission, 'id' | 'action' | 'subject' | 'conditions' | 'fields' | 'inverted'>;
 
-  /** A direct grant's own pin, carried over as the owner's rule carries it; null otherwise. */
+  /** A direct permission's own pin, carried over as the owner's rule carries it; null otherwise. */
   readonly resourceId: string | null;
 
-  /** The CASL subject of the owner's rule: the permission's subject, or a direct grant's resourceType. */
+  /** What gives the owner the permission here, so a log line can name it without reading the context's keys. */
+  readonly source: HoldingSource;
+
+  /** The CASL subject of the owner's rule: the permission's subject, or a direct permission's resourceType. */
   readonly subject: string;
 }
 
 /**
- * Every server role, household membership, event attendance and active direct
- * grant that gives `owner` the permission `permissionId` with its own
+ * Every server role, household membership, event attendance and direct
+ * permission that gives `owner` the permission `permissionId` with its own
  * polarity, in the order `AbilityFactory.createForUser` applies them.
  *
- * A direct grant counts only where the owner's own ability builds a rule of
- * that polarity from it: it is skipped when expired, when its override flips
- * the permission's polarity, or when the permission is on the `'all'`
- * wildcard, which is never directly assignable. A membership or attendance
+ * A direct permission counts only where the owner's own ability builds a rule
+ * of that polarity from it: it is skipped where
+ * {@link buildsDirectPermissionRule} says no rule is built, and where its own
+ * `inverted` flag flips the permission's polarity. A membership or attendance
  * the owner no longer has is not in the graph, so a key stops reaching that
  * household or event on the next graph load (#266).
  */
@@ -41,6 +47,7 @@ export function holdingContexts(owner: UserWithRoles, permissionId: string, now 
     if (permission) {
       held.push({
         context: { user: owner, role: role.name },
+        source: 'serverRole',
         subject: permission.subject,
         resourceId: null,
         permission,
@@ -53,7 +60,7 @@ export function holdingContexts(owner: UserWithRoles, permissionId: string, now 
 
     if (permission) {
       const context = { user: owner, role: member.role?.role.name, householdId: member.householdId };
-      held.push({ context, subject: permission.subject, resourceId: null, permission });
+      held.push({ context, source: 'household', subject: permission.subject, resourceId: null, permission });
     }
   }
 
@@ -62,22 +69,28 @@ export function holdingContexts(owner: UserWithRoles, permissionId: string, now 
 
     if (permission) {
       const context = { user: owner, role: attendee.role?.role.name, eventId: attendee.eventId };
-      held.push({ context, subject: permission.subject, resourceId: null, permission });
+      held.push({ context, source: 'event', subject: permission.subject, resourceId: null, permission });
     }
   }
 
-  for (const grant of owner.permissions) {
-    const { permission } = grant;
+  for (const direct of owner.permissions) {
+    const { permission } = direct;
 
-    if (permission.id !== permissionId || permission.subject === 'all' || !isActiveDirectGrant(grant, now)) {
+    if (permission.id !== permissionId || !buildsDirectPermissionRule(direct, now)) {
       continue;
     }
 
-    if (isDirectGrantDenial(grant) !== permission.inverted) {
+    if (isDirectPermissionDenial(direct) !== permission.inverted) {
       continue;
     }
 
-    held.push({ context: { user: owner }, subject: grant.resourceType, resourceId: grant.resourceId, permission });
+    held.push({
+      context: { user: owner },
+      source: 'directPermission',
+      subject: direct.resourceType,
+      resourceId: direct.resourceId,
+      permission,
+    });
   }
 
   return held;
@@ -86,8 +99,9 @@ export function holdingContexts(owner: UserWithRoles, permissionId: string, now 
 /**
  * Every context the owner has, held or not: `{ user }`, then one per household
  * membership (`{ user, householdId, role }`) and one per event attendance
- * (`{ user, eventId, role }`). A denial only narrows, so an inverted key scope
- * renders in each of them whether or not the owner holds it there (#266).
+ * (`{ user, eventId, role }`). A denial only narrows, so a key scope over a
+ * denial renders in each of them whether or not the owner holds it there
+ * (#266).
  */
 export function ownerContexts(owner: UserWithRoles): Record<string, unknown>[] {
   return [
@@ -106,21 +120,38 @@ export function ownerContexts(owner: UserWithRoles): Record<string, unknown>[] {
 }
 
 /**
- * Whether a direct grant is still in force. The loader already leaves out
+ * Whether the owner's own ability builds a rule from a direct permission at
+ * all: the row is still in force, and its permission is not on the `'all'`
+ * wildcard, which is never directly assignable (wildcard authority is
+ * role-gated only). Which polarity that rule takes is
+ * {@link isDirectPermissionDenial}'s question. The owner's ability and an API
+ * key's both ask this one predicate, so a key never borrows a direct
+ * permission its owner's ability leaves out (#266).
+ */
+export function buildsDirectPermissionRule(
+  direct: Pick<UserPermissionWithPermission, 'expiresAt' | 'permission'>,
+  now: number,
+): boolean {
+  return direct.permission.subject !== 'all' && isActiveDirectPermission(direct, now);
+}
+
+/**
+ * Whether a direct permission is still in force. The loader already leaves out
  * expired rows, but a cached graph can outlive a row's `expiresAt`, and its
  * `Date` arrives as an ISO string once the graph round-trips through the
  * cache, so the value is normalized before comparing.
  */
-export function isActiveDirectGrant(grant: Pick<UserPermissionWithPermission, 'expiresAt'>, now: number): boolean {
-  return grant.expiresAt === null || new Date(grant.expiresAt).getTime() > now;
+function isActiveDirectPermission(direct: Pick<UserPermissionWithPermission, 'expiresAt'>, now: number): boolean {
+  return direct.expiresAt === null || new Date(direct.expiresAt).getTime() > now;
 }
 
 /**
- * Whether a direct grant builds a `cannot`: `UserPermission.inverted`
- * overrides the permission's polarity, and `null` inherits it.
+ * Whether a direct permission builds a `cannot`: its own `inverted` flag sets
+ * the polarity when it is `true` or `false`, and `null` inherits the
+ * permission's.
  */
-export function isDirectGrantDenial(grant: UserPermissionWithPermission): boolean {
-  return grant.inverted ?? grant.permission.inverted;
+export function isDirectPermissionDenial(direct: UserPermissionWithPermission): boolean {
+  return direct.inverted ?? direct.permission.inverted;
 }
 
 function grantedBy(role: RoleWithPermissions['role'] | undefined, permissionId: string): Permission | undefined {

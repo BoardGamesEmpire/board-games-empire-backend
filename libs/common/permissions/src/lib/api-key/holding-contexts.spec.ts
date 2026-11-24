@@ -19,8 +19,20 @@ describe('holdingContexts (#266)', () => {
     });
 
     expect(holdingContexts(owner, held.id, NOW)).toEqual([
-      { context: { user: owner, role: 'User' }, subject: 'Household', resourceId: null, permission: held },
-      { context: { user: owner, role: 'Admin' }, subject: 'Household', resourceId: null, permission: held },
+      {
+        context: { user: owner, role: 'User' },
+        source: 'serverRole',
+        subject: 'Household',
+        resourceId: null,
+        permission: held,
+      },
+      {
+        context: { user: owner, role: 'Admin' },
+        source: 'serverRole',
+        subject: 'Household',
+        resourceId: null,
+        permission: held,
+      },
     ]);
   });
 
@@ -34,9 +46,9 @@ describe('holdingContexts (#266)', () => {
       ],
     });
 
-    expect(holdingContexts(owner, held.id, NOW).map(({ context }) => context)).toEqual([
-      { user: owner, role: 'HouseholdMember', householdId: 'hh-A' },
-      { user: owner, role: 'HouseholdAdmin', householdId: 'hh-B' },
+    expect(holdingContexts(owner, held.id, NOW).map(({ context, source }) => ({ context, source }))).toEqual([
+      { context: { user: owner, role: 'HouseholdMember', householdId: 'hh-A' }, source: 'household' },
+      { context: { user: owner, role: 'HouseholdAdmin', householdId: 'hh-B' }, source: 'household' },
     ]);
   });
 
@@ -51,6 +63,7 @@ describe('holdingContexts (#266)', () => {
     expect(holdingContexts(owner, held.id, NOW)).toEqual([
       {
         context: { user: owner, role: 'EventGuest', eventId: 'ev-1' },
+        source: 'event',
         subject: 'Household',
         resourceId: null,
         permission: held,
@@ -58,13 +71,14 @@ describe('holdingContexts (#266)', () => {
     ]);
   });
 
-  it('yields a direct grant with { user }, its resourceType as subject and its resourceId', () => {
+  it('yields a direct permission with { user }, its resourceType as subject and its resourceId', () => {
     const grant = makeGrant(held, { resourceType: ResourceType.HouseholdMember, resourceId: 'member-9' });
     const owner = makeOwner({ permissions: [grant, makeGrant(lookalike)] });
 
     expect(holdingContexts(owner, held.id, NOW)).toEqual([
       {
         context: { user: owner },
+        source: 'directPermission',
         subject: ResourceType.HouseholdMember,
         resourceId: 'member-9',
         permission: grant.permission,
@@ -73,7 +87,7 @@ describe('holdingContexts (#266)', () => {
   });
 
   // A cached graph round-trips through JSON, so `expiresAt` arrives as a string.
-  it('skips an expired direct grant', () => {
+  it('skips an expired direct permission', () => {
     const owner = makeOwner({
       permissions: [
         makeGrant(held, { resourceId: 'hh-expired', expiresAt: jsonDate('2026-11-23T11:59:59.000Z') }),
@@ -86,7 +100,7 @@ describe('holdingContexts (#266)', () => {
 
   // The owner's own ability turns that row into a `cannot`, so it gives the
   // owner nothing a key's allow could borrow.
-  it('skips a direct grant whose override makes it a denial', () => {
+  it('skips a direct permission whose own inverted flag makes it a denial', () => {
     const owner = makeOwner({ permissions: [makeGrant(held, { inverted: true })] });
 
     expect(holdingContexts(owner, held.id, NOW)).toEqual([]);
@@ -94,7 +108,7 @@ describe('holdingContexts (#266)', () => {
 
   // Wildcard authority is role-gated only, so the owner's ability skips this
   // row and a key can't hold it through one.
-  it("skips a direct grant on the 'all' subject", () => {
+  it("skips a direct permission on the 'all' subject", () => {
     const wildcard = makePermission({ id: 'perm-wildcard', action: Action.manage, subject: 'all' });
     const owner = makeOwner({ permissions: [makeGrant(wildcard, { resourceType: ResourceType.Household })] });
 

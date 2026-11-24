@@ -79,12 +79,17 @@ describe('AbilityFactory', () => {
   // renders there (#266).
   describe('createForApiKey (#266)', () => {
     let warn: jest.SpyInstance;
+    let debug: jest.SpyInstance;
 
     beforeEach(() => {
       warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      debug = jest.spyOn(Logger.prototype, 'debug').mockImplementation(() => undefined);
     });
 
-    afterEach(() => warn.mockRestore());
+    afterEach(() => {
+      warn.mockRestore();
+      debug.mockRestore();
+    });
 
     const publicGame = { deletedAt: null, reach: 'Public', createdById: 'someone-else' };
     const ownersPrivateGame = { deletedAt: null, reach: 'Private', createdById: 'owner-1' };
@@ -182,7 +187,7 @@ describe('AbilityFactory', () => {
       });
     });
 
-    it("carries a direct grant's own pin, ANDed with its conditions", () => {
+    it("carries a direct permission's own pin, ANDed with its conditions", () => {
       const readHouseholds = catalogPermission('read:households');
       const owner = makeUser({
         id: 'owner-1',
@@ -223,7 +228,7 @@ describe('AbilityFactory', () => {
 
     // A catalog edit can leave a granted permission naming a variable its
     // holder's context lacks. That rule goes, and the key keeps working.
-    it("drops an allow scope that names a variable none of its contexts supply, logs it, and keeps the key's other scopes", () => {
+    it("drops an allow scope whose condition names householdId, which none of its contexts supply, warns once, and keeps the key's other scopes (#266)", () => {
       const readHouseholdMember = catalogPermission('read:household_member');
       const readGamePublic = catalogPermission('read:game:public');
       const owner = makeUser({
@@ -243,12 +248,13 @@ describe('AbilityFactory', () => {
       expect(warn.mock.calls[0][0]).toEqual(expect.stringContaining('key-1'));
       expect(warn.mock.calls[0][0]).toEqual(expect.stringContaining(readHouseholdMember.id));
       expect(warn.mock.calls[0][0]).toEqual(expect.stringContaining('householdId'));
-      expect(warn.mock.calls[0][0]).toEqual(expect.stringContaining('direct grant'));
+      expect(warn.mock.calls[0][0]).toEqual(expect.stringContaining("the owner's direct permission"));
     });
 
-    // One context renders and another has a template problem: the key keeps
-    // the first and the log names the second.
-    it("keeps a membership's rule when the same permission's direct grant can't render, and names the direct grant (#266)", () => {
+    // One context renders and another's condition names a variable it lacks:
+    // the key still reaches what the owner holds, so the skipped context is a
+    // debug line, not a warning.
+    it("keeps a membership's rule when a direct permission over the same permission can't render, and logs that only at debug (#266)", () => {
       const readOwnHousehold = makePermission({
         action: Action.read,
         subject: 'Household',
@@ -264,8 +270,10 @@ describe('AbilityFactory', () => {
       expect(ability.rules).toHaveLength(1);
       expect(ability.can(Action.read, asEntity('Household', { id: 'hh-A' }))).toBe(true);
       expect(ability.can(Action.read, asEntity('Household', { id: 'hh-B' }))).toBe(false);
-      expect(warn).toHaveBeenCalledTimes(1);
-      expect(warn.mock.calls[0][0]).toEqual(expect.stringContaining('direct grant'));
+      expect(warn).not.toHaveBeenCalled();
+      expect(debug).toHaveBeenCalledTimes(1);
+      expect(debug.mock.calls[0][0]).toEqual(expect.stringContaining(readOwnHousehold.id));
+      expect(debug.mock.calls[0][0]).toEqual(expect.stringContaining("the owner's direct permission"));
     });
 
     it("names the household in the log line when a membership's rule is dropped (#266)", () => {
@@ -282,6 +290,27 @@ describe('AbilityFactory', () => {
 
       expect(warn).toHaveBeenCalledTimes(1);
       expect(warn.mock.calls[0][0]).toEqual(expect.stringContaining('householdId hh-A'));
+    });
+
+    // A household or event context also carries `role`, so the log names a
+    // context by what gives the owner the permission there, not by its keys.
+    it('names the server role and the event in one warning for a scope dropped in both (#266)', () => {
+      const readOwnHousehold = makePermission({
+        action: Action.read,
+        subject: 'Household',
+        conditions: { id: '{{ householdId }}' },
+      });
+      const owner = makeUser({
+        roles: [makeRole('User', [readOwnHousehold])],
+        eventsAttended: [{ eventId: 'ev-1', role: makeRole('EventGuest', [readOwnHousehold]) }],
+      });
+
+      factory.createForApiKey(owner, makeApiKey([makeScope(readOwnHousehold)]));
+
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0][0]).toEqual(expect.stringContaining("the owner's server role User"));
+      expect(warn.mock.calls[0][0]).toEqual(expect.stringContaining("the owner's event attendance (eventId ev-1)"));
+      expect(debug).not.toHaveBeenCalled();
     });
 
     // A blank pin is still a pin: `{ id: '' }` matches no row, so it fails closed.
@@ -308,9 +337,9 @@ describe('AbilityFactory', () => {
       expect(ability.can(Action.read, asEntity('Game', publicGame))).toBe(false);
     });
 
-    // The grant's pin, the key scope's pin and the permission's conditions
-    // all narrow the same rule.
-    it("ANDs a direct grant's pin, a key scope's pin and the permission's conditions (#266)", () => {
+    // The direct permission's pin, the key scope's pin and the permission's
+    // conditions all narrow the same rule.
+    it("ANDs a direct permission's pin, a key scope's pin and the permission's conditions (#266)", () => {
       const readPublicGame = makePermission({ action: Action.read, subject: 'Game', conditions: { reach: 'Public' } });
       const holder = (grantPin: string) =>
         makeUser({
@@ -357,7 +386,7 @@ describe('AbilityFactory', () => {
       expect(warn).not.toHaveBeenCalled();
     });
 
-    describe('an inverted key scope', () => {
+    describe('a key scope over a denial', () => {
       const readEveryGame = makePermission({ action: Action.read, subject: 'Game', conditions: {} });
 
       it('a denial carries its conditions onto the cannot', () => {
@@ -3182,7 +3211,7 @@ function makeScope(permission: Permission, resourceId: string | null = null): Ap
   };
 }
 
-/** The owner's direct grant of `permission`, the same row a key scope names. */
+/** The owner's direct permission over `permission`, the same row a key scope names. */
 function grantOf(
   permission: Permission,
   overrides: Partial<Omit<UserPermissionWithPermission, 'permission'>> = {},
