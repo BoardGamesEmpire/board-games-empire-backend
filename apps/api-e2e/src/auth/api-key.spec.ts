@@ -15,6 +15,10 @@ import { createTestDatabase } from '../support/test-db';
 const UNREAD_PATH = '/api/notifications/unread';
 const UNREAD_PERMISSION_SLUG = 'read:notification:own';
 
+/** A policy-checked read only staff hold: `read` on `AuditLog`. */
+const AUDIT_LOGS_PATH = '/api/audit-logs';
+const AUDIT_LOG_PERMISSION_SLUG = 'read:audit_log';
+
 /** An authenticated route with no policy. */
 const ME_PATH = '/api/users/me';
 
@@ -33,12 +37,13 @@ const GAMES_PATH = '/api/games';
  * whole stack, because the defect lived between the middleware and the guard,
  * where no unit test of either one could see it.
  *
- * Keys are minted through better-auth's own route, as their owner would mint
- * them. A key with no key scope is denied everywhere, so a key that should
- * pass a policy gets its scope rows arranged directly, until #1418's route
- * writes them. Each key scope keeps its permission's conditions, rendered
- * where the key's owner holds the permission (#266). Generalizing this into
- * a fixture is #270.
+ * Keys are minted at `POST /api/api-keys`, as their owner would mint them,
+ * with the key scopes the route writes (#1418); the conditioned case below
+ * (`read:game:public`) mints through it too. A key with no key scope is denied
+ * everywhere. Each key scope keeps its permission's conditions, rendered
+ * where the key's owner holds the permission (#266). The routes themselves
+ * are covered in `api-key-routes.spec.ts`. Generalizing this into a fixture
+ * is #270.
  */
 describe('API key requests', () => {
   const baseUrl = requireBaseUrl(process.env);
@@ -108,6 +113,22 @@ describe('API key requests', () => {
         const response = await request(baseUrl).get(UNREAD_PATH).set(key.headers);
         expect({ attempt, status: response.status }).toEqual({ attempt, status: 200 });
       }
+    });
+
+    // A key is judged by its own key scopes beside its owner's ability, so an
+    // Admin's key does no more than it holds, though its owner can (#1418).
+    // The route checks `read` on `AuditLog`, which Admin holds.
+    it("refuses a privileged owner's key scoped to read:notification:own at the audit log, which a key scoped to read:audit_log reads (#1418)", async () => {
+      const admin = await actors.admin();
+      const notificationsKey = await scopedKey(admin);
+      const auditKey = await mintApiKey(baseUrl, db.client, admin, {
+        slugs: [AUDIT_LOG_PERMISSION_SLUG],
+        resourceType: ResourceType.AuditLog,
+      });
+
+      await request(baseUrl).get(AUDIT_LOGS_PATH).set(admin.headers).expect(200);
+      await request(baseUrl).get(AUDIT_LOGS_PATH).set(notificationsKey.headers).expect(403);
+      await request(baseUrl).get(AUDIT_LOGS_PATH).set(auditKey.headers).expect(200);
     });
 
     it("answers /users/me with the key's owner", async () => {
