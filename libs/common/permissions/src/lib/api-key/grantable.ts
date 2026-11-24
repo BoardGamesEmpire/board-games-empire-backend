@@ -21,7 +21,13 @@ export const API_KEY_PINNABLE_TYPES: ReadonlySet<ResourceType> = new Set<Resourc
   ResourceType.HouseholdBan,
 ]);
 
-/** A pin is accepted on an allowlisted type, never on a create permission: no row exists yet to pin (#1417). */
+/**
+ * A pin is accepted on an allowlisted type, never on a create permission: no
+ * row exists yet to pin (#1417). A `manage` permission still accepts one, and
+ * `manage` covers create, so a pinned `manage` scope does not stop a create
+ * route that checks only the type. The key create route (#1418) must refuse
+ * that pairing.
+ */
 export function acceptsPin(permission: Pick<Permission, 'action' | 'subject'>): boolean {
   const pinnable: ReadonlySet<string> = API_KEY_PINNABLE_TYPES;
 
@@ -72,8 +78,8 @@ export function grantablePermissions(owner: UserWithRoles): GrantablePermission[
  *   cached graph must not bring one back);
  * - it renders in at least one context where its owner holds it, with every
  *   variable resolved. A household permission held through a membership
- *   qualifies; a direct grant whose template names `{{ householdId }}`
- *   doesn't, because a direct grant renders with the user alone.
+ *   qualifies; a direct permission whose condition names `{{ householdId }}`
+ *   doesn't, because a direct permission renders with the user alone.
  *
  * The render check is the one `AbilityFactory.createForApiKey` makes, so the
  * list and the factory agree on which contexts build. The retirement check is
@@ -87,7 +93,7 @@ export function mayKeyHold(owner: UserWithRoles, permissionId: string): boolean 
 
 /**
  * The first context where the owner holds `permissionId` and a key scope over
- * it builds an allow. {@link renderHeldAllow} refuses a denial and a template
+ * it builds an allow. {@link renderHeldAllow} refuses a denial and a condition
  * the context can't resolve, exactly as the factory does (#1417).
  */
 function firstGrantableContext(owner: UserWithRoles, permissionId: string, now: number): HoldingContext | undefined {

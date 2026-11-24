@@ -47,7 +47,7 @@ export interface Permissions {
  * - `inverted` (base) — the permission's default polarity, inherited when the
  *   `UserPermission.inverted` override is `null`.
  * - `slug` / `riskLevel` / `retiredAt` — what the list of permissions an API key
- *   may hold reads, so a permission held only through a direct grant is listed
+ *   may hold reads, so a permission held only through a direct permission is listed
  *   with its slug and risk, and a retired row a stale graph carries is left out
  *   (#1417).
  *

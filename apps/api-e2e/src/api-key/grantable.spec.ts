@@ -54,12 +54,8 @@ function grantableEnvelope(response: HttpResponseLike): readonly GrantablePermis
 }
 
 /** The English `permissions` catalog as the server ships it, read at run time (#1417). */
-function shippedDescription(slug: string): unknown {
-  const catalog: Record<string, unknown> = JSON.parse(
-    readFileSync(path.join(I18N_CATALOG_DIR, 'en', 'permissions.json'), 'utf8'),
-  );
-
-  return catalog[slug];
+function shippedDescriptions(): Record<string, unknown> {
+  return JSON.parse(readFileSync(path.join(I18N_CATALOG_DIR, 'en', 'permissions.json'), 'utf8'));
 }
 
 /**
@@ -120,13 +116,20 @@ describe('GET /api/api-keys/grantable (#1417)', () => {
   });
 
   // The description is the localized catalog text a screen reader announces,
-  // never the permission's editable reason.
+  // never the permission's editable reason. Every entry is checked, so a
+  // catalog gap shows here as the slug whose description is missing (#1417).
   it("each description is the permissions catalog's English text", async () => {
     const user = await actors.user();
-    const expected = shippedDescription('read:game');
+    const catalog = shippedDescriptions();
+    const list = await grantableFor(user.headers);
 
-    expect(typeof expected).toBe('string');
-    expect(entry(await grantableFor(user.headers), 'read:game')?.description).toBe(expected);
+    expect(list.length).toBeGreaterThan(0);
+
+    for (const { slug, description } of list) {
+      // The slug rides along so a failure names the permission.
+      expect([slug, typeof catalog[slug]]).toEqual([slug, 'string']);
+      expect([slug, description]).toEqual([slug, catalog[slug]]);
+    }
   });
 
   it('read:household_ban is pinnable and create:household_ban is not', async () => {
@@ -151,7 +154,7 @@ describe('GET /api/api-keys/grantable (#1417)', () => {
   });
 
   // The global guard refuses a request with no session and no key before the route runs.
-  it('an anonymous request is refused', async () => {
+  it('an unauthenticated request is refused', async () => {
     await request(baseUrl).get(PATH).expect(401);
   });
 });

@@ -63,6 +63,22 @@ describe('ApiKeyController (#1417)', () => {
       expect(service.grantableFor).not.toHaveBeenCalled();
     });
 
+    // An anonymous user holds no account of their own to hand a key, so only a
+    // registered user signed in as themself reads the list (#1417).
+    it("refuses an anonymous user's actor with 403", () => {
+      auditContext.getActor.mockReturnValue({ kind: 'anonymous', userId: USER_ID });
+
+      let status: number | undefined;
+      try {
+        controller.grantable();
+      } catch (error) {
+        status = error instanceof ForbiddenException ? error.getStatus() : undefined;
+      }
+
+      expect(status).toBe(403);
+      expect(service.grantableFor).not.toHaveBeenCalled();
+    });
+
     // Every signed-in user may list their own, so no policy gates the route.
     it('carries no policy check', () => {
       expect(Reflect.getMetadata(CHECK_POLICIES_KEY, ApiKeyController.prototype.grantable)).toBeUndefined();

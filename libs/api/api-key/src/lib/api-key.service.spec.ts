@@ -29,7 +29,7 @@ describe('ApiKeyService (#1417)', () => {
     service = new ApiKeyService(permissions as unknown as PermissionsService);
   });
 
-  it("reads the caller's graph and returns its grantable permissions", async () => {
+  it("reads the signed-in user's graph and returns its grantable permissions", async () => {
     permissions.getUserRoleGraph.mockResolvedValue(
       graphOf('user-1', [readOwnNotification, readGame, denyPrivateGames]),
     );

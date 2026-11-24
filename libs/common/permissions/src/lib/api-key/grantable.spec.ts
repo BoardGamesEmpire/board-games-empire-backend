@@ -73,7 +73,7 @@ describe('grantablePermissions and mayKeyHold (#1417)', () => {
     conditions: { reach: 'Private' },
     inverted: true,
   });
-  // A direct grant renders with the user alone, so a template naming
+  // A direct permission renders with the user alone, so a condition naming
   // householdId can't be built for it.
   const banInHousehold = makePermission({
     id: 'perm-ban-in-household',
@@ -113,7 +113,7 @@ describe('grantablePermissions and mayKeyHold (#1417)', () => {
     expect(mayKeyHold(owner, readHousehold.id)).toBe(true);
   });
 
-  it('offers a permission held through a direct grant', () => {
+  it('offers a permission held through a direct permission', () => {
     const owner = makeOwner({ permissions: [makeGrant(readOwnNotification)] });
 
     expect(grantablePermissions(owner)).toEqual([
@@ -142,13 +142,13 @@ describe('grantablePermissions and mayKeyHold (#1417)', () => {
     expect(grantablePermissions(owner).map(({ id }) => id)).not.toContain(denyPrivateGames.id);
   });
 
-  it('refuses a direct grant whose template names householdId', () => {
+  it('refuses a direct permission whose condition names householdId', () => {
     expect(mayKeyHold(owner, banInHousehold.id)).toBe(false);
     expect(grantablePermissions(owner).map(({ id }) => id)).not.toContain(banInHousehold.id);
   });
 
-  // The same template held through a membership renders, so it is offered.
-  it('offers that template where a membership supplies householdId', () => {
+  // The same condition held through a membership renders, so it is offered.
+  it('offers that condition where a membership supplies householdId', () => {
     const member = makeOwner({
       householdMember: [{ householdId: 'hh-A', role: makeRole('HouseholdAdmin', [banInHousehold]) }],
       permissions: [makeGrant(banInHousehold)],
@@ -173,8 +173,8 @@ describe('grantablePermissions and mayKeyHold (#1417)', () => {
   });
 
   // An Admin-like owner holds `read:public_content` (subject 'all') through a
-  // server role; a direct grant never carries an 'all' permission (#1417).
-  it("offers a permission on 'all' held through a server role, not through a direct grant", () => {
+  // server role; a direct permission never carries an 'all' permission (#1417).
+  it("offers a permission on 'all' held through a server role, not through a direct permission", () => {
     const readPublicContent = makePermission({
       id: 'perm-read-public-content',
       slug: 'read:public_content',

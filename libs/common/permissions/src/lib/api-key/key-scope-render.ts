@@ -2,7 +2,7 @@ import type { TemplateProblem } from '../condition-template';
 import { findTemplateProblem, renderPermissionConditions } from '../condition-template';
 import type { HoldingContext } from './holding-contexts';
 
-/** Why a key scope's conditions can't be built in a context: not an object, or a template problem (#266). */
+/** Why a key scope's conditions can't be built in a context: not an object, or a {@link TemplateProblem} (#266). */
 export type KeyScopeRenderRefusal = { readonly reason: 'not-an-object' } | TemplateProblem;
 
 /** A key scope's conditions rendered in one context, or why they can't be (#266). */
@@ -22,7 +22,7 @@ export type HeldAllowRender =
 /**
  * Renders a key scope's conditions in one context (#266). Only null and `{}`
  * mean "no conditions" here. Conditions that aren't an object (a list, a
- * string, a number) can't be read as a bound, and a template naming a
+ * string, a number) can't be read as a bound, and a condition naming a
  * variable the context lacks would render `''` into the clause, so both are
  * refused. No catalog row is either; this fails closed on a row written some
  * other way.
