@@ -5,12 +5,14 @@ import type { GrantablePermission, UserWithRoles } from '@bge/permissions';
 import { grantablePermissions, PermissionsService } from '@bge/permissions';
 import type { PaginatedRows, ResolvedPaging } from '@bge/shared';
 import { Injectable, Logger } from '@nestjs/common';
+import type { ApiKeyPreset } from './api-key.constants';
 import { API_KEY_EXPIRY_DEFAULT_DAYS } from './api-key.constants';
 import { apiKeyNotFound, scopesOrPreset } from './api-key.errors';
 import type { RequestedScope, ResolvedScope, ScopeCatalog } from './key-scope-request';
 import {
   addsCritical,
   assertCriticalAllowed,
+  assertExpiryInRange,
   everythingScopes,
   expiryDate,
   resolveRequestedScopes,
@@ -67,7 +69,7 @@ export interface ApiKeyCreateInput {
   readonly name: string;
 
   /** "Everything I can do": every permission the owner's key may hold, unpinned. */
-  readonly preset?: 'everything';
+  readonly preset?: ApiKeyPreset;
 
   readonly scopes?: readonly RequestedScope[];
 }
@@ -173,7 +175,7 @@ export class ApiKeyService {
       input.preset === 'everything' ? everythingScopes(owner, catalog) : this.resolve(owner, catalog, input.scopes);
     const expiresInDays = input.expiresInDays ?? API_KEY_EXPIRY_DEFAULT_DAYS;
     // Only the range check: better-auth works out the expiry itself from the seconds.
-    expiryDate(expiresInDays, this.now());
+    assertExpiryInRange(expiresInDays);
     this.checkCritical(addsCritical(resolved, new Set()), input.confirmCritical);
 
     const created = await this.auth.createApiKey({
@@ -352,7 +354,7 @@ export class ApiKeyService {
     return scopes === undefined ? [] : resolveRequestedScopes(owner, catalog, scopes);
   }
 
-  /** {@link assertCriticalAllowed} with the caller's sign-in time, by better-auth's fresh-session age. */
+  /** {@link assertCriticalAllowed} with the actor's sign-in time, by better-auth's fresh-session age. */
   private checkCritical(adds: boolean, confirmCritical: boolean | undefined): void {
     assertCriticalAllowed({
       addsCritical: adds,
@@ -366,7 +368,7 @@ export class ApiKeyService {
   /**
    * Deletes a key whose key scopes could not be written (#1418). By id through
    * Prisma, since better-auth's delete reads a session. A failure here is
-   * logged, not thrown, so the caller rethrows the failure that caused it: the
+   * logged, not thrown, so `create` rethrows the failure that caused it: the
    * key left behind holds no key scopes, so it is denied everywhere.
    */
   private async deleteUnscopedKey(id: string): Promise<void> {

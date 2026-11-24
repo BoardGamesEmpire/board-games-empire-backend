@@ -231,7 +231,7 @@ describe('AuthService', () => {
     });
 
     // With no headers, better-auth takes the owner from `body.userId`; with
-    // headers it would take the caller's session instead (#1418).
+    // headers it would take the signed-in user's session instead (#1418).
     it('creates the key server-side: the owner in the body, no headers (#1418)', async () => {
       const createApiKey = jest.fn().mockResolvedValue(created());
 

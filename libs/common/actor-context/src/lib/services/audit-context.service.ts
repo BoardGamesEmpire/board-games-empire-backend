@@ -13,7 +13,7 @@ export const SOURCE_CLS_KEY = 'actor-context:source' as const;
 export const LOCALE_CLS_KEY = 'actor-context:locale' as const;
 
 /**
- * When the caller's session was signed in (the session's `createdAt`), set by
+ * When the actor's session was signed in (the session's `createdAt`), set by
  * the HTTP actor middleware for a signed-in user only. It lives in its own CLS
  * slot rather than on `Actor` because `Actor` reaches audit rows and job
  * payloads, and a sign-in time belongs to neither (#1418). Consumers read it
@@ -110,7 +110,7 @@ export class AuditContextService {
   }
 
   /**
-   * When the caller's session was signed in, so a route can require a recent
+   * When the actor's session was signed in, so a route can require a recent
    * sign-in before an act such as giving an API key a Critical permission
    * (#1418). `null` for everything but a signed-in user over HTTP: an API key,
    * an anonymous user, no actor, any other source (a queue job included), and

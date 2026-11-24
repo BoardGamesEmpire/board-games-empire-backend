@@ -24,7 +24,7 @@ export interface ActorContextInit {
   readonly locale?: string;
 
   /**
-   * When the caller's session was signed in. Set only by the HTTP seam, and
+   * When the actor's session was signed in. Set only by the HTTP seam, and
    * only for a signed-in user; every other seam leaves it out (#1418).
    */
   readonly sessionSignedInAt?: Date;

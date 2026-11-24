@@ -23,8 +23,11 @@ import { GrantablePermissionsResponse, toGrantablePermissionEntry } from './dto/
 import { ListApiKeysQueryDto } from './dto/list-api-keys.query.dto';
 import { UpdateApiKeyDto } from './dto/update-api-key.dto';
 
-/** The key list holds no permissioned resource: an API key is not a ResourceType (#1418). */
-const API_KEYS_SCOPE = Unscoped("a user's own API keys, filtered by owner; an API key is not a ResourceType");
+/** The key list holds no permissioned resource, and only its owner, signed in, may read it (#1418). */
+const API_KEYS_SCOPE = Unscoped(
+  "a user's own API keys, filtered by owner (an API key is not a ResourceType), and an API key is refused at " +
+    'this route, so only the owner, signed in, lists their keys and no delegated ceiling is dropped',
+);
 
 const UNAUTHORIZED_DESCRIPTION = 'Authentication required';
 

@@ -9,6 +9,7 @@ import type { ResolvedScope } from './key-scope-request';
 import {
   addsCritical,
   assertCriticalAllowed,
+  assertExpiryInRange,
   everythingScopes,
   expiryDate,
   resolveRequestedScopes,
@@ -291,6 +292,19 @@ describe('expiryDate (#1418)', () => {
 
   it.each([0, 366, -1])('refuses %p days with API_KEY_EXPIRY_OUT_OF_RANGE naming the range', (days) => {
     const error = thrownBy(() => expiryDate(days, now));
+
+    expect(error.getStatus()).toBe(Http.UnprocessableEntity);
+    expect(error.getResponse()).toMatchObject({ code: 'API_KEY_EXPIRY_OUT_OF_RANGE', min: 1, max: 365 });
+  });
+});
+
+describe('assertExpiryInRange (#1418)', () => {
+  it.each([1, 365])('accepts %p days', (days) => {
+    expect(() => assertExpiryInRange(days)).not.toThrow();
+  });
+
+  it.each([0, 366])('refuses %p days with API_KEY_EXPIRY_OUT_OF_RANGE naming the range', (days) => {
+    const error = thrownBy(() => assertExpiryInRange(days));
 
     expect(error.getStatus()).toBe(Http.UnprocessableEntity);
     expect(error.getResponse()).toMatchObject({ code: 'API_KEY_EXPIRY_OUT_OF_RANGE', min: 1, max: 365 });

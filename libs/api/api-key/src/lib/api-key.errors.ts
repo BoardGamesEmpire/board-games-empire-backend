@@ -17,7 +17,7 @@ export function apiKeyRequired(): CodedHttpException {
 }
 
 /**
- * A missing key and another user's key get the same 404, so a caller can't
+ * A missing key and another user's key get the same 404, so no actor can
  * learn which ids exist (#1418).
  */
 export function apiKeyNotFound(): CodedHttpException {

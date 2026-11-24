@@ -1,3 +1,4 @@
+import { isSessionStale } from '@bge/auth';
 import type { Permission } from '@bge/database';
 import { ResourceType, RiskLevel } from '@bge/database';
 import type { UserWithRoles } from '@bge/permissions';
@@ -104,6 +105,8 @@ export function everythingScopes(owner: UserWithRoles, catalog: ScopeCatalog): R
   return grantablePermissions(owner).flatMap(({ slug }): ResolvedScope[] => {
     const permission = catalog.get(slug);
 
+    // grantablePermissions already leaves `all` out; the check narrows the
+    // catalog's string subject to a ResourceType for the key scope.
     if (!permission || !isResourceType(permission.subject)) {
       return [];
     }
@@ -124,6 +127,11 @@ export function everythingScopes(owner: UserWithRoles, catalog: ScopeCatalog): R
  * Whether `next` gives the key a Critical permission it doesn't hold yet
  * (#1418). An edit passes the permissions the key holds now, so keeping a
  * Critical permission asks for nothing again; a create passes an empty set.
+ *
+ * It compares permission ids only, so widening a pinned Critical key scope to
+ * an unpinned one would ask for nothing. No Critical permission accepts a pin
+ * today (a `manage:plugin` pin is refused), so none can be widened. Once one
+ * does, this must compare (permissionId, resourceId) pairs instead.
  */
 export function addsCritical(next: readonly ResolvedScope[], currentPermissionIds: ReadonlySet<string>): boolean {
   return next.some(
@@ -136,9 +144,10 @@ export function addsCritical(next: readonly ResolvedScope[], currentPermissionId
  * confirmation and a recent sign-in, checked in that order, so a client asks
  * the owner before sending them to sign in again (#1418).
  *
- * Freshness is better-auth's rule, as the provider link check applies it: a
- * `freshAgeSeconds` of 0 checks nothing, and a session signed in
- * `freshAgeSeconds` ago or longer is stale. An unknown sign-in time is stale.
+ * Freshness is better-auth's rule ({@link isSessionStale}), the one the
+ * provider link check applies too: a `freshAgeSeconds` of 0 checks nothing,
+ * and a session signed in `freshAgeSeconds` ago or longer is stale. An unknown
+ * sign-in time is stale.
  */
 export function assertCriticalAllowed(input: {
   addsCritical: boolean;
@@ -161,16 +170,24 @@ export function assertCriticalAllowed(input: {
 }
 
 /**
- * The expiry `expiresInDays` from `now` (#1418). It refuses a count outside 1
- * to 365 days; a request that names none passes the default itself. It accepts
- * a fraction: the request DTO refuses a non-integer before it gets here.
+ * Refuses an expiry outside 1 to 365 days (#1418). It accepts a fraction: the
+ * request DTO refuses a non-integer before it gets here.
  */
-export function expiryDate(expiresInDays: number, now: number): Date {
+export function assertExpiryInRange(expiresInDays: number): void {
   const inRange = expiresInDays >= API_KEY_EXPIRY_MIN_DAYS && expiresInDays <= API_KEY_EXPIRY_MAX_DAYS;
 
   if (!inRange) {
     throw expiryOutOfRange();
   }
+}
+
+/**
+ * The expiry `expiresInDays` from `now` (#1418), refused outside 1 to 365 days
+ * ({@link assertExpiryInRange}); a request that names none passes the default
+ * itself.
+ */
+export function expiryDate(expiresInDays: number, now: number): Date {
+  assertExpiryInRange(expiresInDays);
 
   return new Date(now + expiresInDays * DAY_MS);
 }
@@ -180,13 +197,11 @@ function isResourceType(subject: string): subject is ResourceType {
 }
 
 function isStale(signedInAt: Date | null, now: number, freshAgeSeconds: number): boolean {
-  if (freshAgeSeconds === 0) {
-    return false;
-  }
-
+  // A session with no sign-in time recorded is stale, unless freshness checks
+  // nothing at all (#1418).
   if (signedInAt === null) {
-    return true;
+    return freshAgeSeconds !== 0;
   }
 
-  return now - signedInAt.getTime() >= freshAgeSeconds * 1000;
+  return isSessionStale({ signedInAt, now, freshAgeSeconds });
 }

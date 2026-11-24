@@ -16,5 +16,6 @@ export * from './lib/constants';
 export * from './lib/events/auth.events';
 export * from './lib/interfaces';
 export * from './lib/session-credential';
+export { isSessionStale } from './lib/session-freshness';
 export { fallbackLocaleRenderer } from './lib/setting-gates';
 export { USER_REMOVAL_BLOCKERS, type UserRemovalBlocker } from './lib/user-removal-gate';

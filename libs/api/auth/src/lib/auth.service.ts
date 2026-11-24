@@ -183,7 +183,7 @@ export class AuthService {
    * The call is server-side: it passes no headers, so better-auth takes the
    * owner from `body.userId` rather than from a session, and the API key
    * route block, which closes that route to HTTP clients, lets it through.
-   * The caller checks who may create the key.
+   * `ApiKeyService` checks who may create the key.
    *
    * Every key is created with an expiry, so a key better-auth stored without
    * one would never expire. That would be a fault in better-auth, not in the
@@ -194,7 +194,7 @@ export class AuthService {
 
     // Unreachable with the current plugin options: `expiresIn` is always sent
     // and `defaultExpiresIn` is null. If it ever fired, the key row better-auth
-    // wrote would stay behind, since the caller gets no id to delete (#1418).
+    // wrote would stay behind, since `ApiKeyService` gets no id to delete (#1418).
     if (created.expiresAt === null) {
       throw new Error(`better-auth stored API key ${created.id} without an expiry, though one was given (#1418)`);
     }

@@ -1,6 +1,7 @@
 import type { I18nPath } from '@bge/i18n';
 import type { DispatchContext } from 'better-auth/api';
 import { APIError, dispatchAuthEndpoint, getSession } from 'better-auth/api';
+import { isSessionStale } from './session-freshness';
 
 /** The stable code a link refused for a stale session carries, so a client can announce or rephrase it. */
 export const PROVIDER_LINK_NEEDS_RECENT_SIGN_IN = 'PROVIDER_LINK_NEEDS_RECENT_SIGN_IN';
@@ -33,8 +34,9 @@ export interface ProviderLinkFreshness {
  * A linked provider is a way to sign in as the user from then on, so starting
  * a link asks for a recent sign-in, as better-auth's fresh-session check does
  * for its other sensitive routes. `/link-social` uses only its plain session
- * check, so the check is made here, by better-auth's rule: a session as old as
- * `freshAge` seconds or older is stale, and a `freshAge` of 0 checks nothing.
+ * check, so the check is made here, by better-auth's rule ({@link isSessionStale}):
+ * a session as old as `freshAge` seconds or older is stale, and a `freshAge` of
+ * 0 checks nothing, so no session is read then.
  *
  * The session checked must be the one the route will use. Every before hook
  * sees the request as sent: the bearer plugin turns a bearer credential into
@@ -72,8 +74,8 @@ export function createProviderLinkFreshness(deps: ProviderLinkFreshnessDeps): Pr
         return;
       }
 
-      const signedInAt = new Date(found.session.createdAt).getTime();
-      if (now() - signedInAt >= freshAge * 1000) {
+      const signedInAt = new Date(found.session.createdAt);
+      if (isSessionStale({ signedInAt, now: now(), freshAgeSeconds: freshAge })) {
         throw new APIError('FORBIDDEN', {
           code: PROVIDER_LINK_NEEDS_RECENT_SIGN_IN,
           message: deps.render(NEEDS_RECENT_SIGN_IN_MESSAGE),

@@ -102,7 +102,7 @@ describe('API key routes (#1418)', () => {
 
   const deleteKey = (owner: Caller, id: string) => request(baseUrl).delete(`${API_KEYS_PATH}/${id}`).set(owner.headers);
 
-  const readUnread = (caller: Caller) => request(baseUrl).get(UNREAD_PATH).set(caller.headers);
+  const readUnread = (actor: Caller) => request(baseUrl).get(UNREAD_PATH).set(actor.headers);
 
   const slugsOf = (apiKey: ApiKeyWire) => apiKey.scopes.map(({ slug }) => slug);
 
@@ -305,7 +305,7 @@ describe('API key routes (#1418)', () => {
   });
 
   describe('list and read', () => {
-    it("lists only the caller's keys, a page at a time, never with a secret (#1418)", async () => {
+    it("lists only the owner's keys, a page at a time, never with a secret (#1418)", async () => {
       const [owner, other] = [await actors.user(), await actors.user()];
       const ids = [
         (await createKey(owner, { name: 'first' })).apiKey.id,
@@ -333,8 +333,8 @@ describe('API key routes (#1418)', () => {
       }
     });
 
-    // Another user's key gets the answer a made-up id gets, so a caller
-    // can't learn which ids exist.
+    // Another user's key gets the answer a made-up id gets, so no actor
+    // can learn which ids exist.
     it("answers 404 API_KEY_NOT_FOUND to GET, PATCH and DELETE on another user's key, or a made-up id, and changes nothing (#1418)", async () => {
       const [owner, intruder] = [await actors.user(), await actors.user()];
       const { apiKey, key } = await notificationsKey(owner);

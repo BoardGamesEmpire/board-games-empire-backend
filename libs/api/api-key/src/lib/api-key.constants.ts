@@ -12,3 +12,8 @@ export const API_KEY_EXPIRY_DEFAULT_DAYS = 90;
 
 /** better-auth refuses a key name longer than this (#1418). */
 export const API_KEY_NAME_MAX_LENGTH = 32;
+
+/** The one preset a create may name: every permission the owner's key may hold, unpinned (#1418). */
+export const API_KEY_PRESETS = ['everything'] as const;
+
+export type ApiKeyPreset = (typeof API_KEY_PRESETS)[number];

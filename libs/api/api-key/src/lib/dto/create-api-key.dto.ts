@@ -1,4 +1,5 @@
 import { i18nValidationMessage } from '@bge/i18n';
+import { TransformAsSent, TransformTrimmedAsSent } from '@bge/shared';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
@@ -19,9 +20,9 @@ import {
   API_KEY_EXPIRY_MAX_DAYS,
   API_KEY_EXPIRY_MIN_DAYS,
   API_KEY_NAME_MAX_LENGTH,
+  API_KEY_PRESETS,
 } from '../api-key.constants';
 import type { ApiKeyCreateInput } from '../api-key.service';
-import { asSent, trimmedAsSent } from './as-sent';
 import { RequestedScopeDto } from './requested-scope.dto';
 
 /**
@@ -30,9 +31,6 @@ import { RequestedScopeDto } from './requested-scope.dto';
  * of thousands from being validated item by item (#1418).
  */
 export const API_KEY_SCOPES_MAX = 500;
-
-/** The one preset a create may name: every permission the owner's key may hold, unpinned (#1418). */
-export const API_KEY_PRESETS = ['everything'] as const;
 
 /**
  * A new API key (#1418). Each scalar is read as sent, not as the global pipe's
@@ -50,7 +48,7 @@ export class CreateApiKeyDto implements ApiKeyCreateInput {
     minLength: 1,
     maxLength: API_KEY_NAME_MAX_LENGTH,
   })
-  @trimmedAsSent
+  @TransformTrimmedAsSent()
   @IsString({ message: i18nValidationMessage('validation.isString') })
   @MinLength(1, { message: i18nValidationMessage('validation.minLength') })
   @MaxLength(API_KEY_NAME_MAX_LENGTH, { message: i18nValidationMessage('validation.maxLength') })
@@ -78,7 +76,7 @@ export class CreateApiKeyDto implements ApiKeyCreateInput {
       'everything: every permission you hold that a key may hold, each unpinned, as the key is created. A ' +
       'permission you gain later is not added. Not beside scopes.',
   })
-  @asSent
+  @TransformAsSent()
   @ValidateIf((_, value) => value !== undefined)
   @IsIn(API_KEY_PRESETS, { message: i18nValidationMessage('validation.isIn') })
   preset?: 'everything';
@@ -92,7 +90,7 @@ export class CreateApiKeyDto implements ApiKeyCreateInput {
       `Whole days until the key stops working, ${API_KEY_EXPIRY_MIN_DAYS} to ${API_KEY_EXPIRY_MAX_DAYS}; ` +
       `${API_KEY_EXPIRY_DEFAULT_DAYS} when left out. A key never lasts longer.`,
   })
-  @asSent
+  @TransformAsSent()
   @ValidateIf((_, value) => value !== undefined)
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   expiresInDays?: number;
@@ -102,7 +100,7 @@ export class CreateApiKeyDto implements ApiKeyCreateInput {
       'true confirms that the key may hold a Critical permission. Required when the key scopes, or the preset, ' +
       'include one; you must also have signed in recently.',
   })
-  @asSent
+  @TransformAsSent()
   @ValidateIf((_, value) => value !== undefined)
   @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
   confirmCritical?: boolean;
