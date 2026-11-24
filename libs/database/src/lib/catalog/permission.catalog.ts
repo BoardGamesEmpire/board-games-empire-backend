@@ -1892,6 +1892,24 @@ export const PERMISSION_CATALOG = [
     riskLevel: RiskLevel.Low,
     reason: 'Leave a household you belong to',
   }),
+  // A member's own say over how their games join the household's game pool:
+  // their collection sharing and their excluded games (#367, #170). One slug
+  // covers both, since each is an update of the acting user's own membership
+  // and CASL can't tell two grants of one action on one subject apart. Self-
+  // scoped by conditions like the leave grant above, so every household role
+  // holds it, and the service pins `userId` in its `where` for the same reason:
+  // an Owner/Admin's `manage` implies `update` on the whole roster.
+  permission({
+    action: Action.update,
+    subject: ResourceType.HouseholdMember,
+    conditions: {
+      userId: '{{ user.id }}',
+      householdId: '{{ householdId }}',
+    },
+    slug: 'update:household_member:own',
+    riskLevel: RiskLevel.Low,
+    reason: 'Change how you share your games with a household you belong to',
+  }),
   // Household bans (#782), held by household owners and admins alike. A ban
   // of a current member removes them, and the service asks about removing
   // them through the actor's `manage` scope on the member, which keeps a household

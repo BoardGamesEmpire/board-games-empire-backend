@@ -123,6 +123,9 @@ const HOUSEHOLD_OWNER: readonly PermissionSlug[] = [
   'delete:event_game:household',
   'manage:quota:household_member',
   'delete:household_member:leave',
+  // A member's own collection sharing and excluded games (#367, #170): every
+  // household role, the guest's included, holds it.
+  'update:household_member:own',
   // Household bans (#782): owners and admins alike.
   'create:household_ban',
   'delete:household_ban',
@@ -487,6 +490,7 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     'read:event_game:household',
     'read:household_member',
     'delete:household_member:leave',
+    'update:household_member:own',
     'read:event_occurrence:household',
     'read:event_policy:household',
     'read:event:participant:household',
@@ -494,14 +498,16 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
   ],
   [SystemRole.HouseholdGuest]: [
     // A guest reads the household's events with their dates and rules, but
-    // not who attends them, and leaves; the rest of a guest's reach comes from
-    // `User` (#168). See the table in `libs/api/household/README.md`.
+    // not who attends them, sets its own collection sharing and excluded games
+    // (#367, #170), and leaves; the rest of a guest's reach comes from `User`
+    // (#168). See the table in `libs/api/household/README.md`.
     'delete:household_member:leave',
     'read:event:participant:household',
     'read:event_occurrence:household',
     'read:event_policy:household',
     'read:household',
     'read:household_member',
+    'update:household_member:own',
   ],
   [SystemRole.EventHost]: EVENT_HOST,
   [SystemRole.EventCoHost]: EVENT_HOST.filter((slug) => !EVENT_HOST_ONLY.includes(slug)),

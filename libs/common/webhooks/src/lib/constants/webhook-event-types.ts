@@ -53,6 +53,12 @@ export const WebhookEventType = {
   HouseholdMemberRoleChanged: 'household.member.role-changed.v1',
   /** A membership ended, for any cause (#245). */
   HouseholdMemberRemoved: 'household.member.removed.v1',
+  /** A member turned their collection sharing on or off (#367). */
+  HouseholdMemberCollectionSharingChanged: 'household.member.collection-sharing-changed.v1',
+  /** A member excluded one of their collection entries from the game pool; ids only, never the reason (#170). */
+  HouseholdExcludedGameAdded: 'household.member.excluded-game-added.v1',
+  /** A member stopped excluding one of their collection entries from the game pool (#170). */
+  HouseholdExcludedGameRemoved: 'household.member.excluded-game-removed.v1',
 } as const;
 
 export type WebhookEventType = (typeof WebhookEventType)[keyof typeof WebhookEventType];
@@ -143,6 +149,15 @@ export const WEBHOOK_EVENT_DESCRIPTORS: Record<WebhookEventType, WebhookEventMet
   [WebhookEventType.HouseholdMemberAdmitted]: { subject: ResourceType.Household, requiredAction: Action.read },
   [WebhookEventType.HouseholdMemberRoleChanged]: { subject: ResourceType.Household, requiredAction: Action.read },
   [WebhookEventType.HouseholdMemberRemoved]: { subject: ResourceType.Household, requiredAction: Action.read },
+  // A member's collection sharing and excluded games are `read` on the
+  // household, as the membership types above are (#367, #170). Ids only: an
+  // excluded game's reason never leaves the server.
+  [WebhookEventType.HouseholdMemberCollectionSharingChanged]: {
+    subject: ResourceType.Household,
+    requiredAction: Action.read,
+  },
+  [WebhookEventType.HouseholdExcludedGameAdded]: { subject: ResourceType.Household, requiredAction: Action.read },
+  [WebhookEventType.HouseholdExcludedGameRemoved]: { subject: ResourceType.Household, requiredAction: Action.read },
 };
 
 /** Frozen list of every webhook-eligible event name. */

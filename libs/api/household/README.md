@@ -28,6 +28,7 @@ The server decides what each request may do, and this table is what it grants. A
 | Lift a ban                                                                                  | Yes             | Yes             | No           | No              | Household role |
 | Transfer ownership                                                                          | Yes             | No              | No           | No              | Household role |
 | Leave the household                                                                         | Yes             | Yes             | Yes          | Yes             | Household role |
+| Change their own collection sharing and excluded games                                      | Yes             | Yes             | Yes          | Yes             | Household role |
 | List the household's invites                                                                | Yes             | Yes             | No           | No              | Household role |
 | Invite with the member or guest role, when the member invite policy is Direct               | Yes             | Yes             | Yes          | No              | Household role |
 | Invite with the member or guest role, when the member invite policy is NeedsApproval        | Yes             | Yes             | For approval | No              | Household role |

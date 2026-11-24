@@ -817,6 +817,28 @@ describe('the shipped catalogs', () => {
       ]);
     });
 
+    // Collection sharing and excluded games are a member's own say over how
+    // their games join the household's game pool, whatever their household
+    // role (#367, #170). The `userId` pin keeps the grant to the acting
+    // user's own membership.
+    it.each([
+      SystemRole.HouseholdOwner,
+      SystemRole.HouseholdAdmin,
+      SystemRole.HouseholdMember,
+      SystemRole.HouseholdGuest,
+    ])('give %s update:household_member:own (#367, #170)', (roleName) => {
+      expect(ROLE_PERMISSION_CATALOG[roleName]).toContain('update:household_member:own');
+    });
+
+    it('scope update:household_member:own to the acting user’s own membership (#367, #170)', () => {
+      expect(PERMISSION_CATALOG.find(({ slug }) => slug === 'update:household_member:own')).toMatchObject({
+        action: Action.update,
+        subject: ResourceType.HouseholdMember,
+        conditions: { userId: '{{ user.id }}', householdId: '{{ householdId }}' },
+        riskLevel: RiskLevel.Low,
+      });
+    });
+
     it('derive EventCoHost from EventHost minus event deletion only', () => {
       const host = ROLE_PERMISSION_CATALOG[SystemRole.EventHost];
       const coHost = ROLE_PERMISSION_CATALOG[SystemRole.EventCoHost];

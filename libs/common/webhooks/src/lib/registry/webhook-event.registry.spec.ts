@@ -118,6 +118,9 @@ describe('WebhookEventRegistry', () => {
         WebhookEventType.HouseholdMemberAdmitted,
         WebhookEventType.HouseholdMemberRoleChanged,
         WebhookEventType.HouseholdMemberRemoved,
+        WebhookEventType.HouseholdMemberCollectionSharingChanged,
+        WebhookEventType.HouseholdExcludedGameAdded,
+        WebhookEventType.HouseholdExcludedGameRemoved,
       ].sort(),
     );
   });
@@ -140,6 +143,11 @@ describe('WebhookEventRegistry', () => {
       [WebhookEventType.HouseholdMemberAdmitted]: 'household.member.admitted.v1',
       [WebhookEventType.HouseholdMemberRoleChanged]: 'household.member.role-changed.v1',
       [WebhookEventType.HouseholdMemberRemoved]: 'household.member.removed.v1',
+      // A member's collection sharing and excluded games (#367, #170): ids
+      // only, never an excluded game's reason.
+      [WebhookEventType.HouseholdMemberCollectionSharingChanged]: 'household.member.collection-sharing-changed.v1',
+      [WebhookEventType.HouseholdExcludedGameAdded]: 'household.member.excluded-game-added.v1',
+      [WebhookEventType.HouseholdExcludedGameRemoved]: 'household.member.excluded-game-removed.v1',
     };
 
     for (const [type, wireName] of Object.entries(wireNames)) {
