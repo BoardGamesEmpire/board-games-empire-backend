@@ -5,6 +5,7 @@ import {
   HttpActorMiddleware,
   LocaleResolutionMiddleware,
 } from '@bge/actor-context-transport';
+import { ApiKeyModule } from '@bge/api-key';
 import { AuditLogApiModule } from '@bge/audit-log';
 import { AuthModule } from '@bge/auth';
 import { GatewayCoordinatorClientModule } from '@bge/coordinator';
@@ -195,6 +196,8 @@ import { apiPluginModuleOptions } from './plugin-module.options';
     I18nConfigModule,
 
     // Feature modules
+    // A user's own API keys: the permissions a new key may hold (#1417).
+    ApiKeyModule,
     // Audit capture (onAny listener) + the admin read endpoint. The listener
     // registers in every event-emitting process; this app additionally mounts
     // the HTTP surface.
