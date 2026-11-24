@@ -144,6 +144,13 @@ export enum MembershipEndCause {
  */
 export interface HouseholdStateSnapshot {
   readonly description: string | null;
+
+  /**
+   * Who besides members and guests may open the game pool (#367). Null for a
+   * household with no settings row.
+   */
+  readonly gamePoolReach: Reach | null;
+
   readonly id: string;
   readonly image: string | null;
   readonly languageTagId: string | null;
@@ -258,6 +265,7 @@ export function householdStateSnapshot(row: HouseholdStateRow): HouseholdStateSn
     languageTagId: row.languageTagId,
     memberInvitePolicy: row.settings?.memberInvitePolicy ?? null,
     memberSharePolicy: row.settings?.memberSharePolicy ?? null,
+    gamePoolReach: row.settings?.gamePoolReach ?? null,
   };
 }
 

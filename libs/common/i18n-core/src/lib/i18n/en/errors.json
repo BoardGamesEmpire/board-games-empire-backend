@@ -276,7 +276,8 @@
     "ban_self": "You can't ban yourself from a household",
     "ban_forbidden": "Only a household owner can ban a household admin or another owner",
     "already_banned": "This user is already banned from household {householdId}",
-    "ban_not_found": "User {userId} is not banned from household {householdId}"
+    "ban_not_found": "User {userId} is not banned from household {householdId}",
+    "game_pool_reach_wider_than_household": "A household's game pool can't reach further than the household itself. Let friends see the household first."
   },
   "invite": {
     "not_found": "Invite with ID {id} not found",

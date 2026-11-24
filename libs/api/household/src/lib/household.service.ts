@@ -9,6 +9,7 @@ import {
   isPrismaDependentRecordNotFoundError,
   normalizeClientRequestId,
   Prisma,
+  Reach,
   ResourceType,
   SystemRole,
 } from '@bge/database';
@@ -36,6 +37,7 @@ import {
 } from '@nestjs/common';
 import assert from 'node:assert';
 import { HOUSEHOLD_RESTORE_PERMISSION_SLUG, HOUSEHOLD_RESTORE_WINDOW_MS } from './constants/household.constants';
+import type { UpdateHouseholdSettingsDto } from './dto';
 import { CreateHouseholdDto, UpdateHouseholdDto } from './dto';
 import { HouseholdEventPublisher, householdWebhook } from './events/household-event.publisher';
 import type { HouseholdStateSnapshot } from './events/household.events';
@@ -140,7 +142,43 @@ const HOUSEHOLD_EDITABLE_COLUMNS: { readonly [Column in Exclude<keyof HouseholdS
   languageTagId: 'languageTagId',
   memberInvitePolicy: 'memberInvitePolicy',
   memberSharePolicy: 'memberSharePolicy',
+  gamePoolReach: 'gamePoolReach',
 };
+
+/**
+ * The settings an edit writes, with the game pool reach kept within the
+ * household's reach once the edit lands (#367). A friend who can't see the
+ * household can't see its game pool either, so:
+ *
+ * - a patch that sets the game pool reach to `Friends` while the household is,
+ *   or becomes, `Private` is refused with a 400 naming what to change first;
+ * - a patch that narrows the household to `Private` and leaves the game pool
+ *   reach out lowers a stored `Friends` to `Private` in the same write, so the
+ *   game pool never reaches further than the household it belongs to.
+ *
+ * Lowered rather than refused: narrowing a household is the stronger privacy
+ * choice, and refusing it until the owner also changed a second setting would
+ * keep the household wider than they asked for.
+ */
+function settingsWithinHouseholdReach(
+  settings: Partial<UpdateHouseholdSettingsDto>,
+  householdReach: Reach,
+  stored: { readonly gamePoolReach: Reach } | null,
+): Partial<UpdateHouseholdSettingsDto> {
+  if (householdReach !== Reach.Private) {
+    return settings;
+  }
+
+  if (settings.gamePoolReach === Reach.Friends) {
+    throw new BadRequestException(t('errors.household.game_pool_reach_wider_than_household'));
+  }
+
+  if (settings.gamePoolReach === undefined && stored?.gamePoolReach === Reach.Friends) {
+    return { ...settings, gamePoolReach: Reach.Private };
+  }
+
+  return settings;
+}
 
 @Injectable()
 export class HouseholdService {
@@ -453,9 +491,15 @@ export class HouseholdService {
    *
    * A household with no settings row has no member invite or share policy,
    * which no invite or share grant matches. The row the upsert creates gives
-   * it both, the one the patch sent and the other's column default, so both
-   * are recorded as changed: the second is a change in what members may do,
-   * though the patch did not name it.
+   * it every setting, the ones the patch sent and the others' column defaults,
+   * so each is recorded as changed. The policies' defaults change what members
+   * may do, though the patch did not name them; the game pool reach's default
+   * is recorded because the row now holds it, though it admits no one new.
+   *
+   * The game pool reach is kept within the household's reach as the edit
+   * leaves it (#367): see {@link settingsWithinHouseholdReach}. A household
+   * narrowed to `Private` lowers it in the same write, and that is recorded as
+   * a change too.
    */
   async updateHousehold(id: string, updateHouseholdDto: UpdateHouseholdDto) {
     const initiatedAt = new Date();
@@ -498,6 +542,14 @@ export class HouseholdService {
           include: { settings: { select: HOUSEHOLD_SETTINGS_SELECT } },
         });
 
+        // Judged against the stored row read under the lock, so a concurrent
+        // edit to the household's reach can't slip past it (#367). That holds
+        // only while this transaction stays at READ COMMITTED: the read after
+        // the lock is a new statement that sees a concurrent writer's commit,
+        // where RepeatableRead would snapshot at the earlier count, before the
+        // lock.
+        const written = settingsWithinHouseholdReach(settings, fields.reach ?? stored.reach, stored.settings);
+
         const household = await tx.household.update({
           where: editable,
           data: {
@@ -509,9 +561,9 @@ export class HouseholdService {
                   },
                 }
               : undefined,
-            ...(Object.keys(settings).length === 0
+            ...(Object.keys(written).length === 0
               ? {}
-              : { settings: { upsert: { create: settings, update: settings } } }),
+              : { settings: { upsert: { create: written, update: written } } }),
           },
           include: { settings: { select: HOUSEHOLD_SETTINGS_SELECT } },
         });

@@ -6,7 +6,12 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { IsNotEmpty, IsOptional, IsString, ValidateIf } from 'class-validator';
 
-const HOUSEHOLD_REACHES = [Reach.Private, Reach.Friends] as const;
+/**
+ * The rungs a household read rule serves (see {@link HouseholdReachProperty}).
+ * The household's game pool reach takes the same ones (#367): it can't reach
+ * anyone the household doesn't.
+ */
+export const HOUSEHOLD_REACHES = [Reach.Private, Reach.Friends] as const;
 export type HouseholdReach = (typeof HOUSEHOLD_REACHES)[number];
 
 /**

@@ -90,6 +90,10 @@ describe('household read shapes', () => {
     it('publishes the member share policy, which a member needs to know whether they may share (#810)', () => {
       expect(scalarKeysOf(HOUSEHOLD_SETTINGS_SELECT)).toContain('memberSharePolicy');
     });
+
+    it('publishes the game pool reach, which says who besides members and guests may see the game pool (#367)', () => {
+      expect(scalarKeysOf(HOUSEHOLD_SETTINGS_SELECT)).toContain('gamePoolReach');
+    });
   });
 
   describe('ADMIN_HOUSEHOLD_ROW_SELECT (#419)', () => {

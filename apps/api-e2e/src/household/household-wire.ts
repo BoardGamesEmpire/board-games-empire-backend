@@ -92,8 +92,10 @@ export interface LanguageTagProjection {
   readonly tag: string;
 }
 
-/** A household's settings as the detail, the lists and `PATCH` publish them (#166). */
-export type HouseholdSettingsProjection = Wire<Pick<HouseholdSettings, 'memberInvitePolicy' | 'memberSharePolicy'>>;
+/** A household's settings as the detail, the lists and `PATCH` publish them (#166, #367). */
+export type HouseholdSettingsProjection = Wire<
+  Pick<HouseholdSettings, 'memberInvitePolicy' | 'memberSharePolicy' | 'gamePoolReach'>
+>;
 
 /**
  * `getHouseholdById`'s shape: the row plus its member, language and settings

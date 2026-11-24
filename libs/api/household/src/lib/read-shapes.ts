@@ -126,11 +126,14 @@ export const MEMBER_SCALARS_OMITTED = {
  * A household's settings as the household's detail, its lists and its update
  * return them (#166), to every reader of the household: a member's client
  * needs the member invite policy to know whether to offer an invite, and the
- * member share policy to know whether to offer a share (#810).
+ * member share policy to know whether to offer a share (#810), and the game
+ * pool reach to show who besides members and guests may see the game pool
+ * (#367).
  */
 export const HOUSEHOLD_SETTINGS_SELECT = {
   memberInvitePolicy: true,
   memberSharePolicy: true,
+  gamePoolReach: true,
 } as const satisfies Prisma.HouseholdSettingsSelect;
 
 /**

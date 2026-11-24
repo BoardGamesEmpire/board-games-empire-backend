@@ -229,6 +229,7 @@ describe('household domain events (#245)', () => {
       settings: {
         memberInvitePolicy: MemberInvitePolicy.Direct,
         memberSharePolicy: MemberSharePolicy.NeedsApproval,
+        gamePoolReach: Reach.Friends,
       },
     };
 
@@ -242,6 +243,7 @@ describe('household domain events (#245)', () => {
         languageTagId: 'lang-en',
         memberInvitePolicy: MemberInvitePolicy.Direct,
         memberSharePolicy: MemberSharePolicy.NeedsApproval,
+        gamePoolReach: Reach.Friends,
       });
     });
 
@@ -257,6 +259,7 @@ describe('household domain events (#245)', () => {
 
       expect(Object.keys(householdStateSnapshot(wider)).sort()).toEqual([
         'description',
+        'gamePoolReach',
         'id',
         'image',
         'languageTagId',
@@ -272,6 +275,7 @@ describe('household domain events (#245)', () => {
 
       expect(snapshot.memberInvitePolicy).toBeNull();
       expect(snapshot.memberSharePolicy).toBeNull();
+      expect(snapshot.gamePoolReach).toBeNull();
       expect(snapshot.name).toBe('The Meeple House');
     });
   });

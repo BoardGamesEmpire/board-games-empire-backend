@@ -54,7 +54,11 @@ const STORED = {
   image: null,
   reach: Reach.Private,
   languageTagId: 'tag-en',
-  settings: { memberInvitePolicy: MemberInvitePolicy.Off, memberSharePolicy: MemberSharePolicy.Direct },
+  settings: {
+    memberInvitePolicy: MemberInvitePolicy.Off,
+    memberSharePolicy: MemberSharePolicy.Direct,
+    gamePoolReach: Reach.Private,
+  },
 };
 
 /** The household row lock a role transition takes, which an edit takes too (#239, #245). */
@@ -178,9 +182,12 @@ describe('HouseholdService', () => {
     const [{ include }] = db.household.findUnique.mock.calls[0] as [{ include: Record<string, unknown> }];
 
     // A member's client needs the invite and share policies to know whether to
-    // offer an invite or a share (#810), so they ride on the read every member
-    // already makes.
-    expect(include.settings).toEqual({ select: { memberInvitePolicy: true, memberSharePolicy: true } });
+    // offer an invite or a share (#810), and the game pool reach to say who
+    // besides its members and guests may see the game pool (#367), so they
+    // ride on the read every member already makes.
+    expect(include.settings).toEqual({
+      select: { memberInvitePolicy: true, memberSharePolicy: true, gamePoolReach: true },
+    });
   });
 
   // #868. The detail roster used to select each member's excluded games beside
@@ -576,9 +583,96 @@ describe('HouseholdService', () => {
 
       expect(db.household.update).toHaveBeenCalledWith(
         expect.objectContaining({
-          include: { settings: { select: { memberInvitePolicy: true, memberSharePolicy: true } } },
+          include: { settings: { select: { memberInvitePolicy: true, memberSharePolicy: true, gamePoolReach: true } } },
         }),
       );
+    });
+
+    /**
+     * #367. The game pool's reach can't be wider than the household's own: a
+     * friend who can't see the household can't see its games. Judged against
+     * the reach the household has once the patch lands.
+     */
+    describe('the game pool reach (#367)', () => {
+      it("refuses a game pool reach wider than the household's reach (#367)", async () => {
+        const attempt = service.updateHousehold('hh-1', { settings: { gamePoolReach: Reach.Friends } });
+
+        await expect(attempt).rejects.toThrow(BadRequestException);
+        await expect(attempt).rejects.toMatchObject({
+          response: t('errors.household.game_pool_reach_wider_than_household'),
+        });
+
+        expect(db.household.update).not.toHaveBeenCalled();
+        expect(events.emit).not.toHaveBeenCalled();
+      });
+
+      it('refuses Friends when the same patch narrows the household to Private (#367)', async () => {
+        db.household.findUniqueOrThrow.mockResolvedValue({ ...STORED, reach: Reach.Friends } as never);
+
+        const attempt = service.updateHousehold('hh-1', {
+          reach: Reach.Private,
+          settings: { gamePoolReach: Reach.Friends },
+        });
+
+        await expect(attempt).rejects.toThrow(BadRequestException);
+        await expect(attempt).rejects.toMatchObject({
+          response: t('errors.household.game_pool_reach_wider_than_household'),
+        });
+
+        expect(db.household.update).not.toHaveBeenCalled();
+      });
+
+      it('accepts Friends when the same patch widens the household to Friends (#367)', async () => {
+        await service.updateHousehold('hh-1', { reach: Reach.Friends, settings: { gamePoolReach: Reach.Friends } });
+
+        expect(written()).toEqual({
+          reach: Reach.Friends,
+          settings: {
+            upsert: { create: { gamePoolReach: Reach.Friends }, update: { gamePoolReach: Reach.Friends } },
+          },
+        });
+      });
+
+      // A household narrowed to Private keeps no friend in its game pool: the
+      // stored Friends is lowered in the same write, so the game pool's
+      // reach never outlives the household's (#367).
+      it('lowers the game pool reach to Private when the household narrows to Private (#367)', async () => {
+        const stored = {
+          ...STORED,
+          reach: Reach.Friends,
+          settings: { ...STORED.settings, gamePoolReach: Reach.Friends },
+        };
+        db.household.findUniqueOrThrow.mockResolvedValue(stored as never);
+        db.household.update.mockResolvedValue({
+          ...stored,
+          reach: Reach.Private,
+          settings: { ...stored.settings, gamePoolReach: Reach.Private },
+        } as never);
+
+        await service.updateHousehold('hh-1', { reach: Reach.Private });
+
+        expect(written()).toEqual({
+          reach: Reach.Private,
+          settings: {
+            upsert: { create: { gamePoolReach: Reach.Private }, update: { gamePoolReach: Reach.Private } },
+          },
+        });
+
+        const event = emittedUnder(HouseholdEvents.Updated) as HouseholdUpdatedEvent;
+        expect(event.before).toEqual({ id: 'hh-1', reach: Reach.Friends, gamePoolReach: Reach.Friends });
+        expect(event.after).toEqual({ id: 'hh-1', reach: Reach.Private, gamePoolReach: Reach.Private });
+        expect(emittedUnder(WebhookEventType.HouseholdUpdated)).toMatchObject({
+          data: { householdId: 'hh-1', changedFields: ['reach', 'gamePoolReach'] },
+        });
+      });
+
+      it('leaves the game pool reach alone when the household narrows and it is already Private (#367)', async () => {
+        db.household.findUniqueOrThrow.mockResolvedValue({ ...STORED, reach: Reach.Friends } as never);
+
+        await service.updateHousehold('hh-1', { reach: Reach.Private });
+
+        expect(written()).toEqual({ reach: Reach.Private });
+      });
     });
 
     it.each([
@@ -646,28 +740,39 @@ describe('HouseholdService', () => {
       });
     });
 
-    it('records both policies as changed when the household had no settings row and the patch names one (#245)', async () => {
+    it('records every setting as changed when the household had no settings row and the patch names one (#245, #367)', async () => {
       db.household.findUniqueOrThrow.mockResolvedValue({ ...STORED, settings: null } as never);
       db.household.update.mockResolvedValue({
         ...STORED,
-        settings: { memberInvitePolicy: MemberInvitePolicy.Direct, memberSharePolicy: MemberSharePolicy.Direct },
+        settings: {
+          memberInvitePolicy: MemberInvitePolicy.Direct,
+          memberSharePolicy: MemberSharePolicy.Direct,
+          gamePoolReach: Reach.Private,
+        },
       } as never);
 
       await service.updateHousehold('hh-1', { settings: { memberInvitePolicy: MemberInvitePolicy.Direct } });
 
-      // The upsert created the row with both, so both are new. No row meant
-      // no policy, which no invite or share grant matches, so the share
+      // The upsert created the row with every setting, so each is new. No row
+      // meant no policy, which no invite or share grant matches, so the share
       // policy's default is a change in what members may do, not a restatement
-      // of what they already could.
+      // of what they already could. The game pool reach's default is recorded
+      // because the row now holds it, though it admits no one new.
       const event = emittedUnder(HouseholdEvents.Updated) as HouseholdUpdatedEvent;
-      expect(event.before).toEqual({ id: 'hh-1', memberInvitePolicy: null, memberSharePolicy: null });
+      expect(event.before).toEqual({
+        id: 'hh-1',
+        memberInvitePolicy: null,
+        memberSharePolicy: null,
+        gamePoolReach: null,
+      });
       expect(event.after).toEqual({
         id: 'hh-1',
         memberInvitePolicy: MemberInvitePolicy.Direct,
         memberSharePolicy: MemberSharePolicy.Direct,
+        gamePoolReach: Reach.Private,
       });
       expect(emittedUnder(WebhookEventType.HouseholdUpdated)).toMatchObject({
-        data: { householdId: 'hh-1', changedFields: ['memberInvitePolicy', 'memberSharePolicy'] },
+        data: { householdId: 'hh-1', changedFields: ['memberInvitePolicy', 'memberSharePolicy', 'gamePoolReach'] },
       });
     });
 
@@ -793,7 +898,7 @@ describe('HouseholdService', () => {
       expect(tx.$queryRaw.mock.calls.map(([query]) => isRoleTransitionLockSql(query))).toEqual([true]);
       expect(tx.household.findUniqueOrThrow).toHaveBeenCalledWith({
         where: { id: 'hh-1' },
-        include: { settings: { select: { memberInvitePolicy: true, memberSharePolicy: true } } },
+        include: { settings: { select: { memberInvitePolicy: true, memberSharePolicy: true, gamePoolReach: true } } },
       });
       // Nothing reads outside the transaction.
       expect(db.household.count).not.toHaveBeenCalled();

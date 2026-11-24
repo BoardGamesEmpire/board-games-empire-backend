@@ -52,6 +52,14 @@ model HouseholdSettings {
   memberInvitePolicy MemberInvitePolicy @default(NeedsApproval) @map("member_invite_policy")
   memberSharePolicy  MemberSharePolicy  @default(NeedsApproval) @map("member_share_policy")
 
+  // Who besides the household's members and guests may open its game pool,
+  // `GET /households/:id/games` (#367): `Private` or `Friends`, the rungs the
+  // household's own reach accepts. A friend sees only the collection entries
+  // they could already read. Never wider than the household's reach: an edit
+  // that would widen it past the household is refused, and one that narrows
+  // the household to `Private` lowers it to `Private` in the same write.
+  gamePoolReach Reach @default(Private) @map("game_pool_reach")
+
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
