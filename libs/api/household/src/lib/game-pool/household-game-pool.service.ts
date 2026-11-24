@@ -1,11 +1,13 @@
 import type { GameSummary } from '@bge/database';
 import {
+  acceptedFriendOf,
   Action,
   DatabaseService,
   GAME_SUMMARY_SELECT,
   gameSummaryReader,
   Prisma,
   Reach,
+  REACHES_ADMITTING_FRIENDS,
   ResourceType,
 } from '@bge/database';
 import { t } from '@bge/i18n';
@@ -151,19 +153,21 @@ export class HouseholdGamePoolService {
    *
    * ## Who may open it
    *
-   * Its members, and, when its game pool reach is `Friends`, anyone the
-   * Household read ceiling lets read the household: a friend of a member when
-   * the household's reach admits friends, and server staff, whose read
-   * reaches every household. Staff already read every collection entry, so
-   * letting them in shows nothing they could not read elsewhere; a `Private`
-   * game pool still refuses them. The game pool reach is a
-   * door, not a grant: it decides who may look, never what they see. A friend
-   * let in sees only the entries the GameCollection ceiling already lets them
-   * read, the same entries they would find in that member's collection, so
-   * widening the reach never hands anyone an entry they could not read
-   * before. A household with no settings row matches no `settings` clause and
-   * reads as `Private`. Anyone else is refused as `GET /households/:id`
-   * refuses them: 403 when the household exists, 404 when it doesn't.
+   * Its members, and, when its game pool reach is `Friends`, a friend of a
+   * member, while the household's own reach admits friends and the Household
+   * read ceiling lets them read it. The friendship and the household's reach
+   * are stated here, not left to the ceiling: server staff read every
+   * household, so a ceiling alone would let a non-member who is no one's
+   * friend in, and the household's reach keeps the game pool within the
+   * household even if a stored game pool reach were wider. The game pool
+   * reach is a door, not a grant: it decides who may look, never what they
+   * see. A friend let in sees only the entries the GameCollection ceiling
+   * already lets them read, the same entries they would find in that member's
+   * collection, so widening the reach never hands anyone an entry they could
+   * not read before. A household with no settings row matches no `settings`
+   * clause and reads as `Private`. Anyone else, server staff included, is
+   * refused as `GET /households/:id` refuses them: 403 when the household
+   * exists, 404 when it doesn't.
    *
    * ## What it serves
    *
@@ -196,7 +200,14 @@ export class HouseholdGamePoolService {
           where: this.scopeComposer.compose(ResourceType.Household, Action.read, {
             id: householdId,
             deletedAt: null,
-            OR: [{ members: { some: { userId } } }, { settings: { is: { gamePoolReach: Reach.Friends } } }],
+            OR: [
+              { members: { some: { userId } } },
+              {
+                reach: { in: [...REACHES_ADMITTING_FRIENDS] },
+                settings: { is: { gamePoolReach: Reach.Friends } },
+                members: { some: { user: { is: acceptedFriendOf(userId) } } },
+              },
+            ],
           }),
           select: { id: true },
         });

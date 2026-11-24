@@ -425,14 +425,14 @@ describe('household game pool list (#367)', () => {
       expect(await gamePoolIds(friend, home.id)).toEqual([await gameOf(entry)]);
     });
 
-    // Pinned as built: server staff who are not members are refused while
-    // the game pool reach is Private, and let in once it is Friends, because
-    // their read reaches every household and Friends opens the game pool to
-    // anyone who can read the household (#367).
-    it('refuses server staff who are not members while the game pool reach is Private, and lets them in at Friends (#367)', async () => {
+    // Server staff read every household, but the game pool reach opens the
+    // game pool to a member's friends, not to everyone who can read the
+    // household: a non-member who is no member's friend is refused at either
+    // game pool reach (#367).
+    it('refuses server staff who are not members or friends at either game pool reach (#367)', async () => {
       const [owner, admin] = [await actors.user(), await actors.admin()];
       const home = await household(owner);
-      const entry = await arrangeCollectionEntry(db.client, owner.user.id, Reach.Private);
+      await arrangeCollectionEntry(db.client, owner.user.id, Reach.Private);
 
       // Staff read the household itself.
       await request(baseUrl).get(`/api/households/${home.id}`).set(admin.headers).expect(200);
@@ -442,7 +442,7 @@ describe('household game pool list (#367)', () => {
         200,
       );
 
-      expect(await gamePoolIds(admin, home.id)).toEqual([await gameOf(entry)]);
+      await readGamePool(admin, home.id).expect(403);
     });
   });
 });

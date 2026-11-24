@@ -178,9 +178,9 @@ export class HouseholdController {
       '`platform`. A member who owns the game on two platforms is named twice. Owners are ordered by shown name, ' +
       'then `memberId`, then entry id, so one member’s entries stay together. Only entries the caller can read ' +
       'name an owner, and a game the caller can’t open at `GET /games/:id` is left out and not counted. Open to ' +
-      'the household’s members, and, when its `gamePoolReach` is `Friends`, to anyone who can read the ' +
-      'household: a friend of a member, and server staff, who can read every household. Anyone let in this ' +
-      'way sees only the entries they could already read. Ordered by title, then id. Paginated: `?page=` (1-based) and ' +
+      'the household’s members, and, when its `gamePoolReach` is `Friends`, to a friend of a member who can ' +
+      'read the household. Anyone let in this way sees only the entries they could already read. Anyone else, ' +
+      'server staff included, is refused. Ordered by title, then id. Paginated: `?page=` (1-based) and ' +
       '`?limit=`, with a `pagination` envelope carrying `total`, `totalPages` and `hasMore`; `total` counts ' +
       'games, not entries. Pages are offsets into a live list, so a game added or removed between requests can ' +
       'shift the rows after it. See #367.',

@@ -1,4 +1,12 @@
-import { Action, GAME_SUMMARY_SELECT, Prisma, Reach, ResourceType } from '@bge/database';
+import {
+  acceptedFriendOf,
+  Action,
+  GAME_SUMMARY_SELECT,
+  Prisma,
+  Reach,
+  REACHES_ADMITTING_FRIENDS,
+  ResourceType,
+} from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
 import { RandomSampleQueryDto } from '@bge/shared';
@@ -196,10 +204,12 @@ describe('HouseholdGamePoolService', () => {
     });
 
     // The game pool reach is a door, not a grant: it lets a friend of a
-    // member in when it is `Friends`, and the Household read ceiling still
-    // decides whether they may read the household at all. A household with no
-    // settings row matches no `settings` clause, so it reads as `Private`.
-    it('opens the household to its members, or to the Household ceiling when its game pool reach is Friends (#367)', async () => {
+    // member in when it is `Friends` and the household reaches friends, and
+    // the Household read ceiling still decides whether they may read the
+    // household at all. The friendship is stated, not left to the ceiling,
+    // which lets staff read every household. A household with no settings row
+    // matches no `settings` clause, so it reads as `Private`.
+    it('opens the household to its members, or to a friend of a member when its game pool reach is Friends (#367)', async () => {
       await listOf();
 
       expect(compose).toHaveBeenCalledWith(ResourceType.Household, Action.read, {
@@ -207,7 +217,11 @@ describe('HouseholdGamePoolService', () => {
         deletedAt: null,
         OR: [
           { members: { some: { userId: MOCK_ACTING_USER_ID } } },
-          { settings: { is: { gamePoolReach: Reach.Friends } } },
+          {
+            reach: { in: [...REACHES_ADMITTING_FRIENDS] },
+            settings: { is: { gamePoolReach: Reach.Friends } },
+            members: { some: { user: { is: acceptedFriendOf(MOCK_ACTING_USER_ID) } } },
+          },
         ],
       });
       expect(tx.household.findFirst).toHaveBeenCalledWith({
