@@ -222,7 +222,7 @@
     "jest-environment-node": "30.5.2",
     "jest-mock-extended": "4.0.2",
     "jest-util": "30.5.1",
-    "jsonc-eslint-parser": "2.4.2",
+    "jsonc-eslint-parser": "3.3.0",
     "npm-check": "6.0.1",
     "nx": "22.7.12",
     "playwright": "1.65.0",
