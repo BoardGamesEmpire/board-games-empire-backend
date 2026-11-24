@@ -57,7 +57,7 @@ describe('household read shapes', () => {
 
     it('publishes the roster scalars named by D-296-5', () => {
       expect(scalarKeysOf(MEMBER_SELECT).sort()).toEqual(
-        ['createdAt', 'householdId', 'id', 'showAllGames', 'updatedAt', 'userId'].sort(),
+        ['createdAt', 'householdId', 'id', 'collectionSharing', 'updatedAt', 'userId'].sort(),
       );
     });
 

@@ -1478,15 +1478,15 @@ export const PERMISSION_CATALOG = [
     reason: 'View your own game collection',
   }),
   // Row visible when the owner shares a household with the acting user, the
-  // owner's membership in that household has `showAllGames`, and the row is
+  // owner's membership in that household has `collectionSharing`, and the row is
   // not excluded from a household the acting user belongs to. Its reach is
   // not read: a household shares its members' games, and the reach says who
   // beyond the owner's households sees the row. A member keeps an entry from
-  // a household by excluding it, or all of them with `showAllGames` (#495).
+  // a household by excluding it, or all of them with `collectionSharing` (#495).
   // The shared household must be live: a deleted one keeps its member rows
   // until it is purged, so membership alone would still match it.
   //
-  // Known approximation: `showAllGames` and the ExcludedGame check cannot be
+  // Known approximation: `collectionSharing` and the ExcludedGame check cannot be
   // correlated to the *same* shared household from inside this flat Prisma
   // clause — when owner and viewer share 2+ households with differing
   // exclusions/flags, an exclusion in any shared household hides the row.
@@ -1499,7 +1499,7 @@ export const PERMISSION_CATALOG = [
         is: {
           householdMember: {
             some: {
-              showAllGames: true,
+              collectionSharing: true,
               household: { is: liveHouseholdOf('{{ user.id }}') },
             },
           },

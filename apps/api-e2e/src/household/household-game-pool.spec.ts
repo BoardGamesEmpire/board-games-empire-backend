@@ -62,7 +62,7 @@ describe('household game pool sample', () => {
   };
 
   const turnSharingOff = (membershipId: string) =>
-    db.client.householdMember.update({ where: { id: membershipId }, data: { showAllGames: false } });
+    db.client.householdMember.update({ where: { id: membershipId }, data: { collectionSharing: false } });
 
   const exclude = (membershipId: string, entryId: string) =>
     db.client.excludedGame.create({ data: { householdMemberId: membershipId, gameCollectionId: entryId } });

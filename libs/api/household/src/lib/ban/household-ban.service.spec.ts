@@ -83,7 +83,7 @@ const REMOVED: RemovedMembership = {
     id: 'member-2',
     userId: 'user-2',
     householdId: 'hh-1',
-    showAllGames: true,
+    collectionSharing: true,
     createdAt: NOW,
     updatedAt: NOW,
     user: { id: 'user-2', username: 'sam', profile: { avatarUrl: null, displayName: 'Sam Doe' } },

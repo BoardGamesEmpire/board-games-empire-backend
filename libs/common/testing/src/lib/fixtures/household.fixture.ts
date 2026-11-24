@@ -20,7 +20,7 @@ export function makeHouseholdMember(
 ): HouseholdMember {
   return {
     id: `hm-${sequence()}`,
-    showAllGames: true,
+    collectionSharing: true,
     // NULL, not a synthetic consent path (#276). A fixture row is not produced
     // by anyone accepting or approving anything, and NULL is precisely how the
     // model says "created outside a consent path". Defaulting to a real origin

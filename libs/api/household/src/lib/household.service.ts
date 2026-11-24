@@ -247,7 +247,7 @@ export class HouseholdService {
    * The games the member excluded from this household sit beside the
    * composed clause, as a filter on the entry's `ExcludedGame` rows for this
    * membership, so the roster read never has to carry them (#868). The
-   * ceiling's household rule approximates `showAllGames` and excluded games
+   * ceiling's household rule approximates `collectionSharing` and excluded games
    * across every household the owner and viewer share, not just this one; the
    * exact rule for a single household belongs to the collection pool read
    * (#367).

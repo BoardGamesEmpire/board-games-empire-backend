@@ -29,7 +29,7 @@ model GameCollection {
 
   // Who may see this row beyond the owner and their households. Friends reach
   // honors UserPreferences.showCollectionToFriends. A household sees the row
-  // whatever its reach, through the owner's HouseholdMember.showAllGames flag
+  // whatever its reach, through the owner's HouseholdMember.collectionSharing flag
   // and ExcludedGame opt-outs instead (#495).
   reach Reach @default(Private)
 

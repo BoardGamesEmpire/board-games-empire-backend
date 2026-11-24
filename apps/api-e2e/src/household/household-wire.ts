@@ -53,7 +53,7 @@ export type HouseholdWire = Wire<Household>;
  * suite would stop being an independent check of the wire contract.
  */
 export type HouseholdMemberWire = Wire<
-  Pick<HouseholdMember, 'id' | 'userId' | 'householdId' | 'showAllGames' | 'createdAt' | 'updatedAt'>
+  Pick<HouseholdMember, 'id' | 'userId' | 'householdId' | 'collectionSharing' | 'createdAt' | 'updatedAt'>
 >;
 
 /** The `role` embed on a member in `getHouseholdById`'s select shape. */

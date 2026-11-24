@@ -522,7 +522,9 @@ const HOUSEHOLD_ROLE_TABLE: readonly TableRow[] = [
             userId: OTHER,
             deletedAt: null,
             user: {
-              householdMember: [{ showAllGames: true, household: { deletedAt: null, members: [{ userId: ACTOR }] } }],
+              householdMember: [
+                { collectionSharing: true, household: { deletedAt: null, members: [{ userId: ACTOR }] } },
+              ],
             },
             excludedFromHouseholds: [],
           }),

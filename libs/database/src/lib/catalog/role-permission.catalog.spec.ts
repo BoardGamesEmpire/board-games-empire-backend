@@ -765,7 +765,7 @@ describe('the shipped catalogs', () => {
     });
 
     // A household sees a member's collection through the member's
-    // `showAllGames` and its excluded games, whatever the entry's reach: the
+    // `collectionSharing` and its excluded games, whatever the entry's reach: the
     // reach says who beyond the owner's households sees it (#495).
     it('let a household read a member’s collection whatever its reach', () => {
       const entry = PERMISSION_CATALOG.find(({ slug }) => slug === 'read:game_collection:household');

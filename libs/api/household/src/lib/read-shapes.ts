@@ -92,7 +92,7 @@ export const MEMBER_SELECT = {
   id: true,
   userId: true,
   householdId: true,
-  showAllGames: true,
+  collectionSharing: true,
   createdAt: true,
   updatedAt: true,
 
