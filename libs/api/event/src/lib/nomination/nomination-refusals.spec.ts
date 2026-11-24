@@ -41,7 +41,7 @@ describe('nominationStatusRefusal', () => {
       const refusal = nominationStatusRefusal(code, status);
 
       expect(refusal.getStatus()).toBe(Http.BadRequest);
-      expect(refusal.getResponse()).toMatchObject({ code, status, message: t(key) });
+      expect(refusal.getResponse()).toMatchObject({ code, state: status, message: t(key) });
     });
   });
 });

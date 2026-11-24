@@ -36,13 +36,15 @@ export function nominationNotFound(nominationId: string, eventId: string): NotFo
 /**
  * A 400 for a nomination whose status refuses the request. The code names
  * what was refused, the message says the state the nomination is in, and
- * `status` carries the status a client can branch on (#1114).
+ * `state` carries its status for a client to branch on (#1114).
  */
 export function nominationStatusRefusal(
   code: NominationStatusRefusalCode,
   status: NominationStatus,
 ): CodedHttpException {
-  return new CodedHttpException(Http.BadRequest, code, t(NOMINATION_STATE_MESSAGE[status]), { fields: { status } });
+  return new CodedHttpException(Http.BadRequest, code, t(NOMINATION_STATE_MESSAGE[status]), {
+    fields: { state: status },
+  });
 }
 
 /** The game addition modes under which a game can't be added straight to the lineup (#1114). */

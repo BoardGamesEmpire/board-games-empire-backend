@@ -1535,7 +1535,7 @@ describe('EventOccurrenceService', () => {
       expect(rejection).toBeInstanceOf(CodedHttpException);
       expect((rejection as CodedHttpException).getResponse()).toMatchObject({
         code: 'OCCURRENCE_TRANSITION_NOT_ALLOWED',
-        status: OccurrenceStatus.Confirmed,
+        state: OccurrenceStatus.Confirmed,
       });
     });
 
@@ -1555,7 +1555,7 @@ describe('EventOccurrenceService', () => {
       expect((rejection as CodedHttpException).getStatus()).toBe(400);
       expect((rejection as CodedHttpException).getResponse()).toMatchObject({
         code: 'OCCURRENCE_TRANSITION_NOT_ALLOWED',
-        status: OccurrenceStatus.Proposed,
+        state: OccurrenceStatus.Proposed,
         to: OccurrenceStatus.Cancelled,
         message: t('errors.occurrence.state.proposed'),
       });
@@ -1642,7 +1642,7 @@ describe('EventOccurrenceService', () => {
         expect((rejection as CodedHttpException).getStatus()).toBe(400);
         expect((rejection as CodedHttpException).getResponse()).toMatchObject({
           code: 'OCCURRENCE_TRANSITION_NOT_ALLOWED',
-          status: moved,
+          state: moved,
         });
         expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
           db.eventOccurrence.findUnique.mock.invocationCallOrder[1],
@@ -1796,7 +1796,7 @@ describe('EventOccurrenceService', () => {
       expect((rejection as CodedHttpException).getStatus()).toBe(400);
       expect((rejection as CodedHttpException).getResponse()).toMatchObject({
         code: 'OCCURRENCE_NOT_PROPOSED',
-        status: OccurrenceStatus.Confirmed,
+        state: OccurrenceStatus.Confirmed,
         message: t('errors.occurrence.state.confirmed'),
       });
       expect(db.eventAvailabilityVote.upsert).not.toHaveBeenCalled();

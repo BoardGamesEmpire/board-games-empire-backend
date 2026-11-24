@@ -550,11 +550,11 @@ describe('household bans (#782)', () => {
       await holder.commit();
 
       expect(await banning).toMatchObject({ status: 201 });
-      // The code and the status field say it was revoked; the message is a
+      // The code and the `state` field say it was revoked; the message is a
       // sentence, not the enum's name (#1114).
       expect(await accepting).toMatchObject({
         status: 409,
-        body: { code: 'INVITE_NOT_OUTSTANDING', status: InviteStatus.Revoked },
+        body: { code: 'INVITE_NOT_OUTSTANDING', state: InviteStatus.Revoked },
       });
     });
 

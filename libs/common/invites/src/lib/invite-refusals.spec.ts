@@ -29,7 +29,7 @@ describe('inviteNotOutstanding (#1114)', () => {
       error: 'Conflict',
       message: t(key),
       code: 'INVITE_NOT_OUTSTANDING',
-      status,
+      state: status,
     });
   });
 });

@@ -554,7 +554,7 @@ describe('EventGameNominationService', () => {
 
     // The status the lock found, not the one first read (#1114).
     expect(await refusalOf(service.resolveNomination('event-1', 'nom-1'))).toEqual(
-      codedRefusal(Http.BadRequest, 'NOMINATION_NOT_RESOLVABLE', { status: NominationStatus.Paused }),
+      codedRefusal(Http.BadRequest, 'NOMINATION_NOT_RESOLVABLE', { state: NominationStatus.Paused }),
     );
     expect(db.eventGameVote.findMany).not.toHaveBeenCalled();
     expect(db.eventGameNomination.update).not.toHaveBeenCalled();
@@ -808,7 +808,7 @@ describe('EventGameNominationService', () => {
       arrangeWithdraw(NominationStatus.Open, { locked: NominationStatus.Approved });
 
       expect(await refusalOf(service.withdraw('event-1', 'nom-1'))).toEqual(
-        codedRefusal(Http.BadRequest, 'NOMINATION_NOT_WITHDRAWABLE', { status: NominationStatus.Approved }),
+        codedRefusal(Http.BadRequest, 'NOMINATION_NOT_WITHDRAWABLE', { state: NominationStatus.Approved }),
       );
       expect(tx.eventGameNomination.update).not.toHaveBeenCalled();
       expect(db.eventGameNomination.update).not.toHaveBeenCalled();
@@ -933,7 +933,7 @@ describe('EventGameNominationService', () => {
       arrangeWithdraw(NominationStatus.Approved);
 
       expect(await refusalOf(service.withdraw('event-1', 'nom-1'))).toEqual(
-        codedRefusal(Http.BadRequest, 'NOMINATION_NOT_WITHDRAWABLE', { status: NominationStatus.Approved }),
+        codedRefusal(Http.BadRequest, 'NOMINATION_NOT_WITHDRAWABLE', { state: NominationStatus.Approved }),
       );
       expect(db.$transaction).not.toHaveBeenCalled();
       expect(tx.$queryRaw).not.toHaveBeenCalled();
@@ -973,7 +973,7 @@ describe('EventGameNominationService', () => {
       });
 
       expect(await refusalOf(service.hostApprove('event-1', 'nom-1'))).toEqual(
-        codedRefusal(Http.BadRequest, 'NOMINATION_NOT_AWAITING_APPROVAL', { status: NominationStatus.Paused }),
+        codedRefusal(Http.BadRequest, 'NOMINATION_NOT_AWAITING_APPROVAL', { state: NominationStatus.Paused }),
       );
       expect(db.eventGameNomination.update).not.toHaveBeenCalled();
       expect(db.eventGame.create).not.toHaveBeenCalled();
@@ -1084,7 +1084,7 @@ describe('EventGameNominationService', () => {
       } as EventGameNomination);
 
       expect(await refusalOf(service.resolveNomination('event-1', 'nom-1'))).toEqual(
-        codedRefusal(Http.BadRequest, 'NOMINATION_NOT_RESOLVABLE', { status }),
+        codedRefusal(Http.BadRequest, 'NOMINATION_NOT_RESOLVABLE', { state: status }),
       );
     },
   );
@@ -1186,7 +1186,7 @@ describe('EventGameNominationService', () => {
 
     // The status the lock found, not the one first read (#1114).
     expect(await refusalOf(service.castVote('event-1', 'nom-1', { voteType: VoteType.For }))).toEqual(
-      codedRefusal(Http.BadRequest, 'NOMINATION_NOT_OPEN', { status: NominationStatus.Paused }),
+      codedRefusal(Http.BadRequest, 'NOMINATION_NOT_OPEN', { state: NominationStatus.Paused }),
     );
     expect(db.eventGameVote.upsert).not.toHaveBeenCalled();
   });
@@ -1216,7 +1216,7 @@ describe('EventGameNominationService', () => {
     } as EventGameNomination);
 
     expect(await refusalOf(service.castVote('event-1', 'nom-1', { voteType: VoteType.For }))).toEqual(
-      codedRefusal(Http.BadRequest, 'NOMINATION_NOT_OPEN', { status: NominationStatus.Withdrawn }),
+      codedRefusal(Http.BadRequest, 'NOMINATION_NOT_OPEN', { state: NominationStatus.Withdrawn }),
     );
     expect(db.$transaction).not.toHaveBeenCalled();
   });

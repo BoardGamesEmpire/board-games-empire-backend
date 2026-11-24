@@ -24,8 +24,8 @@ const STATE_KEYS = [
 ] as const;
 
 // The status names a state the message describes in whole sentences, so no
-// enum name reaches the copy (#1114): the key picks the sentence and `status`
-// rides as a field for a client to branch on.
+// enum name reaches the copy (#1114): the key picks the sentence and the status
+// rides as the field `state` for a client to branch on.
 describe('media contribution refusals', () => {
   it('covers every status each refusal can carry in the tables (#1114)', () => {
     expect(STATE_KEYS.map(([status]) => status).sort()).toEqual(Object.values(MediaContributionStatus).sort());
@@ -38,7 +38,11 @@ describe('media contribution refusals', () => {
 
       expect(refusal.getStatus()).toBe(Http.Conflict);
       expect(refusal.code).toBe('MEDIA_CONTRIBUTION_EXISTS');
-      expect(refusal.getResponse()).toMatchObject({ code: 'MEDIA_CONTRIBUTION_EXISTS', status, message: t(key) });
+      expect(refusal.getResponse()).toMatchObject({
+        code: 'MEDIA_CONTRIBUTION_EXISTS',
+        state: status,
+        message: t(key),
+      });
     });
   });
 
@@ -51,7 +55,7 @@ describe('media contribution refusals', () => {
 
       expect(refusal.getStatus()).toBe(Http.Conflict);
       expect(refusal.code).toBe(code);
-      expect(refusal.getResponse()).toMatchObject({ code, status, message: t(key) });
+      expect(refusal.getResponse()).toMatchObject({ code, state: status, message: t(key) });
     });
   });
 

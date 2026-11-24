@@ -18,14 +18,14 @@ describe('occurrence refusals (#1114)', () => {
     expect(EXPECTED_KEYS.map(([status]) => status).sort()).toEqual(Object.values(OccurrenceStatus).sort());
   });
 
-  it.each(EXPECTED_KEYS)('occurrenceNotProposed(%s) is a 400 with the status as a field, reading %s', (status, key) => {
+  it.each(EXPECTED_KEYS)('occurrenceNotProposed(%s) is a 400 with the status as `state`, reading %s', (status, key) => {
     const refusal = occurrenceNotProposed(status);
 
     expect(refusal.getStatus()).toBe(Http.BadRequest);
     expect(refusal.getResponse()).toMatchObject({
       statusCode: Http.BadRequest,
       code: 'OCCURRENCE_NOT_PROPOSED',
-      status,
+      state: status,
       message: t(key),
     });
   });
@@ -39,7 +39,7 @@ describe('occurrence refusals (#1114)', () => {
       expect(refusal.getResponse()).toMatchObject({
         statusCode: Http.BadRequest,
         code: 'OCCURRENCE_TRANSITION_NOT_ALLOWED',
-        status: from,
+        state: from,
         to: OccurrenceStatus.Confirmed,
         message: t(key),
       });

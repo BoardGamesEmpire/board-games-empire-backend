@@ -127,10 +127,10 @@ Refusals, in the order they are checked:
 | outstanding but past `expiresAt`                                                      | 410    | `expired`                                                                |
 | accept on `AwaitingApproval`                                                          | 409    | `awaiting_approval`                                                      |
 | approve on anything but `AwaitingApproval`                                            | 409    | `not_awaiting_approval`                                                  |
-| settled                                                                               | 409    | `INVITE_NOT_OUTSTANDING`, with the status it holds in `status`           |
+| settled                                                                               | 409    | `INVITE_NOT_OUTSTANDING`, with the status it holds in `state`            |
 | moved between the read and the guarded update                                         | 409    | the transition the row now refuses, else `changed_concurrently`          |
 
-All keys live under `errors.invite.*`. The settled refusal is coded `INVITE_NOT_OUTSTANDING`, carries the invite's status as the field `status`, and says in one sentence per status what state the invite is in (`errors.invite.state.pending` … `errors.invite.state.withdrawn`), without the invite's id (#1114).
+All keys live under `errors.invite.*`. The settled refusal is coded `INVITE_NOT_OUTSTANDING`, carries the invite's status as the field `state`, and says in one sentence per status what state the invite is in (`errors.invite.state.pending` … `errors.invite.state.withdrawn`), without the invite's id (#1114).
 
 ---
 

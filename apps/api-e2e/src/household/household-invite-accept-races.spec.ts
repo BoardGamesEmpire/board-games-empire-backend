@@ -132,11 +132,11 @@ describe('household invite accept races', () => {
       const [joined, refused] = (await Promise.all(racing)).sort((left, right) => left.status - right.status);
 
       expect(joined).toMatchObject({ status: 200 });
-      // The code and the status field say it was accepted; the message is a
+      // The code and the `state` field say it was accepted; the message is a
       // sentence, not the enum's name (#1114).
       expect(refused).toMatchObject({
         status: 409,
-        body: { code: 'INVITE_NOT_OUTSTANDING', status: InviteStatus.Accepted },
+        body: { code: 'INVITE_NOT_OUTSTANDING', state: InviteStatus.Accepted },
       });
     });
 

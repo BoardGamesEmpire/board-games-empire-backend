@@ -35,29 +35,29 @@ const CONTRIBUTION_EXISTS_MESSAGE = {
   [MediaContributionStatus.Approved]: 'errors.contribution.exists.approved',
 } as const satisfies Record<LiveContributionStatus, I18nPath>;
 
-/** The media already holds a live contribution; `status` says which (#1114). */
+/** The media already holds a live contribution; `state` says which (#1114). */
 export function contributionExists(status: LiveContributionStatus): CodedHttpException {
   return new CodedHttpException(Http.Conflict, 'MEDIA_CONTRIBUTION_EXISTS', t(CONTRIBUTION_EXISTS_MESSAGE[status]), {
-    fields: { status },
+    fields: { state: status },
   });
 }
 
-/** Only a pending contribution can be approved or rejected; `status` is the one it holds (#1114). */
+/** Only a pending contribution can be approved or rejected; `state` is the status it holds (#1114). */
 export function contributionNotPending(status: MediaContributionStatus): CodedHttpException {
   return new CodedHttpException(
     Http.Conflict,
     'MEDIA_CONTRIBUTION_NOT_PENDING',
     t(CONTRIBUTION_STATE_MESSAGE[status]),
-    { fields: { status } },
+    { fields: { state: status } },
   );
 }
 
-/** Only a rejected contribution can be reclaimed; `status` is the one it holds (#1114). */
+/** Only a rejected contribution can be reclaimed; `state` is the status it holds (#1114). */
 export function contributionNotReclaimable(status: MediaContributionStatus): CodedHttpException {
   return new CodedHttpException(
     Http.Conflict,
     'MEDIA_CONTRIBUTION_NOT_RECLAIMABLE',
     t(CONTRIBUTION_STATE_MESSAGE[status]),
-    { fields: { status } },
+    { fields: { state: status } },
   );
 }

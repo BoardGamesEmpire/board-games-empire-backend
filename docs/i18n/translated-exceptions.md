@@ -58,7 +58,9 @@ better-auth writes itself (below):
   row (#634).
 
 - Any other field (a quota's `limit`, a permission catalog refusal's `problems`) sits
-  beside these. No field can override `statusCode`, `error` or `message`.
+  beside these. No field can override `statusCode`, `error` or `message`. A
+  record's status travels as `state` (an invite's, a nomination's), never as
+  `status`, which RFC 9457 problem details keep for the HTTP status code (#1114).
 
 `errorEnvelope(status, message, fields?)` in `@bge/i18n` builds it. Every
 producer goes through it: the global filter and the controller-scoped plugin,

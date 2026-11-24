@@ -15,16 +15,16 @@ const OCCURRENCE_STATE_MESSAGE = {
   [OccurrenceStatus.Cancelled]: 'errors.occurrence.state.cancelled',
 } as const satisfies Record<OccurrenceStatus, I18nPath>;
 
-/** 400 for an availability vote on a date that isn't Proposed. `status` carries the date's (#1114). */
+/** 400 for an availability vote on a date that isn't Proposed. `state` carries the date's status (#1114). */
 export function occurrenceNotProposed(status: OccurrenceStatus): CodedHttpException {
   return new CodedHttpException(Http.BadRequest, 'OCCURRENCE_NOT_PROPOSED', t(OCCURRENCE_STATE_MESSAGE[status]), {
-    fields: { status },
+    fields: { state: status },
   });
 }
 
 /**
  * 400 for a confirm, decline or cancel the date's status can't start from.
- * The message says where the date is; `status` and `to` let a client say the
+ * The message says where the date is; `state` and `to` let a client say the
  * rest (#1114).
  */
 export function occurrenceTransitionRefused(from: OccurrenceStatus, to: OccurrenceStatus): CodedHttpException {
@@ -32,6 +32,6 @@ export function occurrenceTransitionRefused(from: OccurrenceStatus, to: Occurren
     Http.BadRequest,
     'OCCURRENCE_TRANSITION_NOT_ALLOWED',
     t(OCCURRENCE_STATE_MESSAGE[from]),
-    { fields: { status: from, to } },
+    { fields: { state: from, to } },
   );
 }

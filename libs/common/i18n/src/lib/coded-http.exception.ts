@@ -7,7 +7,12 @@ export interface CodedHttpExceptionOptions {
   /** Server-side context for logs. It never reaches the response body. */
   readonly cause?: unknown;
 
-  /** Machine-readable detail beside the message: a quota's `limit`, a permission catalog refusal's `problems`. */
+  /**
+   * Machine-readable detail beside the message: a quota's `limit`, a permission
+   * catalog refusal's `problems`. A record's status travels as `state`, never
+   * `status`: RFC 9457 problem details keep `status` for the HTTP status code
+   * (#1114).
+   */
   readonly fields?: Readonly<Record<string, unknown>>;
 }
 

@@ -109,7 +109,7 @@ describe('MediaContributionService', () => {
         await expect(service.contribute('m1', dto)).rejects.toMatchObject({
           status: Http.Conflict,
           code: 'MEDIA_CONTRIBUTION_EXISTS',
-          response: { status },
+          response: { state: status },
         });
         expect(db.mediaContribution.create).not.toHaveBeenCalled();
       },
@@ -216,7 +216,7 @@ describe('MediaContributionService', () => {
       await expect(service.approve('c1')).rejects.toMatchObject({
         status: Http.Conflict,
         code: 'MEDIA_CONTRIBUTION_NOT_PENDING',
-        response: { status: MediaContributionStatus.Approved },
+        response: { state: MediaContributionStatus.Approved },
       });
     });
 
@@ -248,7 +248,7 @@ describe('MediaContributionService', () => {
         await expect(service.reject('c1', { reason: 'nope' })).rejects.toMatchObject({
           status: Http.Conflict,
           code: 'MEDIA_CONTRIBUTION_NOT_PENDING',
-          response: { status },
+          response: { state: status },
         });
         expect(db.mediaContribution.update).not.toHaveBeenCalled();
         expect(emit).not.toHaveBeenCalled();
@@ -353,7 +353,7 @@ describe('MediaContributionService', () => {
         await expect(service.reclaim('c1')).rejects.toMatchObject({
           status: Http.Conflict,
           code: 'MEDIA_CONTRIBUTION_NOT_RECLAIMABLE',
-          response: { status },
+          response: { state: status },
         });
       },
     );

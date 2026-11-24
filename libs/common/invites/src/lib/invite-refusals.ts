@@ -19,12 +19,12 @@ const INVITE_STATE_MESSAGE = {
 
 /**
  * The refusal for a transition an invite's status doesn't allow. The status is
- * a field so a client can branch on it; the invite's id is not, since the
+ * the field `state` so a client can branch on it; the invite's id is not, since the
  * actor already holds it and a revoked answer must tell the invitee nothing
  * more (#1114).
  */
 export function inviteNotOutstanding(status: InviteStatus): CodedHttpException {
   return new CodedHttpException(Http.Conflict, 'INVITE_NOT_OUTSTANDING', t(INVITE_STATE_MESSAGE[status]), {
-    fields: { status },
+    fields: { state: status },
   });
 }
