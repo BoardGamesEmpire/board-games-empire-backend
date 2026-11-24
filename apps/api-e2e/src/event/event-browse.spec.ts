@@ -333,17 +333,39 @@ describe('browsing upcoming events (#962)', () => {
     }
   });
 
-  // A key's grant keeps its action and type but not the permission's
-  // conditions, which the owner's ability stands in for (#266). What limits a
-  // key's list is a grant pinned to one event.
+  // A key scope keeps its permission's conditions, rendered where the key's
+  // owner holds the permission (#266). A key scoped to friends' events lists a
+  // friend's event and not a stranger's Public one, which its owner's session
+  // lists beside it.
   it('limits an API key to its own grants', async () => {
+    const [owner, host, stranger] = await Promise.all([actors.user(), actors.user(), actors.user()]);
+    await befriend(db.client, owner, host);
+    const friendsId = await createdEventId(host, { reach: Reach.Friends, ...dated(2) });
+    const otherId = await createdEventId(stranger, { reach: Reach.Public, ...dated(2) });
+
+    const key = await mintApiKey(baseUrl, db.client, owner, {
+      slugs: ['read:event:friends'],
+      resourceType: ResourceType.Event,
+    });
+
+    // The control: the owner's session lists both.
+    expect(await browse(owner)).toEqual(expect.arrayContaining([friendsId, otherId]));
+
+    const ids = await browse(key);
+    expect(ids).toContain(friendsId);
+    expect(ids).not.toContain(otherId);
+  });
+
+  // A key scope's own `resourceId` is ANDed with the rendered condition, so a
+  // pin narrows the list to the one event it names (#266).
+  it('limits an API key with a pinned key scope to the event it names', async () => {
     const [owner, host] = await Promise.all([actors.user(), actors.user()]);
     await befriend(db.client, owner, host);
     const pinnedId = await createdEventId(host, { reach: Reach.Friends, ...dated(2) });
-    const otherId = await createdEventId(host, { reach: Reach.Public, ...dated(2) });
+    const otherId = await createdEventId(host, { reach: Reach.Friends, ...dated(2) });
 
     const key = await mintApiKey(baseUrl, db.client, owner, {
-      slugs: ['read:event:public'],
+      slugs: ['read:event:friends'],
       resourceType: ResourceType.Event,
       resourceId: pinnedId,
     });

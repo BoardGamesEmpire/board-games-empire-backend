@@ -53,8 +53,9 @@ it('an owner can list their households', async () => {
 - **Generated identifiers only.** Never pin ids, usernames, or emails across tests — a pinned id
   lets a stale ability-cache entry from a truncated user be re-derived by a later test (#268).
 
-API-key actors are deliberately absent — deferred to #270 while the key permission model is
-unbuilt; restricted-key scoping is #266.
+API-key actors are deliberately absent, deferred to #270; specs mint keys through
+`apps/api-e2e/src/support/api-key.ts`. A key scope keeps its permission's conditions, rendered
+where the key's owner holds the permission (#266).
 
 ## Child processes and gateways
 

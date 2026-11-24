@@ -469,9 +469,11 @@ describe('HouseholdPluginsController (delegation + household instance gate)', ()
     });
 
     // The route's liveness guard lets through an actor that cannot read
-    // households, such as a staff member's key scoped to the plugin routes,
-    // and a soft delete leaves the plugin rows in place. The list checks for
-    // that actor itself, and answers 403, as the routes do whatever the id.
+    // households, such as a household member's key scoped to the plugin routes
+    // whose owner's cached graph still holds a deleted household's membership
+    // (#266), and a soft delete leaves the plugin rows in place. The list
+    // checks for that actor itself, and answers 403, as the routes do whatever
+    // the id.
     it('answers 403 for a household that is gone to an actor who does not read households', async () => {
       householdCount.mockResolvedValue(0);
       abilityService.getCurrentAbilities.mockReturnValue([{ can: () => true }, { can: () => false }] as never);
@@ -535,8 +537,9 @@ describe('HouseholdPluginsController (delegation + household instance gate)', ()
   });
 
   // The consent and feature-state reads have no write to re-check liveness in
-  // either, so a staff member's key scoped to the plugin routes would read a
-  // deleted household's decisions through them. They check it as the list
+  // either, so a household member's key scoped to the plugin routes, whose
+  // owner's cached graph still holds the deleted household's membership
+  // (#266), would read its decisions through them. They check it as the list
   // does, for the actor the guard let through, and answer the same 403 (#790).
   describe('household liveness on the single reads (#790)', () => {
     const reads = [

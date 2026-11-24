@@ -333,8 +333,10 @@ describe("a date's own policy and the allowed lists (#796)", () => {
         dateIds: [dateId],
       } = await createdWithDates(host);
       await updateDatePolicy(host, eventId, dateId, { gameAdditionMode: GameAdditionMode.HostOnly }).expect(200);
+      // The reads the host holds through attending the event: a key scope
+      // renders only where its owner holds the permission (#266).
       const key = await mintApiKey(baseUrl, db.client, host, [
-        { slugs: ['read:event'], resourceType: ResourceType.Event },
+        { slugs: ['read:event:participant'], resourceType: ResourceType.Event },
         { slugs: ['read:event_occurrence'], resourceType: ResourceType.EventOccurrence },
       ]);
 
