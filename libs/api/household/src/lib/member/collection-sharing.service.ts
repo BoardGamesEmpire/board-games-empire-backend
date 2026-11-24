@@ -18,6 +18,7 @@ import {
   HouseholdExcludedGameRemovedEvent,
   HouseholdMemberCollectionSharingChangedEvent,
 } from '../events/household.events';
+import { lockHouseholdForRoleTransition } from '../household-access.helpers';
 import { MEMBER_SELECT } from '../read-shapes';
 import type { HouseholdMemberWithRelations } from './household-member.service';
 
@@ -110,8 +111,12 @@ function excludedGameNotFound(): CodedHttpException {
  * are, as leaving the household does (#157).
  *
  * Each change publishes after commit, and only a change publishes: the domain
- * event, which the audit persistence listener records, then the webhook, both
- * carrying ids only. An excluded game's reason never leaves the server.
+ * event, which the audit persistence listener records, carrying ids only. A
+ * change to collection sharing also sends a webhook to whoever can read the
+ * household, as every roster read already shows the flag. An excluded game
+ * sends none: that audience includes fellow members and, by the household's
+ * reach, friends of members, and the roster read keeps excluded games from all
+ * of them (#868). An excluded game's reason never leaves the server.
  */
 @Injectable()
 export class CollectionSharingService {
@@ -205,6 +210,16 @@ export class CollectionSharingService {
    * excluded. The insert skips a duplicate rather than failing on it, so its
    * count says whether this call created the excluded game, and only a create
    * publishes, even when two calls race.
+   *
+   * The insert waits on the household's role-transition lock, which leaving,
+   * removal and a ban take before they clear the member's excluded games and
+   * delete the membership. Without it, an insert that commits between those
+   * two deletes leaves a row the membership's foreign key refuses, and the
+   * leave answers 500. Under the lock, a leave that went first ends the
+   * membership and this insert answers the membership 404; an insert that
+   * went first is cleared by the leave that follows. The lock comes after the
+   * membership and entry reads, so a 403 or 404 takes no lock, as on the
+   * leave path.
    */
   async excludeGame(householdId: string, dto: ExcludeGameDto): Promise<ExcludedGameView> {
     const initiatedAt = new Date();
@@ -222,6 +237,8 @@ export class CollectionSharingService {
       if (!entry) {
         throw collectionEntryNotFound();
       }
+
+      await lockHouseholdForRoleTransition(tx, householdId);
 
       const key = { householdMemberId: own.id, gameCollectionId: entry.id };
       const created = await this.writeExcludedGame(tx, householdId, { ...key, excludedReason });
@@ -242,10 +259,7 @@ export class CollectionSharingService {
         collectionEntryId: row.gameCollectionId,
       };
 
-      this.publisher.publish(
-        new HouseholdExcludedGameAddedEvent(excluded, initiatedAt),
-        householdWebhook(WebhookEventType.HouseholdMemberExcludedGameAdded, excluded),
-      );
+      this.publisher.publish(new HouseholdExcludedGameAddedEvent(excluded, initiatedAt));
     }
 
     return toExcludedGameView(row);
@@ -255,6 +269,10 @@ export class CollectionSharingService {
    * Puts an excluded game back into this household's game pool (#170). 404
    * when the caller hasn't excluded it, which a second of two racing calls
    * hears too.
+   *
+   * It matches what the list shows: an excluded game of a removed entry
+   * answers the same 404, and stays until the entry is added again, as it
+   * does for every other route.
    */
   async removeExcludedGame(householdId: string, collectionEntryId: string): Promise<void> {
     const initiatedAt = new Date();
@@ -264,7 +282,11 @@ export class CollectionSharingService {
       const own = await this.findOwnMembership(tx, householdId, userId, Action.update, OWN_MEMBERSHIP_SELECT);
 
       const { count } = await tx.excludedGame.deleteMany({
-        where: { householdMemberId: own.id, gameCollectionId: collectionEntryId },
+        where: {
+          householdMemberId: own.id,
+          gameCollectionId: collectionEntryId,
+          gameCollection: { userId, deletedAt: null },
+        },
       });
 
       if (count === 0) {
@@ -276,10 +298,7 @@ export class CollectionSharingService {
 
     const excluded = { householdId, memberId: own.id, userId: own.userId, collectionEntryId };
 
-    this.publisher.publish(
-      new HouseholdExcludedGameRemovedEvent(excluded, initiatedAt),
-      householdWebhook(WebhookEventType.HouseholdMemberExcludedGameRemoved, excluded),
-    );
+    this.publisher.publish(new HouseholdExcludedGameRemovedEvent(excluded, initiatedAt));
   }
 
   /**

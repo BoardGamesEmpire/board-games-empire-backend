@@ -55,10 +55,6 @@ export const WebhookEventType = {
   HouseholdMemberRemoved: 'household.member.removed.v1',
   /** A member turned their collection sharing on or off (#170). */
   HouseholdMemberCollectionSharingChanged: 'household.member.collection-sharing-changed.v1',
-  /** A member excluded one of their collection entries from the game pool; ids only, never the reason (#170). */
-  HouseholdMemberExcludedGameAdded: 'household.member.excluded-game-added.v1',
-  /** A member stopped excluding one of their collection entries from the game pool (#170). */
-  HouseholdMemberExcludedGameRemoved: 'household.member.excluded-game-removed.v1',
 } as const;
 
 export type WebhookEventType = (typeof WebhookEventType)[keyof typeof WebhookEventType];
@@ -149,15 +145,13 @@ export const WEBHOOK_EVENT_DESCRIPTORS: Record<WebhookEventType, WebhookEventMet
   [WebhookEventType.HouseholdMemberAdmitted]: { subject: ResourceType.Household, requiredAction: Action.read },
   [WebhookEventType.HouseholdMemberRoleChanged]: { subject: ResourceType.Household, requiredAction: Action.read },
   [WebhookEventType.HouseholdMemberRemoved]: { subject: ResourceType.Household, requiredAction: Action.read },
-  // A member's collection sharing and excluded games are `read` on the
-  // household, as the membership types above are (#170). Ids only: an
-  // excluded game's reason never leaves the server.
+  // A member's collection sharing is `read` on the household, as the
+  // membership types above are (#170): every roster read already shows it.
+  // Excluded games have no type: `read` on the household reaches fellow
+  // members and a member's friends, from whom the roster read keeps a
+  // member's excluded games (#868), and no narrower audience is expressible
+  // here.
   [WebhookEventType.HouseholdMemberCollectionSharingChanged]: {
-    subject: ResourceType.Household,
-    requiredAction: Action.read,
-  },
-  [WebhookEventType.HouseholdMemberExcludedGameAdded]: { subject: ResourceType.Household, requiredAction: Action.read },
-  [WebhookEventType.HouseholdMemberExcludedGameRemoved]: {
     subject: ResourceType.Household,
     requiredAction: Action.read,
   },

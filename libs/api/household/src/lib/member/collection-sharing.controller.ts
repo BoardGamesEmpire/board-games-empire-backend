@@ -74,10 +74,13 @@ export class CollectionSharingController {
     description:
       'Holds one of your own collection entries back from the household’s game pool (#170). ' +
       'A repeat for the same entry replaces the reason, and one that omits it or sends it blank clears it. ' +
-      'The reason is never sent in a webhook.',
+      'The reason is returned only to you. Excluding a game sends no webhook.',
   })
   @ApiParam({ name: 'householdId', type: String })
-  @ApiResponse({ status: Http.Created, description: 'Game excluded' })
+  @ApiResponse({
+    status: Http.Created,
+    description: 'Game excluded. A repeat for the same entry answers 201 too, with the replaced reason',
+  })
   @ApiResponse({ status: Http.BadRequest, description: 'Invalid body' })
   @ApiResponse({
     status: Http.Forbidden,

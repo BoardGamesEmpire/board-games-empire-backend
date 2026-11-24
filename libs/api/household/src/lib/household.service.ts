@@ -289,7 +289,10 @@ export class HouseholdService {
    * ceiling's household rule approximates `collectionSharing` and excluded games
    * across every household the owner and viewer share, not just this one; the
    * exact rule for a single household belongs to the collection pool read
-   * (#367).
+   * (#367). So a member who turned sharing off here, and keeps it on in another
+   * household the viewer is in, still shows entries here: only ones the viewer
+   * can read by id, and sharing off was never meant to hide what the reach
+   * admits on its own (#495).
    */
   private async getSelectMemberGames(memberId: string, householdMemberId: string) {
     // One where for both reads: the member's live entries under the ceiling,

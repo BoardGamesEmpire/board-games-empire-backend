@@ -1,7 +1,7 @@
 import { Action, Prisma, ResourceType, SystemRole } from '@bge/database';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
 import type { MockDatabaseService } from '@bge/testing';
-import { createTestingModuleWithDb, unwrapTransaction } from '@bge/testing';
+import { createTestingModuleWithDb, rawQueryText, unwrapTransaction } from '@bge/testing';
 import { WebhookEventType } from '@bge/webhooks';
 import { ForbiddenException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -129,6 +129,8 @@ describe('CollectionSharingService', () => {
     db.excludedGame.updateMany.mockResolvedValue({ count: 1 });
     db.excludedGame.findMany.mockResolvedValue(resolves([EXCLUDED_ROW]));
     db.excludedGame.deleteMany.mockResolvedValue({ count: 1 });
+    // The household's role-transition lock, which the exclude takes (#170).
+    db.$queryRaw.mockResolvedValue(resolves([{ id: 'hh-1' }]));
   });
 
   afterEach(() => jest.clearAllMocks());
@@ -153,6 +155,7 @@ describe('CollectionSharingService', () => {
     expect(db.excludedGame.update).not.toHaveBeenCalled();
     expect(db.excludedGame.updateMany).not.toHaveBeenCalled();
     expect(db.excludedGame.deleteMany).not.toHaveBeenCalled();
+    expect(db.$queryRaw).not.toHaveBeenCalled();
     expect(events.emit).not.toHaveBeenCalled();
   };
 
@@ -371,6 +374,49 @@ describe('CollectionSharingService', () => {
       expect(db.excludedGame.updateMany).not.toHaveBeenCalled();
     });
 
+    it('takes the household’s role-transition lock after the membership and entry reads, before the insert (#170)', async () => {
+      // Leaving, removal and a ban take this lock before they clear the
+      // member's excluded games and delete the membership, whose foreign key
+      // refuses an excluded game inserted between the two deletes.
+      const order: string[] = [];
+      db.householdMember.findFirst.mockImplementation((() => {
+        order.push('membership');
+        return Promise.resolve(MEMBER);
+      }) as never);
+      db.gameCollection.findFirst.mockImplementation((() => {
+        order.push('entry');
+        return Promise.resolve({ id: 'entry-1' });
+      }) as never);
+      db.$queryRaw.mockImplementation(((query: unknown) => {
+        order.push(rawQueryText(query));
+        return Promise.resolve([{ id: 'hh-1' }]);
+      }) as never);
+      db.excludedGame.createMany.mockImplementation((() => {
+        order.push('insert');
+        return Promise.resolve({ count: 1 });
+      }) as never);
+
+      await routes.excludeGame();
+
+      expect(order).toEqual([
+        'membership',
+        'entry',
+        expect.stringMatching(/FROM households h .* FOR NO KEY UPDATE/),
+        'insert',
+      ]);
+    });
+
+    it('answers 404 when the household was deleted before the lock (#170)', async () => {
+      db.$queryRaw.mockResolvedValue(resolves([]));
+
+      await expect(routes.excludeGame()).rejects.toMatchObject({
+        status: Http.NotFound,
+        response: expect.objectContaining({ key: 'errors.household.not_found' }),
+      });
+      expect(db.excludedGame.createMany).not.toHaveBeenCalled();
+      expect(events.emit).not.toHaveBeenCalled();
+    });
+
     it('stores no reason as null (#170)', async () => {
       await service.excludeGame('hh-1', { collectionEntryId: 'entry-1', reason: null });
 
@@ -440,10 +486,7 @@ describe('CollectionSharingService', () => {
         skipDuplicates: true,
       });
       expect(db.excludedGame.update).not.toHaveBeenCalled();
-      expect(emittedNames()).toEqual([
-        HouseholdEvents.ExcludedGameAdded,
-        WebhookEventType.HouseholdMemberExcludedGameAdded,
-      ]);
+      expect(emittedNames()).toEqual([HouseholdEvents.ExcludedGameAdded]);
     });
 
     it('publishes nothing when a third racing call re-created the excluded game before the second insert (#170)', async () => {
@@ -473,39 +516,32 @@ describe('CollectionSharingService', () => {
       expect(events.emit).not.toHaveBeenCalled();
     });
 
-    it('publishes the excluded-game events without the reason (#170)', async () => {
+    // A webhook on the household reaches its other members and, by its
+    // reach, friends of members: the readers the roster read keeps a
+    // member's excluded games from (#868). So only the audit event goes out.
+    it('publishes the excluded-game audit events without the reason, and no webhook (#170)', async () => {
       await service.excludeGame('hh-1', { collectionEntryId: 'entry-1', reason: 'Too fragile to lend' });
 
-      expect(emittedNames()).toEqual([
-        HouseholdEvents.ExcludedGameAdded,
-        WebhookEventType.HouseholdMemberExcludedGameAdded,
-      ]);
+      expect(emittedNames()).toEqual([HouseholdEvents.ExcludedGameAdded]);
 
       const added = emittedUnder(HouseholdEvents.ExcludedGameAdded);
       expect(added).toBeInstanceOf(HouseholdExcludedGameAddedEvent);
       expect(added).toMatchObject({
         after: { householdId: 'hh-1', memberId: 'member-1', userId: 'user-1', collectionEntryId: 'entry-1' },
       });
-      expect(emittedUnder(WebhookEventType.HouseholdMemberExcludedGameAdded)).toMatchObject({
-        data: { householdId: 'hh-1', memberId: 'member-1', userId: 'user-1', collectionEntryId: 'entry-1' },
-      });
 
       const addedPayloads = events.emit.mock.calls.map(([, payload]) => payload);
       events.emit.mockClear();
       await routes.removeExcludedGame();
 
-      expect(emittedNames()).toEqual([
-        HouseholdEvents.ExcludedGameRemoved,
-        WebhookEventType.HouseholdMemberExcludedGameRemoved,
-      ]);
+      expect(emittedNames()).toEqual([HouseholdEvents.ExcludedGameRemoved]);
       expect(emittedUnder(HouseholdEvents.ExcludedGameRemoved)).toBeInstanceOf(HouseholdExcludedGameRemovedEvent);
       expect(emittedUnder(HouseholdEvents.ExcludedGameRemoved)).toMatchObject({
         before: { householdId: 'hh-1', memberId: 'member-1', userId: 'user-1', collectionEntryId: 'entry-1' },
       });
 
-      // Every payload published by both, the audit events and the webhook
-      // envelopes alike, carries no reason under any key: the reason is the
-      // member's alone.
+      // Every payload published by both carries no reason under any key: the
+      // reason is the member's alone.
       const published = JSON.stringify([...addedPayloads, ...events.emit.mock.calls.map(([, payload]) => payload)]);
       expect(published).not.toMatch(/reason/i);
       expect(published).not.toContain('Too fragile to lend');
@@ -517,8 +553,26 @@ describe('CollectionSharingService', () => {
       await expect(routes.removeExcludedGame()).resolves.toBeUndefined();
 
       expect(db.excludedGame.deleteMany).toHaveBeenCalledWith({
-        where: { householdMemberId: 'member-1', gameCollectionId: 'entry-1' },
+        where: {
+          householdMemberId: 'member-1',
+          gameCollectionId: 'entry-1',
+          gameCollection: { userId: 'user-1', deletedAt: null },
+        },
       });
+    });
+
+    it('matches only an excluded game of a live entry of the caller’s, as the list does (#170)', async () => {
+      // An excluded game of a removed entry is unlisted, and the exclude
+      // refuses that entry, so the put-back answers the same 404 for it rather
+      // than publishing a change no route shows.
+      db.excludedGame.deleteMany.mockResolvedValue({ count: 0 });
+
+      await expect(routes.removeExcludedGame()).rejects.toMatchObject({ code: 'EXCLUDED_GAME_NOT_FOUND' });
+
+      expect(db.excludedGame.deleteMany).toHaveBeenCalledWith({
+        where: expect.objectContaining({ gameCollection: { userId: 'user-1', deletedAt: null } }),
+      });
+      expect(events.emit).not.toHaveBeenCalled();
     });
 
     it('answers 404 when the entry is not excluded, and publishes nothing (#170)', async () => {
