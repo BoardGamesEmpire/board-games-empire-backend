@@ -198,6 +198,11 @@ export class EventAttendeeController {
       'The attendee was added by name, so has no collection to offer from (code ATTENDEE_HAS_NO_COLLECTION), ' +
       'the entry was removed from its collection, or a malformed body',
   })
+  @ApiResponse({
+    status: Http.Forbidden,
+    description: "No grant to offer games for this attendee, or the entry isn't in the attendee's collection",
+  })
+  @ApiResponse({ status: Http.NotFound, description: 'Event, attendee or collection entry not found' })
   @ApiResponse({ status: Http.Conflict, description: 'Game already in list' })
   @CheckPolicies((ability) => ability.can(Action.create, ResourceType.EventAttendeeGameList))
   @Post(':attendeeId/games')
