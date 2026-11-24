@@ -13,6 +13,16 @@ export const SOURCE_CLS_KEY = 'actor-context:source' as const;
 export const LOCALE_CLS_KEY = 'actor-context:locale' as const;
 
 /**
+ * When the caller's session was signed in (the session's `createdAt`), set by
+ * the HTTP actor middleware for a signed-in user only. It lives in its own CLS
+ * slot rather than on `Actor` because `Actor` reaches audit rows and job
+ * payloads, and a sign-in time belongs to neither (#1418). Consumers read it
+ * only through {@link AuditContextService.getSessionSignedInAt}; the key stays
+ * out of the lib's public barrel so no other code can read or write the slot.
+ */
+export const SESSION_SIGNED_IN_AT_CLS_KEY = 'actor-context:sessionSignedInAt' as const;
+
+/**
  * CLS slot for the per-request resolved ability array. OWNED by the
  * permissions lib (`AbilityContextInternalService` is the only sanctioned
  * writer; reads go through `AbilityService`) — the key string alone lives
@@ -97,5 +107,26 @@ export class AuditContextService {
    */
   getLocale(): string | null {
     return this.cls.get<string | undefined>(LOCALE_CLS_KEY) ?? null;
+  }
+
+  /**
+   * When the caller's session was signed in, so a route can require a recent
+   * sign-in before an act such as giving an API key a Critical permission
+   * (#1418). `null` for everything but a signed-in user over HTTP: an API key,
+   * an anonymous user, no actor, any other source (a queue job included), and
+   * a call outside any request or job scope. Both the actor and the source
+   * are checked here, so a nested system or plugin scope never reads the
+   * request's sign-in time.
+   */
+  getSessionSignedInAt(): Date | null {
+    if (!this.cls.isActive()) {
+      return null;
+    }
+
+    if (this.getSource() !== 'http' || this.getActor()?.kind !== 'user') {
+      return null;
+    }
+
+    return this.cls.get<Date | undefined>(SESSION_SIGNED_IN_AT_CLS_KEY) ?? null;
   }
 }

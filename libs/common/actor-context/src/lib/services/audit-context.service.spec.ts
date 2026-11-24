@@ -3,9 +3,15 @@ import { ForbiddenException } from '@nestjs/common';
 import type { TestingModule } from '@nestjs/testing';
 import { Test } from '@nestjs/testing';
 import { ClsModule, ClsService } from 'nestjs-cls';
-import type { Actor } from '../types';
+import type { Actor, EventSource } from '../types';
 import { SERVER_PLUGIN_UNIT } from '../types';
-import { ACTOR_CLS_KEY, AuditContextService, CORRELATION_ID_CLS_KEY, SOURCE_CLS_KEY } from './audit-context.service';
+import {
+  ACTOR_CLS_KEY,
+  AuditContextService,
+  CORRELATION_ID_CLS_KEY,
+  SESSION_SIGNED_IN_AT_CLS_KEY,
+  SOURCE_CLS_KEY,
+} from './audit-context.service';
 
 describe('AuditContextService', () => {
   let module: TestingModule;
@@ -167,5 +173,63 @@ describe('AuditContextService', () => {
         expect(service.getSource()).toBe('http');
       });
     });
+  });
+
+  // The sign-in time gates a Critical permission on an API key (#1418). It is
+  // read only for a signed-in user over HTTP, so a nested system or plugin
+  // scope, a job and an API key never see a stale one.
+  describe('getSessionSignedInAt', () => {
+    const signedInAt = new Date('2026-11-01T00:00:00Z');
+
+    it('returns the populated date for a signed-in user over HTTP', async () => {
+      await cls.run(() => {
+        cls.set(ACTOR_CLS_KEY, { kind: 'user', userId: 'user-1' } satisfies Actor);
+        cls.set(SOURCE_CLS_KEY, 'http');
+        cls.set(SESSION_SIGNED_IN_AT_CLS_KEY, signedInAt);
+
+        expect(service.getSessionSignedInAt()).toEqual(signedInAt);
+      });
+    });
+
+    it('returns null when it was never set (#1418)', async () => {
+      await cls.run(() => {
+        cls.set(ACTOR_CLS_KEY, { kind: 'user', userId: 'user-1' } satisfies Actor);
+        cls.set(SOURCE_CLS_KEY, 'http');
+
+        expect(service.getSessionSignedInAt()).toBeNull();
+      });
+    });
+
+    it('returns null outside any request or job scope (#1418)', () => {
+      expect(service.getSessionSignedInAt()).toBeNull();
+    });
+
+    it.each<[string, Actor | null]>([
+      ['an API key', { kind: 'apiKey', apiKeyId: 'k1', userId: 'user-1' }],
+      ['an anonymous user', { kind: 'anonymous', userId: 'anon-1' }],
+      ['a system actor', { kind: 'system', reason: 'nested' }],
+      ['no actor', null],
+    ])('returns null for %s even when a date is stored (#1418)', async (_label, actor) => {
+      await cls.run(() => {
+        cls.set(ACTOR_CLS_KEY, actor);
+        cls.set(SOURCE_CLS_KEY, 'http');
+        cls.set(SESSION_SIGNED_IN_AT_CLS_KEY, signedInAt);
+
+        expect(service.getSessionSignedInAt()).toBeNull();
+      });
+    });
+
+    it.each<EventSource>(['queue', 'system', 'grpc', 'ws'])(
+      'returns null for the %s source even when a date is stored (#1418)',
+      async (source) => {
+        await cls.run(() => {
+          cls.set(ACTOR_CLS_KEY, { kind: 'user', userId: 'user-1' } satisfies Actor);
+          cls.set(SOURCE_CLS_KEY, source);
+          cls.set(SESSION_SIGNED_IN_AT_CLS_KEY, signedInAt);
+
+          expect(service.getSessionSignedInAt()).toBeNull();
+        });
+      },
+    );
   });
 });
