@@ -1,3 +1,9 @@
+export {
+  API_KEY_ROUTES_MOVED,
+  createApiKeyRouteBlock,
+  type ApiKeyRouteBlock,
+  type ApiKeyRouteBlockContext,
+} from './lib/api-key-route-block';
 export { APP_SIGN_IN_FLOW_KEY } from './lib/app-sign-in/app-sign-in-hand-off';
 export * from './lib/auth-factory';
 export { createAuthNodeHandler, type AuthNodeHandlerOptions } from './lib/auth-node-handler';

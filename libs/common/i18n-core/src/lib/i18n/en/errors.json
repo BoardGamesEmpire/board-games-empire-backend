@@ -239,7 +239,8 @@
     "bad_request": "The server couldn't read where this request was sent, so nothing was changed. If it keeps happening, tell the server's admin",
     "rate_limited": "Too many attempts in a short time. Wait a minute, then try again",
     "ban_flag_invalid": "A user's ban must be on or off (true or false), so nothing was changed",
-    "user_removal_blocked": "This user shares things with other people, such as households, events, media, loans or invites, so they weren't removed. Removing a user who shares data isn't supported yet"
+    "user_removal_blocked": "This user shares things with other people, such as households, events, media, loans or invites, so they weren't removed. Removing a user who shares data isn't supported yet",
+    "api_key_routes_moved": "API keys are managed at /api/api-keys on this server"
   },
   "request": {
     "failed": "Something went wrong on the server, so your request wasn't completed. Try again, and if it keeps happening, tell the server's admin",
