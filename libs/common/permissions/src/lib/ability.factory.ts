@@ -6,6 +6,7 @@ import { AbilityBuilder, detectSubjectType, ExtractSubjectType } from '@casl/abi
 import { createPrismaAbility } from '@casl/prisma';
 import { Injectable, Logger } from '@nestjs/common';
 import * as Mustache from 'mustache';
+import { findTemplateProblem } from './condition-template';
 import { PluginAbilityRenderRejectionError } from './errors/plugin-ability-render-rejection.error';
 import type {
   ApikeyWithScopes,
@@ -285,18 +286,10 @@ export class AbilityFactory {
   }
 
   /**
-   * The fail-loud rule: every variable a condition template references
-   * must resolve to a value in the unit-coordinate context. Mustache renders
-   * missing variables to `''` — for user abilities that lands on a clause
-   * that matches nothing and is accepted as an operator concern
-   * ({@link applyUserPermissions}), but for a PLUGIN a malformed clause like
-   * `{ userId: '' }` is an authorization boundary rendered wrong, so the
-   * permission is rejected before any rendering happens.
-   *
-   * Walks the parsed token tree: interpolations (`name`/`&`) and section
-   * openers (`#`/`^`) all name variables; section bodies are walked
-   * recursively. The implicit iterator `.` never resolves here (the context
-   * holds no lists) and is treated as out-of-context.
+   * The plugin path's fail-loud rule: a condition template that names anything
+   * outside the unit-coordinate context rejects the permission before any
+   * rendering. The check itself is {@link findTemplateProblem}, shared with the
+   * API key path; this maps its verdict onto the typed rejection.
    */
   private assertTemplateWithinContext(
     template: string,
@@ -304,100 +297,17 @@ export class AbilityFactory {
     permissionSlug: string,
     snapshot: PluginGrantSnapshot,
   ): void {
-    const reject = (variable: string): never => {
+    const problem = findTemplateProblem(template, context);
+
+    if (problem) {
       throw new PluginAbilityRenderRejectionError({
-        reason: 'out-of-context-variable',
-        pluginId: snapshot.plugin.id,
-        pluginSlug: snapshot.plugin.slug,
-        permissionSlug,
-        variable,
-        unit: snapshot.unit,
-      });
-    };
-
-    // Own-property resolution to a STRING leaf, or it does not resolve.
-    // Both halves are load-bearing: `in`-style lookup would admit
-    // prototype-chain names (`unit.constructor` is "in" every object), and
-    // a non-leaf resolution (`{{ unit }}`) would render `[object Object]`
-    // into the clause — junk, not authority. Every legitimate context value
-    // is a non-empty string (ids, slugs, the scope type).
-    const resolves = (path: string): boolean => {
-      if (path === '.') {
-        return false;
-      }
-
-      let value: unknown = context;
-      for (const segment of path.split('.')) {
-        if (typeof value !== 'object' || value === null || !Object.prototype.hasOwnProperty.call(value, segment)) {
-          return false;
-        }
-
-        // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- TypeScript has no narrowing from `object` to an indexable record, and the own-property check above doesn't narrow a computed key (#1321)
-        value = (value as Record<string, unknown>)[segment];
-      }
-
-      return typeof value === 'string' && value.length > 0;
-    };
-
-    // The parse is inside the typed contract too: a template that does not
-    // even parse (unclosed tag) can no more be rendered safely than one
-    // referencing unknown variables, and must not escape as Mustache's raw
-    // Error (a 500 instead of the typed rejection's 403).
-    let tokens: Mustache.TemplateSpans;
-    try {
-      tokens = Mustache.parse(template);
-    } catch {
-      throw new PluginAbilityRenderRejectionError({
-        reason: 'malformed-template',
+        ...problem,
         pluginId: snapshot.plugin.id,
         pluginSlug: snapshot.plugin.slug,
         permissionSlug,
         unit: snapshot.unit,
       });
     }
-
-    // Mustache token tuples: [type, name, start, end, subTokens?]. The walk
-    // is a WHITELIST: 'text' carries no variable; 'name'/'&' interpolate
-    // (triple-stache parses as '&'); sections '#'/'^' name a variable and
-    // nest their body at index 4. Anything else — partials ('>') and
-    // comments ('!') both render to empty string, delimiter changes ('=')
-    // reshape parsing — is rejected outright rather than silently rendered.
-    const walk = (tokens: Mustache.TemplateSpans): void => {
-      for (const token of tokens) {
-        const [type, name, , , subTokens] = token;
-
-        if (type === 'text') {
-          continue;
-        }
-
-        if (type === 'name' || type === '&' || type === '#' || type === '^') {
-          if (!resolves(name)) {
-            reject(name);
-          }
-
-          if ((type === '#' || type === '^') && Array.isArray(subTokens)) {
-            walk(subTokens);
-          }
-
-          continue;
-        }
-
-        // Not a variable problem — the token TYPE is forbidden, and `name`
-        // here is a partial name or comment text, not a context path. A
-        // distinct reason keeps the operator from hunting for a variable
-        // that does not exist.
-        throw new PluginAbilityRenderRejectionError({
-          reason: 'unsupported-token-type',
-          pluginId: snapshot.plugin.id,
-          pluginSlug: snapshot.plugin.slug,
-          permissionSlug,
-          tokenType: type,
-          unit: snapshot.unit,
-        });
-      }
-    };
-
-    walk(tokens);
   }
 
   private parseConditions(
