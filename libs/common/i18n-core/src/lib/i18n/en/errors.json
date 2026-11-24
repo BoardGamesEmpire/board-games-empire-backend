@@ -203,7 +203,16 @@
   "api_key": {
     "not_found_or_revoked": "API key not found or has been revoked.",
     "invalid": "Invalid API key",
-    "owner_banned": "This API key's owner is banned"
+    "owner_banned": "This API key's owner is banned",
+    "session_required": "Only you, signed in, can manage your API keys. An API key can't manage keys",
+    "key_required": "Only an API key can ask about itself here. Signed in, see your keys at /api/api-keys",
+    "not_found": "You have no API key with this ID",
+    "scope_not_grantable": "An API key of yours can't hold the permission {slug}. Choose from the permissions your keys may hold",
+    "scope_not_pinnable": "A key scope over {slug} can't be limited to one record",
+    "scopes_or_preset": "Choose key scopes or \"everything I can do\", not both",
+    "critical_needs_confirmation": "This key would hold a permission marked Critical. Confirm that you want it to, then try again",
+    "needs_recent_sign_in": "Giving a key a Critical permission needs a recent sign-in. Sign in again, then try again",
+    "expiry_out_of_range": "A key can expire from {min} to {max} days from now"
   },
   "host": {
     "not_allowed": "This server doesn't answer at this address. If you run this server, add the address to TRUSTED_ORIGINS"
