@@ -48,24 +48,24 @@ describe('household game pool sample', () => {
       members: members.map((actor) => ({ actor, role: SystemRole.HouseholdMember })),
     });
 
-    const membershipOf = (actor: SessionActor) => {
-      const roster = [fixture.owner, ...fixture.members];
-      const membership = roster.find((entry) => entry.member.userId === actor.user.id)?.member;
-      if (membership === undefined) {
-        throw new Error(`the fixture left ${actor.user.id} off the roster`);
-      }
-
-      return membership;
-    };
-
-    return { id: fixture.household.id, membershipOf };
+    return { id: fixture.household.id };
   };
 
-  const turnSharingOff = (membershipId: string) =>
-    db.client.householdMember.update({ where: { id: membershipId }, data: { collectionSharing: false } });
+  /** The member turns their collection sharing off through the route (#367). */
+  const turnSharingOff = (actor: SessionActor, householdId: string) =>
+    request(baseUrl)
+      .patch(`/api/households/${householdId}/members/me`)
+      .set(actor.headers)
+      .send({ collectionSharing: false })
+      .expect(200);
 
-  const exclude = (membershipId: string, entryId: string) =>
-    db.client.excludedGame.create({ data: { householdMemberId: membershipId, gameCollectionId: entryId } });
+  /** The member excludes one of their entries from the household through the route (#170). */
+  const exclude = (actor: SessionActor, householdId: string, collectionEntryId: string) =>
+    request(baseUrl)
+      .post(`/api/households/${householdId}/members/me/excluded-games`)
+      .set(actor.headers)
+      .send({ collectionEntryId })
+      .expect(201);
 
   /** The game a collection entry holds. */
   const gameOf = async (entryId: string) =>
@@ -144,7 +144,7 @@ describe('household game pool sample', () => {
     // The control: the sample still reaches this household, so m1's absence
     // is collection sharing's doing.
     const shared = await arrangeCollectionEntry(db.client, m2.user.id, Reach.Private);
-    await turnSharingOff(home.membershipOf(m1).id);
+    await turnSharingOff(m1, home.id);
 
     const sample = await sampleOf(viewer);
 
@@ -157,7 +157,7 @@ describe('household game pool sample', () => {
     const home = await household(viewer, [m1]);
     const excluded = await arrangeCollectionEntry(db.client, m1.user.id, Reach.Private);
     const kept = await arrangeCollectionEntry(db.client, m1.user.id, Reach.Private);
-    await exclude(home.membershipOf(m1).id, excluded);
+    await exclude(m1, home.id, excluded);
 
     const sample = await sampleOf(viewer);
 
@@ -173,7 +173,7 @@ describe('household game pool sample', () => {
     const shared = await household(viewer, [m1]);
     await household(m1);
     const entry = await arrangeCollectionEntry(db.client, m1.user.id, Reach.Public);
-    await turnSharingOff(shared.membershipOf(m1).id);
+    await turnSharingOff(m1, shared.id);
 
     const sample = await sampleOf(viewer);
 
@@ -192,7 +192,7 @@ describe('household game pool sample', () => {
     const a = await household(viewer, [m1]);
     await household(viewer, [m1]);
     const entry = await arrangeCollectionEntry(db.client, m1.user.id, Reach.Private);
-    await exclude(a.membershipOf(m1).id, entry);
+    await exclude(m1, a.id, entry);
 
     const sample = await sampleOf(viewer);
 

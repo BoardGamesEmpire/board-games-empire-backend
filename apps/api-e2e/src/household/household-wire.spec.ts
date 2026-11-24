@@ -3,6 +3,9 @@ import {
   constraintTargetNames,
   createEnvelope,
   deleteEnvelope,
+  excludedGameEnvelope,
+  excludedGamesEnvelope,
+  gamePoolEnvelope,
   HOUSEHOLD_CLIENT_REQUEST_ID_CONSTRAINT,
   listEnvelope,
   memberEnvelope,
@@ -394,6 +397,83 @@ describe('household wire parsers (pure logic)', () => {
           /household 'h1' carried a 'restorableUntil' that is neither null nor a timestamp/,
         );
       }
+    });
+  });
+
+  describe('excludedGameEnvelope and excludedGamesEnvelope', () => {
+    const excludedGame = {
+      collectionEntryId: 'gc-1',
+      reason: null,
+      excludedAt: '2026-11-23T12:00:00.000Z',
+      platformGame: { id: 'pg-1', game: { id: 'g1', title: 't', thumbnail: null, description: null } },
+    };
+
+    it('returns the excluded game and the message, or the list', () => {
+      expect(excludedGameEnvelope(response({ message: 'm', excludedGame }, 201), 'POST').excludedGame).toEqual(
+        excludedGame,
+      );
+      expect(excludedGamesEnvelope(response({ excludedGames: [excludedGame] }), 'GET').excludedGames).toEqual([
+        excludedGame,
+      ]);
+    });
+
+    // A missing reason would read as "no reason" in a test that cleared one
+    // (#170), so it fails here rather than passing as undefined.
+    it('rejects an excluded game without a reason key, an entry id or its game', () => {
+      const noReason = Object.fromEntries(Object.entries(excludedGame).filter(([key]) => key !== 'reason'));
+
+      for (const broken of [
+        noReason,
+        { ...excludedGame, collectionEntryId: '' },
+        { ...excludedGame, platformGame: {} },
+      ]) {
+        expect(() => excludedGameEnvelope(response({ message: 'm', excludedGame: broken }), 'POST')).toThrow(
+          /no 'excludedGame' with a string collectionEntryId/,
+        );
+        expect(() => excludedGamesEnvelope(response({ excludedGames: [broken] }), 'GET')).toThrow(
+          /one of its excluded games/,
+        );
+      }
+    });
+
+    it('rejects a missing message or list', () => {
+      expect(() => excludedGameEnvelope(response({ excludedGame }), 'POST')).toThrow(/no 'message' string/);
+      expect(() => excludedGamesEnvelope(response({}), 'GET')).toThrow(/no 'excludedGames' array/);
+    });
+  });
+
+  describe('gamePoolEnvelope', () => {
+    const PAGINATION = { page: 1, limit: 25, total: 1, totalPages: 1, hasMore: false };
+    const owner = {
+      memberId: 'm1',
+      collectionEntryId: 'gc-1',
+      user: { id: 'u1', username: 'u', profile: null },
+      platform: { id: 'p1', name: 'Tabletop' },
+    };
+    const row = { id: 'g1', title: 't', thumbnail: null, description: null, owners: [owner] };
+
+    it('returns the rows and the pagination', () => {
+      const parsed = gamePoolEnvelope(response({ games: [row], pagination: PAGINATION }), 'GET');
+
+      expect(parsed.games).toEqual([row]);
+      expect(parsed.pagination).toEqual(PAGINATION);
+    });
+
+    // A game is in the game pool only through an entry, so a row with no
+    // owner is one the read should not have counted (#367).
+    it('rejects a row with no owners, or an owner without its ids', () => {
+      for (const owners of [undefined, [], [{ ...owner, memberId: '' }], [{ ...owner, platform: null }]]) {
+        expect(() =>
+          gamePoolEnvelope(response({ games: [{ ...row, owners }], pagination: PAGINATION }), 'GET'),
+        ).toThrow(/owners/);
+      }
+    });
+
+    it('rejects a page longer than its total, or no pagination', () => {
+      expect(() =>
+        gamePoolEnvelope(response({ games: [row, { ...row, id: 'g2' }], pagination: PAGINATION }), 'GET'),
+      ).toThrow(/more than its limit 25 or total 1/);
+      expect(() => gamePoolEnvelope(response({ games: [] }), 'GET')).toThrow(/no 'pagination' envelope/);
     });
   });
 
