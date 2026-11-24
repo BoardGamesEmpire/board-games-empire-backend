@@ -185,16 +185,39 @@ export class ApiKeyService {
     });
 
     let row: ApiKeyRow;
+    let replaced: boolean;
     try {
-      row = await this.db.$transaction(async (tx) => {
+      [row, replaced] = await this.db.$transaction(async (tx) => {
+        // The key is listed from the moment better-auth writes it, so its owner
+        // can edit or delete it before this transaction runs. The row lock
+        // orders this write after any such edit, as two edits are ordered.
+        const locked = await tx.$queryRaw<{ id: string }[]>(
+          Prisma.sql`SELECT id FROM apikeys WHERE id = ${created.id} FOR UPDATE`,
+        );
+
+        if (locked.length === 0) {
+          throw apiKeyNotFound();
+        }
+
+        // An edit that got in first wrote key scopes of its own. Create's list
+        // replaces them, as a later edit's would, rather than merging with them.
+        const { count } = await tx.apiKeyScope.deleteMany({ where: { apiKeyId: created.id } });
         await tx.apiKeyScope.createMany({ data: resolved.map((scope) => scopeRow(created.id, scope)) });
 
-        return tx.apikey.findUniqueOrThrow({ where: { id: created.id }, select: API_KEY_VIEW_SELECT });
+        return [
+          await tx.apikey.findUniqueOrThrow({ where: { id: created.id }, select: API_KEY_VIEW_SELECT }),
+          count > 0,
+        ];
       });
     } catch (error) {
       await this.deleteUnscopedKey(created.id);
 
       throw error;
+    }
+
+    // A request through the key may have cached the earlier edit's key scopes.
+    if (replaced) {
+      await this.permissions.invalidateApiKey(created.id);
     }
 
     return { apiKey: toView(row), secret: created.key };

@@ -103,6 +103,53 @@ describe('ApiKeyService (#1417)', () => {
   });
 
   describe('create (#1418)', () => {
+    beforeEach(() => {
+      db.$queryRaw.mockResolvedValue([{ id: KEY_ID }] as never);
+    });
+
+    // The key is listed once better-auth writes it, so its owner can edit or
+    // delete it before the key scope transaction runs.
+    it("locks the new key's row, then replaces any key scopes an edit wrote first, and evicts its cached scope graph (#1418)", async () => {
+      const order: string[] = [];
+      db.$queryRaw.mockImplementation((() => {
+        order.push('lock');
+        return Promise.resolve([{ id: KEY_ID }]);
+      }) as never);
+      db.apiKeyScope.deleteMany.mockImplementation((() => {
+        order.push('delete-scopes');
+        return Promise.resolve({ count: 1 });
+      }) as never);
+      db.apiKeyScope.createMany.mockImplementation((() => {
+        order.push('write-scopes');
+        return Promise.resolve({ count: 1 });
+      }) as never);
+
+      await service.create(USER_ID, { name: 'CI', scopes: [{ slug: 'read:game' }] });
+
+      expect(order).toEqual(['lock', 'delete-scopes', 'write-scopes']);
+      const [[lock]] = db.$queryRaw.mock.calls;
+      expect(rawQueryText(lock)).toBe('SELECT id FROM apikeys WHERE id = ? FOR UPDATE');
+      expect(lock).toMatchObject({ values: [KEY_ID] });
+      expect(db.apiKeyScope.deleteMany).toHaveBeenCalledWith({ where: { apiKeyId: KEY_ID } });
+      expect(permissions.invalidateApiKey).toHaveBeenCalledWith(KEY_ID);
+    });
+
+    it('evicts nothing when the new key held no key scopes yet (#1418)', async () => {
+      await service.create(USER_ID, { name: 'CI', scopes: [{ slug: 'read:game' }] });
+
+      expect(permissions.invalidateApiKey).not.toHaveBeenCalled();
+    });
+
+    it('answers API_KEY_NOT_FOUND, and writes no key scopes, when the key was deleted before its key scopes were written (#1418)', async () => {
+      db.$queryRaw.mockResolvedValue([] as never);
+
+      const error = await refusal(service.create(USER_ID, { name: 'CI', scopes: [{ slug: 'read:game' }] }));
+
+      expect(error.getStatus()).toBe(Http.NotFound);
+      expect(error.getResponse()).toMatchObject({ code: 'API_KEY_NOT_FOUND' });
+      expect(db.apiKeyScope.createMany).not.toHaveBeenCalled();
+    });
+
     it('writes the key scope rows after better-auth creates the key, which expires in 90 days by default (#1418)', async () => {
       // The shared db mock keeps its own call counter, so order is tracked by hand.
       const order: string[] = [];
