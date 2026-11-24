@@ -30,7 +30,7 @@ describe('HouseholdController (no-Session delegation)', () => {
       | 'restoreHousehold'
     >
   >;
-  let gamePool: jest.Mocked<Pick<HouseholdGamePoolService, 'sampleGamePool'>>;
+  let gamePool: jest.Mocked<Pick<HouseholdGamePoolService, 'sampleGamePool' | 'listGamePool'>>;
   beforeEach(() => {
     service = {
       getHouseholdsForUser: jest.fn().mockResolvedValue({ rows: [], total: 0 }),
@@ -41,7 +41,10 @@ describe('HouseholdController (no-Session delegation)', () => {
       deleteHousehold: jest.fn().mockResolvedValue({ household: { id: 'hh-1' }, restorableUntil: null }),
       restoreHousehold: jest.fn().mockResolvedValue({ id: 'hh-1' }),
     };
-    gamePool = { sampleGamePool: jest.fn().mockResolvedValue({ games: [], gameCount: 0 }) };
+    gamePool = {
+      sampleGamePool: jest.fn().mockResolvedValue({ games: [], gameCount: 0 }),
+      listGamePool: jest.fn().mockResolvedValue({ rows: [], total: 0 }),
+    };
     controller = new HouseholdController(service as never, gamePool as never);
   });
 
@@ -216,6 +219,70 @@ describe('HouseholdController (no-Session delegation)', () => {
       expect(handlers).toHaveLength(1);
       expect(handlers[0]({ can } as unknown as AppAbility)).toBe(true);
 
+      expect(can).toHaveBeenCalledWith(Action.read, ResourceType.GameCollection);
+      expect(can).toHaveBeenCalledWith(Action.read, ResourceType.Game);
+    });
+  });
+
+  describe('listGamePool (#367)', () => {
+    it('forwards the household id and paging, and wraps the rows in the games envelope', async () => {
+      const row = {
+        id: 'game-1',
+        title: 'Azul',
+        thumbnail: null,
+        description: null,
+        owners: [],
+      };
+      gamePool.listGamePool.mockResolvedValue({ rows: [row], total: 3 });
+
+      const response = await firstValueFrom(controller.listGamePool('hh-1', paginationQuery({ page: 2, limit: 2 })));
+
+      expect(gamePool.listGamePool).toHaveBeenCalledWith('hh-1', paginationQuery({ page: 2, limit: 2 }));
+      expect(response).toEqual({
+        games: [row],
+        pagination: { page: 2, limit: 2, total: 3, totalPages: 2, hasMore: false },
+      });
+    });
+
+    // The service composes the `Game` scope, the type each row is; the
+    // envelope is where the guard checks for it.
+    it('builds its envelope under the Game scope guard', async () => {
+      const response = ClsServiceManager.getClsService().runWith({}, () =>
+        firstValueFrom(controller.listGamePool('hh-1', PAGINATION)),
+      );
+
+      await expect(response).rejects.toThrow(ListScopeNotComposedError);
+      await expect(response).rejects.toThrow(`intrinsic scope for '${ResourceType.Game}'`);
+    });
+
+    it('binds GET /households/:id/games', () => {
+      const handler = HouseholdController.prototype.listGamePool;
+
+      expect(Reflect.getMetadata('path', handler)).toBe(':id/games');
+      expect(Reflect.getMetadata('method', handler)).toBe(RequestMethod.GET);
+    });
+
+    // Beside the other game pool route, and above `GET :id`, as the household
+    // reads that are not the household itself are.
+    it('is declared above GET /households/:id', () => {
+      const handlers = Object.getOwnPropertyNames(HouseholdController.prototype);
+
+      expect(handlers.indexOf('listGamePool')).toBeGreaterThan(handlers.indexOf('sampleGamePool'));
+      expect(handlers.indexOf('listGamePool')).toBeLessThan(handlers.indexOf('getById'));
+    });
+
+    // The household it opens, the entries that name the owners, and the
+    // games that are the rows.
+    it('asks the guard for read on households, game collections and games', () => {
+      const handlers = Reflect.getMetadata(CHECK_POLICIES_KEY, HouseholdController.prototype.listGamePool) as Array<
+        (ability: AppAbility) => boolean
+      >;
+      const can = jest.fn().mockReturnValue(true);
+
+      expect(handlers).toHaveLength(1);
+      expect(handlers[0]({ can } as unknown as AppAbility)).toBe(true);
+
+      expect(can).toHaveBeenCalledWith(Action.read, ResourceType.Household);
       expect(can).toHaveBeenCalledWith(Action.read, ResourceType.GameCollection);
       expect(can).toHaveBeenCalledWith(Action.read, ResourceType.Game);
     });

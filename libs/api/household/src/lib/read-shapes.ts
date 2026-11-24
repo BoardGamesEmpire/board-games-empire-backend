@@ -60,9 +60,9 @@ import { SHOWN_NAME_SELECT } from './shown-name';
  *
  * `@bge/invites` renders an invite's `inviter` the same way, and
  * `read-shapes.spec.ts` pins that the two cannot drift into two spellings of
- * the same thing.
+ * the same thing. The game pool's owners are rendered this way too (#367).
  */
-const ACTOR_SELECT = {
+export const ACTOR_SELECT = {
   id: true,
   username: true,
   profile: {
