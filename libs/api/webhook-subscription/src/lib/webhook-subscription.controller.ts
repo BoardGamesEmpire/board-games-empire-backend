@@ -25,7 +25,13 @@ export class WebhookSubscriptionController {
     status: Http.PaymentRequired,
     description: 'You have as many webhook subscriptions on as your quota allows (#1253)',
   })
-  @ApiResponse({ status: Http.Forbidden, description: 'No read access to the requested events' })
+  @ApiResponse({
+    status: Http.Forbidden,
+    description:
+      "You can't create a new subscription, for example through an API key whose scope reaches only one subscription; " +
+      "or you can't receive one of the requested event types; " +
+      "or you can't see the household or the resource the subscription names",
+  })
   @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.WebhookSubscription))
   @Post()
   create(@Body() dto: CreateWebhookSubscriptionDto) {

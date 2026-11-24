@@ -27,6 +27,7 @@ import {
   WebhookEventRegistry,
   WebhookVisibilityService,
 } from '@bge/webhooks';
+import { subject } from '@casl/ability';
 import { accessibleBy } from '@casl/prisma';
 import {
   BadRequestException,
@@ -90,6 +91,15 @@ export class WebhookSubscriptionService {
   async create(dto: CreateWebhookSubscriptionDto): Promise<WebhookSubscriptionWithEventTypes> {
     const userId = this.abilityService.getActingUserId();
     const abilities = this.requireAbilities(t('errors.webhook_subscription.forbidden_create'));
+
+    // The route's type check asks only whether some subscription may be
+    // managed. `manage` covers create, so ask it of the row this writes: an API
+    // key whose scope is pinned to one subscription names a row that exists,
+    // never the new one, and so may not create another (#1418).
+    const written = subject(ResourceType.WebhookSubscription, { createdById: userId });
+    if (!abilities.every((ability) => ability.can(Action.manage, written))) {
+      throw new ForbiddenException(t('errors.webhook_subscription.forbidden_create'));
+    }
 
     this.assertTypesMatchResource(dto.eventTypes, dto.resourceType);
     this.assertCanReceiveTypes(dto.eventTypes, abilities);
