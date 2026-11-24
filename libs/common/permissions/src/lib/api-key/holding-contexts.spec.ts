@@ -141,9 +141,9 @@ describe('holdingContexts (#266)', () => {
 // A denial only narrows, so it renders in every context the owner has, held
 // or not (#266).
 describe('ownerContexts (#266)', () => {
-  it('yields one user context, then each membership, then each attendance', () => {
+  it('yields one user context, then each server role, each membership and each attendance', () => {
     const owner = makeOwner({
-      roles: [makeRole('User', [])],
+      roles: [makeRole('User', []), makeRole('Moderator', [])],
       householdMember: [
         { householdId: 'hh-A', role: makeRole('HouseholdMember', []) },
         { householdId: 'hh-B', role: null },
@@ -153,6 +153,8 @@ describe('ownerContexts (#266)', () => {
 
     expect(ownerContexts(owner)).toEqual([
       { user: owner },
+      { user: owner, role: 'User' },
+      { user: owner, role: 'Moderator' },
       { user: owner, householdId: 'hh-A', role: 'HouseholdMember' },
       { user: owner, householdId: 'hh-B', role: undefined },
       { user: owner, eventId: 'ev-1', role: 'EventGuest' },

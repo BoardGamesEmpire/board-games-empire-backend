@@ -97,15 +97,18 @@ export function holdingContexts(owner: UserWithRoles, permissionId: string, now 
 }
 
 /**
- * Every context the owner has, held or not: `{ user }`, then one per household
- * membership (`{ user, householdId, role }`) and one per event attendance
- * (`{ user, eventId, role }`). A denial only narrows, so a key scope over a
- * denial renders in each of them whether or not the owner holds it there
+ * Every context the owner has, held or not: `{ user }`, then one per server
+ * role (`{ user, role }`), one per household membership
+ * (`{ user, householdId, role }`) and one per event attendance
+ * (`{ user, eventId, role }`), the contexts `AbilityFactory.createForUser`
+ * renders the owner's own rules in. A denial only narrows, so a key scope over
+ * a denial renders in each of them whether or not the owner holds it there
  * (#266).
  */
 export function ownerContexts(owner: UserWithRoles): Record<string, unknown>[] {
   return [
     { user: owner },
+    ...owner.roles.map(({ role }) => ({ user: owner, role: role.name })),
     ...owner.householdMember.map((member) => ({
       user: owner,
       householdId: member.householdId,

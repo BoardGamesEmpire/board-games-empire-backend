@@ -344,7 +344,8 @@ export class AbilityFactory {
   /**
    * One allow key scope, as one rule per context where `owner` holds its
    * permission, each the owner's own rule there with the key scope's pin
-   * ANDed on (#266). A context the rule can't be built in is left out, and
+   * ANDed on, and a rule that renders the same in two contexts applied once
+   * (#266). A context the rule can't be built in is left out, and
    * the key keeps its other rules. One warning names every context tried when
    * the scope builds nowhere; when it builds somewhere, the contexts it
    * skipped are logged at debug level, since the key still reaches what the
@@ -357,6 +358,7 @@ export class AbilityFactory {
     scope: ApiKeyScopeWithPermission,
   ): void {
     const skipped: string[] = [];
+    const applied = new Set<string>();
     let built = false;
 
     for (const held of holdingContexts(owner, scope.permissionId)) {
@@ -376,12 +378,12 @@ export class AbilityFactory {
         continue;
       }
 
-      this.applyRule(
-        ability,
-        { action, subject: held.subject, inverted: false, fields },
-        allOf([render.conditions, pinOf(held.resourceId), pinOf(scope.resourceId)]),
-      );
+      const allowed = allOf([render.conditions, pinOf(held.resourceId), pinOf(scope.resourceId)]);
       built = true;
+
+      if (firstSighting(applied, [held.subject, fields, allowed])) {
+        this.applyRule(ability, { action, subject: held.subject, inverted: false, fields }, allowed);
+      }
     }
 
     if (skipped.length === 0) {
@@ -405,7 +407,8 @@ export class AbilityFactory {
 
   /**
    * One key scope over a denial, as one `cannot` per context the owner has,
-   * held or not, with the key scope's pin ANDed on and no field list (#266).
+   * held or not, with the key scope's pin ANDed on and no field list, and a
+   * `cannot` that renders the same in two contexts applied once (#266).
    * Returns whether it rendered anywhere: the caller denies the whole key
    * when it didn't, since dropping a denial would widen the key.
    */
@@ -415,6 +418,7 @@ export class AbilityFactory {
     scope: ApiKeyScopeWithPermission,
   ): boolean {
     const { action, subject, conditions } = scope.permission;
+    const applied = new Set<string>();
     let rendered = false;
 
     for (const context of ownerContexts(owner)) {
@@ -424,12 +428,12 @@ export class AbilityFactory {
         continue;
       }
 
-      this.applyRule(
-        ability,
-        { action, subject, inverted: true },
-        allOf([render.conditions, denialPinOf(scope.resourceId)]),
-      );
+      const denied = allOf([render.conditions, denialPinOf(scope.resourceId)]);
       rendered = true;
+
+      if (firstSighting(applied, [denied])) {
+        this.applyRule(ability, { action, subject, inverted: true }, denied);
+      }
     }
 
     return rendered;
@@ -587,6 +591,25 @@ function pinOf(resourceId: string | null | undefined): Record<string, unknown> |
  */
 function denialPinOf(resourceId: string | null | undefined): Record<string, unknown> | undefined {
   return resourceId ? { id: resourceId } : undefined;
+}
+
+/**
+ * Records a key scope's rule in `applied` and says whether it is new. A scope
+ * whose conditions name no context variable renders the same rule in every
+ * context, one per role, membership and attendance, and each copy would be
+ * another arm in every query through the key, so only the first is applied
+ * (#266).
+ */
+function firstSighting(applied: Set<string>, rule: unknown[]): boolean {
+  const key = JSON.stringify(rule);
+
+  if (applied.has(key)) {
+    return false;
+  }
+
+  applied.add(key);
+
+  return true;
 }
 
 /** Names where the owner holds a permission, for the log line of a dropped key scope (#266). */

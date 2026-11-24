@@ -498,6 +498,65 @@ describe('AbilityFactory', () => {
         expect(ability.can(Action.read, asEntity('Game', publicGame))).toBe(false);
         expect(ability.rules.map(({ inverted }) => inverted ?? false)).toEqual([false, true]);
       });
+
+      // The owner's own server-role rules render with `{ user, role }`, so a
+      // denial naming `role` renders there too, for an owner with no household
+      // or event, instead of denying the whole key.
+      it("renders a denial that names role in the owner's server-role context (#266)", () => {
+        const denyByRole = makePermission({
+          action: Action.read,
+          subject: 'Game',
+          conditions: { audience: '{{ role }}' },
+          inverted: true,
+        });
+        const owner = makeUser({ roles: [makeRole('User', [readEveryGame])] });
+
+        const ability = factory.createForApiKey(owner, makeApiKey([makeScope(readEveryGame), makeScope(denyByRole)]));
+
+        expect(ability.can(Action.read, asEntity('Game', { audience: 'User' }))).toBe(false);
+        expect(ability.can(Action.read, asEntity('Game', { audience: 'Admin' }))).toBe(true);
+        expect(warn).not.toHaveBeenCalled();
+      });
+
+      // A denial naming no context variable renders the same in every
+      // context, and each copy would be another clause in every query.
+      it('applies a denial that renders the same in every context once (#266)', () => {
+        const denyEveryGame = makePermission({ action: Action.read, subject: 'Game', conditions: {}, inverted: true });
+        const owner = makeUser({
+          roles: [makeRole('User', [readEveryGame])],
+          householdMember: [{ householdId: 'hh-A', role: makeRole('HouseholdMember', []) }],
+          eventsAttended: [
+            { eventId: 'ev-1', role: makeRole('EventGuest', []) },
+            { eventId: 'ev-2', role: makeRole('EventGuest', []) },
+          ],
+        });
+
+        const ability = factory.createForApiKey(
+          owner,
+          makeApiKey([makeScope(readEveryGame), makeScope(denyEveryGame)]),
+        );
+
+        expect(ability.rules.filter(({ inverted }) => inverted)).toHaveLength(1);
+        expect(ability.can(Action.read, asEntity('Game', publicGame))).toBe(false);
+      });
+    });
+
+    // An allow held through several roles renders the same wherever its
+    // conditions name no context variable; one copy is enough.
+    it('applies an allow that renders the same in every holding context once (#266)', () => {
+      const readEveryGame = makePermission({ action: Action.read, subject: 'Game', conditions: {} });
+      const owner = makeUser({
+        roles: [makeRole('User', [readEveryGame])],
+        eventsAttended: [
+          { eventId: 'ev-1', role: makeRole('EventGuest', [readEveryGame]) },
+          { eventId: 'ev-2', role: makeRole('EventGuest', [readEveryGame]) },
+        ],
+      });
+
+      const ability = factory.createForApiKey(owner, makeApiKey([makeScope(readEveryGame)]));
+
+      expect(ability.rules).toHaveLength(1);
+      expect(ability.can(Action.read, asEntity('Game', publicGame))).toBe(true);
     });
 
     // A key's rule is held to its grant's field list, as a user's is, so a

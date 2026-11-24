@@ -721,6 +721,33 @@ describe('installed-plugin inventory (#354)', () => {
         await reads('features').expect(404);
       });
 
+      // A member's key reads no households, so the liveness guard lets it
+      // through. A delete that bypasses the route evicts no graph, so the
+      // owner's cached graph still holds the membership and the key's scope
+      // still renders there: only the controller's own re-check stands
+      // between the key and the deleted household's rows (#790).
+      it("refuses a member's key the list, consent and feature-state reads while the owner's cached graph still holds the deleted household (#266, #790)", async () => {
+        const owner = await actors.user();
+        const { household } = await actors.householdWithMembers({ owner });
+        const plugin = await arrangeHouseholdPlugin();
+        const key = await memberKeyOf(owner);
+        const reads = (path: string) =>
+          request(baseUrl).get(`/api/households/${household.id}/plugins/${plugin.slug}/${path}`).set(key.headers);
+
+        // The control: the household is live, so the key reads all three, and
+        // the owner's graph is now cached with the membership.
+        const live = await listHousehold(key, household.id, '?limit=100').expect(200);
+        expect(slugsOf(live.body)).toEqual(expect.arrayContaining([plugin.slug]));
+        await reads('consent').expect(200);
+        await reads('features').expect(200);
+
+        await db.client.household.update({ where: { id: household.id }, data: { deletedAt: new Date() } });
+
+        await listHousehold(key, household.id).expect(403);
+        await reads('consent').expect(403);
+        await reads('features').expect(403);
+      });
+
       // The rows are plugins. A key with no rule on them is refused, not served
       // an empty page. Its owner holds both reads, so the refusal is the key's
       // missing scope, and the same owner's key with both lists.
