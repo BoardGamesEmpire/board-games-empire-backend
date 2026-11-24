@@ -51,7 +51,7 @@ describe('household game pool sample', () => {
     return { id: fixture.household.id };
   };
 
-  /** The member turns their collection sharing off through the route (#367). */
+  /** The member turns their collection sharing off through the route (#170). */
   const turnSharingOff = (actor: SessionActor, householdId: string) =>
     request(baseUrl)
       .patch(`/api/households/${householdId}/members/me`)

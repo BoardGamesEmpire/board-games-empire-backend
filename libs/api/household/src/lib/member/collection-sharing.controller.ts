@@ -12,7 +12,7 @@ import { CollectionSharingService } from './collection-sharing.service';
 
 /**
  * The caller's own collection sharing with a household and their excluded
- * games (#367, #170). Every route acts on the caller's own membership, never
+ * games (#170). Every route acts on the caller's own membership, never
  * another member's, whatever the caller's household role.
  *
  * Mounted beside `HouseholdMemberController`'s `members/:memberId` routes
@@ -32,7 +32,7 @@ export class CollectionSharingController {
   @ApiOperation({
     summary: 'Turn your collection sharing with the household on or off',
     description:
-      'Whether your games join the household’s game pool (#367). Your excluded games stay out either way. ' +
+      'Whether your games join the household’s game pool (#170). Your excluded games stay out either way. ' +
       'Returns your roster row.',
   })
   @ApiParam({ name: 'householdId', type: String })
@@ -85,7 +85,8 @@ export class CollectionSharingController {
   })
   @ApiResponse({
     status: Http.NotFound,
-    description: 'Not a member, household not found, or no such entry in your collection',
+    description:
+      'Not a member, household not found, or no such entry in your collection (code COLLECTION_ENTRY_NOT_FOUND)',
   })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.HouseholdMember))
   @Post('excluded-games')
@@ -106,11 +107,14 @@ export class CollectionSharingController {
     status: Http.Forbidden,
     description: 'Insufficient permissions, or you hold no household membership this action could apply to',
   })
-  @ApiResponse({ status: Http.NotFound, description: 'Not a member, household not found, or the game is not excluded' })
+  @ApiResponse({
+    status: Http.NotFound,
+    description: 'Not a member, household not found, or the game is not excluded (code EXCLUDED_GAME_NOT_FOUND)',
+  })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.HouseholdMember))
   @Delete('excluded-games/:collectionEntryId')
-  includeGame(@Param('householdId') householdId: string, @Param('collectionEntryId') collectionEntryId: string) {
-    return from(this.collectionSharing.includeGame(householdId, collectionEntryId)).pipe(
+  removeExcludedGame(@Param('householdId') householdId: string, @Param('collectionEntryId') collectionEntryId: string) {
+    return from(this.collectionSharing.removeExcludedGame(householdId, collectionEntryId)).pipe(
       map(() => ({ message: t('success.household.excluded_game_removed') })),
     );
   }

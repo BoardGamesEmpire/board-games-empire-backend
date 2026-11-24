@@ -252,6 +252,12 @@ export class HouseholdController {
     return from(this.householdService.getHouseholdById(id)).pipe(map((household) => ({ household })));
   }
 
+  @ApiResponse({
+    status: Http.BadRequest,
+    description:
+      'Invalid body, or a game pool reach wider than the household’s own reach ' +
+      '(code GAME_POOL_REACH_WIDER_THAN_HOUSEHOLD, #367)',
+  })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @ApiResponse({ status: Http.NotFound, description: 'Household not found, or deleted' })

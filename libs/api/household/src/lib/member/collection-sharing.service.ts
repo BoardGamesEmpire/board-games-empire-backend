@@ -6,10 +6,11 @@ import {
   isPrismaForeignKeyConstraintError,
   ResourceType,
 } from '@bge/database';
-import { t } from '@bge/i18n';
+import { CodedHttpException, t } from '@bge/i18n';
 import { AbilityService, resolveScopeSubjectId, ScopeComposer } from '@bge/permissions';
 import { WebhookEventType } from '@bge/webhooks';
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { Http } from '@status/codes';
 import { ExcludeGameDto, UpdateCollectionSharingDto } from '../dto';
 import { HouseholdEventPublisher, householdWebhook } from '../events/household-event.publisher';
 import {
@@ -74,49 +75,32 @@ function toExcludedGameView(row: ExcludedGameRow): ExcludedGameView {
   };
 }
 
-function collectionEntryNotFound(): NotFoundException {
-  return new NotFoundException(t('errors.household.collection_entry_not_found'));
+/**
+ * The refusal for an entry that isn't one of the caller's live collection
+ * entries: missing, removed, or another member's, which the 404 never tells
+ * apart (#170). It carries the collection's own code (#634), since it says the
+ * same thing about the same row.
+ */
+function collectionEntryNotFound(): CodedHttpException {
+  return new CodedHttpException(
+    Http.NotFound,
+    'COLLECTION_ENTRY_NOT_FOUND',
+    t('errors.household.collection_entry_not_found'),
+  );
 }
 
-/**
- * The spellings of the excluded game's membership foreign key: the constraint
- * name `@prisma/adapter-pg@7.10` reports, and the column it reports when
- * Postgres names no constraint.
- */
-const MEMBERSHIP_FOREIGN_KEY_NAMES: ReadonlySet<string> = new Set([
-  'excluded_games_household_member_id_fkey',
-  'household_member_id',
-]);
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
-/**
- * True when a P2003 names the excluded game's membership foreign key (#170).
- *
- * Reads `meta.driverAdapterError.cause.constraint`, which Prisma doesn't
- * publish, so a shape change only costs precision: a key this can't name
- * answers the collection entry 404, never a 500.
- */
-function isMembershipForeignKey(error: Prisma.PrismaClientKnownRequestError): boolean {
-  const driverAdapterError = error.meta?.['driverAdapterError'];
-  const cause = isRecord(driverAdapterError) ? driverAdapterError['cause'] : undefined;
-  const constraint = isRecord(cause) ? cause['constraint'] : undefined;
-
-  if (!isRecord(constraint)) {
-    return false;
-  }
-
-  const fields = Array.isArray(constraint['fields']) ? constraint['fields'] : [];
-  const names: unknown[] = [constraint['index'], ...fields];
-
-  return names.some((name) => typeof name === 'string' && MEMBERSHIP_FOREIGN_KEY_NAMES.has(name));
+/** The refusal for putting back a game the caller hasn't excluded from this household (#170). */
+function excludedGameNotFound(): CodedHttpException {
+  return new CodedHttpException(
+    Http.NotFound,
+    'EXCLUDED_GAME_NOT_FOUND',
+    t('errors.household.excluded_game_not_found'),
+  );
 }
 
 /**
  * A member's own say over how their games join a household's game pool: their
- * collection sharing (#367) and their excluded games (#170).
+ * collection sharing and their excluded games (#170).
  *
  * Every route acts on the caller's own membership, and only theirs. A household
  * owner's `manage` on `HouseholdMember` implies `update` on every member of the
@@ -140,7 +124,7 @@ export class CollectionSharingService {
 
   /**
    * Turns the caller's collection sharing with this household on or off
-   * (#367), and returns their roster row.
+   * (#170), and returns their roster row.
    *
    * One transaction reads the value it replaces and writes the new one. The
    * write is conditional on the value differing, so of two toggles racing,
@@ -260,7 +244,7 @@ export class CollectionSharingService {
 
       this.publisher.publish(
         new HouseholdExcludedGameAddedEvent(excluded, initiatedAt),
-        householdWebhook(WebhookEventType.HouseholdExcludedGameAdded, excluded),
+        householdWebhook(WebhookEventType.HouseholdMemberExcludedGameAdded, excluded),
       );
     }
 
@@ -272,7 +256,7 @@ export class CollectionSharingService {
    * when the caller hasn't excluded it, which a second of two racing calls
    * hears too.
    */
-  async includeGame(householdId: string, collectionEntryId: string): Promise<void> {
+  async removeExcludedGame(householdId: string, collectionEntryId: string): Promise<void> {
     const initiatedAt = new Date();
     const userId = resolveScopeSubjectId(this.abilityService);
 
@@ -284,7 +268,7 @@ export class CollectionSharingService {
       });
 
       if (count === 0) {
-        throw new NotFoundException(t('errors.household.excluded_game_not_found'));
+        throw excludedGameNotFound();
       }
 
       return own;
@@ -294,7 +278,7 @@ export class CollectionSharingService {
 
     this.publisher.publish(
       new HouseholdExcludedGameRemovedEvent(excluded, initiatedAt),
-      householdWebhook(WebhookEventType.HouseholdExcludedGameRemoved, excluded),
+      householdWebhook(WebhookEventType.HouseholdMemberExcludedGameRemoved, excluded),
     );
   }
 
@@ -363,10 +347,10 @@ export class CollectionSharingService {
 
   /**
    * Inserts the excluded game unless it exists, and says whether it did. A
-   * foreign key that fails means a row read earlier in the call is gone: a
-   * 404, rather than a 500. Only the membership's key answers "not a member";
-   * any other, the collection entry's above all, answers the collection entry
-   * 404, as an entry deleted mid-call is no entry.
+   * foreign key that fails means a row read earlier in the call is gone: the
+   * membership left, or the entry was deleted, mid-call. Both answer 404,
+   * rather than a 500, and the one membership 404 answers either, as every
+   * other foreign key failure in the repo maps to a single 404.
    */
   private async insertExcludedGame(
     tx: Prisma.TransactionClient,
@@ -382,7 +366,7 @@ export class CollectionSharingService {
         throw error;
       }
 
-      throw isMembershipForeignKey(error) ? this.notAMember(householdId) : collectionEntryNotFound();
+      throw this.notAMember(householdId);
     }
   }
 

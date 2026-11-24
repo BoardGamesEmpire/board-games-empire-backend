@@ -5,15 +5,22 @@ import request from 'supertest';
 import { arrangeCollectionEntry } from '../game-collection/game-collection-fixtures';
 import { gamePoolSampleEnvelope } from '../game/game-wire';
 import { requireBaseUrl } from '../support/e2e-env';
+import { expectErrorEnvelope } from '../support/error-envelope';
 import type { TestDatabase } from '../support/test-db';
 import { createTestDatabase } from '../support/test-db';
-import { excludedGameEnvelope, excludedGamesEnvelope, gamePoolEnvelope, memberEnvelope } from './household-wire';
+import {
+  excludedGameEnvelope,
+  excludedGamesEnvelope,
+  gamePoolEnvelope,
+  memberEnvelope,
+  memberGameSampleIds,
+} from './household-wire';
 
 /**
  * A member's own say over how their games join a household's game pool,
- * against the running server: their collection sharing (#367), through
+ * against the running server: their collection sharing, through
  * `PATCH /api/households/:id/members/me`, and their excluded games (#170),
- * through `…/members/me/excluded-games`.
+ * through `…/members/me/excluded-games` (#170).
  *
  * Each route acts on the caller's own membership, whatever their household
  * role: an owner's grant reaches every member's row, so the tests that matter
@@ -24,7 +31,7 @@ import { excludedGameEnvelope, excludedGamesEnvelope, gamePoolEnvelope, memberEn
  * Each test creates its actors, then the rosters and rows, before any
  * authenticated request (#256 ordering rule).
  */
-describe('collection sharing and excluded games (#367, #170)', () => {
+describe('collection sharing and excluded games (#170)', () => {
   const baseUrl = requireBaseUrl(process.env);
 
   /** How long the audit listener may take to write an entry after the request has answered. */
@@ -122,7 +129,19 @@ describe('collection sharing and excluded games (#367, #170)', () => {
       })
     ).platformGame.gameId;
 
+  /** The collection entries `GET /api/households/:id` samples for one member, sorted (#514). */
+  const memberSampleOf = async (viewer: SessionActor, householdId: string, member: SessionActor) =>
+    memberGameSampleIds(
+      await request(baseUrl).get(`/api/households/${householdId}`).set(viewer.headers).expect(200),
+      'GET /api/households/:id',
+      member.user.id,
+    ).sort();
+
   const sorted = (ids: readonly string[]) => [...ids].sort();
+
+  /** The refusals a client can branch on, by their stable code (#170). */
+  const COLLECTION_ENTRY_NOT_FOUND = { status: 404, code: 'COLLECTION_ENTRY_NOT_FOUND' };
+  const EXCLUDED_GAME_NOT_FOUND = { status: 404, code: 'EXCLUDED_GAME_NOT_FOUND' };
 
   /** The household's audit entries for `event`, oldest first, once there are `count` of them. */
   const householdEntriesOnce = (householdId: string, event: string, count = 1) =>
@@ -138,7 +157,7 @@ describe('collection sharing and excluded games (#367, #170)', () => {
       { description: `${count} ${event} audit entries for household ${householdId}`, timeoutMs: AUDIT_ENTRY_LANDS_MS },
     );
 
-  it("takes a member's games out of the household's game pool and the sample when they turn collection sharing off (#367)", async () => {
+  it("takes a member's games out of the household's game pool and the sample when they turn collection sharing off (#170)", async () => {
     const [viewer, m1, m2] = [await actors.user(), await actors.user(), await actors.user()];
     const home = await household(viewer, [m1, m2]);
     const offEntry = await arrangeCollectionEntry(db.client, m1.user.id, Reach.Private);
@@ -162,9 +181,29 @@ describe('collection sharing and excluded games (#367, #170)', () => {
     expect(await gamePoolIds(viewer, home.id)).toEqual(sorted([off, kept]));
   });
 
+  // The member game sample `GET /api/households/:id` embeds reads the same
+  // two writes: turning collection sharing off leaves what the reach admits on
+  // its own, and an excluded game is left out whatever its reach (#170).
+  it("takes a member's games out of their game sample on the household when they turn collection sharing off and exclude a game (#170)", async () => {
+    const [viewer, m1] = [await actors.user(), await actors.user()];
+    const home = await household(viewer, [m1]);
+    const unsharedEntry = await arrangeCollectionEntry(db.client, m1.user.id, Reach.Private);
+    // Public, so only the excluded game keeps it out once sharing is off.
+    const excludedEntry = await arrangeCollectionEntry(db.client, m1.user.id, Reach.Public);
+    // The control: a Public entry the member neither excludes nor needs to share.
+    const keptEntry = await arrangeCollectionEntry(db.client, m1.user.id, Reach.Public);
+
+    expect(await memberSampleOf(viewer, home.id, m1)).toEqual(sorted([unsharedEntry, excludedEntry, keptEntry]));
+
+    await setCollectionSharing(m1, home.id, false).expect(200);
+    await exclude(m1, home.id, excludedEntry).expect(201);
+
+    expect(await memberSampleOf(viewer, home.id, m1)).toEqual([keptEntry]);
+  });
+
   // An owner's `manage` on HouseholdMember reaches every row of the roster,
-  // so "me" has to be pinned to the caller (#367).
-  it("changes only the owner's own row when the owner turns collection sharing off (#367)", async () => {
+  // so "me" has to be pinned to the caller (#170).
+  it("changes only the owner's own row when the owner turns collection sharing off (#170)", async () => {
     const [owner, m1] = [await actors.user(), await actors.user()];
     const home = await household(owner, [m1]);
 
@@ -184,8 +223,8 @@ describe('collection sharing and excluded games (#367, #170)', () => {
   });
 
   // The global pipe's implicit conversion would read the string 'false' as
-  // true, turning collection sharing on (#367).
-  it('refuses a collectionSharing that is not a JSON boolean (#367)', async () => {
+  // true, turning collection sharing on (#170).
+  it('refuses a collectionSharing that is not a JSON boolean (#170)', async () => {
     const [owner, m1] = [await actors.user(), await actors.user()];
     const home = await household(owner, [m1]);
 
@@ -201,11 +240,11 @@ describe('collection sharing and excluded games (#367, #170)', () => {
   // on the other member routes. Every user may read some HouseholdMember rows,
   // so the list passes its gate, and so does a member of another household on
   // every route: the service, finding no membership here, answers 404
-  // (#367, #170).
-  it('refuses a user outside the household, and changes nothing (#367, #170)', async () => {
+  // (#170).
+  it('refuses a user outside the household, and changes nothing (#170)', async () => {
     const [owner, stranger, elsewhere] = [await actors.user(), await actors.user(), await actors.user()];
     const home = await household(owner);
-    await household(elsewhere);
+    const elsewheresHome = await household(elsewhere);
     const strangersEntry = await arrangeCollectionEntry(db.client, stranger.user.id, Reach.Private);
     const elsewheresEntry = await arrangeCollectionEntry(db.client, elsewhere.user.id, Reach.Private);
 
@@ -220,6 +259,12 @@ describe('collection sharing and excluded games (#367, #170)', () => {
     await expect(
       db.client.excludedGame.count({ where: { gameCollectionId: { in: [strangersEntry, elsewheresEntry] } } }),
     ).resolves.toBe(0);
+    const sharingOf = (membershipId: string) =>
+      db.client.householdMember.findUniqueOrThrow({ where: { id: membershipId }, select: { collectionSharing: true } });
+    // No refused toggle reached a row: not this household's, nor the one
+    // `elsewhere` belongs to.
+    await expect(sharingOf(home.membershipOf(owner).id)).resolves.toEqual({ collectionSharing: true });
+    await expect(sharingOf(elsewheresHome.membershipOf(elsewhere).id)).resolves.toEqual({ collectionSharing: true });
     // The control: the owner's own calls on the same household are answered.
     await setCollectionSharing(owner, home.id, false).expect(200);
     await request(baseUrl).get(excludedGamesPath(home.id)).set(owner.headers).expect(200);
@@ -271,8 +316,12 @@ describe('collection sharing and excluded games (#367, #170)', () => {
       .find((entry) => entry.memberId === home.membershipOf(m1).id)?.collectionEntryId;
     expect(handedOut).toBe(membersEntry);
 
-    await exclude(owner, home.id, membersEntry, 'Not yours to hold back').expect(404);
-    await exclude(owner, home.id, 'no-such-entry').expect(404);
+    const foreign = await exclude(owner, home.id, membersEntry, 'Not yours to hold back');
+    const missing = await exclude(owner, home.id, 'no-such-entry');
+
+    expectErrorEnvelope(foreign, COLLECTION_ENTRY_NOT_FOUND);
+    expectErrorEnvelope(missing, COLLECTION_ENTRY_NOT_FOUND);
+    expect(foreign.body).toEqual(missing.body);
 
     await expect(db.client.excludedGame.count({ where: { gameCollectionId: membersEntry } })).resolves.toBe(0);
     expect(await gamePoolIds(owner, home.id)).toEqual(sorted([await gameOf(membersEntry), await gameOf(ownEntry)]));
@@ -280,6 +329,11 @@ describe('collection sharing and excluded games (#367, #170)', () => {
     // The control: the owner's own entry is excluded through the same route.
     await exclude(owner, home.id, ownEntry).expect(201);
     expect(await gamePoolIds(owner, home.id)).toEqual([await gameOf(membersEntry)]);
+
+    // The control's entry is the only one recorded: the 404s published nothing.
+    const added = await householdEntriesOnce(home.id, EXCLUDED_GAME_ADDED);
+    expect(added).toHaveLength(1);
+    expect(added[0]?.payload).toMatchObject({ after: { collectionEntryId: ownEntry } });
   });
 
   it('lets a guest exclude their own entry (#170)', async () => {
@@ -298,7 +352,7 @@ describe('collection sharing and excluded games (#367, #170)', () => {
     expect(await gamePoolIds(owner, home.id)).toEqual([owners]);
   });
 
-  it('replaces the reason on a repeated exclusion, and clears it when one is sent without a reason (#170)', async () => {
+  it('replaces the reason when an excluded game is excluded again, and clears it when one is sent without a reason (#170)', async () => {
     const [owner, m1] = [await actors.user(), await actors.user()];
     const home = await household(owner, [m1]);
     const entry = await arrangeCollectionEntry(db.client, m1.user.id, Reach.Private);
@@ -330,7 +384,7 @@ describe('collection sharing and excluded games (#367, #170)', () => {
     const neverExcluded = await arrangeCollectionEntry(db.client, m1.user.id, Reach.Private);
     const entry = await arrangeCollectionEntry(db.client, m1.user.id, Reach.Private);
 
-    await include(m1, home.id, neverExcluded).expect(404);
+    expectErrorEnvelope(await include(m1, home.id, neverExcluded), EXCLUDED_GAME_NOT_FOUND);
 
     // The control: an excluded game is put back, once.
     await exclude(m1, home.id, entry).expect(201);
@@ -340,12 +394,12 @@ describe('collection sharing and excluded games (#367, #170)', () => {
     expect(removed.body).toEqual({ message: expect.any(String) });
     expect(await gamePoolIds(owner, home.id)).toEqual(sorted([await gameOf(neverExcluded), await gameOf(entry)]));
 
-    await include(m1, home.id, entry).expect(404);
+    expectErrorEnvelope(await include(m1, home.id, entry), EXCLUDED_GAME_NOT_FOUND);
   });
 
   // The reason is the member's own note: no audit entry or webhook carries it
   // (#170). Only a change is recorded, so a repeat writes no second entry.
-  it('records each change in the audit log, attributed to the member, with no reason in any entry (#367, #170)', async () => {
+  it('records each change in the audit log, attributed to the member, with no reason in any entry (#170)', async () => {
     const [owner, m1] = [await actors.user(), await actors.user()];
     const home = await household(owner, [m1]);
     const entry = await arrangeCollectionEntry(db.client, m1.user.id, Reach.Private);
@@ -395,7 +449,10 @@ describe('collection sharing and excluded games (#367, #170)', () => {
       }),
     ]);
 
-    const everyEntry = await db.client.auditLog.findMany({ where: { subjectId: home.id } });
+    // Under any subject, so a reason recorded against another one is caught too.
+    const everyEntry = await db.client.auditLog.findMany({
+      where: { OR: [{ subjectId: home.id }, { actorUserId: m1.user.id }] },
+    });
     expect(JSON.stringify(everyEntry)).not.toContain('secret reason');
   });
 });

@@ -4,6 +4,7 @@ import { befriend, createActors, createHouseholdWithMembers } from '@bge/testing
 import request from 'supertest';
 import { arrangeCollectionEntry } from '../game-collection/game-collection-fixtures';
 import { requireBaseUrl } from '../support/e2e-env';
+import { expectErrorEnvelope } from '../support/error-envelope';
 import { tabletopPlatform } from '../support/seeded-platforms';
 import type { TestDatabase } from '../support/test-db';
 import { createTestDatabase } from '../support/test-db';
@@ -125,8 +126,8 @@ describe('household game pool list (#367)', () => {
   const sorted = (ids: readonly string[]) => [...ids].sort();
 
   describe('what it lists', () => {
-    // Owners order by shown name, then entry id, so Amy's entry comes before
-    // both of Zed's though Zed's came first (#367).
+    // Owners order by shown name, then memberId, then entry id, so Amy's
+    // entry comes before both of Zed's though Zed's came first (#367).
     it('lists a game two members own as one row naming each entry, and counts it once (#367)', async () => {
       const [viewer, zed, amy] = [await actors.user(), await actors.user(), await actors.user()];
       const home = await household(viewer, [zed, amy]);
@@ -254,9 +255,9 @@ describe('household game pool list (#367)', () => {
     });
 
     // By the exact rule this entry is in B's game pool. But the
-    // GameCollection ceiling's household rule can't tie an exclusion to the
-    // household it was made in, so an exclusion in any household the caller
-    // shares with the owner hides it, and the list never serves more than the
+    // GameCollection ceiling's household rule can't tie an excluded game to
+    // the household it was excluded from, so an excluded game in any household
+    // the caller shares with the owner hides it, and the list never serves more than the
     // collection read (#367). Pinned so a change to the approximation is seen.
     it('leaves out an entry excluded from one household the caller shares with its owner, though shared in another (#367)', async () => {
       const [viewer, m1] = [await actors.user(), await actors.user()];
@@ -367,17 +368,20 @@ describe('household game pool list (#367)', () => {
       await readGamePool(friend, home.id).expect(403);
     });
 
+    // Coded, so a client can offer to widen the household first (#367).
     it('refuses a game pool reach wider than the household (#367)', async () => {
       const owner = await actors.user();
       const home = await household(owner);
+      const wider = { status: 400, code: 'GAME_POOL_REACH_WIDER_THAN_HOUSEHOLD' };
 
-      await editHousehold(owner, home.id, { settings: { gamePoolReach: Reach.Friends } }).expect(400);
+      expectErrorEnvelope(await editHousehold(owner, home.id, { settings: { gamePoolReach: Reach.Friends } }), wider);
       expect(await gamePoolReachOf(owner, home.id)).toBe(Reach.Private);
 
       // Nor may one patch narrow the household and widen its game pool.
       await editHousehold(owner, home.id, { reach: Reach.Friends }).expect(200);
-      await editHousehold(owner, home.id, { reach: Reach.Private, settings: { gamePoolReach: Reach.Friends } }).expect(
-        400,
+      expectErrorEnvelope(
+        await editHousehold(owner, home.id, { reach: Reach.Private, settings: { gamePoolReach: Reach.Friends } }),
+        wider,
       );
       expect(await gamePoolReachOf(owner, home.id)).toBe(Reach.Private);
 
@@ -414,12 +418,17 @@ describe('household game pool list (#367)', () => {
       expect(await gamePoolIds(m1, home.id)).toEqual([await gameOf(entry)]);
 
       // And once the household reaches friends, the same row lets the friend in.
-      await db.client.household.update({ where: { id: home.id }, data: { reach: Reach.Friends } });
+      // Widened through the route, which leaves a Friends game pool reach as
+      // it stands, so no write goes behind the server's back after the first
+      // authenticated request (#256).
+      await editHousehold(owner, home.id, { reach: Reach.Friends }).expect(200);
       expect(await gamePoolIds(friend, home.id)).toEqual([await gameOf(entry)]);
     });
 
-    // Staff read every household, but the game pool reach decides who may
-    // open its game pool, and staff are no exception (#367).
+    // Pinned as built: server staff who are not members are refused while
+    // the game pool reach is Private, and let in once it is Friends, because
+    // their read reaches every household and Friends opens the game pool to
+    // anyone who can read the household (#367).
     it('refuses server staff who are not members while the game pool reach is Private, and lets them in at Friends (#367)', async () => {
       const [owner, admin] = [await actors.user(), await actors.admin()];
       const home = await household(owner);

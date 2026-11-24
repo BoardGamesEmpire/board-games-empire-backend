@@ -183,7 +183,7 @@ describe('household domain events (#245)', () => {
   });
 
   describe('HouseholdMemberCollectionSharingChangedEvent', () => {
-    it('is an update of the household, with the collection sharing before and after (#367)', () => {
+    it('is an update of the household, with the collection sharing before and after (#170)', () => {
       const before = collectionSharing({ collectionSharing: true });
       const after = collectionSharing({ collectionSharing: false });
 
@@ -213,7 +213,7 @@ describe('household domain events (#245)', () => {
 
     // The reason is the member's own note on why they excluded a game; it
     // stays out of the audit entry and the webhook payload alike (#170).
-    it('carries no reason for the exclusion (#170)', () => {
+    it('carries no reason for the excluded game (#170)', () => {
       // @ts-expect-error -- an excluded game's snapshot has no reason field (#170)
       const withReason: ExcludedGameSnapshot = { ...excludedGame(), reason: 'Too fragile to lend' };
 

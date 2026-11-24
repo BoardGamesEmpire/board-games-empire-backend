@@ -1893,7 +1893,7 @@ export const PERMISSION_CATALOG = [
     reason: 'Leave a household you belong to',
   }),
   // A member's own say over how their games join the household's game pool:
-  // their collection sharing and their excluded games (#367, #170). One slug
+  // their collection sharing and their excluded games (#170). One slug
   // covers both, since each is an update of the acting user's own membership
   // and CASL can't tell two grants of one action on one subject apart. Self-
   // scoped by conditions like the leave grant above, so every household role

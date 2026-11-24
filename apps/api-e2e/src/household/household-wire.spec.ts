@@ -408,7 +408,7 @@ describe('household wire parsers (pure logic)', () => {
       platformGame: { id: 'pg-1', game: { id: 'g1', title: 't', thumbnail: null, description: null } },
     };
 
-    it('returns the excluded game and the message, or the list', () => {
+    it('returns the excluded game and the message, or the list (#170)', () => {
       expect(excludedGameEnvelope(response({ message: 'm', excludedGame }, 201), 'POST').excludedGame).toEqual(
         excludedGame,
       );
@@ -419,7 +419,7 @@ describe('household wire parsers (pure logic)', () => {
 
     // A missing reason would read as "no reason" in a test that cleared one
     // (#170), so it fails here rather than passing as undefined.
-    it('rejects an excluded game without a reason key, an entry id or its game', () => {
+    it('rejects an excluded game without a reason key, an entry id or its game (#170)', () => {
       const noReason = Object.fromEntries(Object.entries(excludedGame).filter(([key]) => key !== 'reason'));
 
       for (const broken of [
@@ -436,7 +436,7 @@ describe('household wire parsers (pure logic)', () => {
       }
     });
 
-    it('rejects a missing message or list', () => {
+    it('rejects a missing message or list (#170)', () => {
       expect(() => excludedGameEnvelope(response({ excludedGame }), 'POST')).toThrow(/no 'message' string/);
       expect(() => excludedGamesEnvelope(response({}), 'GET')).toThrow(/no 'excludedGames' array/);
     });
@@ -452,7 +452,7 @@ describe('household wire parsers (pure logic)', () => {
     };
     const row = { id: 'g1', title: 't', thumbnail: null, description: null, owners: [owner] };
 
-    it('returns the rows and the pagination', () => {
+    it('returns the rows and the pagination (#367)', () => {
       const parsed = gamePoolEnvelope(response({ games: [row], pagination: PAGINATION }), 'GET');
 
       expect(parsed.games).toEqual([row]);
@@ -461,7 +461,7 @@ describe('household wire parsers (pure logic)', () => {
 
     // A game is in the game pool only through an entry, so a row with no
     // owner is one the read should not have counted (#367).
-    it('rejects a row with no owners, or an owner without its ids', () => {
+    it('rejects a row with no owners, or an owner without its ids (#367)', () => {
       for (const owners of [undefined, [], [{ ...owner, memberId: '' }], [{ ...owner, platform: null }]]) {
         expect(() =>
           gamePoolEnvelope(response({ games: [{ ...row, owners }], pagination: PAGINATION }), 'GET'),
@@ -469,7 +469,7 @@ describe('household wire parsers (pure logic)', () => {
       }
     });
 
-    it('rejects a page longer than its total, or no pagination', () => {
+    it('rejects a page longer than its total, or no pagination (#367)', () => {
       expect(() =>
         gamePoolEnvelope(response({ games: [row, { ...row, id: 'g2' }], pagination: PAGINATION }), 'GET'),
       ).toThrow(/more than its limit 25 or total 1/);

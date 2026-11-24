@@ -1,7 +1,7 @@
 import type { DatabaseService, SystemRole } from '@bge/database';
 import { lockLiveHousehold, Prisma } from '@bge/database';
 import { t } from '@bge/i18n';
-import { InternalServerErrorException, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 
 /**
  * Cheap existence probe (excludes soft-deleted). Lets a caller distinguish a
@@ -9,14 +9,32 @@ import { InternalServerErrorException, NotFoundException } from '@nestjs/common'
  * not read/mutate (→ 403) once a permission-scoped query returns nothing.
  *
  * Consumed today by `HouseholdService` and `HouseholdMemberService`; the
- * household analog of `event-access.helpers.ts`. Scope is deliberately narrow —
- * only the existence predicate is shared here. The 403-vs-404 disambiguation
- * that follows a permission-scoped miss stays with each service, because the
- * "what does an empty result mean" question is resource-specific.
+ * household analog of `event-access.helpers.ts`. A miss on the household row
+ * itself is answered by {@link householdRefusal}; a miss on another resource
+ * keeps its own 403-vs-404 disambiguation, because the "what does an empty
+ * result mean" question is resource-specific.
  */
 export async function householdExists(db: LockFreeReadClient, householdId: string): Promise<boolean> {
   const count = await db.household.count({ where: { id: householdId, deletedAt: null } });
   return count > 0;
+}
+
+/**
+ * The refusal for a permission-scoped read or write of the household row that
+ * matched nothing: a 403 carrying `forbidden` when the household is live and
+ * the actor's grant doesn't reach it, and otherwise the 404 every household
+ * route gives a missing or deleted household (#299, #367).
+ *
+ * `client` is the connection the probe runs on, as for {@link householdExists}.
+ */
+export async function householdRefusal(
+  client: LockFreeReadClient,
+  householdId: string,
+  forbidden: ReturnType<typeof t>,
+): Promise<ForbiddenException | NotFoundException> {
+  return (await householdExists(client, householdId))
+    ? new ForbiddenException(forbidden)
+    : new NotFoundException(t('errors.household.not_found', { id: householdId }));
 }
 
 /**

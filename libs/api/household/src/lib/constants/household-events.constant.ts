@@ -30,7 +30,7 @@ export enum HouseholdEvents {
   MemberRoleChanged = 'household.member.role_changed',
   /** A membership ended: the member left, was removed from the household or was banned (#245). */
   MemberRemoved = 'household.member.removed',
-  /** A member turned their collection sharing on or off (#367). */
+  /** A member turned their collection sharing on or off (#170). */
   MemberCollectionSharingChanged = 'household.member.collection_sharing_changed',
   /** A member made one of their collection entries an excluded game (#170). */
   ExcludedGameAdded = 'household.member.excluded_game_added',

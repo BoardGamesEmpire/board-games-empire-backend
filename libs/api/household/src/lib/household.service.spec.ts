@@ -594,13 +594,22 @@ describe('HouseholdService', () => {
      * the reach the household has once the patch lands.
      */
     describe('the game pool reach (#367)', () => {
+      /** The 400 a client branches on to offer widening the household first (#367). */
+      const REACH_WIDER_THAN_HOUSEHOLD = {
+        status: 400,
+        code: 'GAME_POOL_REACH_WIDER_THAN_HOUSEHOLD',
+        response: {
+          statusCode: 400,
+          error: 'Bad Request',
+          code: 'GAME_POOL_REACH_WIDER_THAN_HOUSEHOLD',
+          message: t('errors.household.game_pool_reach_wider_than_household'),
+        },
+      };
+
       it("refuses a game pool reach wider than the household's reach (#367)", async () => {
         const attempt = service.updateHousehold('hh-1', { settings: { gamePoolReach: Reach.Friends } });
 
-        await expect(attempt).rejects.toThrow(BadRequestException);
-        await expect(attempt).rejects.toMatchObject({
-          response: t('errors.household.game_pool_reach_wider_than_household'),
-        });
+        await expect(attempt).rejects.toMatchObject(REACH_WIDER_THAN_HOUSEHOLD);
 
         expect(db.household.update).not.toHaveBeenCalled();
         expect(events.emit).not.toHaveBeenCalled();
@@ -614,10 +623,7 @@ describe('HouseholdService', () => {
           settings: { gamePoolReach: Reach.Friends },
         });
 
-        await expect(attempt).rejects.toThrow(BadRequestException);
-        await expect(attempt).rejects.toMatchObject({
-          response: t('errors.household.game_pool_reach_wider_than_household'),
-        });
+        await expect(attempt).rejects.toMatchObject(REACH_WIDER_THAN_HOUSEHOLD);
 
         expect(db.household.update).not.toHaveBeenCalled();
       });

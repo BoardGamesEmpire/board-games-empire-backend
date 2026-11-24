@@ -225,7 +225,7 @@ describe('HouseholdController (no-Session delegation)', () => {
   });
 
   describe('listGamePool (#367)', () => {
-    it('forwards the household id and paging, and wraps the rows in the games envelope', async () => {
+    it('forwards the household id and paging, and wraps the rows in the games envelope (#367)', async () => {
       const row = {
         id: 'game-1',
         title: 'Azul',
@@ -246,7 +246,7 @@ describe('HouseholdController (no-Session delegation)', () => {
 
     // The service composes the `Game` scope, the type each row is; the
     // envelope is where the guard checks for it.
-    it('builds its envelope under the Game scope guard', async () => {
+    it('builds its envelope under the Game scope guard (#367)', async () => {
       const response = ClsServiceManager.getClsService().runWith({}, () =>
         firstValueFrom(controller.listGamePool('hh-1', PAGINATION)),
       );
@@ -255,7 +255,7 @@ describe('HouseholdController (no-Session delegation)', () => {
       await expect(response).rejects.toThrow(`intrinsic scope for '${ResourceType.Game}'`);
     });
 
-    it('binds GET /households/:id/games', () => {
+    it('binds GET /households/:id/games (#367)', () => {
       const handler = HouseholdController.prototype.listGamePool;
 
       expect(Reflect.getMetadata('path', handler)).toBe(':id/games');
@@ -264,7 +264,7 @@ describe('HouseholdController (no-Session delegation)', () => {
 
     // Beside the other game pool route, and above `GET :id`, as the household
     // reads that are not the household itself are.
-    it('is declared above GET /households/:id', () => {
+    it('is declared above GET /households/:id (#367)', () => {
       const handlers = Object.getOwnPropertyNames(HouseholdController.prototype);
 
       expect(handlers.indexOf('listGamePool')).toBeGreaterThan(handlers.indexOf('sampleGamePool'));
@@ -273,7 +273,7 @@ describe('HouseholdController (no-Session delegation)', () => {
 
     // The household it opens, the entries that name the owners, and the
     // games that are the rows.
-    it('asks the guard for read on households, game collections and games', () => {
+    it('asks the guard for read on households, game collections and games (#367)', () => {
       const handlers = Reflect.getMetadata(CHECK_POLICIES_KEY, HouseholdController.prototype.listGamePool) as Array<
         (ability: AppAbility) => boolean
       >;

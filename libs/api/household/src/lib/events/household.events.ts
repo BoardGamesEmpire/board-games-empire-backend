@@ -224,7 +224,7 @@ export interface HouseholdMembershipSnapshot {
   readonly userId: string;
 }
 
-/** A member's collection sharing, on one side of a change to it (#367). */
+/** A member's collection sharing, on one side of a change to it (#170). */
 export interface CollectionSharingSnapshot {
   readonly collectionSharing: boolean;
   readonly householdId: string;
@@ -439,7 +439,7 @@ export class HouseholdMemberRemovedEvent extends MutationEvent<HouseholdMembersh
 
 /**
  * Emitted once, after commit, when a member turns their collection sharing on
- * or off (#367), and only when it changes. Both snapshots are populated, so
+ * or off (#170), and only when it changes. Both snapshots are populated, so
  * `action` derives to `update`; the household is the subject, since what
  * changed is which games its game pool holds.
  */
@@ -472,11 +472,7 @@ export class HouseholdExcludedGameAddedEvent extends MutationEvent<ExcludedGameS
   readonly subjectId: string;
 
   constructor(after: ExcludedGameSnapshot, initiatedAt: Date) {
-    super(
-      { householdId: after.householdId, memberId: after.memberId, userId: after.userId, collectionEntryId: null },
-      after,
-      initiatedAt,
-    );
+    super({ ...after, collectionEntryId: null }, after, initiatedAt);
     this.subjectId = after.householdId;
   }
 }
@@ -495,11 +491,7 @@ export class HouseholdExcludedGameRemovedEvent extends MutationEvent<ExcludedGam
   readonly subjectId: string;
 
   constructor(before: ExcludedGameSnapshot, initiatedAt: Date) {
-    super(
-      before,
-      { householdId: before.householdId, memberId: before.memberId, userId: before.userId, collectionEntryId: null },
-      initiatedAt,
-    );
+    super(before, { ...before, collectionEntryId: null }, initiatedAt);
     this.subjectId = before.householdId;
   }
 }

@@ -4,7 +4,7 @@ import { Transform } from 'class-transformer';
 import { IsBoolean } from 'class-validator';
 
 /**
- * `PATCH /households/:householdId/members/me` (#367): turns the caller's
+ * `PATCH /households/:householdId/members/me` (#170): turns the caller's
  * collection sharing with this household on or off.
  */
 export class UpdateCollectionSharingDto {

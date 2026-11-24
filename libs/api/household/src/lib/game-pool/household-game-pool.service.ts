@@ -12,8 +12,8 @@ import { t } from '@bge/i18n';
 import { AbilityService, resolveScopeSubjectId, ScopeComposer } from '@bge/permissions';
 import type { PaginatedRows, PaginationQueryDto, RandomSampleQueryDto } from '@bge/shared';
 import { sampleByOffsets } from '@bge/shared';
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { householdExists } from '../household-access.helpers';
+import { Injectable } from '@nestjs/common';
+import { householdRefusal } from '../household-access.helpers';
 import { ACTOR_SELECT } from '../read-shapes';
 import { shownName } from '../shown-name';
 import { gamePoolEntryScope } from './game-pool-scope';
@@ -202,11 +202,7 @@ export class HouseholdGamePoolService {
         });
 
         if (!household) {
-          if (await householdExists(tx, householdId)) {
-            throw new ForbiddenException(t('common.forbidden.view'));
-          }
-
-          throw new NotFoundException(t('errors.household.not_found', { id: householdId }));
+          throw await householdRefusal(tx, householdId, t('common.forbidden.view'));
         }
 
         const entries = this.scopeComposer.compose(

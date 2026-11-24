@@ -13,7 +13,7 @@ import {
   ResourceType,
   SystemRole,
 } from '@bge/database';
-import { t } from '@bge/i18n';
+import { CodedHttpException, t } from '@bge/i18n';
 import { InviteService } from '@bge/invites';
 import { canonicalizeTag } from '@bge/locale';
 import {
@@ -35,6 +35,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { Http } from '@status/codes';
 import assert from 'node:assert';
 import { HOUSEHOLD_RESTORE_PERMISSION_SLUG, HOUSEHOLD_RESTORE_WINDOW_MS } from './constants/household.constants';
 import type { UpdateHouseholdSettingsDto } from './dto';
@@ -51,7 +52,7 @@ import {
 import type { LockFreeReadClient } from './household-access.helpers';
 import {
   assertHouseholdExists,
-  householdExists,
+  householdRefusal,
   lockDeletedHousehold,
   lockHouseholdForRoleTransition,
 } from './household-access.helpers';
@@ -170,7 +171,11 @@ function settingsWithinHouseholdReach(
   }
 
   if (settings.gamePoolReach === Reach.Friends) {
-    throw new BadRequestException(t('errors.household.game_pool_reach_wider_than_household'));
+    throw new CodedHttpException(
+      Http.BadRequest,
+      'GAME_POOL_REACH_WIDER_THAN_HOUSEHOLD',
+      t('errors.household.game_pool_reach_wider_than_household'),
+    );
   }
 
   if (settings.gamePoolReach === undefined && stored?.gamePoolReach === Reach.Friends) {
@@ -234,11 +239,7 @@ export class HouseholdService {
     if (!household) {
       // The scoped read matched nothing: probe existence to distinguish a
       // missing household (404) from one that exists but isn't visible (403).
-      if (await householdExists(this.db, id)) {
-        throw new ForbiddenException(t('common.forbidden.view'));
-      }
-
-      throw new NotFoundException(t('errors.household.not_found', { id }));
+      throw await householdRefusal(this.db, id, t('common.forbidden.view'));
     }
 
     const memberGamesPromises = household.members.map((member) => this.getSelectMemberGames(member.userId, member.id));
@@ -973,9 +974,7 @@ export class HouseholdService {
     forbidden: ReturnType<typeof t>,
     client: LockFreeReadClient = this.db,
   ): Promise<ForbiddenException | NotFoundException> {
-    return (await householdExists(client, id))
-      ? new ForbiddenException(forbidden)
-      : new NotFoundException(t('errors.household.not_found', { id }));
+    return householdRefusal(client, id, forbidden);
   }
 
   /**
