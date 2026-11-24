@@ -39,12 +39,16 @@ describe('GameImportProcessor', () => {
     origin: ImportJobOrigin.Requested,
   };
 
-  const makeJob = (name: string, payload: object, over: { attempts?: number; attemptsMade?: number } = {}): Job =>
+  const makeJob = (
+    name: string,
+    payload: object,
+    over: { attempts?: number; attemptsMade?: number; meta?: JobActorMeta } = {},
+  ): Job =>
     ({
       name,
       id: '1',
       queueName: 'games-import',
-      data: wrapJobData(payload, meta),
+      data: wrapJobData(payload, over.meta ?? meta),
       attemptsMade: over.attemptsMade ?? 0,
       opts: { attempts: over.attempts ?? 3 },
       getChildrenValues: jest.fn().mockResolvedValue({}),
@@ -217,6 +221,31 @@ describe('GameImportProcessor', () => {
     const spawnOrder = expansionSpawner.spawn.mock.invocationCallOrder[0];
     const completedIdx = db.job.updateMany.mock.calls.findIndex(([arg]) => arg?.data?.status === JobStatus.Completed);
     expect(spawnOrder).toBeLessThan(db.job.updateMany.mock.invocationCallOrder[completedIdx]);
+  });
+
+  it('spawned expansion flows carry the API-key actor (#650)', async () => {
+    const apiKeyMeta: JobActorMeta = {
+      actor: { kind: 'apiKey', apiKeyId: 'key-1', userId: 'user-7' },
+      correlationId: 'corr-1',
+    };
+    gameUpsert.upsert.mockResolvedValue({
+      gameId: 'game-1',
+      gameCreated: true,
+      sourceCreated: true,
+      platformGames: [],
+      baseGameIds: [],
+      isExpansion: false,
+    });
+
+    await processor.process(
+      makeJob(
+        JobNames.GameImport,
+        { ...basePayload, expansionExternalIds: ['exp-a'], locale: 'en' },
+        { meta: apiKeyMeta },
+      ),
+    );
+
+    expect(expansionSpawner.spawn).toHaveBeenCalledWith(expect.anything(), apiKeyMeta);
   });
 
   it('does not spawn when a base requested no expansions', async () => {

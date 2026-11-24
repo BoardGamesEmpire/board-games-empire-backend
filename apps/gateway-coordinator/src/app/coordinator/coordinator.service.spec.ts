@@ -1,3 +1,4 @@
+import { AuditContextService } from '@bge/actor-context';
 import { FlowProducerNames } from '@bge/game-import';
 import { GatewayRegistryService, GatewayRoutingRefusedError } from '@bge/gateway-registry';
 import { createTestingModuleWithDb } from '@bge/testing';
@@ -30,6 +31,7 @@ describe('CoordinatorService', () => {
           } satisfies Partial<jest.Mocked<GatewayRegistryService>>,
         },
         GameImportEnqueuerService,
+        { provide: AuditContextService, useValue: { getActor: jest.fn().mockReturnValue(null) } },
         {
           provide: getFlowProducerToken(FlowProducerNames.GamesImport),
           useValue: {

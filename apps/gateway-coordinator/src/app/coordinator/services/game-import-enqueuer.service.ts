@@ -1,3 +1,4 @@
+import { AuditContextService } from '@bge/actor-context';
 import { DatabaseService, InitiatorType, JobStatus, JobType } from '@bge/database';
 import type { GameImportJobPayload } from '@bge/game-import';
 import { buildBaseFlow, FlowProducerNames, idempotencyKeyFor, ImportJobOrigin } from '@bge/game-import';
@@ -15,6 +16,7 @@ export class GameImportEnqueuerService {
     private readonly db: DatabaseService,
     @InjectFlowProducer(FlowProducerNames.GamesImport)
     private readonly flowProducer: FlowProducer,
+    private readonly auditContext: AuditContextService,
   ) {}
 
   /**
@@ -35,12 +37,17 @@ export class GameImportEnqueuerService {
 
     const baseJobId = await this.createBaseJobRow(batchId, input, initiatorType);
 
-    // The coordinator is a gRPC service with no CLS actor of its own — the
-    // originating identity arrives as userId. Reconstruct the actor from it so
-    // it survives the queue hop into the worker's ActorAwareWorkerHost and, in
-    // turn, onto the expansion flows the base processor spawns.
+    // The global GrpcInternalActorInterceptor puts the request's actor in CLS
+    // from x-bge-actor, API-key actors included (#650). Prefer it, so the key
+    // survives the queue hop into the worker's ActorAwareWorkerHost and onto
+    // the expansion flows the base processor spawns. The interceptor refuses a
+    // call with no actor, so the fallback below serves only a call made
+    // outside a gRPC scope: it rebuilds the actor from userId. input.userId
+    // still decides initiatorType and the job rows.
     const meta: JobActorMeta = {
-      actor: input.userId ? { kind: 'user', userId: input.userId } : { kind: 'system', reason: 'game-import' },
+      actor:
+        this.auditContext.getActor() ??
+        (input.userId ? { kind: 'user', userId: input.userId } : { kind: 'system', reason: 'game-import' }),
       correlationId: input.correlationId,
     };
 
