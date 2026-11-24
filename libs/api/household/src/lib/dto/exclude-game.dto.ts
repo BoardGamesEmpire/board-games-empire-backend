@@ -7,8 +7,8 @@ import { EXCLUDED_GAME_MAX_REASON_LENGTH } from '../constants/household.constant
 /**
  * `POST /households/:householdId/members/me/excluded-games` (#170): holds one
  * of the caller's collection entries back from this household's game pool. A
- * repeat for the same entry replaces the reason, and one that omits it or
- * sends it blank clears it.
+ * repeat for the same entry that sends a reason replaces it, one that sends it
+ * `null` or blank clears it, and one that leaves it out keeps it.
  */
 export class ExcludeGameDto {
   @ApiProperty({ description: 'ID of one of your own collection entries.' })
@@ -20,7 +20,7 @@ export class ExcludeGameDto {
     type: String,
     nullable: true,
     description:
-      'Why you hold it back: a note only you see. It is never sent in a webhook. Trimmed. Sending the same entry again replaces the reason; omitting it, or sending it blank or null, clears it.',
+      'Why you hold it back: a note only you see. It is never sent in a webhook. Trimmed. Sending the same entry again with a reason replaces it, sending it blank or null clears it, and leaving it out keeps the stored reason.',
     maxLength: EXCLUDED_GAME_MAX_REASON_LENGTH,
   })
   @IsOptional()

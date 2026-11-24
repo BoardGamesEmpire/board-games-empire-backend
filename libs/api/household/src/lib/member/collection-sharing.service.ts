@@ -206,8 +206,10 @@ export class CollectionSharingService {
    * game pool read hands out, answers the same 404 as a missing one and
    * writes nothing.
    *
-   * Idempotent: a repeat replaces the reason and keeps when it was first
-   * excluded. The insert skips a duplicate rather than failing on it, so its
+   * Idempotent: a repeat keeps when it was first excluded. A repeat that
+   * sends `reason` replaces it, and one that sends it `null` or blank clears
+   * it; a repeat that leaves it out keeps the stored reason, so a retry or a
+   * client with no reason field never wipes the member's note. The insert skips a duplicate rather than failing on it, so its
    * count says whether this call created the excluded game, and only a create
    * publishes, even when two calls race.
    *
@@ -224,7 +226,6 @@ export class CollectionSharingService {
   async excludeGame(householdId: string, dto: ExcludeGameDto): Promise<ExcludedGameView> {
     const initiatedAt = new Date();
     const userId = resolveScopeSubjectId(this.abilityService);
-    const excludedReason = dto.reason ?? null;
 
     const { created, own, row } = await this.db.$transaction(async (tx) => {
       const own = await this.findOwnMembership(tx, householdId, userId, Action.update, OWN_MEMBERSHIP_SELECT);
@@ -241,7 +242,7 @@ export class CollectionSharingService {
       await lockHouseholdForRoleTransition(tx, householdId);
 
       const key = { householdMemberId: own.id, gameCollectionId: entry.id };
-      const created = await this.writeExcludedGame(tx, householdId, { ...key, excludedReason });
+      const created = await this.writeExcludedGame(tx, householdId, key, dto.reason);
 
       const row = await tx.excludedGame.findUniqueOrThrow({
         where: { householdMemberId_gameCollectionId: key },
@@ -337,24 +338,31 @@ export class CollectionSharingService {
   /**
    * Writes the excluded game, and says whether this call created it (#170).
    *
-   * The insert skips a duplicate; the reason is then replaced on the row it
-   * skipped. A racing include can delete that row in between, so a replace
-   * that matches nothing inserts once more, and that insert is a create. Should
-   * a third call re-create the row before it, the row stands as that call
-   * wrote it, and this call published nothing.
+   * The insert skips a duplicate; the row it skipped is then updated. With a
+   * `reason` the update replaces it (`null` clears it). With none, it sets the
+   * membership to the value it holds, which changes nothing but still locks
+   * the row the way a replace does, so a racing include waits for this call
+   * rather than deleting the row before it is read back. A racing include can
+   * delete that row before the update, so an update that matches nothing
+   * inserts once more, and that insert is a create. Should a third call
+   * re-create the row before it, the row stands as that call wrote it, and
+   * this call published nothing.
    */
   private async writeExcludedGame(
     tx: Prisma.TransactionClient,
     householdId: string,
-    data: Prisma.ExcludedGameCreateManyInput,
+    key: { gameCollectionId: string; householdMemberId: string },
+    reason: string | null | undefined,
   ): Promise<boolean> {
+    const data = { ...key, excludedReason: reason ?? null } satisfies Prisma.ExcludedGameCreateManyInput;
+
     if (await this.insertExcludedGame(tx, householdId, data)) {
       return true;
     }
 
     const { count } = await tx.excludedGame.updateMany({
-      where: { householdMemberId: data.householdMemberId, gameCollectionId: data.gameCollectionId },
-      data: { excludedReason: data.excludedReason },
+      where: key,
+      data: reason === undefined ? { householdMemberId: key.householdMemberId } : { excludedReason: reason },
     });
 
     if (count > 0) {

@@ -85,7 +85,7 @@ describe('collection sharing and excluded games (#170)', () => {
   const setCollectionSharing = (actor: SessionActor, householdId: string, collectionSharing: boolean) =>
     request(baseUrl).patch(mePath(householdId)).set(actor.headers).send({ collectionSharing });
 
-  const exclude = (actor: SessionActor, householdId: string, collectionEntryId: string, reason?: string) =>
+  const exclude = (actor: SessionActor, householdId: string, collectionEntryId: string, reason?: string | null) =>
     request(baseUrl)
       .post(excludedGamesPath(householdId))
       .set(actor.headers)
@@ -352,7 +352,10 @@ describe('collection sharing and excluded games (#170)', () => {
     expect(await gamePoolIds(owner, home.id)).toEqual([owners]);
   });
 
-  it('replaces the reason when an excluded game is excluded again, and clears it when one is sent without a reason (#170)', async () => {
+  // A repeat that leaves the reason out keeps it, so a retry, or a client
+  // with no reason field, never wipes the member's note; null or blank
+  // clears it on purpose (#170).
+  it('replaces the reason when an excluded game is excluded again, keeps it when the reason is left out, and clears it when sent null or blank (#170)', async () => {
     const [owner, m1] = [await actors.user(), await actors.user()];
     const home = await household(owner, [m1]);
     const entry = await arrangeCollectionEntry(db.client, m1.user.id, Reach.Private);
@@ -367,7 +370,11 @@ describe('collection sharing and excluded games (#170)', () => {
     expect(await excludedGamesOf(m1, home.id)).toEqual([second.excludedGame]);
 
     const omitted = excludedGameEnvelope(await exclude(m1, home.id, entry).expect(201), route);
-    expect(omitted.excludedGame.reason).toBeNull();
+    expect(omitted.excludedGame.reason).toBe('Missing a piece');
+    expect(omitted.excludedGame.excludedAt).toBe(first.excludedGame.excludedAt);
+
+    const cleared = excludedGameEnvelope(await exclude(m1, home.id, entry, null).expect(201), route);
+    expect(cleared.excludedGame.reason).toBeNull();
 
     // A reason of only spaces reads as none, so it clears one too.
     const again = excludedGameEnvelope(await exclude(m1, home.id, entry, 'Again').expect(201), route);

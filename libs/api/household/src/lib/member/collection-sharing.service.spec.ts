@@ -470,6 +470,42 @@ describe('CollectionSharingService', () => {
       expect(events.emit).not.toHaveBeenCalled();
     });
 
+    // A repeat that leaves the reason out keeps the stored one, so a retry
+    // never wipes the member's note. The update sets the membership to the
+    // value it holds: a no-op that still locks the row, so a racing include
+    // waits instead of deleting it before the read back.
+    it('keeps the stored reason on a repeat that leaves it out, still locking the row (#170)', async () => {
+      db.excludedGame.createMany.mockResolvedValue({ count: 0 });
+
+      await expect(service.excludeGame('hh-1', { collectionEntryId: 'entry-1' })).resolves.toEqual(EXCLUDED_VIEW);
+
+      expect(db.excludedGame.updateMany).toHaveBeenCalledWith({
+        where: { householdMemberId: 'member-1', gameCollectionId: 'entry-1' },
+        data: { householdMemberId: 'member-1' },
+      });
+      expect(events.emit).not.toHaveBeenCalled();
+    });
+
+    it('clears the stored reason on a repeat that sends it null (#170)', async () => {
+      db.excludedGame.createMany.mockResolvedValue({ count: 0 });
+
+      await service.excludeGame('hh-1', { collectionEntryId: 'entry-1', reason: null });
+
+      expect(db.excludedGame.updateMany).toHaveBeenCalledWith({
+        where: { householdMemberId: 'member-1', gameCollectionId: 'entry-1' },
+        data: { excludedReason: null },
+      });
+    });
+
+    it('stores a first exclusion that leaves the reason out with none (#170)', async () => {
+      await service.excludeGame('hh-1', { collectionEntryId: 'entry-1' });
+
+      expect(db.excludedGame.createMany).toHaveBeenCalledWith({
+        data: [{ householdMemberId: 'member-1', gameCollectionId: 'entry-1', excludedReason: null }],
+        skipDuplicates: true,
+      });
+    });
+
     it('inserts again, as a create, when a racing include removed the excluded game the insert skipped (#170)', async () => {
       // The insert skips the duplicate, then a racing DELETE commits, so the
       // replace finds no row: the excluded game is written fresh, and published.
