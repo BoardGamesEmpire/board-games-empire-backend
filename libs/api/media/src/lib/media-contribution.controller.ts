@@ -48,12 +48,20 @@ export class MediaContributionController {
     );
   }
 
+  @ApiResponse({
+    status: Http.Conflict,
+    description: 'The contribution is no longer pending (code MEDIA_CONTRIBUTION_NOT_PENDING)',
+  })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.MediaContribution))
   @Post(':id/approve')
   approve(@Param('id') id: string) {
     return from(this.contributions.approve(id)).pipe(map((c) => ({ contribution: toMediaContributionResponse(c) })));
   }
 
+  @ApiResponse({
+    status: Http.Conflict,
+    description: 'The contribution is no longer pending (code MEDIA_CONTRIBUTION_NOT_PENDING)',
+  })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.MediaContribution))
   @Post(':id/reject')
   reject(@Param('id') id: string, @Body() dto: RejectContributionDto) {
@@ -62,6 +70,11 @@ export class MediaContributionController {
     );
   }
 
+  @ApiResponse({
+    status: Http.Conflict,
+    description:
+      'Only a rejected contribution can be reclaimed (code MEDIA_CONTRIBUTION_NOT_RECLAIMABLE), or the reclaim window has closed (no code)',
+  })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.MediaContribution))
   @Post(':id/reclaim')
   reclaim(@Param('id') id: string) {

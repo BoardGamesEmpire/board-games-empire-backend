@@ -74,6 +74,7 @@ import type {
   WithdrawInviteParams,
 } from './interfaces';
 import { isOutstandingInviteStatus, withEffectiveInviteStatus } from './invite-expiry';
+import { inviteNotOutstanding } from './invite-refusals';
 import type { InvitePartyView, InviteTransitionRow } from './read-shapes';
 import { CONTEXT_INVITE_SELECT, INVITE_SNAPSHOT_SELECT, PARTY_INVITE_SELECT, TRANSITION_SELECT } from './read-shapes';
 
@@ -1199,7 +1200,7 @@ export class InviteService {
 
   private assertFrom(current: InviteTransitionRow, allowed: readonly InviteStatus[]): void {
     if (!allowed.includes(current.status)) {
-      throw new ConflictException(t('errors.invite.not_outstanding', { id: current.id, status: current.status }));
+      throw inviteNotOutstanding(current.status);
     }
   }
 

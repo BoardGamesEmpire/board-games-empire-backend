@@ -449,7 +449,7 @@ describe('GameSearchGateway', () => {
         [
           'its actor has no user behind it',
           'getActingUserId',
-          () => new ForbiddenException(t('errors.actor_context.not_user_attributable', { kind: 'plugin' })),
+          () => new ForbiddenException(t('errors.actor_context.not_user_attributable.plugin')),
           ForbiddenException,
         ],
       ] as const)(

@@ -93,17 +93,21 @@ describe('WsErrorFilter', () => {
       });
     });
 
+    // A quota refusal over WebSocket renders its resource's own sentence, and
+    // its fields survive the filter (#1114).
     it("keeps a structured body's fields and names its status's reason phrase, as the HTTP body does (#1260)", async () => {
       const { client, host } = hostFor('search:start', { correlationId: 'corr-1' });
       const exceeded = new HttpException(
         {
           statusCode: 402,
           error: 'Quota Exceeded',
-          message: t('errors.quota.exceeded', { resource: 'storage_bytes', scope: 'User' }),
+          message: t('errors.quota.exceeded.storage_bytes'),
           code: 'QUOTA_EXCEEDED',
           resource: 'storage_bytes',
           scope: 'User',
           limit: 5,
+          currentUsage: 5,
+          attemptedAmount: 1,
         },
         402,
       );
@@ -113,11 +117,13 @@ describe('WsErrorFilter', () => {
       expect(client.emit).toHaveBeenCalledWith(WsErrorEvents.Exception, {
         statusCode: 402,
         error: 'Payment Required',
-        message: 'Quota for "storage_bytes" exceeded at User scope',
+        message: 'The storage limit has been reached.',
         code: 'QUOTA_EXCEEDED',
         resource: 'storage_bytes',
         scope: 'User',
         limit: 5,
+        currentUsage: 5,
+        attemptedAmount: 1,
         pattern: 'search:start',
         correlationId: 'corr-1',
       });
@@ -169,23 +175,25 @@ describe('WsErrorFilter', () => {
       jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
       failTranslation();
       const { client, host } = hostFor('search:start', { correlationId: 'corr-1' });
-      const exceeded = new HttpException(
+      // A key that keeps its args, so dropping them is observable: `eventId`
+      // arrives only as the body's own field, and `nominationId` not at all (#1114).
+      const missing = new HttpException(
         {
-          statusCode: 402,
-          error: 'Quota Exceeded',
-          message: t('errors.quota.exceeded', { resource: 'storage_bytes', scope: 'User' }),
-          resource: 'storage_bytes',
+          statusCode: 404,
+          error: 'Nomination Missing',
+          message: t('errors.nomination.not_found', { nominationId: 'nomination-1', eventId: 'event-1' }),
+          eventId: 'event-1',
         },
-        402,
+        404,
       );
 
-      await filter.catch(exceeded, host);
+      await filter.catch(missing, host);
 
       expect(client.emit).toHaveBeenCalledWith(WsErrorEvents.Exception, {
-        statusCode: 402,
-        error: 'Payment Required',
-        message: 'errors.quota.exceeded',
-        resource: 'storage_bytes',
+        statusCode: 404,
+        error: 'Not Found',
+        message: 'errors.nomination.not_found',
+        eventId: 'event-1',
         pattern: 'search:start',
         correlationId: 'corr-1',
       });

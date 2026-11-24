@@ -144,12 +144,15 @@ describe('household bans (#782)', () => {
   const messageOf = (response: { body: unknown }) => (response.body as { message?: unknown } | null)?.message;
 
   /**
-   * Sends the request at once and settles it to its status and message. Not
+   * Sends the request at once and settles it to its status and body. Not
    * awaited by the caller until the barrier lets go, and handled here, so a
    * failure before then is not an unhandled rejection.
    */
   const send = (pending: request.Test) => {
-    const settled = pending.then((response) => ({ status: response.status, message: messageOf(response) ?? null }));
+    const settled = pending.then((response) => ({
+      status: response.status,
+      body: (response.body ?? null) as Record<string, unknown> | null,
+    }));
     settled.catch(() => undefined);
 
     return settled;
@@ -547,7 +550,12 @@ describe('household bans (#782)', () => {
       await holder.commit();
 
       expect(await banning).toMatchObject({ status: 201 });
-      expect(await accepting).toEqual({ status: 409, message: expect.stringContaining(InviteStatus.Revoked) });
+      // The code and the status field say it was revoked; the message is a
+      // sentence, not the enum's name (#1114).
+      expect(await accepting).toMatchObject({
+        status: 409,
+        body: { code: 'INVITE_NOT_OUTSTANDING', status: InviteStatus.Revoked },
+      });
     });
 
     await expect(membership(h.householdId, stranger.user.id)).resolves.toBeNull();

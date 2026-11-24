@@ -608,7 +608,7 @@ describe('MediaObjectService', () => {
     // ceiling admitted.
     it('refuses an actor kind with no user behind it rather than answering an empty page', async () => {
       ability.getActingUserId.mockImplementation(() => {
-        throw new ForbiddenException(t('errors.actor_context.not_user_attributable', { kind: 'plugin' }));
+        throw new ForbiddenException(t('errors.actor_context.not_user_attributable.plugin'));
       });
 
       const rejection: unknown = await service.list(paginationQuery({ limit: 10 })).catch((error: unknown) => error);

@@ -5,13 +5,13 @@
   "language_link": {
     "not_found": "Language link with ID {id} not found.",
     "tag_not_found": "Language tag with ID {tagId} not found.",
-    "not_pending": "Only a Pending language link can be accepted.",
+    "not_pending": "Only a language link that is still pending can be accepted.",
     "not_acceptable": "Language link {id} names no registered language, so it can't be accepted. Link it to a language tag instead."
   },
   "vocabulary_link": {
     "not_found": "Link with ID {id} not found.",
     "record_not_found": "No record with ID {recordId} to link to.",
-    "not_pending": "Only a Pending link can be accepted."
+    "not_pending": "Only a link that is still pending can be accepted."
   },
   "game": {
     "not_found": "Game with ID {id} not found",
@@ -100,8 +100,12 @@
     "not_found": "Occurrence {occurrenceId} not found for event {eventId}",
     "confirmed_remove": "This date is confirmed. Cancel it first, then remove it.",
     "fixed_mode_single": "This event takes one date, and it already has one. Cancel that date if it's confirmed, or decline it if it's proposed, then add the new one. You can also change the event's scheduling mode.",
-    "invalid_transition": "Cannot transition from \"{from}\" to \"{to}\". Allowed source statuses: {allowed}.",
-    "availability_proposed_only": "Availability votes are only accepted for Proposed occurrences. Current status: \"{status}\".",
+    "state": {
+      "proposed": "This date hasn't been confirmed yet.",
+      "confirmed": "This date has already been confirmed.",
+      "declined": "This date has been declined.",
+      "cancelled": "This date has been cancelled."
+    },
     "vote_date_passed": "This date has already passed, so it no longer takes availability votes. The host can move it to a later time so it takes votes again.",
     "confirm_date_passed": "This date has already passed, so it can't be confirmed. Move it to a later time. To record a date that happened, decline this one and add a confirmed date."
   },
@@ -126,21 +130,27 @@
   },
   "nomination": {
     "not_found": "Nomination {nominationId} not found for event {eventId}",
-    "host_only": "Only hosts can add games in HostOnly mode.",
+    "host_only": "Only the event's hosts can add games to it.",
     "supplier_not_found": "Game list entry {gameListId} not found for this event.",
     "supplier_mismatch": "The game list entry named as the supplier is not for this platformGameId.",
     "supplier_not_attending": "The attendee offering this game is not attending the event.",
     "only_nominator_withdraw": "Only the nominator can withdraw a nomination.",
-    "cannot_withdraw_status": "Cannot withdraw a nomination with status \"{status}\".",
-    "cannot_vote_status": "Cannot vote on a nomination with status \"{status}\".",
-    "cannot_resolve_status": "Cannot resolve a nomination with status \"{status}\".",
-    "cannot_decide_status": "Cannot approve/reject a nomination with status \"{status}\". Only nominations in AwaitingApproval status can be decided by the host.",
     "forbidden_withdraw": "You don't have permission to withdraw this nomination.",
     "vote_failed": "Failed to cast vote.",
     "forbidden_resolve": "You don't have permission to resolve this nomination.",
     "invalid_resolution": "Must be \"Approved\" or \"Rejected\".",
     "forbidden_decide": "You don't have permission to decide on this nomination.",
-    "direct_add_not_permitted": "Direct game addition is not permitted in \"{mode}\" mode."
+    "state": {
+      "open": "This nomination is still open for votes.",
+      "awaiting_approval": "This nomination is waiting for the host's approval.",
+      "decided": "This nomination has already been decided.",
+      "paused": "This nomination is paused because nobody is bringing its game anymore.",
+      "withdrawn": "This nomination has been withdrawn."
+    },
+    "direct_add": {
+      "requires_vote": "Games for this event are chosen by vote. Nominate the game instead.",
+      "host_approval": "Games for this event need the host's approval. Nominate the game instead."
+    }
   },
   "lineup": {
     "not_found": "Lineup game {lineupGameId} not found for event {eventId}",
@@ -160,9 +170,16 @@
     "not_found": "Contribution {id} not found",
     "forbidden_contribute": "You may only contribute media you own",
     "forbidden_reclaim": "You can only reclaim your own contribution",
-    "already_exists": "Media object {id} already has a {status} contribution",
-    "not_pending": "Contribution is not pending (status: {status})",
-    "only_rejected_reclaim": "Only a rejected contribution can be reclaimed (status: {status})",
+    "state": {
+      "pending": "This contribution is still waiting for review.",
+      "approved": "This contribution has already been approved.",
+      "rejected": "This contribution has already been rejected.",
+      "reclaimed": "This contribution has already been reclaimed."
+    },
+    "exists": {
+      "pending": "This media already has a contribution waiting for review.",
+      "approved": "This media has already been contributed."
+    },
     "reclaim_window_closed": "The reclaim window has closed",
     "cannot_contribute_subject": "This media type can't be contributed to a {subjectType}"
   },
@@ -295,12 +312,26 @@
     "awaiting_approval": "Invite {id} is awaiting approval and cannot be accepted yet",
     "not_awaiting_approval": "Invite {id} is not awaiting approval",
     "sender_cannot_send": "The person who sent invite {id} can no longer send it, so it cannot be approved. Revoke it instead.",
-    "not_outstanding": "Invite {id} is {status} and can no longer be changed",
+    "state": {
+      "pending": "This invite is still waiting for an answer.",
+      "awaiting_approval": "This invite is waiting for approval.",
+      "accepted": "This invite has already been accepted.",
+      "declined": "This invite has already been declined.",
+      "expired": "This invite has expired.",
+      "revoked": "This invite has been revoked.",
+      "withdrawn": "This invite has been withdrawn."
+    },
     "expired": "Invite {id} has expired",
     "changed_concurrently": "Invite {id} changed while it was being updated; try again"
   },
   "quota": {
-    "exceeded": "Quota for \"{resource}\" exceeded at {scope} scope",
+    "exceeded": {
+      "household_member_count": "This household has reached its limit on members.",
+      "webhook_subscription_count": "The limit on webhook subscriptions has been reached.",
+      "storage_bytes": "The storage limit has been reached.",
+      "plugin_install_count": "The limit on installed plugins has been reached.",
+      "household_invite_daily_count": "The daily limit on household invites has been reached."
+    },
     "check_amount_negative": "check amount must be non-negative",
     "consume_amount_negative": "consume amount must be non-negative",
     "unknown_resource": "Unknown quota resource \"{resource}\"",
@@ -470,7 +501,11 @@
     "deadlock": "Another change was being applied at the same time. Please retry the request."
   },
   "actor_context": {
-    "not_user_attributable": "Actor kind '{kind}' cannot perform user-attributed writes."
+    "not_user_attributable": {
+      "plugin": "Only a user can make this change, not a plugin.",
+      "external": "Only a user can make this change, not an outside system.",
+      "system": "Only a user can make this change, not the server itself."
+    }
   },
   "permission": {
     "condition_unevaluable": "The server could not check a permission this needs, so nothing was changed. Try again later, and tell the server's operator if it keeps happening."

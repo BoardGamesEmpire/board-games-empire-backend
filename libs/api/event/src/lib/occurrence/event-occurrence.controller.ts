@@ -139,7 +139,7 @@ export class EventOccurrenceController {
   @ApiResponse({
     status: Http.BadRequest,
     description:
-      'The date is not proposed, its event is cancelled, or the date has passed (code OCCURRENCE_DATE_PASSED)',
+      'The date is not proposed (code OCCURRENCE_TRANSITION_NOT_ALLOWED), its event is cancelled, or the date has passed (code OCCURRENCE_DATE_PASSED)',
   })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.EventOccurrence, 'confirmedAt'))
   @Post(':occurrenceId/confirm')
@@ -158,6 +158,10 @@ export class EventOccurrenceController {
   })
   @ApiParam({ name: 'occurrenceId', type: String })
   @ApiResponse({ status: Http.Ok, description: 'Occurrence declined' })
+  @ApiResponse({
+    status: Http.BadRequest,
+    description: 'The date is not proposed (code OCCURRENCE_TRANSITION_NOT_ALLOWED)',
+  })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.EventOccurrence, 'declinedAt'))
   @Post(':occurrenceId/decline')
   decline(@Param('eventId') eventId: string, @Param('occurrenceId') occurrenceId: string) {
@@ -175,6 +179,10 @@ export class EventOccurrenceController {
   })
   @ApiParam({ name: 'occurrenceId', type: String })
   @ApiResponse({ status: Http.Ok, description: 'Occurrence cancelled' })
+  @ApiResponse({
+    status: Http.BadRequest,
+    description: 'The date is not confirmed (code OCCURRENCE_TRANSITION_NOT_ALLOWED)',
+  })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.EventOccurrence, 'cancelledAt'))
   @Post(':occurrenceId/cancel')
   cancel(
@@ -192,7 +200,8 @@ export class EventOccurrenceController {
   @ApiResponse({ status: Http.Ok, description: 'Availability recorded' })
   @ApiResponse({
     status: Http.BadRequest,
-    description: 'Occurrence is not in Proposed status, or the date has passed (code OCCURRENCE_DATE_PASSED)',
+    description:
+      'The date is not proposed (code OCCURRENCE_NOT_PROPOSED), or it has passed (code OCCURRENCE_DATE_PASSED)',
   })
   @CheckPolicies((ability) => ability.can(Action.create, ResourceType.EventAvailabilityVote))
   @Post(':occurrenceId/availability')

@@ -226,7 +226,7 @@ these as a `CodedHttpException` with `fields`:
 
 ```ts
 // libs/common/quota QuotaExceededException
-super(Http.PaymentRequired, 'QUOTA_EXCEEDED', t('errors.quota.exceeded', { resource, scope }), {
+super(Http.PaymentRequired, 'QUOTA_EXCEEDED', t(QUOTA_EXCEEDED_MESSAGE[resource]), {
   fields: { resource, scope, limit: limit.toString() /* …currentUsage, attemptedAmount */ },
 });
 ```

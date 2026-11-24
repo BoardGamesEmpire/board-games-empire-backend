@@ -552,7 +552,7 @@ describe('WebhookSubscriptionService', () => {
     // no user behind it, and the refusal must not soften into an empty list.
     it('refuses an actor kind with no user behind it, with a message about reading', async () => {
       ability.getActingUserId.mockImplementation(() => {
-        throw new ForbiddenException(t('errors.actor_context.not_user_attributable', { kind: 'plugin' }));
+        throw new ForbiddenException(t('errors.actor_context.not_user_attributable.plugin'));
       });
 
       const rejection: unknown = await service.list().catch((error: unknown) => error);
@@ -579,7 +579,7 @@ describe('WebhookSubscriptionService', () => {
     // included, read through here, so they refuse a userless actor as it does.
     it('refuses an actor kind with no user behind it, as the list does', async () => {
       ability.getActingUserId.mockImplementation(() => {
-        throw new ForbiddenException(t('errors.actor_context.not_user_attributable', { kind: 'plugin' }));
+        throw new ForbiddenException(t('errors.actor_context.not_user_attributable.plugin'));
       });
 
       const rejection: unknown = await service.getById('sub-x').catch((error: unknown) => error);

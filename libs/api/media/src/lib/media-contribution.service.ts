@@ -24,6 +24,13 @@ import { MediaContributionEvents } from './constants/media-contribution-events.c
 import { ContributeMediaDto, ListContributionsQueryDto, RejectContributionDto } from './dto';
 import type { MediaContributionRejectedEvent } from './interfaces/media-contribution.interface';
 import { MediaLinkService } from './link/link.service';
+import {
+  contributionExists,
+  contributionNotPending,
+  contributionNotReclaimable,
+  isLiveContributionStatus,
+  LIVE_CONTRIBUTION_STATUSES,
+} from './media-contribution-refusals';
 
 @Injectable()
 export class MediaContributionService {
@@ -85,13 +92,18 @@ export class MediaContributionService {
     }
 
     const existing = await tx.mediaContribution.findFirst({
-      where: { mediaObjectId, status: { in: [MediaContributionStatus.Pending, MediaContributionStatus.Approved] } },
+      where: { mediaObjectId, status: { in: [...LIVE_CONTRIBUTION_STATUSES] } },
       select: { id: true, status: true },
     });
     if (existing) {
-      throw new ConflictException(
-        t('errors.contribution.already_exists', { id: mediaObjectId, status: existing.status }),
-      );
+      // The query filters on the live statuses, so any other status here is a bug (#1114).
+      if (!isLiveContributionStatus(existing.status)) {
+        throw new Error(
+          `Contribution ${existing.id} has status ${existing.status}, which the live-status query can't return`,
+        );
+      }
+
+      throw contributionExists(existing.status);
     }
 
     if (!this.mediaLink.canLink(media.mimeType, dto.subjectType)) {
@@ -207,7 +219,7 @@ export class MediaContributionService {
     }
 
     if (contribution.status !== MediaContributionStatus.Rejected) {
-      throw new ConflictException(t('errors.contribution.only_rejected_reclaim', { status: contribution.status }));
+      throw contributionNotReclaimable(contribution.status);
     }
 
     if (contribution.reclaimDeadline && contribution.reclaimDeadline.getTime() < Date.now()) {
@@ -294,7 +306,7 @@ export class MediaContributionService {
     }
 
     if (contribution.status !== MediaContributionStatus.Pending) {
-      throw new ConflictException(t('errors.contribution.not_pending', { status: contribution.status }));
+      throw contributionNotPending(contribution.status);
     }
 
     return contribution;

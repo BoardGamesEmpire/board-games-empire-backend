@@ -54,6 +54,7 @@ import {
   NominationWithdrawnEvent,
   VoteCastEvent,
 } from './events/nomination.events';
+import { directAddRefusal, nominationNotFound, nominationStatusRefusal } from './nomination-refusals';
 
 @Injectable()
 export class EventGameNominationService {
@@ -124,7 +125,7 @@ export class EventGameNominationService {
       include: NOMINATION_INCLUDE,
     });
 
-    assert(nomination, new NotFoundException(t('errors.nomination.not_found', { nominationId, eventId })));
+    assert(nomination, nominationNotFound(nominationId, eventId));
     return this.toNominationDetail(eventId, nomination);
   }
 
@@ -268,7 +269,7 @@ export class EventGameNominationService {
       select: { id: true, nominatedById: true, status: true },
     });
 
-    assert(nomination, new NotFoundException(t('errors.nomination.not_found', { nominationId, eventId })));
+    assert(nomination, nominationNotFound(nominationId, eventId));
     assert(
       nomination.nominatedById === attendeeId,
       new ForbiddenException(t('errors.nomination.only_nominator_withdraw')),
@@ -282,11 +283,10 @@ export class EventGameNominationService {
       NominationStatus.AwaitingApproval,
       NominationStatus.Paused,
     ];
+    // Checked on both reads, so a refusal under the lock names the status the
+    // lock found, not the one first read (#1114).
     const assertWithdrawable = (status: NominationStatus) =>
-      assert(
-        withdrawable.includes(status),
-        new BadRequestException(t('errors.nomination.cannot_withdraw_status', { status })),
-      );
+      assert(withdrawable.includes(status), nominationStatusRefusal('NOMINATION_NOT_WITHDRAWABLE', status));
     assertWithdrawable(nomination.status);
 
     try {
@@ -296,7 +296,7 @@ export class EventGameNominationService {
         const [current] = await tx.$queryRaw<{ status: NominationStatus }[]>(
           Prisma.sql`SELECT status FROM event_game_nominations WHERE id = ${nominationId} FOR NO KEY UPDATE`,
         );
-        assert(current, new NotFoundException(t('errors.nomination.not_found', { nominationId, eventId })));
+        assert(current, nominationNotFound(nominationId, eventId));
         assertWithdrawable(current.status);
 
         const written = await tx.eventGameNomination.update({
@@ -362,10 +362,10 @@ export class EventGameNominationService {
       select: { id: true, status: true },
     });
 
-    assert(nomination, new NotFoundException(t('errors.nomination.not_found', { nominationId, eventId })));
+    assert(nomination, nominationNotFound(nominationId, eventId));
     assert(
       nomination.status === NominationStatus.Open,
-      new BadRequestException(t('errors.nomination.cannot_vote_status', { status: nomination.status })),
+      nominationStatusRefusal('NOMINATION_NOT_OPEN', nomination.status),
     );
 
     try {
@@ -380,10 +380,12 @@ export class EventGameNominationService {
           SELECT status FROM event_game_nominations WHERE id = ${nominationId} FOR SHARE
         `);
 
-        if (current?.status !== NominationStatus.Open) {
-          throw new BadRequestException(
-            t('errors.nomination.cannot_vote_status', { status: current?.status ?? nomination.status }),
-          );
+        // A row gone under the lock was deleted since the first read: 404,
+        // rather than a state sentence for a status it no longer has (#1114).
+        assert(current, nominationNotFound(nominationId, eventId));
+
+        if (current.status !== NominationStatus.Open) {
+          throw nominationStatusRefusal('NOMINATION_NOT_OPEN', current.status);
         }
 
         // Pre-read classifies create vs update for the audit before-snapshot.
@@ -482,10 +484,10 @@ export class EventGameNominationService {
       },
     });
 
-    assert(nomination, new NotFoundException(t('errors.nomination.not_found', { nominationId, eventId })));
+    assert(nomination, nominationNotFound(nominationId, eventId));
     assert(
       nomination.status === NominationStatus.Open,
-      new BadRequestException(t('errors.nomination.cannot_resolve_status', { status: nomination.status })),
+      nominationStatusRefusal('NOMINATION_NOT_RESOLVABLE', nomination.status),
     );
 
     try {
@@ -522,6 +524,12 @@ export class EventGameNominationService {
 
       return { nomination: detail, resolution: decision.resolution };
     } catch (error) {
+      // A refusal under the lock (the nomination gone, or settled first) is
+      // the answer to a lost race, as in withdraw, not a server error (#1114).
+      if (error instanceof HttpException) {
+        throw error;
+      }
+
       this.logger.error(`Error resolving nomination ${nominationId} for event ${eventId}`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {
         throw new ForbiddenException(t('errors.nomination.forbidden_resolve'));
@@ -560,10 +568,10 @@ export class EventGameNominationService {
       },
     });
 
-    assert(nomination, new NotFoundException(t('errors.nomination.not_found', { nominationId, eventId })));
+    assert(nomination, nominationNotFound(nominationId, eventId));
     assert(
       nomination.status === NominationStatus.AwaitingApproval,
-      new BadRequestException(t('errors.nomination.cannot_decide_status', { status: nomination.status })),
+      nominationStatusRefusal('NOMINATION_NOT_AWAITING_APPROVAL', nomination.status),
     );
 
     try {
@@ -590,6 +598,12 @@ export class EventGameNominationService {
 
       return detail;
     } catch (error) {
+      // A refusal under the lock (the nomination gone, or settled first) is
+      // the answer to a lost race, as in withdraw, not a server error (#1114).
+      if (error instanceof HttpException) {
+        throw error;
+      }
+
       this.logger.error(`Error applying host decision ${decision} for nomination ${nominationId}`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {
         throw new ForbiddenException(t('errors.nomination.forbidden_decide'));
@@ -622,7 +636,7 @@ export class EventGameNominationService {
     const policy = await this.getEffectivePolicy(eventId, dto.occurrenceId);
 
     if (policy.gameAdditionMode !== GameAdditionMode.Direct && policy.gameAdditionMode !== GameAdditionMode.HostOnly) {
-      throw new ForbiddenException(t('errors.nomination.direct_add_not_permitted', { mode: policy.gameAdditionMode }));
+      throw directAddRefusal(policy.gameAdditionMode);
     }
 
     // The supplier's attendee is read under the attendee read ceiling, as the
@@ -758,12 +772,13 @@ export class EventGameNominationService {
         SELECT status, occurrence_id AS "occurrenceId" FROM event_game_nominations WHERE id = ${nomination.id} FOR UPDATE
       `);
 
-      if (current?.status !== expected) {
-        const status = current?.status ?? expected;
-        throw new BadRequestException(
-          expected === NominationStatus.Open
-            ? t('errors.nomination.cannot_resolve_status', { status })
-            : t('errors.nomination.cannot_decide_status', { status }),
+      // Gone under the lock: 404, as in castVote (#1114).
+      assert(current, nominationNotFound(nomination.id, eventId));
+
+      if (current.status !== expected) {
+        throw nominationStatusRefusal(
+          expected === NominationStatus.Open ? 'NOMINATION_NOT_RESOLVABLE' : 'NOMINATION_NOT_AWAITING_APPROVAL',
+          current.status,
         );
       }
 

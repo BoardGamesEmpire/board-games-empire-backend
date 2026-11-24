@@ -11,6 +11,7 @@ import { t } from '@bge/i18n';
 import type { InvitePartyView, InviteTarget, RespondToInviteParams } from '@bge/invites';
 import {
   effectiveInviteStatusWhere,
+  inviteNotOutstanding,
   InviteService,
   OUTSTANDING_INVITE_STATUSES,
   PARTY_INVITE_SELECT,
@@ -261,9 +262,7 @@ export class PartyInviteService {
       this.invites.emit([outcome.revoked]);
 
       // The answer a revoked invite gets, so the invitee learns nothing of why.
-      throw new ConflictException(
-        t('errors.invite.not_outstanding', { id: outcome.revoked.subjectId, status: InviteStatus.Revoked }),
-      );
+      throw inviteNotOutstanding(InviteStatus.Revoked);
     }
 
     const { invite, member, event, softOverages } = outcome;

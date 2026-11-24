@@ -37,40 +37,35 @@ describe('translateException', () => {
   });
 
   it("translates only the `message` field of a structured body, keeping sibling fields and status, under the status's reason phrase (#1260)", () => {
-    // Shape mirrors the old QuotaExceededException: machine-readable fields beside
-    // a translatable message marker, under a custom `error` label. The label gives
-    // way to the standard reason phrase, so every error names its status alike.
+    // Machine-readable fields beside a translatable message marker, under a
+    // custom `error` label. The label gives way to the standard reason phrase,
+    // so every error names its status alike. The marker's key keeps its args,
+    // so the spec can see them reach the translator (#1114).
     const original = new HttpException(
       {
-        statusCode: 402,
-        error: 'Quota Exceeded',
-        message: t('errors.quota.exceeded', { resource: 'storage_bytes', scope: 'User' }),
-        resource: 'storage_bytes',
-        scope: 'User',
-        limit: '100',
-        currentUsage: '100',
-        attemptedAmount: '1',
+        statusCode: 404,
+        error: 'Nomination Missing',
+        message: t('errors.nomination.not_found', { nominationId: 'nomination-1', eventId: 'event-1' }),
+        nominationId: 'nomination-1',
+        eventId: 'event-1',
       },
-      402,
+      404,
     );
 
     const rebuilt = translateException(original, i18n as never, auditContext);
 
-    expect(translate).toHaveBeenCalledWith('errors.quota.exceeded', {
+    expect(translate).toHaveBeenCalledWith('errors.nomination.not_found', {
       lang: 'en',
-      args: { resource: 'storage_bytes', scope: 'User' },
+      args: { nominationId: 'nomination-1', eventId: 'event-1' },
     });
-    expect(rebuilt.getStatus()).toBe(402);
+    expect(rebuilt.getStatus()).toBe(404);
     // The message is rendered and every other field survives.
     expect(rebuilt.getResponse()).toEqual({
-      statusCode: 402,
-      error: 'Payment Required',
-      message: 't:errors.quota.exceeded',
-      resource: 'storage_bytes',
-      scope: 'User',
-      limit: '100',
-      currentUsage: '100',
-      attemptedAmount: '1',
+      statusCode: 404,
+      error: 'Not Found',
+      message: 't:errors.nomination.not_found',
+      nominationId: 'nomination-1',
+      eventId: 'event-1',
     });
   });
 
@@ -108,7 +103,7 @@ describe('translateException', () => {
         {
           statusCode: 402,
           error: 'Quota Exceeded',
-          message: t('errors.quota.exceeded', { resource: 'storage_bytes', scope: 'User' }),
+          message: t('errors.quota.exceeded.storage_bytes'),
           resource: 'storage_bytes',
           scope: 'User',
           limit: '100',
@@ -122,7 +117,7 @@ describe('translateException', () => {
       expect(rebuilt.getResponse()).toEqual({
         statusCode: 402,
         error: 'Payment Required',
-        message: 'errors.quota.exceeded',
+        message: 'errors.quota.exceeded.storage_bytes',
         resource: 'storage_bytes',
         scope: 'User',
         limit: '100',

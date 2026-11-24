@@ -14,7 +14,7 @@ describe('the acting-user resolvers', () => {
   // What `getActingUserId` throws for a plugin, system or external actor.
   const userless = () => {
     abilityService.getActingUserId.mockImplementation(() => {
-      throw new ForbiddenException(t('errors.actor_context.not_user_attributable', { kind: 'plugin' }));
+      throw new ForbiddenException(t('errors.actor_context.not_user_attributable.plugin'));
     });
   };
 

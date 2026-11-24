@@ -328,7 +328,7 @@ describe('EventService', () => {
     // the write-flavoured one `getActingUserId` throws.
     it('refuses an actor kind with no user behind it rather than answering an empty page', async () => {
       abilityService.getActingUserId.mockImplementation(() => {
-        throw new ForbiddenException(t('errors.actor_context.not_user_attributable', { kind: 'plugin' }));
+        throw new ForbiddenException(t('errors.actor_context.not_user_attributable.plugin'));
       });
 
       const rejection: unknown = await read().catch((error: unknown) => error);
@@ -408,7 +408,7 @@ describe('EventService', () => {
     // tell a client there are none.
     it('refuses an actor kind with no user behind it rather than answering an empty page', async () => {
       abilityService.getActingUserId.mockImplementation(() => {
-        throw new ForbiddenException(t('errors.actor_context.not_user_attributable', { kind: 'plugin' }));
+        throw new ForbiddenException(t('errors.actor_context.not_user_attributable.plugin'));
       });
 
       const rejection: unknown = await browse().catch((error: unknown) => error);
@@ -485,7 +485,7 @@ describe('EventService', () => {
     // match the rows of attendees with no account, so it makes no attendance read.
     it('lists for an actor with no user, with null attendance and no attendee read', async () => {
       abilityService.getActingUserId.mockImplementation(() => {
-        throw new ForbiddenException(t('errors.actor_context.not_user_attributable', { kind: 'plugin' }));
+        throw new ForbiddenException(t('errors.actor_context.not_user_attributable.plugin'));
       });
       groupBy.mockResolvedValue([{ eventId: 'event-1' }]);
       db.event.findMany.mockResolvedValue([{ ...makeEvent({ id: 'event-1' }), occurrences: [futureDate()] }] as never);
@@ -697,7 +697,7 @@ describe('EventService', () => {
     // skipped.
     it('makes no attendance read for an actor with no user, whose where would match attendees with no account (#867)', async () => {
       abilityService.getActingUserId.mockImplementation(() => {
-        throw new ForbiddenException(t('errors.actor_context.not_user_attributable', { kind: 'plugin' }));
+        throw new ForbiddenException(t('errors.actor_context.not_user_attributable.plugin'));
       });
 
       const detail = await service.getEventById('event-1');

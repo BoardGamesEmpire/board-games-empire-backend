@@ -13,10 +13,12 @@ import {
 } from '@bge/testing';
 import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { Http } from '@status/codes';
 import { plainToInstance } from 'class-transformer';
 import { MediaContributionEvents } from './constants/media-contribution-events.constant';
 import { ListContributionsQueryDto } from './dto';
 import { MediaLinkService } from './link/link.service';
+import { LIVE_CONTRIBUTION_STATUSES } from './media-contribution-refusals';
 import { MediaContributionService } from './media-contribution.service';
 
 describe('MediaContributionService', () => {
@@ -100,13 +102,38 @@ describe('MediaContributionService', () => {
       await expect(service.contribute('m1', dto)).rejects.toBeInstanceOf(ForbiddenException);
     });
 
-    it('rejects a duplicate when a Pending/Approved contribution already exists', async () => {
+    it.each([MediaContributionStatus.Pending, MediaContributionStatus.Approved])(
+      'rejects a duplicate when a %s contribution already exists with 409 MEDIA_CONTRIBUTION_EXISTS (#1114)',
+      async (status) => {
+        db.mediaContribution.findFirst.mockResolvedValue({ id: 'existing', status } as never);
+        await expect(service.contribute('m1', dto)).rejects.toMatchObject({
+          status: Http.Conflict,
+          code: 'MEDIA_CONTRIBUTION_EXISTS',
+          response: { status },
+        });
+        expect(db.mediaContribution.create).not.toHaveBeenCalled();
+      },
+    );
+
+    it('looks for an existing contribution among the live statuses only (#1114)', async () => {
       db.mediaContribution.findFirst.mockResolvedValue({
         id: 'existing',
         status: MediaContributionStatus.Pending,
       } as never);
-      await expect(service.contribute('m1', dto)).rejects.toBeInstanceOf(ConflictException);
-      expect(db.mediaContribution.create).not.toHaveBeenCalled();
+      await expect(service.contribute('m1', dto)).rejects.toMatchObject({ code: 'MEDIA_CONTRIBUTION_EXISTS' });
+      expect(db.mediaContribution.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ status: { in: [...LIVE_CONTRIBUTION_STATUSES] } }),
+        }),
+      );
+    });
+
+    it('fails loudly, not with a 409, if the live-status query returns another status (#1114)', async () => {
+      db.mediaContribution.findFirst.mockResolvedValue({
+        id: 'existing',
+        status: MediaContributionStatus.Rejected,
+      } as never);
+      await expect(service.contribute('m1', dto)).rejects.toThrow(/Rejected.*can't return/);
     });
 
     it('attaches to the subject on auto-approve', async () => {
@@ -181,12 +208,16 @@ describe('MediaContributionService', () => {
       );
     });
 
-    it('rejects approving a non-pending contribution', async () => {
+    it('rejects approving a non-pending contribution with 409 MEDIA_CONTRIBUTION_NOT_PENDING (#1114)', async () => {
       db.mediaContribution.findUnique.mockResolvedValue({
         id: 'c1',
         status: MediaContributionStatus.Approved,
       } as never);
-      await expect(service.approve('c1')).rejects.toBeInstanceOf(ConflictException);
+      await expect(service.approve('c1')).rejects.toMatchObject({
+        status: Http.Conflict,
+        code: 'MEDIA_CONTRIBUTION_NOT_PENDING',
+        response: { status: MediaContributionStatus.Approved },
+      });
     });
 
     it('attaches to the subject on approve', async () => {
@@ -209,6 +240,21 @@ describe('MediaContributionService', () => {
   });
 
   describe('reject', () => {
+    it.each([MediaContributionStatus.Approved, MediaContributionStatus.Rejected, MediaContributionStatus.Reclaimed])(
+      'refuses to reject a %s contribution with 409 MEDIA_CONTRIBUTION_NOT_PENDING and writes nothing (#1114)',
+      async (status) => {
+        db.mediaContribution.findUnique.mockResolvedValue({ id: 'c1', mediaObjectId: 'm1', status } as never);
+
+        await expect(service.reject('c1', { reason: 'nope' })).rejects.toMatchObject({
+          status: Http.Conflict,
+          code: 'MEDIA_CONTRIBUTION_NOT_PENDING',
+          response: { status },
+        });
+        expect(db.mediaContribution.update).not.toHaveBeenCalled();
+        expect(emit).not.toHaveBeenCalled();
+      },
+    );
+
     it('sets a reclaim deadline for DirectUpload and emits the rejected event', async () => {
       db.mediaContribution.findUnique.mockResolvedValue({
         id: 'c1',
@@ -294,6 +340,23 @@ describe('MediaContributionService', () => {
       } as never);
       await expect(service.reclaim('c1')).rejects.toBeInstanceOf(ConflictException);
     });
+
+    it.each([MediaContributionStatus.Pending, MediaContributionStatus.Approved, MediaContributionStatus.Reclaimed])(
+      'refuses to reclaim a %s contribution with 409 MEDIA_CONTRIBUTION_NOT_RECLAIMABLE (#1114)',
+      async (status) => {
+        db.mediaContribution.findUnique.mockResolvedValue({
+          id: 'c1',
+          contributedById: MOCK_ACTING_USER_ID,
+          status,
+          reclaimDeadline: null,
+        } as never);
+        await expect(service.reclaim('c1')).rejects.toMatchObject({
+          status: Http.Conflict,
+          code: 'MEDIA_CONTRIBUTION_NOT_RECLAIMABLE',
+          response: { status },
+        });
+      },
+    );
 
     it('refuses to reclaim someone else’s contribution', async () => {
       db.mediaContribution.findUnique.mockResolvedValue({

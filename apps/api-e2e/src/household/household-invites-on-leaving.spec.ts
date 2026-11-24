@@ -71,9 +71,13 @@ describe('household invites when a member leaves, and the sender check at accept
   /** The message a refusal carries, so a surprise reads as a diff rather than as a bare status. */
   const messageOf = (response: { body: unknown }) => (response.body as { message?: unknown } | null)?.message;
 
-  /** The refusal a revoked invite gets, which is all an invitee learns whatever revoked it. */
+  /**
+   * The refusal a revoked invite gets, which is all an invitee learns whatever
+   * revoked it: the code and the status field, the message a sentence rather
+   * than the enum's name (#1114).
+   */
   const expectRevokedRefusal = async (response: request.Response, inviteId: string) => {
-    expect(messageOf(response)).toContain(InviteStatus.Revoked);
+    expect(response.body).toMatchObject({ code: 'INVITE_NOT_OUTSTANDING', status: InviteStatus.Revoked });
     await expect(storedInvite(inviteId)).resolves.toMatchObject({ status: InviteStatus.Revoked });
   };
 

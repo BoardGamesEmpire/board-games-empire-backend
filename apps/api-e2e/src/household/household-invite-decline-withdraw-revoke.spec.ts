@@ -222,7 +222,9 @@ describe('declining, withdrawing and revoking a household invite', () => {
       await declineById(lapsed, expired.id).expect(410);
       const refused = await declineById(withdrawn, settled.id).expect(409);
 
-      expect(messageOf(refused)).toContain(InviteStatus.Withdrawn);
+      // The code and the status field say it was withdrawn; the message is a
+      // sentence, not the enum's name (#1114).
+      expect(refused.body).toMatchObject({ code: 'INVITE_NOT_OUTSTANDING', status: InviteStatus.Withdrawn });
     });
 
     it('refuses with 400 a body with no token', async () => {
@@ -272,7 +274,7 @@ describe('declining, withdrawing and revoking a household invite', () => {
 
       const refused = await withdraw(admin, invite.id).expect(409);
 
-      expect(messageOf(refused)).toContain(InviteStatus.Revoked);
+      expect(refused.body).toMatchObject({ code: 'INVITE_NOT_OUTSTANDING', status: InviteStatus.Revoked });
       await expect(storedInvite(invite.id)).resolves.toMatchObject({ status: InviteStatus.Revoked });
     });
 

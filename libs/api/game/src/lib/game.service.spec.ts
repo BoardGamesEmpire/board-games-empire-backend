@@ -228,7 +228,7 @@ describe('GameService', () => {
     // write-flavoured one `getActingUserId` throws.
     it('refuses an actor kind with no user behind it rather than answering a page of Public games', async () => {
       abilityService.getActingUserId.mockImplementation(() => {
-        throw new ForbiddenException(t('errors.actor_context.not_user_attributable', { kind: 'plugin' }));
+        throw new ForbiddenException(t('errors.actor_context.not_user_attributable.plugin'));
       });
 
       const rejection: unknown = await read().catch((error: unknown) => error);
@@ -344,7 +344,7 @@ describe('GameService', () => {
     // games, which has no meaning without a user behind the actor.
     it('refuses an actor kind with no user behind it rather than sampling the Public games', async () => {
       abilityService.getActingUserId.mockImplementation(() => {
-        throw new ForbiddenException(t('errors.actor_context.not_user_attributable', { kind: 'plugin' }));
+        throw new ForbiddenException(t('errors.actor_context.not_user_attributable.plugin'));
       });
 
       const rejection: unknown = await sampleOf(10).catch((error: unknown) => error);

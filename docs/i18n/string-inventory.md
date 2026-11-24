@@ -211,12 +211,12 @@ Ordered roughly by value/size. Each is an independent unit of work (good for par
 - [x] `libs/api/gateway-registry` — **DONE**. 1 exception (`GatewayCredentialsFactory` →
       `errors.gateway_registry.auth_type_not_implemented`, keeps `{authType}`). No spec asserted the message
       (zero spec edits).
-- [x] `libs/common/actor-context` — **DONE** (#189). 1 exception (`audit-context.service.ts:66`,
-      `getActingUserId` refusing a `system`/`external`/`plugin` actor) → `errors.actor_context.not_user_attributable`,
-      keeps `{kind}` (a non-translatable identifier). `@bge/i18n` imports `AuditContextService` /
+- [x] `libs/common/actor-context` — **DONE** (#189). 1 exception (`audit-context.service.ts:79`,
+      `getActingUserId` refusing a `system`/`external`/`plugin` actor) → `errors.actor_context.not_user_attributable.{plugin,external,system}`,
+      one sentence per actor kind, no placeholder (#1114). `@bge/i18n` imports `AuditContextService` /
       `LOCALE_CLS_KEY` from this lib, so importing `t` from `@bge/i18n` here would form a circular project
       reference; it imports from `@bge/i18n-core` instead, the lower lib #189 extracted the primitives
-      and catalogs into. The plain `Error`s at `:56` and `:78` stay English (§5). Spec gained a test
+      and catalogs into. The plain `Error`s at `:69` and `:91` stay English (§5). Spec gained a test
       asserting the marker via `getResponse()`. Guardrail enabled.
 - [x] `libs/api/actor-context-transport` — **DONE**. Real surface was **21** (inventory said 19): 4 HTTP
       and 17 gRPC. The 4 HTTP throws are "Invalid API key" and "Impersonated sessions are not supported",
@@ -319,7 +319,7 @@ unavailable`; signature/not-found remapped inside `media-object.service.ts` to
   - `grpc-internal-actor.interceptor.ts:143` — embeds `(error as Error).message` in a
     BadRequestException. **Resolved (#144):** it stays English with the other gRPC frames (§5).
 - **Centralized-in-constructor:** `QuotaExceededException` builds its message once in its ctor
-  (`Quota for "{resource}" exceeded at {scope} scope`) — one key, all throw sites inherit it.
+  — one sentence per quota resource (`errors.quota.exceeded.<resource>`, e.g. "The storage limit has been reached."), no placeholders, so all throw sites inherit it (#1114).
 - **`SAFE_MESSAGE` map** (`game-import/src/lib/utils/sanitize-import-error.ts`) — 4 client-safe
   strings already designed as user-facing copy. **Resolved (#144, #188):** they are the
   `errors.game_import.failure.*` keys, which the status read-back and the ImportFailed notification

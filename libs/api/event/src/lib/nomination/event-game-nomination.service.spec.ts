@@ -21,7 +21,7 @@ import {
   VoteQuorumType,
   VoteType,
 } from '@bge/database';
-import { t } from '@bge/i18n';
+import { CodedHttpException, t } from '@bge/i18n';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
 import type { MockAbilityService, MockDatabaseService } from '@bge/testing';
 import {
@@ -35,6 +35,7 @@ import {
 } from '@bge/testing';
 import { BadRequestException, ConflictException, ForbiddenException, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { Http } from '@status/codes';
 import type { LockedSupplier } from '../attendee/attendance';
 import { LINEUP_GAME_SNAPSHOT_SELECT } from '../attendee/attendance';
 import { ATTENDEE_SUMMARY_SELECT } from '../attendee/attendee-summary';
@@ -551,7 +552,10 @@ describe('EventGameNominationService', () => {
       status: NominationStatus.Paused,
     });
 
-    await expect(service.resolveNomination('event-1', 'nom-1')).rejects.toThrow(BadRequestException);
+    // The status the lock found, not the one first read (#1114).
+    expect(await refusalOf(service.resolveNomination('event-1', 'nom-1'))).toEqual(
+      codedRefusal(Http.BadRequest, 'NOMINATION_NOT_RESOLVABLE', { status: NominationStatus.Paused }),
+    );
     expect(db.eventGameVote.findMany).not.toHaveBeenCalled();
     expect(db.eventGameNomination.update).not.toHaveBeenCalled();
     expect(db.eventGame.create).not.toHaveBeenCalled();
@@ -615,6 +619,47 @@ describe('EventGameNominationService', () => {
         expect(rawQueryText(nominationLock)).toMatch(/FROM event_game_nominations WHERE id = \? FOR UPDATE$/);
       },
     );
+
+    // A row deleted since the first read has no status to put in a sentence:
+    // the one expected would misstate it, so it answers as missing (#1114).
+    it.each(settles)(
+      '$caller answers 404 when the nomination is gone under the lock (#1114)',
+      async ({ status, settle }) => {
+        arrange(status, 'occ-1');
+        db.$queryRaw.mockReset();
+        mockSettleLocks(db, lockedSupplier(), null);
+
+        const attempt = settle();
+
+        await expect(attempt).rejects.toBeInstanceOf(NotFoundException);
+        await expect(attempt).rejects.toThrow(
+          new NotFoundException(t('errors.nomination.not_found', { nominationId: 'nom-1', eventId: 'event-1' })),
+        );
+        expect(db.eventGameVote.findMany).not.toHaveBeenCalled();
+        expect(db.eventGameNomination.update).not.toHaveBeenCalled();
+        expect(db.eventGame.create).not.toHaveBeenCalled();
+        expect(emitter.emit).not.toHaveBeenCalled();
+      },
+    );
+
+    // A lost race is an expected answer, as in withdraw: logged no more than
+    // the same refusal from the first read, which is not logged at all (#1114).
+    it.each(
+      settles.flatMap((entry) => [
+        { ...entry, answer: '400 for a nomination settled first', locked: NominationStatus.Withdrawn },
+        { ...entry, answer: '404 for a nomination gone', locked: null },
+      ]),
+    )('$caller logs no error when it answers $answer at the lock', async ({ status, settle, locked }) => {
+      const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      arrange(status, 'occ-1');
+      db.$queryRaw.mockReset();
+      mockSettleLocks(db, lockedSupplier(), locked === null ? null : { status: locked, occurrenceId: 'occ-1' });
+
+      await expect(settle()).rejects.toThrow();
+      expect(logged).not.toHaveBeenCalled();
+
+      logged.mockRestore();
+    });
 
     // The answer is read in the settle's transaction. Read after the commit, a
     // failed read would answer an error for an outcome that was settled, and
@@ -758,11 +803,12 @@ describe('EventGameNominationService', () => {
       );
     });
 
+    // The refusal names the status the lock found, not the one first read (#1114).
     it('answers 400 for a nomination settled since the first read, and writes nothing', async () => {
       arrangeWithdraw(NominationStatus.Open, { locked: NominationStatus.Approved });
 
-      await expect(service.withdraw('event-1', 'nom-1')).rejects.toThrow(
-        new BadRequestException(t('errors.nomination.cannot_withdraw_status', { status: NominationStatus.Approved })),
+      expect(await refusalOf(service.withdraw('event-1', 'nom-1'))).toEqual(
+        codedRefusal(Http.BadRequest, 'NOMINATION_NOT_WITHDRAWABLE', { status: NominationStatus.Approved }),
       );
       expect(tx.eventGameNomination.update).not.toHaveBeenCalled();
       expect(db.eventGameNomination.update).not.toHaveBeenCalled();
@@ -886,8 +932,8 @@ describe('EventGameNominationService', () => {
     it('answers 400 for a status the first read already refuses, without locking', async () => {
       arrangeWithdraw(NominationStatus.Approved);
 
-      await expect(service.withdraw('event-1', 'nom-1')).rejects.toThrow(
-        new BadRequestException(t('errors.nomination.cannot_withdraw_status', { status: NominationStatus.Approved })),
+      expect(await refusalOf(service.withdraw('event-1', 'nom-1'))).toEqual(
+        codedRefusal(Http.BadRequest, 'NOMINATION_NOT_WITHDRAWABLE', { status: NominationStatus.Approved }),
       );
       expect(db.$transaction).not.toHaveBeenCalled();
       expect(tx.$queryRaw).not.toHaveBeenCalled();
@@ -926,7 +972,9 @@ describe('EventGameNominationService', () => {
         status: NominationStatus.Paused,
       });
 
-      await expect(service.hostApprove('event-1', 'nom-1')).rejects.toThrow(BadRequestException);
+      expect(await refusalOf(service.hostApprove('event-1', 'nom-1'))).toEqual(
+        codedRefusal(Http.BadRequest, 'NOMINATION_NOT_AWAITING_APPROVAL', { status: NominationStatus.Paused }),
+      );
       expect(db.eventGameNomination.update).not.toHaveBeenCalled();
       expect(db.eventGame.create).not.toHaveBeenCalled();
     });
@@ -1035,7 +1083,9 @@ describe('EventGameNominationService', () => {
         updatedAt: new Date(),
       } as EventGameNomination);
 
-      await expect(service.resolveNomination('event-1', 'nom-1')).rejects.toThrow(BadRequestException);
+      expect(await refusalOf(service.resolveNomination('event-1', 'nom-1'))).toEqual(
+        codedRefusal(Http.BadRequest, 'NOMINATION_NOT_RESOLVABLE', { status }),
+      );
     },
   );
 
@@ -1134,8 +1184,41 @@ describe('EventGameNominationService', () => {
     } as EventGameNomination);
     db.$queryRaw.mockResolvedValue([{ status: NominationStatus.Paused }] as never);
 
-    await expect(service.castVote('event-1', 'nom-1', { voteType: VoteType.For })).rejects.toThrow(BadRequestException);
+    // The status the lock found, not the one first read (#1114).
+    expect(await refusalOf(service.castVote('event-1', 'nom-1', { voteType: VoteType.For }))).toEqual(
+      codedRefusal(Http.BadRequest, 'NOMINATION_NOT_OPEN', { status: NominationStatus.Paused }),
+    );
     expect(db.eventGameVote.upsert).not.toHaveBeenCalled();
+  });
+
+  // A row deleted since the first check has no status to put in a sentence:
+  // the one first read would misstate it, so it answers as missing (#1114).
+  it('castVote answers 404 when the nomination is gone under the lock (#1114)', async () => {
+    db.eventGameNomination.findUnique.mockResolvedValue({
+      id: 'nom-1',
+      status: NominationStatus.Open,
+    } as EventGameNomination);
+    db.$queryRaw.mockResolvedValue([] as never);
+
+    const attempt = service.castVote('event-1', 'nom-1', { voteType: VoteType.For });
+
+    await expect(attempt).rejects.toBeInstanceOf(NotFoundException);
+    await expect(attempt).rejects.toThrow(
+      new NotFoundException(t('errors.nomination.not_found', { nominationId: 'nom-1', eventId: 'event-1' })),
+    );
+    expect(db.eventGameVote.upsert).not.toHaveBeenCalled();
+  });
+
+  it('castVote refuses a nomination that is not open at the first check, without locking (#1114)', async () => {
+    db.eventGameNomination.findUnique.mockResolvedValue({
+      id: 'nom-1',
+      status: NominationStatus.Withdrawn,
+    } as EventGameNomination);
+
+    expect(await refusalOf(service.castVote('event-1', 'nom-1', { voteType: VoteType.For }))).toEqual(
+      codedRefusal(Http.BadRequest, 'NOMINATION_NOT_OPEN', { status: NominationStatus.Withdrawn }),
+    );
+    expect(db.$transaction).not.toHaveBeenCalled();
   });
 
   it('castVote refuses before writing when the instance check denies', async () => {
@@ -1414,6 +1497,19 @@ describe('EventGameNominationService', () => {
       } as never),
     ).rejects.toThrow(NotFoundException);
     expect(abilityService.assertCurrentActorCan).not.toHaveBeenCalled();
+    expect(db.eventGame.create).not.toHaveBeenCalled();
+  });
+
+  // The mode stays a field; the message says to nominate instead (#1114).
+  it('directAddGame refuses under RequiresVote with 403 GAME_ADDITION_NOT_DIRECT, and writes nothing (#1114)', async () => {
+    db.eventPolicy.findUnique.mockResolvedValue({
+      gameAdditionMode: GameAdditionMode.RequiresVote,
+      votingWindowHours: null,
+    } as EventPolicy);
+
+    expect(
+      await refusalOf(service.directAddGame('event-1', { platformGameId: 'pg-1', suppliedById: 'gl-1' } as never)),
+    ).toEqual(codedRefusal(Http.Forbidden, 'GAME_ADDITION_NOT_DIRECT', { mode: GameAdditionMode.RequiresVote }));
     expect(db.eventGame.create).not.toHaveBeenCalled();
   });
 
@@ -1851,12 +1947,26 @@ function lockedSupplier(overrides: Partial<LockedSupplier> = {}): LockedSupplier
 function mockSettleLocks(
   db: MockDatabaseService,
   supplier: LockedSupplier,
-  nomination: { occurrenceId?: string | null; status: NominationStatus },
+  nomination: { occurrenceId?: string | null; status: NominationStatus } | null,
 ): void {
   db.$queryRaw
     .mockResolvedValueOnce([supplier] as never)
     .mockResolvedValueOnce([{ id: 'event-1' }] as never)
-    .mockResolvedValueOnce([{ occurrenceId: null, ...nomination }] as never);
+    .mockResolvedValueOnce((nomination ? [{ occurrenceId: null, ...nomination }] : []) as never);
+}
+
+/** The HTTP status and body a promise is refused with; it fails the test unless that is a coded refusal. */
+async function refusalOf(attempt: Promise<unknown>): Promise<{ body: unknown; httpStatus: number }> {
+  const error = await attempt.catch((caught: unknown) => caught);
+  expect(error).toBeInstanceOf(CodedHttpException);
+  const refusal = error as CodedHttpException;
+
+  return { httpStatus: refusal.getStatus(), body: refusal.getResponse() };
+}
+
+/** A coded refusal as {@link refusalOf} reads it: its status, its code and the fields beside them. */
+function codedRefusal(httpStatus: number, code: string, fields: Record<string, unknown>) {
+  return { httpStatus, body: expect.objectContaining({ code, ...fields }) };
 }
 
 /**

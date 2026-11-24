@@ -148,6 +148,10 @@ export class MediaObjectController {
     return from(this.media.unpublish(id)).pipe(map((media) => ({ media: toMediaObjectResponse(media) })));
   }
 
+  @ApiResponse({
+    status: Http.Conflict,
+    description: 'The media already has a pending or approved contribution (code MEDIA_CONTRIBUTION_EXISTS)',
+  })
   @CheckPolicies((ability) => ability.can(Action.create, ResourceType.MediaContribution))
   @Post(':id/contribute')
   contribute(@Param('id') id: string, @Body() dto: ContributeMediaDto) {
