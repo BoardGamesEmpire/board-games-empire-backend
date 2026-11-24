@@ -874,6 +874,7 @@ describe('EventNotificationListener', () => {
       [LineupRemovalReason.TakenOut, 'user-host', null],
       [LineupRemovalReason.SupplierLeft, 'user-supplier', null],
       [LineupRemovalReason.NobodyBringing, 'user-host', 'occ-1'],
+      [LineupRemovalReason.RemovedFromCollection, 'user-supplier', null],
     ] as const)(
       'tells the attendees still coming, minus whoever acted, that a game left the lineup, with its reason: %s (#769)',
       async (reason, actingUserId, occurrenceId) => {

@@ -368,6 +368,63 @@ describe('EventGameNominationService', () => {
     );
   });
 
+  // Under the vote eligibility of only those offering games, an offer counts
+  // only while it is live: not taken back, and its collection entry not
+  // removed. A voter whose only offered game was removed from their
+  // collection offers nothing until it is added back, so their vote stops
+  // counting (#1221).
+  it("resolveNomination reads each voter's offered games as live offers only, to count who offers games (#1221)", async () => {
+    db.eventGameNomination.findUnique.mockResolvedValue(openNomination());
+    db.eventGameVote.findMany.mockResolvedValue([{ voteType: VoteType.For, attendeeId: 'att-in' }] as never);
+    db.eventAttendee.findMany.mockResolvedValue([
+      { id: 'att-in', ...voter(EventParticipationStatus.Attending) },
+    ] as never);
+    mockSettleLocks(db, lockedSupplier(), { status: NominationStatus.Open });
+    db.eventGameNomination.update.mockResolvedValue(nominationRow({ status: NominationStatus.Passed }));
+    db.eventGame.create.mockResolvedValue({ id: 'eg-1', nominationId: 'nom-1' } as EventGame);
+
+    await service.resolveNomination('event-1', 'nom-1');
+
+    expect(db.eventAttendee.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({
+          availableGames: {
+            where: { removedAt: null, collection: { is: { deletedAt: null } } },
+            select: { id: true },
+            take: 1,
+          },
+        }),
+      }),
+    );
+  });
+
+  // Each vote a read serves is marked by the same rule (#1221).
+  it("getNomination reads each voter's offered games as live offers only, to mark their vote (#1221)", async () => {
+    db.eventGameNomination.findUnique.mockResolvedValue(nominationRow({ votes: [] }));
+
+    await service.getNomination('event-1', 'nom-1');
+
+    expect(db.eventGameNomination.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: expect.objectContaining({
+          votes: {
+            select: expect.objectContaining({
+              attendee: {
+                select: expect.objectContaining({
+                  availableGames: {
+                    where: { removedAt: null, collection: { is: { deletedAt: null } } },
+                    select: { id: true },
+                    take: 1,
+                  },
+                }),
+              },
+            }),
+          },
+        }),
+      }),
+    );
+  });
+
   // The resolver counts only the votes of eligible voters, and its pool is
   // the attendees no host has removed. Each voter is judged as the pool reads
   // them, so the votes and the pool can't disagree about who is in.
@@ -1203,6 +1260,81 @@ describe('EventGameNominationService', () => {
     });
   });
 
+  // A game removed from its owner's collection is supplied by nobody, though
+  // its offer stays in place. A supply check answers as it does for an offer
+  // taken back, and holds the collection entry's row with the offer and the
+  // attendee, so a removal and the write take turns (#1221).
+  describe("a supply check, on an entry removed from its owner's collection (#1221)", () => {
+    const supplierNotFound = t('errors.nomination.supplier_not_found', { gameListId: 'gl-1' });
+
+    const supplyChecks = [
+      {
+        write: 'nominate',
+        arrange: () => {
+          db.eventPolicy.findUnique.mockResolvedValue({
+            gameAdditionMode: 'RequiresVote',
+            votingWindowHours: null,
+          } as EventPolicy);
+          db.$queryRaw.mockResolvedValueOnce([lockedSupplier({ collectionRemovedAt: new Date() })] as never);
+        },
+        run: () => service.nominate('event-1', { platformGameId: 'pg-1', suppliedFromId: 'gl-1' } as NominateGameDto),
+        written: () => db.eventGameNomination.create,
+      },
+      {
+        write: 'directAddGame',
+        arrange: () => {
+          db.eventPolicy.findUnique.mockResolvedValue({
+            gameAdditionMode: GameAdditionMode.Direct,
+            votingWindowHours: null,
+          } as EventPolicy);
+          db.$queryRaw.mockResolvedValueOnce([lockedSupplier({ collectionRemovedAt: new Date() })] as never);
+        },
+        run: () => service.directAddGame('event-1', { platformGameId: 'pg-1', suppliedById: 'gl-1' } as never),
+        written: () => db.eventGame.create,
+      },
+      {
+        write: 'hostApprove',
+        arrange: () => {
+          db.eventGameNomination.findUnique.mockResolvedValue({
+            id: 'nom-1',
+            status: NominationStatus.AwaitingApproval,
+            platformGameId: 'pg-1',
+            occurrenceId: null,
+            suppliedFromId: 'gl-1',
+          } as EventGameNomination);
+          mockSettleLocks(db, lockedSupplier({ collectionRemovedAt: new Date() }), {
+            status: NominationStatus.AwaitingApproval,
+          });
+        },
+        run: () => service.hostApprove('event-1', 'nom-1'),
+        written: () => db.eventGame.create,
+      },
+    ];
+
+    it.each(supplyChecks)(
+      'assertSupplies answers 404 supplier_not_found for an entry removed from its collection, on $write (#1221)',
+      async ({ arrange, run, written }) => {
+        arrange();
+
+        const rejection = await run().catch((error: unknown) => error);
+
+        expect(rejection).toBeInstanceOf(NotFoundException);
+        expect((rejection as NotFoundException).getResponse()).toEqual(supplierNotFound);
+        expect(written()).not.toHaveBeenCalled();
+      },
+    );
+
+    it("lockSupplier reads the collection entry's removal and holds its row with the offer and the attendee (#1221)", async () => {
+      supplyChecks[0].arrange();
+
+      await expect(supplyChecks[0].run()).rejects.toThrow(NotFoundException);
+
+      const [[supplierLock]] = db.$queryRaw.mock.calls;
+      expect(rawQueryText(supplierLock)).toMatch(/c\.deleted_at AS "collectionRemovedAt"/);
+      expect(rawQueryText(supplierLock)).toMatch(/FOR SHARE OF l, a, c$/);
+    });
+  });
+
   it('nominate refuses before writing when the instance check denies', async () => {
     abilityService.assertCurrentActorCan.mockImplementation(() => {
       throw new ForbiddenException();
@@ -1696,7 +1828,8 @@ describe('EventGameNominationService', () => {
 
 /**
  * A game-list entry as the supplier lock reads it: for pg-1, on the list of an
- * attendee of event-1 who is attending, and neither of them removed.
+ * attendee of event-1 who is attending, and none of the entry, its collection
+ * entry or the attendee removed.
  */
 function lockedSupplier(overrides: Partial<LockedSupplier> = {}): LockedSupplier {
   return {
@@ -1704,6 +1837,7 @@ function lockedSupplier(overrides: Partial<LockedSupplier> = {}): LockedSupplier
     platformGameId: 'pg-1',
     status: EventParticipationStatus.Attending,
     attendeeRemovedAt: null,
+    collectionRemovedAt: null,
     entryRemovedAt: null,
     ...overrides,
   };

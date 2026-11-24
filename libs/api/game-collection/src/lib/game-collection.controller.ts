@@ -94,8 +94,10 @@ export class GameCollectionController {
   @ApiOperation({
     summary: "Remove a game from the acting user's collection",
     description:
-      'Soft delete: the entry is tombstoned (optionally with a reason) so play history survives; ' +
-      're-adding the same game resurrects it.',
+      'The entry is marked removed, optionally with a reason, so play history survives, and adding the same ' +
+      'game back restores it. In every event that offers it, unless the event was deleted, the offer stops counting: ' +
+      'nominations of the game that await an outcome pause, and the game leaves the lineup of every date still ahead. ' +
+      'The offers stay, and count again when the game is added back, which resumes the paused nominations.',
   })
   @ApiParam({ name: 'id', type: String })
   @ApiResponse({ status: Http.Ok, type: GameCollectionMessageResponseDto })

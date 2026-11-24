@@ -24,8 +24,14 @@ const OUT_OF_EVENT = {
   OR: [{ removedAt: { not: null } }, { status: EventParticipationStatus.NotAttending }],
 } satisfies Prisma.EventAttendeeWhereInput;
 
+/** The attendees {@link isOutOfEvent} says are in the event, as a filter on attendees (#1221). */
+export const IN_EVENT = {
+  removedAt: null,
+  status: { not: EventParticipationStatus.NotAttending },
+} satisfies Prisma.EventAttendeeWhereInput;
+
 /** The statuses that await an outcome, which a nomination pauses from and returns to. */
-const PAUSABLE_STATUSES = [NominationStatus.Open, NominationStatus.AwaitingApproval] as const;
+export const PAUSABLE_STATUSES = [NominationStatus.Open, NominationStatus.AwaitingApproval] as const;
 
 /**
  * A nomination that has not reached an outcome, paused ones included. A list
@@ -82,16 +88,23 @@ interface NominationStatusChange {
   to: NominationStatus;
 }
 
-/** What {@link syncSuppliedGames} changed, for the caller to emit once it commits. */
+/**
+ * What {@link syncSuppliedGames} changed, or `syncCollectionEntrySupply` in
+ * one event, for the caller to emit once it commits.
+ */
 export interface SuppliedGameChanges {
   paused: NominationStatusChange[];
   removedGames: LineupGameSnapshot[];
   resumed: NominationStatusChange[];
 }
 
-/** A game-list entry as a supply check reads it: whose it is, which game, and whether either was removed. */
+/**
+ * An offer as a supply check reads it: whose it is, which game, and whether
+ * the offer, its collection entry or its attendee was removed.
+ */
 export interface LockedSupplier {
   attendeeRemovedAt: Date | null;
+  collectionRemovedAt: Date | null;
   entryRemovedAt: Date | null;
   eventId: string;
   platformGameId: string;
@@ -99,20 +112,20 @@ export interface LockedSupplier {
 }
 
 /**
- * Reads a game-list entry and its attendee for a write that names the entry
- * as a game's supplier, and holds both rows `FOR SHARE` until the caller's
- * transaction ends. `null` when no entry has the id.
+ * Reads an offer, its attendee and its collection entry for a write that
+ * names the offer as a game's supplier, and holds the three rows `FOR SHARE`
+ * until the caller's transaction ends. `null` when no offer has the id.
  *
  * The lock is what makes the answer last until the write commits. Leaving the
- * event updates the attendee row, and taking the game off the list locks the
- * entry `FOR UPDATE`, and each conflicts with the share lock: whichever comes
- * second waits, then sees the first. Without it, a nomination could open on
- * a game whose supplier left a moment before, and nothing would pause it.
+ * event updates the attendee row, taking the offer back locks it
+ * `FOR UPDATE`, and removing the game from its owner's collection
+ * updates the collection entry's row (#1221), and each conflicts with the
+ * share lock: whichever comes second waits, then sees the first. Without it,
+ * a nomination could open on a game whose supplier left, or whose owner
+ * removed it, a moment before, and nothing would pause it.
  *
- * Take it before any other lock the write needs: the supplier's rows, then
- * the event's (`shareLiveEvent`), then nominations. A write to an attendee
- * takes the event's row before the attendee's instead; the two orders can't
- * wait on each other, since both take the event's row as a share.
+ * Take it before any other lock the write needs. The lock order, and why it
+ * can't deadlock with the other writes, is stated once on `shareLiveEvent`.
  */
 export async function lockSupplier(tx: Prisma.TransactionClient, gameListId: string): Promise<LockedSupplier | null> {
   const rows = await tx.$queryRaw<LockedSupplier[]>(Prisma.sql`
@@ -120,12 +133,13 @@ export async function lockSupplier(tx: Prisma.TransactionClient, gameListId: str
            c.platform_game_id AS "platformGameId",
            a.status AS "status",
            a.removed_at AS "attendeeRemovedAt",
+           c.deleted_at AS "collectionRemovedAt",
            l.removed_at AS "entryRemovedAt"
     FROM attendee_game_lists l
     JOIN event_attendees a ON a.id = l.attendee_id
     JOIN game_collections c ON c.id = l.collection_id
     WHERE l.id = ${gameListId}
-    FOR SHARE OF l, a
+    FOR SHARE OF l, a, c
   `);
 
   return rows[0] ?? null;
@@ -141,7 +155,10 @@ export async function lockSupplier(tx: Prisma.TransactionClient, gameListId: str
  *   date still ahead ({@link lineupStillAhead}), as of `now`, and are not
  *   put back: by the time they are back, the host may have filled the slot.
  * - **In:** each paused nomination of a game from their list returns to the
- *   status it paused from.
+ *   status it paused from, unless the game was removed from its owner's
+ *   collection: nobody supplies it, so it stays paused until the game is
+ *   added back (#1221). Leaving pauses a nomination whatever its collection
+ *   entry's state.
  *
  * It reads the attendee's state as given, not the change that led to it, so
  * running it twice changes nothing, and a caller need not know the state it
@@ -157,6 +174,17 @@ export async function lockSupplier(tx: Prisma.TransactionClient, gameListId: str
  * (`shareLiveEvent`, #1065), so here it costs one round trip and changes
  * nothing; it is taken again so that a caller that skips it still keeps both
  * guarantees.
+ *
+ * Then, before any nomination, it holds the collection entries of the
+ * attendee's offers `FOR SHARE`, in id order (#1221). A removal from the
+ * collection updates the entry's row, and an add-back locks it
+ * `FOR UPDATE`, then each writes the nominations it supplies without
+ * touching the attendee's row, so only this lock makes the two take turns.
+ * Whichever comes second waits, then reads what the first committed: an
+ * attendee coming back doesn't resume a nomination of a game removed a moment
+ * before, and one leaving pauses a nomination an add-back resumed. The lock
+ * order, and why it can't deadlock with a removal, is stated once on
+ * `shareLiveEvent`.
  */
 export async function syncSuppliedGames(
   tx: Prisma.TransactionClient,
@@ -164,50 +192,89 @@ export async function syncSuppliedGames(
   now: Date,
 ): Promise<SuppliedGameChanges> {
   await tx.$queryRaw(Prisma.sql`SELECT id FROM events WHERE id = ${attendee.eventId} FOR SHARE`);
-
-  const changes: SuppliedGameChanges = { paused: [], resumed: [], removedGames: [] };
-  const fromTheirList = {
-    suppliedFrom: { is: { attendeeId: attendee.id } },
-  } satisfies Prisma.EventGameNominationWhereInput;
+  await tx.$queryRaw(Prisma.sql`
+    SELECT c.id
+    FROM attendee_game_lists l
+    JOIN game_collections c ON c.id = l.collection_id
+    WHERE l.attendee_id = ${attendee.id}
+    ORDER BY c.id
+    FOR SHARE OF c
+  `);
 
   if (!isOutOfEvent(attendee)) {
-    for (const status of PAUSABLE_STATUSES) {
-      const resumed = await tx.eventGameNomination.updateManyAndReturn({
-        where: { ...fromTheirList, status: NominationStatus.Paused, pausedFrom: status },
-        data: { status, pausedFrom: null },
-        select: { id: true },
-      });
-      changes.resumed.push(...resumed.map((row) => ({ ...row, from: NominationStatus.Paused, to: status })));
-    }
-
-    return changes;
+    // Only a game still in their collection is supplied again (#1221).
+    return resumeSupply(tx, { attendeeId: attendee.id, collection: { is: { deletedAt: null } } });
   }
 
+  return pauseSupply(tx, { attendeeId: attendee.id }, now);
+}
+
+/**
+ * Stops the offers `offers` matches supplying anything: each nomination
+ * supplied from one that awaits an outcome pauses, whoever made it, and
+ * remembers the status it paused from, and each lineup game one supplies
+ * leaves the lineup of every date still ahead ({@link lineupStillAhead}), as
+ * of `now`. The half of {@link syncSuppliedGames} and
+ * `syncCollectionEntrySupply` that pauses; each caller takes its own locks
+ * first.
+ */
+export async function pauseSupply(
+  tx: Prisma.TransactionClient,
+  offers: Prisma.EventAttendeeGameListWhereInput,
+  now: Date,
+): Promise<SuppliedGameChanges> {
+  const paused: NominationStatusChange[] = [];
+
   for (const status of PAUSABLE_STATUSES) {
-    const paused = await tx.eventGameNomination.updateManyAndReturn({
-      where: { ...fromTheirList, status },
+    const rows = await tx.eventGameNomination.updateManyAndReturn({
+      where: { suppliedFrom: { is: offers }, status },
       data: { status: NominationStatus.Paused, pausedFrom: status },
       select: { id: true },
     });
-    changes.paused.push(...paused.map((row) => ({ ...row, from: status, to: NominationStatus.Paused })));
+    paused.push(...rows.map((row) => ({ ...row, from: status, to: NominationStatus.Paused })));
   }
 
-  changes.removedGames = await tx.eventGame.findMany({
-    where: { suppliedBy: { is: { attendeeId: attendee.id } }, ...lineupStillAhead(now) },
+  const removedGames = await tx.eventGame.findMany({
+    where: { suppliedBy: { is: offers }, ...lineupStillAhead(now) },
     select: LINEUP_GAME_SNAPSHOT_SELECT,
   });
 
-  if (changes.removedGames.length > 0) {
-    await tx.eventGame.deleteMany({ where: { id: { in: changes.removedGames.map((game) => game.id) } } });
+  if (removedGames.length > 0) {
+    await tx.eventGame.deleteMany({ where: { id: { in: removedGames.map((game) => game.id) } } });
   }
 
-  return changes;
+  return { paused, resumed: [], removedGames };
+}
+
+/**
+ * Returns each paused nomination supplied from an offer `offers` matches to
+ * the status it paused from. The half of {@link syncSuppliedGames} and
+ * `syncCollectionEntrySupply` that resumes; each caller takes its own locks
+ * first, and narrows `offers` to the ones that supply again.
+ */
+export async function resumeSupply(
+  tx: Prisma.TransactionClient,
+  offers: Prisma.EventAttendeeGameListWhereInput,
+): Promise<SuppliedGameChanges> {
+  const resumed: NominationStatusChange[] = [];
+
+  for (const status of PAUSABLE_STATUSES) {
+    const rows = await tx.eventGameNomination.updateManyAndReturn({
+      where: { suppliedFrom: { is: offers }, status: NominationStatus.Paused, pausedFrom: status },
+      data: { status, pausedFrom: null },
+      select: { id: true },
+    });
+    resumed.push(...rows.map((row) => ({ ...row, from: NominationStatus.Paused, to: status })));
+  }
+
+  return { paused: [], resumed, removedGames: [] };
 }
 
 /**
  * Runs `write`, a write to an event's dates, and takes off the lineup each
  * game it put back ahead that nobody is bringing: its supplier is out of the
- * event, or its entry came off their offered games (#551).
+ * event, its entry came off their offered games (#551), or the game was
+ * removed from its owner's collection (#1221).
  *
  * Neither takes a game off a date that has started ({@link lineupStillAhead}),
  * and nor does the removal route: it refuses a lineup that has started
@@ -240,7 +307,11 @@ export async function writeEventDates<T>(
       suppliedBy: {
         is: {
           attendee: { is: { eventId } },
-          OR: [{ removedAt: { not: null } }, { attendee: { is: OUT_OF_EVENT } }],
+          OR: [
+            { removedAt: { not: null } },
+            { attendee: { is: OUT_OF_EVENT } },
+            { collection: { is: { deletedAt: { not: null } } } },
+          ],
         },
       },
       ...lineupStillAhead(now),
@@ -272,11 +343,16 @@ export function emitRemovedGames(
   }
 }
 
-/** Emits one domain event per row {@link syncSuppliedGames} changed. Call it after the transaction commits. */
+/**
+ * Emits one domain event per row {@link syncSuppliedGames} or
+ * `syncCollectionEntrySupply` changed, each lineup game taken off with
+ * `reason`. Call it after the transaction commits.
+ */
 export function emitSuppliedGameChanges(
   emitter: EventEmitter2,
   eventId: string,
   changes: SuppliedGameChanges,
+  reason: LineupRemovalReason,
   actingUserId: string | null,
   initiatedAt: Date,
 ): void {
@@ -294,7 +370,7 @@ export function emitSuppliedGameChanges(
     );
   }
 
-  emitRemovedGames(emitter, eventId, changes.removedGames, LineupRemovalReason.SupplierLeft, actingUserId, initiatedAt);
+  emitRemovedGames(emitter, eventId, changes.removedGames, reason, actingUserId, initiatedAt);
 }
 
 /**

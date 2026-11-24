@@ -166,7 +166,8 @@ export class EventAttendeeController {
     summary: 'List the games an attendee offers',
     description:
       "One attendee's offered games, in the shape and order of `GET /events/:eventId/offered-games`: game title, " +
-      'then entry id. Games taken back are left out. **Paginated since #1001**, this read used to return ' +
+      "then entry id. Games taken back, and games removed from the attendee's collection, are left out; a removed " +
+      'game shows again when it is added back. **Paginated since #1001**, this read used to return ' +
       'every game: `?page=` (1-based) and `?limit=`, with a `pagination` envelope carrying `total`, `totalPages` and ' +
       "`hasMore`. To filter one attendee's games, use `?attendeeIds=` on the offered-games read.",
   })
@@ -221,8 +222,9 @@ export class EventAttendeeController {
       '`alreadyOffered`, each with its `entry` in the offered-game shape, or `refused`, with a stable `reason` ' +
       `(${OFFER_REFUSALS.join(', ')}) beside a translated \`message\`. The expansions of a refused game are ` +
       '`baseRefused`; those of a game already offered go ahead. An expansion linked to its game but on another ' +
-      'platform is `differentPlatform`. For an attendee added by name, who has no collection, every entry is ' +
-      'refused, even one already offered: `attendeeHasNoCollection`, or `notFound` for an id that names no entry.',
+      'platform is `differentPlatform`. An entry removed from its collection is `removedFromCollection`, even one ' +
+      'already offered. For an attendee added by name, who has no collection, every entry is refused, even one ' +
+      'already offered: `attendeeHasNoCollection`, or `notFound` for an id that names no entry.',
   })
   @ApiParam({ name: 'eventId', type: String })
   @ApiParam({ name: 'attendeeId', type: String })

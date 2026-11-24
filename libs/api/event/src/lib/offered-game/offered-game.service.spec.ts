@@ -343,6 +343,7 @@ describe('OfferedGameService (#1185, #1187)', () => {
       expect(compose).toHaveBeenCalledWith(ResourceType.EventAttendeeGameList, Action.read, {
         attendeeId: { in: ['att-1', 'att-2', 'att-3'] },
         removedAt: null,
+        collection: { is: { deletedAt: null } },
       });
       expect(db.eventAttendeeGameList.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ select: OFFERED_GAME_SELECT, orderBy: OFFERED_GAME_ORDER }),
@@ -352,6 +353,16 @@ describe('OfferedGameService (#1185, #1187)', () => {
         ['att-2', ['a', 'c']],
         ['att-3', []],
       ]);
+    });
+
+    it('forAttendees leaves out an offer whose collection entry was removed (#1221)', async () => {
+      await service.forAttendees(['att-1'], NOW);
+
+      expect(db.eventAttendeeGameList.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ collection: { is: { deletedAt: null } } }),
+        }),
+      );
     });
 
     it('reads nothing for no attendees', async () => {
@@ -382,6 +393,14 @@ describe('OfferedGameService (#1185, #1187)', () => {
       page = jest.spyOn(service, 'page');
     });
 
+    it('listOfferedGames leaves out an offer whose collection entry was removed (#1221)', async () => {
+      await service.listOfferedGames('event-1', query());
+
+      const where = expect.objectContaining({ collection: { is: { deletedAt: null } } });
+      expect(db.eventAttendeeGameList.findMany).toHaveBeenCalledWith(expect.objectContaining({ where }));
+      expect(db.eventAttendeeGameList.count).toHaveBeenCalledWith({ where });
+    });
+
     // Removed entries, and every entry of a removed attendee, leave both the
     // rows and the total; the query's filters are ANDed beside them.
     it("scopes the read to the event's live attendees and live entries, with the filters ANDed", async () => {
@@ -391,6 +410,7 @@ describe('OfferedGameService (#1185, #1187)', () => {
 
       const scope = {
         removedAt: null,
+        collection: { is: { deletedAt: null } },
         attendee: { is: { eventId: 'event-1', removedAt: null } },
         AND: offeredGamesFilter(listed),
       };

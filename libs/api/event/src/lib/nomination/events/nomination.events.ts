@@ -86,8 +86,9 @@ export class NominationResolvedEvent extends MutationEvent<EventGameNomination> 
 
 /**
  * A nomination paused because the attendee supplying its game is out of the
- * event (#551). Its own name, apart from {@link NominationResumedEvent}, so
- * the audit notifier's per-name dedupe cannot mask one behind the other.
+ * event (#551), or removed the game from their collection (#1221). Its own
+ * name, apart from {@link NominationResumedEvent}, so the audit notifier's
+ * per-name dedupe cannot mask one behind the other.
  */
 export class NominationPausedEvent extends MutationEvent<EventGameNomination> {
   static readonly eventName = NominationEvent.NominationPaused;
@@ -102,7 +103,10 @@ export class NominationPausedEvent extends MutationEvent<EventGameNomination> {
   }
 }
 
-/** A paused nomination returned to the status it paused from, its supplier back in the event (#551). */
+/**
+ * A paused nomination returned to the status it paused from, its supplier
+ * back in the event (#551) or its game back in their collection (#1221).
+ */
 export class NominationResumedEvent extends MutationEvent<EventGameNomination> {
   static readonly eventName = NominationEvent.NominationResumed;
   declare readonly before: NominationStatusSnapshot;
@@ -170,9 +174,10 @@ export class GameAddedToEventEvent extends MutationEvent<EventGame> {
 }
 
 /**
- * A game left the lineup: an EventGame row was deleted, for one of three
+ * A game left the lineup: an EventGame row was deleted, for one of four
  * reasons (#769): a host removed it, the attendee supplying it left the event
- * (#551), or a date write found nobody bringing it. Its own name, apart from
+ * (#551), a date write found nobody bringing it, or the attendee supplying it
+ * removed the game from their collection (#1221). Its own name, apart from
  * {@link GameAddedToEventEvent}.
  */
 export class GameRemovedFromEventEvent extends MutationEvent<EventGame> {
@@ -190,8 +195,9 @@ export class GameRemovedFromEventEvent extends MutationEvent<EventGame> {
     public readonly reason: LineupRemovalReason,
     /**
      * The user who acted: the host who removed it, or whoever answered the
-     * RSVP, removed the attendee or wrote the date. `null` when the actor is
-     * not a user. Context for listeners, not audited (#769).
+     * RSVP, removed the attendee, wrote the date or removed the game from
+     * their collection (#1221). `null` when the actor is not a user. Context
+     * for listeners, not audited (#769).
      */
     public readonly actingUserId: string | null,
     initiatedAt: Date,

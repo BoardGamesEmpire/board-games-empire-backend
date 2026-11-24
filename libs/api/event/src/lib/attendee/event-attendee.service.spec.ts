@@ -513,9 +513,11 @@ describe('EventAttendeeService', () => {
 
       // The attendee row's lock (#802) comes after it, once. The supplier
       // sync takes the event's row again, so it holds even for a caller that
-      // skipped it, before any nomination (#551).
-      const [[datesLock], [attendeeLock], [syncLock]] = db.$queryRaw.mock.calls;
-      expect(db.$queryRaw).toHaveBeenCalledTimes(3);
+      // skipped it, before any nomination (#551), then their offers'
+      // collection entries (#1221).
+      const [[datesLock], [attendeeLock], [syncLock], [collectionLock]] = db.$queryRaw.mock.calls;
+      expect(db.$queryRaw).toHaveBeenCalledTimes(4);
+      expect(rawQueryText(collectionLock)).toMatch(/FOR SHARE OF c$/);
       expect(rawQueryText(datesLock)).toMatch(/^SELECT id FROM events WHERE id = \? FOR SHARE$/);
       expect((datesLock as unknown as Prisma.Sql).values).toEqual(['event-1']);
       expect(rawQueryText(attendeeLock)).toMatch(/FROM event_attendees/);
@@ -530,6 +532,47 @@ describe('EventAttendeeService', () => {
         db.eventGameNomination.updateManyAndReturn.mock.invocationCallOrder[0],
       );
     });
+
+    // A removal from the collection, or an add-back, writes the collection
+    // entry's row and then the nominations it supplies, and never touches the
+    // attendee's row. Holding the collection entries of the attendee's offers
+    // before any nomination update makes the two take turns: whichever comes
+    // second reads what the first committed, so an attendee coming back never
+    // resumes a nomination of a game removed a moment before, and one leaving
+    // pauses a nomination an add-back resumed a moment before (#1221).
+    it.each([
+      { change: 'leaving', from: EventParticipationStatus.Attending, to: EventParticipationStatus.NotAttending },
+      { change: 'coming back', from: EventParticipationStatus.NotAttending, to: EventParticipationStatus.Attending },
+    ])(
+      "syncSuppliedGames holds their offers' collection entries before any nomination update, on $change (#1221)",
+      async ({ from, to }) => {
+        db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1', userId: 'user-1' } as EventAttendee);
+        db.eventAttendee.update.mockResolvedValue(attendeeRow({ status: to }));
+        const order: string[] = [];
+        let collectionLock: unknown;
+        db.$queryRaw.mockImplementation(((query: unknown) => {
+          const text = rawQueryText(query);
+          if (/FOR SHARE OF c$/.test(text)) {
+            collectionLock = query;
+            order.push('collection entries');
+          }
+
+          return Promise.resolve(/FROM event_attendees/.test(text) ? [{ status: from, removedAt: null }] : []);
+        }) as never);
+        db.eventGameNomination.updateManyAndReturn.mockImplementation((async () => {
+          order.push('nominations');
+          return [];
+        }) as never);
+
+        await service.updateStatus('event-1', 'att-1', { status: to });
+
+        expect(rawQueryText(collectionLock)).toMatch(
+          /^SELECT c\.id FROM attendee_game_lists l JOIN game_collections c ON c\.id = l\.collection_id WHERE l\.attendee_id = \? ORDER BY c\.id FOR SHARE OF c$/,
+        );
+        expect((collectionLock as Prisma.Sql).values).toEqual(['att-1']);
+        expect(order).toEqual(['collection entries', 'nominations', 'nominations']);
+      },
+    );
 
     // Their paused nominations return to the status each paused from; the
     // deleted scheduled games are not restored.
@@ -551,7 +594,7 @@ describe('EventAttendeeService', () => {
         expect(db.eventGameNomination.updateManyAndReturn).toHaveBeenCalledWith(
           expect.objectContaining({
             where: {
-              suppliedFrom: { is: { attendeeId: 'att-1' } },
+              suppliedFrom: { is: { attendeeId: 'att-1', collection: { is: { deletedAt: null } } } },
               status: NominationStatus.Paused,
               pausedFrom: status,
             },
@@ -567,6 +610,36 @@ describe('EventAttendeeService', () => {
       expect(resumed).toBeInstanceOf(NominationResumedEvent);
       expect(resumed.before).toEqual({ id: 'nom-1', eventId: 'event-1', status: NominationStatus.Paused });
       expect(resumed.after).toEqual({ id: 'nom-1', eventId: 'event-1', status: NominationStatus.Open });
+    });
+
+    // A game removed from its owner's collection is supplied by nobody, so its
+    // nominations stay paused when the attendee is back, and resume only when
+    // the game is added back. Leaving pauses them whatever the collection
+    // entry's state, so an attendee who left and whose game was removed has
+    // them paused either way (#1221).
+    it('syncSuppliedGames resumes only nominations whose collection entry is live when the attendee is back (#1221)', async () => {
+      db.event.count.mockResolvedValue(1);
+      db.eventAttendee.findUnique.mockResolvedValue({
+        id: 'att-1',
+        userId: 'user-1',
+      } as EventAttendee);
+      lockedStatus(EventParticipationStatus.NotAttending);
+      db.eventAttendee.update.mockResolvedValue(attendeeRow({ status: EventParticipationStatus.Attending }));
+
+      await service.updateStatus('event-1', 'att-1', { status: EventParticipationStatus.Attending });
+
+      expect(db.eventGameNomination.updateManyAndReturn).toHaveBeenCalledTimes(2);
+      for (const [args] of db.eventGameNomination.updateManyAndReturn.mock.calls) {
+        expect(args).toEqual(
+          expect.objectContaining({
+            where: expect.objectContaining({
+              suppliedFrom: {
+                is: expect.objectContaining({ attendeeId: 'att-1', collection: { is: { deletedAt: null } } }),
+              },
+            }),
+          }),
+        );
+      }
     });
 
     it('updateStatus emits an AttendeeStatusUpdatedEvent carrying the status transition', async () => {
@@ -1011,7 +1084,7 @@ describe('EventAttendeeService', () => {
       expect(db.eventGameNomination.updateManyAndReturn).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
-            suppliedFrom: { is: { attendeeId: 'att-2' } },
+            suppliedFrom: { is: { attendeeId: 'att-2', collection: { is: { deletedAt: null } } } },
             status: NominationStatus.Paused,
           }),
         }),
@@ -1068,6 +1141,7 @@ describe('EventAttendeeService', () => {
       const scope = {
         attendeeId: 'att-1',
         removedAt: null,
+        collection: { is: { deletedAt: null } },
         attendee: { is: { eventId: 'event-1', removedAt: null } },
       };
       const where = { ...scope, AND: [COND] };
@@ -1216,6 +1290,28 @@ describe('EventAttendeeService', () => {
       db.event.findUnique.mockResolvedValue({ id: 'event-1', householdId: null } as Event);
       db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1', userId: null } as EventAttendee);
       db.gameCollection.findUnique.mockResolvedValue({ userId: 'user-2', deletedAt: null } as GameCollection);
+
+      const attempt = service.addGameToList('event-1', 'att-1', { collectionId: 'col-1' });
+
+      await expect(attempt).rejects.toThrow(
+        new CodedHttpException(
+          Http.BadRequest,
+          'ATTENDEE_HAS_NO_COLLECTION',
+          t('errors.attendee.attendee_has_no_collection'),
+        ),
+      );
+      await expect(attempt).rejects.toMatchObject({ code: 'ATTENDEE_HAS_NO_COLLECTION', status: Http.BadRequest });
+      expect(db.eventAttendeeGameList.create).not.toHaveBeenCalled();
+      expect(db.eventAttendeeGameList.update).not.toHaveBeenCalled();
+    });
+
+    // The attendee comes before the entry's state: someone added by name has
+    // no collection, so an entry removed from one is refused for that reason,
+    // not as removed (#1210).
+    it('addGameToList refuses an attendee added by name offered a removed entry with 400 ATTENDEE_HAS_NO_COLLECTION (#1210)', async () => {
+      db.event.findUnique.mockResolvedValue({ id: 'event-1', householdId: null } as Event);
+      db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1', userId: null } as EventAttendee);
+      db.gameCollection.findUnique.mockResolvedValue({ userId: 'user-2', deletedAt: new Date() } as GameCollection);
 
       const attempt = service.addGameToList('event-1', 'att-1', { collectionId: 'col-1' });
 
@@ -1395,9 +1491,15 @@ describe('EventAttendeeService', () => {
       expect(compose).toHaveBeenCalledWith(ResourceType.EventAttendeeGameList, Action.read, {
         attendeeId: { in: ['att-1', 'att-2'] },
         removedAt: null,
+        collection: { is: { deletedAt: null } },
       });
       expect(db.eventAttendeeGameList.findMany).toHaveBeenCalledWith({
-        where: { attendeeId: { in: ['att-1', 'att-2'] }, removedAt: null, AND: [COND] },
+        where: {
+          attendeeId: { in: ['att-1', 'att-2'] },
+          removedAt: null,
+          collection: { is: { deletedAt: null } },
+          AND: [COND],
+        },
         select: OFFERED_GAME_SELECT,
         orderBy: OFFERED_GAME_ORDER,
       });
@@ -1742,6 +1844,28 @@ describe('EventAttendeeService', () => {
 
       expect(results).toMatchObject([{ outcome: 'refused', reason: 'attendeeHasNoCollection' }]);
       expect(db.eventAttendeeGameList.create).not.toHaveBeenCalled();
+    });
+
+    it('refuses a removed entry, listed or not, for an attendee added by name as attendeeHasNoCollection (#1210)', async () => {
+      arrange({
+        collections: [
+          owned('col-1', 'game-1', { userId: 'user-2', deletedAt: new Date() }),
+          owned('col-2', 'game-2', { userId: 'user-2', deletedAt: new Date() }),
+        ],
+        entries: [listed('col-2', 'gl-2')],
+      });
+      db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1', userId: null } as EventAttendee);
+
+      const results = await service.offerGames('event-1', 'att-1', {
+        items: [{ collectionId: 'col-1' }, { collectionId: 'col-2' }],
+      });
+
+      expect(results).toMatchObject([
+        { outcome: 'refused', reason: 'attendeeHasNoCollection' },
+        { outcome: 'refused', reason: 'attendeeHasNoCollection' },
+      ]);
+      expect(db.eventAttendeeGameList.create).not.toHaveBeenCalled();
+      expect(db.eventAttendeeGameList.update).not.toHaveBeenCalled();
     });
 
     // The game is refused because the attendee has no collection, so its
@@ -2164,10 +2288,10 @@ describe('EventAttendeeService', () => {
       expect(results[1]).toEqual(expect.objectContaining({ message: t('errors.attendee.base_refused') }));
     });
 
-    // Nothing is written for an entry already offered, so nothing about it is
-    // judged: one removed from its collection since stays offered until it's
-    // taken back, and answering it refused would say it isn't.
-    it('answers an entry still offered as alreadyOffered though removed from its collection, and lets its expansions through (#1188)', async () => {
+    // An entry removed from its collection keeps its offer row (it was not
+    // taken back), but no read shows it; judging it first refuses it, so the
+    // batch doesn't answer alreadyOffered for an offer nobody can see (#1221).
+    it('offerGames refuses an entry removed from the collection as removedFromCollection even while it is still offered (#1221)', async () => {
       arrange({
         collections: [owned('col-on', 'game-1', { deletedAt: removedAt }), owned('col-exp', 'game-exp')],
         entries: [listed('col-on', 'gl-on')],
@@ -2179,10 +2303,11 @@ describe('EventAttendeeService', () => {
       });
 
       expect(outcomes(results)).toEqual([
-        ['col-on', 'alreadyOffered'],
-        ['col-exp', 'added'],
+        ['col-on', 'removedFromCollection'],
+        ['col-exp', 'baseRefused'],
       ]);
-      expect(db.eventAttendeeGameList.create).toHaveBeenCalledTimes(1);
+      expect(db.eventAttendeeGameList.create).not.toHaveBeenCalled();
+      expect(db.eventAttendeeGameList.update).not.toHaveBeenCalled();
     });
 
     // The batch refuses this id as notFound; the single add answered 500.

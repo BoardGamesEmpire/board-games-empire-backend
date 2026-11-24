@@ -15,6 +15,7 @@ import {
   SystemRole,
 } from '@bge/database';
 import { CodedHttpException, t } from '@bge/i18n';
+import { LineupRemovalReason } from '@bge/notifications-service';
 import { AbilityService, PermissionsService, resolveActingUserIdOrNull, ScopeComposer } from '@bge/permissions';
 import type { PaginatedRows, PaginationQueryDto } from '@bge/shared';
 import {
@@ -31,6 +32,7 @@ import { Http } from '@status/codes';
 import assert from 'node:assert';
 import { ATTENDEE_ORDER } from '../constants/attendee-order.constant';
 import { ATTENDEE_USER_AND_ROLE_INCLUDE } from '../constants/attendee-user-and-role.constant';
+import { LIVE_OFFER } from '../constants/live-offer.constant';
 import { NOT_REMOVED } from '../constants/not-removed.constant';
 import { assertEventExists, requireEvent } from '../event-access.helpers';
 import { OFFERED_GAME_SELECT } from '../offered-game/offered-game.select';
@@ -285,7 +287,14 @@ export class EventAttendeeService {
       );
 
       if (changes) {
-        emitSuppliedGameChanges(this.eventEmitter, eventId, changes, invitedByUserId, initiatedAt);
+        emitSuppliedGameChanges(
+          this.eventEmitter,
+          eventId,
+          changes,
+          LineupRemovalReason.SupplierLeft,
+          invitedByUserId,
+          initiatedAt,
+        );
       }
 
       // The added user's cached graph predates this row, so their role here
@@ -390,7 +399,14 @@ export class EventAttendeeService {
           initiatedAt,
         ),
       );
-      emitSuppliedGameChanges(this.eventEmitter, eventId, changes, actingUserId, initiatedAt);
+      emitSuppliedGameChanges(
+        this.eventEmitter,
+        eventId,
+        changes,
+        LineupRemovalReason.SupplierLeft,
+        actingUserId,
+        initiatedAt,
+      );
 
       // The event just left this user's ability surface. Without the eviction
       // a removed co-host keeps co-hosting until the cached graph expires.
@@ -518,7 +534,14 @@ export class EventAttendeeService {
         );
       }
 
-      emitSuppliedGameChanges(this.eventEmitter, eventId, changes, actingUserId, initiatedAt);
+      emitSuppliedGameChanges(
+        this.eventEmitter,
+        eventId,
+        changes,
+        LineupRemovalReason.SupplierLeft,
+        actingUserId,
+        initiatedAt,
+      );
       answered = updated;
     } catch (error) {
       this.logger.error(`Error updating status for attendee ${attendeeId} in event ${eventId}`, error);
@@ -550,7 +573,7 @@ export class EventAttendeeService {
     await this.assertAttendeeExists(eventId, attendeeId);
 
     return this.offeredGames.page(
-      { attendeeId, ...NOT_REMOVED, attendee: { is: { eventId, ...NOT_REMOVED } } },
+      { attendeeId, ...LIVE_OFFER, attendee: { is: { eventId, ...NOT_REMOVED } } },
       pagination,
       new Date(),
     );
@@ -623,11 +646,11 @@ export class EventAttendeeService {
    *   is, so it's `attendeeHasNoCollection` too, or `notFound` (#1210).
    * - An entry already offered is `alreadyOffered`, with its entry, and
    *   emits nothing, before any judgement: nothing is written for it, so
-   *   nothing is refused. That holds for one removed from its collection
-   *   since, which stays offered until taken back. One taken back earlier
-   *   comes back with its id. The exception is an attendee added by name:
-   *   every id is judged for them, so even one already listed is refused as
-   *   `attendeeHasNoCollection` (#1210, see below).
+   *   nothing is refused. One taken back earlier comes back with its id.
+   *   Two exceptions are judged first. An entry removed from its collection
+   *   is refused as `removedFromCollection` even while listed (#1221). For an
+   *   attendee added by name every id is judged, so even one already listed
+   *   is refused as `attendeeHasNoCollection` (#1210, see below).
    * - The create check runs once, as the single add's, before anything is
    *   read. Every id is judged from three reads, whatever the batch's size.
    * - Each accepted id is its own statement. A write that fails on what
@@ -668,23 +691,27 @@ export class EventAttendeeService {
     const listedByCollection = new Map(listed.map((entry) => [entry.collectionId, entry]));
     const links = await this.expansionLinks(dto.items, collectionById);
 
-    // An entry already offered goes ahead unjudged: `offerOne` answers it
-    // `alreadyOffered` and writes nothing. An attendee added by name is
-    // judged for every id, even one listed before the rule (#1210).
-    const offered = (collectionId: string) =>
-      attendee.userId !== null && listedByCollection.get(collectionId)?.removedAt === null;
+    // Whether an id goes ahead unjudged: an entry already offered and live,
+    // which `offerOne` answers `alreadyOffered`, writing nothing. An attendee
+    // added by name is judged for every id, even one listed before the rule
+    // (#1210). An entry removed from its collection is judged too, so it's
+    // refused even while its row is still listed (#1221).
+    const goesAheadUnjudged = (collectionId: string) =>
+      attendee.userId !== null &&
+      listedByCollection.get(collectionId)?.removedAt === null &&
+      collectionById.get(collectionId)?.deletedAt === null;
 
     const judged: { baseId?: string; collectionId: string; refusal: OfferRefusal | null }[] = [];
     for (const item of dto.items) {
       const game = collectionById.get(item.collectionId);
-      const gameRefusal = offered(item.collectionId) ? null : judgeCollectionEntry(attendee, game);
+      const gameRefusal = goesAheadUnjudged(item.collectionId) ? null : judgeCollectionEntry(attendee, game);
       judged.push({ collectionId: item.collectionId, refusal: gameRefusal });
 
       // An attendee added by name has no collection, so each expansion is
       // refused for that, as its game is, not as `baseRefused` (#1210).
       for (const expansionId of item.expansionCollectionIds ?? []) {
         const expansion = collectionById.get(expansionId);
-        const refusal = offered(expansionId)
+        const refusal = goesAheadUnjudged(expansionId)
           ? null
           : gameRefusal === null
             ? (judgeCollectionEntry(attendee, expansion) ?? judgeExpansionOfBase(game, expansion, links))
@@ -707,7 +734,7 @@ export class EventAttendeeService {
     )[] = [];
     for (const { collectionId, baseId, refusal } of judged) {
       const settledRefusal =
-        baseId !== undefined && refusedAtWrite.has(baseId) && !offered(collectionId)
+        baseId !== undefined && refusedAtWrite.has(baseId) && !goesAheadUnjudged(collectionId)
           ? OfferRefusal.BaseRefused
           : refusal;
 

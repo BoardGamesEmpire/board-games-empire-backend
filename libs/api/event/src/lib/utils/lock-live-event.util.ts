@@ -55,13 +55,31 @@ export async function lockLiveEvent(tx: Prisma.TransactionClient, id: string): P
  * game nobody is bringing.
  *
  * Shares never wait on each other, so writes beneath one event run side by
- * side. Take it as the transaction's first lock, except after `lockSupplier`
- * where the write takes that: the supplier's rows, then the event's, then
- * nominations. Removing a date writes to the nominations that name it while
- * holding the event's row, so a nomination is locked only after it. A write
- * that takes the row `FOR NO KEY UPDATE` takes {@link lockLiveEventDates}
- * instead, and never this first: two writes that each hold the share and
- * wait to raise it would wait on each other.
+ * side.
+ *
+ * The lock order, for every write that takes this beside other row locks,
+ * stated here once (#551, #1221):
+ *
+ * - Take it as the transaction's first lock, except in the two orders below
+ *   that start elsewhere.
+ * - A supply check, a write naming an offer as a game's supplier (a
+ *   nomination, a direct add, or adding a nomination's game to the lineup):
+ *   the offer, its attendee and its collection entry, `FOR SHARE` together
+ *   (`lockSupplier`), then this, then nominations.
+ * - An attendee leaving or coming back (`syncSuppliedGames`): this, then the
+ *   attendee's row, then the collection entries behind their offers
+ *   `FOR SHARE` in id order, then nominations, then lineup games.
+ * - A game removed from a collection, or added back
+ *   (`syncCollectionEntrySupply`): the collection entry's row, then each
+ *   event's row `FOR SHARE` in ascending id order, then nominations, then
+ *   lineup games.
+ * - None of these can wait on another in a cycle: each takes the event's row
+ *   as a share, and shares never wait on each other.
+ * - Removing a date writes to the nominations that name it while holding the
+ *   event's row, so a nomination is locked only after it.
+ * - A write that takes the row `FOR NO KEY UPDATE` takes
+ *   {@link lockLiveEventDates} instead, and never this first: two writes that
+ *   each hold the share and wait to raise it would wait on each other.
  */
 export async function shareLiveEvent(tx: Prisma.TransactionClient, eventId: string): Promise<void> {
   await tx.$queryRaw(Prisma.sql`SELECT id FROM events WHERE id = ${eventId} FOR SHARE`);

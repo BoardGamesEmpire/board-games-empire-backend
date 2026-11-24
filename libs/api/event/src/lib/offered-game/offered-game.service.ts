@@ -12,6 +12,7 @@ import type { PaginatedRows, PaginationQueryDto } from '@bge/shared';
 import { Injectable } from '@nestjs/common';
 import { ACTIVE_NOMINATION_STATUSES, lineupStillAhead } from '../attendee/attendance';
 import { readableAttendees } from '../attendee/attendee-summary';
+import { LIVE_OFFER } from '../constants/live-offer.constant';
 import { NOT_REMOVED } from '../constants/not-removed.constant';
 import { assertEventExists } from '../event-access.helpers';
 import type { ListOfferedGamesQueryDto } from './dto/list-offered-games.query.dto';
@@ -37,9 +38,11 @@ export class OfferedGameService {
    *
    * - A row is one offered entry: two attendees offering the same game give
    *   two rows.
-   * - Entries taken back, and every entry of an attendee removed from
-   *   the event, leave both the rows and the total. An attendee answering
-   *   Not attending keeps their rows, and the row's attendee says so.
+   * - Entries taken back, entries whose collection entry was removed (they
+   *   return if the game is added back, #1221), and every entry of an
+   *   attendee removed from the event, leave both the rows and the total.
+   *   An attendee answering Not attending keeps their rows, and the row's
+   *   attendee says so.
    * - The order is game title, then entry id.
    * - Each row's attendee is read once for the page, under the attendee read
    *   ceiling, and is `null` for a caller who can't read them.
@@ -52,7 +55,7 @@ export class OfferedGameService {
     await assertEventExists(this.db, eventId);
 
     const { rows, total } = await this.page(
-      { ...NOT_REMOVED, attendee: { is: { eventId, ...NOT_REMOVED } }, AND: offeredGamesFilter(query) },
+      { ...LIVE_OFFER, attendee: { is: { eventId, ...NOT_REMOVED } }, AND: offeredGamesFilter(query) },
       query,
       new Date(),
     );
@@ -102,9 +105,9 @@ export class OfferedGameService {
 
   /**
    * The games each attendee offers, as far as the caller may read them, for
-   * the attendee routes' embed (#404, #1187). Entries taken back are left out.
-   * Every attendee named has a key, `[]` when they offer nothing the caller
-   * can see.
+   * the attendee routes' embed (#404, #1187). Entries taken back, and those
+   * whose collection entry was removed, are left out (#1221). Every attendee
+   * named has a key, `[]` when they offer nothing the caller can see.
    *
    * The embed used to be an include, which reached anyone who could read
    * attendees whatever their read on offered games. It's a read of its own
@@ -121,7 +124,7 @@ export class OfferedGameService {
     const entries = await this.db.eventAttendeeGameList.findMany({
       where: this.scopeComposer.compose(ResourceType.EventAttendeeGameList, Action.read, {
         attendeeId: { in: [...attendeeIds] },
-        ...NOT_REMOVED,
+        ...LIVE_OFFER,
       }),
       select: OFFERED_GAME_SELECT,
       orderBy: OFFERED_GAME_ORDER,

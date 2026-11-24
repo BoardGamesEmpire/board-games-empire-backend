@@ -60,7 +60,7 @@ enum NominationStatus {
   QuorumNotMet // voting ended without reaching quorum (RequiresVote mode)
   Rejected // host rejected (HostApproval mode)
   Withdrawn // nominator pulled before resolution
-  Paused // its supplier is out of the event; returns to pausedFrom when they are back
+  Paused // its supplier is out of the event, or the game was removed from its owner's collection; returns to pausedFrom when they are back and the game is in the collection
 
   @@map("nomination_statuses")
 }

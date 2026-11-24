@@ -181,7 +181,10 @@ export class VoteResolver {
 }
 
 export interface AttendeeStub extends VoterGrant {
-  /** The games they offer, without the ones taken back. */
+  /**
+   * The games they offer, as live offers: without the ones taken back, or
+   * whose collection entry was removed (#1221).
+   */
   availableGames: { id: string }[];
 
   removedAt: Date | null;

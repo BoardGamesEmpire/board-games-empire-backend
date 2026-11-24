@@ -27,8 +27,10 @@ export class OfferedGameController {
       'kind of record. Its `attendee` is `null` when you cannot read that attendee. Its `onWishlist` says whether ' +
       'the game, or that platform game, is on your own wishlist, and is `null` rather than `false` when this ' +
       'request cannot read your wishlist.\n\n' +
-      'Ordered by game title, then entry id. Games taken back, and every game of an attendee removed from ' +
-      'the event, are left out of the rows and the `total`. An attendee answering Not attending keeps their rows, ' +
+      "Ordered by game title, then entry id. Games taken back, games removed from their owner's collection, and " +
+      'every game of an attendee removed from the event, are left out of the rows and the `total`. A game removed ' +
+      'from the collection shows again, as the same row, when its owner adds it back. An attendee answering Not ' +
+      'attending keeps their rows, ' +
       'and their `attendee.status` says so: their games cannot be nominated.\n\n' +
       'Every filter given is ANDed with the others. Each list takes an include and an exclude parameter, and both ' +
       "can be given at once: `excludeAttendeeIds=<your attendee id>` lists everyone's games but yours. Pages are " +

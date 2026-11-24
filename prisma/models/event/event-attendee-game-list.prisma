@@ -28,5 +28,7 @@ model EventAttendeeGameList {
 
   @@unique([attendeeId, collectionId])
   @@index([attendeeId])
+  // A collection removal reads offers by entry (#1221).
+  @@index([collectionId])
   @@map("attendee_game_lists")
 }

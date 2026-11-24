@@ -200,7 +200,7 @@ describe('POST /api/events/:eventId/attendees/:attendeeId/games/batch (#1188)', 
   it('refuses every id for an attendee added by name as attendeeHasNoCollection, and adds nothing (#1210)', async () => {
     const { host, eventId } = await arrangeEvent();
     const stranger = await actors.user();
-    const guestId = attendeeEnvelope(
+    const nameOnlyAttendeeId = attendeeEnvelope(
       await request(baseUrl)
         .post(attendeesPath(eventId))
         .set(host.headers)
@@ -211,13 +211,16 @@ describe('POST /api/events/:eventId/attendees/:attendeeId/games/batch (#1188)', 
     const hosts = await arrangeCollectionEntry(db.client, host.user.id, Reach.Private);
     const strangers = await arrangeCollectionEntry(db.client, stranger.user.id, Reach.Private);
 
-    const results = await offered(host, eventId, guestId, [{ collectionId: hosts }, { collectionId: strangers }]);
+    const results = await offered(host, eventId, nameOnlyAttendeeId, [
+      { collectionId: hosts },
+      { collectionId: strangers },
+    ]);
 
     expect(outcomes(results)).toEqual([
       [hosts, 'attendeeHasNoCollection'],
       [strangers, 'attendeeHasNoCollection'],
     ]);
-    expect(await db.client.eventAttendeeGameList.count({ where: { attendeeId: guestId } })).toBe(0);
+    expect(await db.client.eventAttendeeGameList.count({ where: { attendeeId: nameOnlyAttendeeId } })).toBe(0);
   });
 
   it('refuses 101 ids, and a repeated id, with 400', async () => {
