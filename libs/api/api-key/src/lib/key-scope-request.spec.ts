@@ -134,6 +134,8 @@ describe('resolveRequestedScopes (#1418)', () => {
     expect(error.getResponse()).toMatchObject({ code: 'API_KEY_SCOPE_NOT_GRANTABLE', slug: 'read:platform' });
   });
 
+  // The request DTO refuses an empty pin, so a route never sends one; this
+  // shows only that duplicates are told apart by the pin as given.
   it('keeps an unpinned scope apart from the same slug pinned to an empty resourceId (#1418)', () => {
     const scopes = resolveRequestedScopes(owner, catalog, [
       { slug: 'read:notification:own' },

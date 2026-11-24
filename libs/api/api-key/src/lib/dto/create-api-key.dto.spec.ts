@@ -2,6 +2,7 @@ import { plainToInstance } from 'class-transformer';
 import type { ValidationError } from 'class-validator';
 import { validate } from 'class-validator';
 import { CreateApiKeyDto } from './create-api-key.dto';
+import { REQUESTED_SCOPE_MAX_LENGTH } from './requested-scope.dto';
 
 /**
  * Transforms and validates a body as the global pipe does (apps/api/src/main.ts):
@@ -128,6 +129,25 @@ describe('CreateApiKeyDto (#1418)', () => {
       const scopes = Array.from({ length: 501 }, (_, index) => ({ slug: `read:thing_${index}` }));
 
       expect(failed((await check({ name: 'k', scopes })).errors)).toEqual(['scopes']);
+    });
+
+    // An empty pin names no row, so a key scope pinned to it would reach
+    // nothing; an owner who sends one most likely meant no pin.
+    it('refuses an empty slug or resource id', async () => {
+      const { errors } = await check({ name: 'k', scopes: [{ slug: '' }, { slug: 'read:game', resourceId: '' }] });
+
+      expect(failed(errors)).toEqual(['scopes.0.slug', 'scopes.1.resourceId']);
+    });
+
+    it(`accepts a slug and resource id of ${REQUESTED_SCOPE_MAX_LENGTH} characters and refuses longer`, async () => {
+      const longest = 'a'.repeat(REQUESTED_SCOPE_MAX_LENGTH);
+      const tooLong = `${longest}a`;
+
+      expect((await check({ name: 'k', scopes: [{ slug: longest, resourceId: longest }] })).errors).toEqual([]);
+      expect(failed((await check({ name: 'k', scopes: [{ slug: tooLong, resourceId: tooLong }] })).errors)).toEqual([
+        'scopes.0.slug',
+        'scopes.0.resourceId',
+      ]);
     });
   });
 

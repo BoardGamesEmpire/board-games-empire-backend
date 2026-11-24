@@ -243,7 +243,10 @@ export class ApiKeyService {
    * locked first, so two edits at once can't merge their key scope lists, and
    * an edit and a delete can't interleave. The key scopes it holds are read
    * under that lock, so a Critical permission it keeps asks for nothing,
-   * while one it adds needs a confirmation and a recent sign-in.
+   * while one it adds needs a confirmation and a recent sign-in. Extending
+   * the expiry or enabling the key asks for nothing either, even for a key
+   * that holds a Critical permission: the owner confirmed that permission
+   * when the key was given it, and neither edit adds a permission.
    *
    * The key's cached scope graph is evicted after the commit when the key
    * scopes or the enabled flag were given. A name or an expiry needs no
