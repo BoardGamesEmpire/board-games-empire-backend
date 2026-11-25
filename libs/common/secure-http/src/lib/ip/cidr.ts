@@ -15,6 +15,8 @@ export interface ParsedCidr {
   prefixLength: number;
 }
 
+const PREFIX_DIGITS = /^\d{1,3}$/;
+
 /**
  * Parse a CIDR string (`10.0.0.0/8`, `fc00::/7`) into an internal form.
  * Returns `null` for malformed input; admin-supplied entries that fail to
@@ -33,10 +35,13 @@ export function parseCidr(input: string): ParsedCidr | null {
 
   const addrPart = input.slice(0, slashIndex);
   const prefixPart = input.slice(slashIndex + 1);
-  const prefixLength = Number.parseInt(prefixPart, 10);
-  if (!Number.isInteger(prefixLength) || prefixLength < 0) {
+  // Digits only (#1519): parseInt alone reads `/0x10` as `/0` and `/8abc`
+  // as `/8`, turning a typo into a different, possibly match-all, entry.
+  if (!PREFIX_DIGITS.test(prefixPart)) {
     return null;
   }
+
+  const prefixLength = Number.parseInt(prefixPart, 10);
 
   const ip = parseIp(addrPart);
   if (!ip) {

@@ -49,6 +49,23 @@ describe('parseCidr', () => {
     expect(parseCidr('10.0.0.0/abc')).toBeNull();
   });
 
+  // #1519: parseInt stopped at the first non-digit and kept what it had read,
+  // so `/0x10` became `/0` and matched every IPv4 address.
+  it.each([
+    '10.0.0.0/8abc',
+    '10.0.0.0/ 8',
+    '10.0.0.0/8 ',
+    '10.0.0.0/8.5',
+    '10.0.0.0/0x10',
+    '10.0.0.0/+8',
+    '10.0.0.0/8/9',
+    '10.0.0.0/',
+    '10.0.0.0/0008',
+    'fc00::/7x',
+  ])('rejects a prefix that is not 1 to 3 digits alone: %s (#1519)', (input) => {
+    expect(parseCidr(input)).toBeNull();
+  });
+
   it('rejects malformed address', () => {
     expect(parseCidr('not-an-ip/8')).toBeNull();
   });
