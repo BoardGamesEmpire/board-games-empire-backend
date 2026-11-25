@@ -86,9 +86,14 @@ const nameOf = (key: string, entry: Lockfile['packages'][string]): string => {
 /**
  * A value as one table cell: a pipe would end the cell and a line break the
  * row, so the table keeps its structure for a screen reader as well as for
- * the eye (#1093).
+ * the eye (#1093). Backslashes are escaped first, or a value's own backslash
+ * would escape the backslash that escapes its pipe.
  */
-const cell = (value: string): string => value.replace(/\|/g, '\\|').replace(/\s*\r?\n\s*/g, ' ');
+const cell = (value: string): string =>
+  value
+    .replace(/\\/g, '\\\\')
+    .replace(/\|/g, '\\|')
+    .replace(/\s*\r?\n\s*/g, ' ');
 
 /**
  * `SOURCES.md`, the list of the dependencies a plugin artifact carries, read

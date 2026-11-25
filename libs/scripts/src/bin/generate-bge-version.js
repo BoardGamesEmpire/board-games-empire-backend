@@ -77,7 +77,9 @@ const HEADERS = {
 `,
 };
 
-const header = HEADERS[outKey];
+// An own key only: `constructor` or `toString` would otherwise read as a header
+// and write a file by that name at the workspace root (#1093).
+const header = Object.hasOwn(HEADERS, outKey) ? HEADERS[outKey] : undefined;
 
 if (header === undefined) {
   console.error(

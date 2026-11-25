@@ -7,12 +7,22 @@ import { ToolkitError } from '../toolkit.errors.js';
 
 /**
  * Installs exactly what package-lock.json records, without development
- * dependencies (#1093). `--ignore-scripts`: no dependency's install script
- * runs on the plugin author's machine. `--install-links`: a `file:`
- * dependency is copied in, not linked. `--no-bin-links`: no
- * `node_modules/.bin`, whose entries are always links.
+ * dependencies (#1093). `--include=prod`: npm installs a type that is both
+ * included and omitted, so this replaces an `include=dev` from the
+ * environment or an .npmrc, which `--omit=dev` alone would lose to, adding
+ * development dependencies SOURCES.md leaves out. `--ignore-scripts`: no
+ * dependency's install script runs on the plugin author's machine.
+ * `--install-links`: a `file:` dependency is copied in, not linked.
+ * `--no-bin-links`: no `node_modules/.bin`, whose entries are always links.
  */
-const INSTALL_ARGS = ['ci', '--omit=dev', '--ignore-scripts', '--install-links', '--no-bin-links'] as const;
+const INSTALL_ARGS = [
+  'ci',
+  '--omit=dev',
+  '--include=prod',
+  '--ignore-scripts',
+  '--install-links',
+  '--no-bin-links',
+] as const;
 
 /**
  * npm's hidden lockfile, which records each `file:` dependency's path counted

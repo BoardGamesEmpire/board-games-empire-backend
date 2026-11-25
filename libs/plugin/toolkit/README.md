@@ -53,8 +53,9 @@ writes its plugin artifact and the artifact's checksum file. In order, it:
    if the plugin needs one, rename it.
 4. Copies those files into a temporary folder and installs the plugin's
    production dependencies there with
-   `npm ci --omit=dev --ignore-scripts --install-links --no-bin-links`. npm's
-   hidden lockfile, `node_modules/.package-lock.json`, is removed: it records
+   `npm ci --omit=dev --include=prod --ignore-scripts --install-links --no-bin-links`.
+   `--include=prod` keeps an `include=dev` setting in your environment or
+   `.npmrc` from adding development dependencies. npm's hidden lockfile, `node_modules/.package-lock.json`, is removed: it records
    the temporary folder's path, and nothing reads it at runtime.
 5. Writes `SOURCES.md` there, listing every installed dependency with its
    version, license and source.

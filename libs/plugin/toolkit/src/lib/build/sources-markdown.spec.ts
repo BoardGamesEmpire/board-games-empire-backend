@@ -167,6 +167,17 @@ describe('renderSourcesMarkdown (#1093)', () => {
     ]);
   });
 
+  it("keeps the table intact when a lockfile field holds a backslash before a pipe, which would otherwise escape the pipe's escape", () => {
+    const lockfile = {
+      lockfileVersion: 3,
+      packages: { ...ROOT_PACKAGE, 'node_modules/odd': { license: 'MIT\\|ISC', version: '1.0.0' } },
+    };
+
+    expect(tableRows(renderSourcesMarkdown(lockfile, everythingVendored))).toEqual([
+      '| odd | 1.0.0 | MIT\\\\\\|ISC | local |',
+    ]);
+  });
+
   it("lists only packages installed under node_modules, never a folder elsewhere on the plugin author's machine", () => {
     const lockfile = {
       lockfileVersion: 3,

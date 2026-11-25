@@ -54,6 +54,17 @@ describe('urlCredentialErrors (#1093)', () => {
     ]);
   });
 
+  it.each([
+    ['a space before it', ` https://alice:${SECRET}@git.example/r.git`],
+    ['a tab before it and a line break after it', `\thttps://alice:${SECRET}@git.example/r.git\n`],
+  ])('refuses a URL with a password and %s, which the URL parser drops', async (_label, url) => {
+    await write({ 'package.json': { repository: { type: 'git', url } } });
+
+    expect(await urlCredentialErrors(dir)).toEqual([
+      { at: 'package.json', code: 'URL_CREDENTIALS_REFUSED', message: expect.stringContaining('"repository > url"') },
+    ]);
+  });
+
   it('reports each file once, at its first such URL', async () => {
     await write({
       'package-lock.json': { packages: { '': { dependencies: { dep: `http://a:${SECRET}@h/x.tgz` } } } },

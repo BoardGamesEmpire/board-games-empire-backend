@@ -11,8 +11,16 @@ import type { ReportItem } from '../report.js';
  */
 const METADATA_FILES = ['package.json', 'package-lock.json'] as const;
 
-/** A URL npm or git fetches over the network: http(s), ssh or git, with or without a `git+` prefix. */
-const NETWORK_URL = /^(?:git\+)?(?:https?|ssh):\/\/|^git:\/\//i;
+/** The schemes npm or git fetch over the network: http(s), ssh or git, with or without a `git+` prefix. */
+const NETWORK_PROTOCOLS: ReadonlySet<string> = new Set([
+  'git:',
+  'git+http:',
+  'git+https:',
+  'git+ssh:',
+  'http:',
+  'https:',
+  'ssh:',
+]);
 
 /**
  * Whether `url` holds a user name or password. The `git` user a git-over-ssh
@@ -21,16 +29,21 @@ const NETWORK_URL = /^(?:git\+)?(?:https?|ssh):\/\/|^git:\/\//i;
 export const hasCredentials = (url: URL): boolean =>
   url.password !== '' || (url.username !== '' && url.username !== 'git');
 
+/**
+ * Whether `text` parses as a network URL with credentials in it. It is parsed
+ * before its scheme is read, since the URL parser drops the spaces and control
+ * characters around a URL that a pattern on the raw text would trip on (#1093).
+ */
 const isCredentialUrl = (text: string): boolean => {
-  if (!NETWORK_URL.test(text)) {
-    return false;
-  }
+  let url: URL;
 
   try {
-    return hasCredentials(new URL(text));
+    url = new URL(text);
   } catch {
     return false;
   }
+
+  return NETWORK_PROTOCOLS.has(url.protocol) && hasCredentials(url);
 };
 
 /**
