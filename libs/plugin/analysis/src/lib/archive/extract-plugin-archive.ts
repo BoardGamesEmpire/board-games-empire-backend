@@ -45,8 +45,13 @@ const PER_ENTRY_FRAMING_BYTES =
  * cap sees them, and a small gzip could otherwise make the server walk
  * gigabytes. The bound is the extracted cap, plus the framing each entry the
  * rules allow may carry, plus 1 MiB for the archive's end blocks and global
- * headers. The framing is sized from the name caps, so an artifact that passes
- * every archive rule (as `bge-plugin build` checks it) is never refused here.
+ * headers. The framing is sized from the name caps, so an artifact whose pax
+ * records hold only its name and the usual times, owner and size (as
+ * `bge-plugin build` writes it) is never refused here. The archive rules do
+ * not bound any other pax record, so an archive carrying more can pass them
+ * and still be refused here as `extracted-size` (#1166). The server and
+ * `bge-plugin validate` both extract through this function, so they refuse
+ * the same archives.
  */
 export const PLUGIN_ARCHIVE_MAX_DECOMPRESSED_BYTES =
   PLUGIN_ARCHIVE_MAX_EXTRACTED_BYTES + PLUGIN_ARCHIVE_MAX_ENTRIES * PER_ENTRY_FRAMING_BYTES + 1024 * 1024;

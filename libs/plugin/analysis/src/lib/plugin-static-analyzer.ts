@@ -568,13 +568,28 @@ export class PluginStaticAnalyzer {
       }
 
       // `bundleDependencies` is an array of names, not a range map — and its
-      // members are literally shipped inside the tarball.
+      // members are literally shipped inside the tarball. A bundled name can
+      // be an alias's local name, so the package it stands for is screened
+      // too, from whichever field declares it: otherwise an alias declared
+      // only in `devDependencies` would keep the shipped package advisory.
       const bundled = packageJson['bundleDependencies'] ?? packageJson['bundledDependencies'];
 
       if (Array.isArray(bundled)) {
         for (const name of bundled) {
-          if (typeof name === 'string') {
-            screen(name, 'package.json', 'declared-dependency', 'forbidden');
+          if (typeof name !== 'string') {
+            continue;
+          }
+
+          screen(name, 'package.json', 'declared-dependency', 'forbidden');
+
+          for (const field of [...GATING_DEPENDENCY_FIELDS, ...ADVISORY_DEPENDENCY_FIELDS]) {
+            const entries = packageJson[field];
+            const range = isPlainJsonObject(entries) ? entries[name] : undefined;
+            const aliased = typeof range === 'string' ? resolveAliasedPackageName(range) : null;
+
+            if (aliased !== null) {
+              screen(aliased, 'package.json', 'declared-dependency', 'forbidden');
+            }
           }
         }
       }

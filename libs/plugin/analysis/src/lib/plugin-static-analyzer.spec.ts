@@ -621,6 +621,62 @@ describe('PluginStaticAnalyzer', () => {
 
       expect(gatingFindings(report)).toHaveLength(1);
     });
+
+    it('gates the package a bundled alias stands for when only devDependencies declares the alias (#59)', async () => {
+      await write(
+        'package.json',
+        JSON.stringify({
+          name: 'demo-sink',
+          version: '1.2.0',
+          devDependencies: { 'my-http': 'npm:axios@^1.7.0' },
+          bundleDependencies: ['my-http', 42],
+        }),
+      );
+
+      const report = await analyze();
+
+      // The alias's local name is unlisted, so the shipped `axios` must gate
+      // exactly as it does when bundled under its own name.
+      expect(findingsBy(report, 'declared-dependency')).toEqual([
+        expect.objectContaining({ specifier: 'axios', severity: 'forbidden' }),
+      ]);
+    });
+
+    it('reports a package that is both declared and bundled once, at gating severity (#59)', async () => {
+      await write(
+        'package.json',
+        JSON.stringify({
+          name: 'demo-sink',
+          version: '1.2.0',
+          dependencies: { axios: '^1.7.0' },
+          bundleDependencies: ['axios'],
+        }),
+      );
+
+      const report = await analyze();
+
+      expect(findingsBy(report, 'declared-dependency')).toEqual([
+        expect.objectContaining({ specifier: 'axios', severity: 'forbidden' }),
+      ]);
+    });
+
+    it('reads a v1 lockfile entry that is not an object by its name alone (#59)', async () => {
+      await write('package-lock.json', JSON.stringify({ lockfileVersion: 1, dependencies: { axios: '1.7.0' } }));
+
+      const report = await analyze();
+
+      expect(findingsBy(report, 'lockfile-package')).toEqual([
+        expect.objectContaining({ specifier: 'axios', severity: 'warning' }),
+      ]);
+    });
+  });
+
+  it('skips import.meta, which names no module (#59)', async () => {
+    await write('index.mjs', "import 'axios';\nexport const here = import.meta.url;\n");
+
+    const report = await analyze();
+
+    expect(report.findings).toEqual([expect.objectContaining({ kind: 'esm-import', specifier: 'axios' })]);
   });
 
   it('ignores non-scannable extensions and survives an absent lockfile', async () => {
