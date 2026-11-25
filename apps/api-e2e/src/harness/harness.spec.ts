@@ -45,9 +45,10 @@ describe('e2e harness', () => {
     it('reports readiness against the ephemeral Postgres and Redis', async () => {
       const response = await request(baseUrl).get('/health/ready');
 
-      // 200 covers both the full dependency check and the config-disabled
-      // short-circuit; a 503 here means a container isn't actually wired.
+      // The public port answers its status only (#1511); a 503 here means a
+      // container isn't actually wired.
       expect(response.status).toBe(200);
+      expect(response.body).toEqual({ status: 'ok' });
     });
 
     it('mounts the BetterAuth handler under the global prefix', async () => {

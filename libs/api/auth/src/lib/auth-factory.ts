@@ -187,11 +187,6 @@ export function authFactory(
   });
   const passwordReset = mailDispatcher && createPasswordReset(passwordResetDeps(prisma, mailDispatcher, i18n));
 
-  const usingSwagger = configService?.get<boolean>('swagger.enabled');
-  if (usingSwagger) {
-    logger.log('Enabling OpenAPI plugin for API documentation');
-  }
-
   // TODO: Make plugins configurable
   const plugins = [
     // Native apps sign in through the redirect flow, on routes of their own
@@ -238,13 +233,22 @@ export function authFactory(
       ? [genericOAuth({ config: providers.map((provider) => toGenericOAuthConfig(provider, logger)) })]
       : []),
 
-    ...(usingSwagger ? [openAPI()] : []),
+    // better-auth's half of the API document, which the api reads with a
+    // direct call and serves on the operational port only (#1511). The plugin's
+    // own routes would serve it on the public port, so `disabledPaths` below
+    // turns them off, and its reference page is off besides.
+    openAPI({ disableDefaultReference: true }),
 
     deviceAuthorization({ verificationUri: '/device' }),
   ];
 
   return betterAuth({
     telemetry: { enabled: false },
+    // The open-api plugin's routes, which would serve better-auth's schema and
+    // a reference page to anyone on the public port (#1511). better-auth's
+    // router answers a disabled path 404 before any endpoint runs; the api's
+    // direct `generateOpenAPISchema()` call never passes through the router.
+    disabledPaths: ['/open-api/generate-schema', '/reference'],
     logger: betterAuthLogger(new Logger('BetterAuth')),
     // Otherwise better-auth logs any error that isn't its own `APIError` and
     // answers an empty 500, which no client can announce or tell from a bug.

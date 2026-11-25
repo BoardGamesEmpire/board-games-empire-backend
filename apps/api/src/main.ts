@@ -6,7 +6,6 @@ import { registerShutdownHandlers } from '@bge/otel';
 import { bootstrapLogger, otel } from './app/lib/logger';
 
 // Imports below this line are instrumented by the OTel auto-instrumentations.
-import { API_KEY_HEADER } from '@bge/actor-context-transport';
 import {
   AUTH_INSTANCE,
   AUTH_REQUEST_HANDLER,
@@ -15,6 +14,7 @@ import {
   MAX_AUTH_REQUEST_BODY_BYTES,
 } from '@bge/auth';
 import { createPrismaCliMigrator, runBootstrap } from '@bge/bootstrap';
+import { markOperationalRequest } from '@bge/health';
 import type { I18nTranslations } from '@bge/i18n';
 import { nestLoggerFromPino } from '@bge/logger';
 import { permissionGraphFlushPatterns } from '@bge/permissions';
@@ -23,22 +23,26 @@ import { Logger, RequestMethod } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
-import type { OpenAPIObject } from '@nestjs/swagger';
-import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import compression from 'compression';
-import helmet from 'helmet';
 import { I18nService, I18nValidationPipe } from 'nestjs-i18n';
 import { Logger as PinoLogger } from 'nestjs-pino';
+import type { Server } from 'node:http';
+import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { RedisIoAdapter } from './app/adapters/redis-io.adapter';
 import { AppModule } from './app/app.module';
 import redisConfig, { redisConfigValidationSchema } from './app/configuration/redis.config';
+import type { SwaggerConfig } from './app/configuration/swagger.config';
 import { API_REQUEST_TIMEOUT_MS, installRequestBodyRateGuard } from './app/http/request-body-rate-guard';
+import { setupApiDocument } from './app/lib/api-document';
 import { createAuthClientIpHandler } from './app/lib/auth-client-ip';
 import { createHostCheck } from './app/lib/host-check';
 import type { ServerNames } from './app/lib/host-rule';
 import { allowsEveryHost, createHostRule } from './app/lib/host-rule';
+import { createOperationalGate, OPERATIONAL_PATHS } from './app/lib/operational-gate';
+import { createSourceRule } from './app/lib/operational-sources';
 import { PATHS_WITHOUT_QUERY } from './app/lib/paths-without-query';
+import { createSecurityHeaders } from './app/lib/security-headers';
 
 // The paths name feature-lib routes, imported above, so they reach the SDK
 // only now; no request is served before the app listens (#935).
@@ -82,10 +86,10 @@ async function bootstrap() {
 
   const globalPrefix = 'api';
   // The routes that sit outside the global prefix. The bundled web client
-  // never answers under these or under the prefix itself.
+  // never answers under these or under the prefix itself, so it can't answer
+  // the operational routes on the public port either (#1511).
   const unprefixedRoutes = [
-    { path: 'metrics', method: RequestMethod.GET },
-    { path: 'health', method: RequestMethod.GET },
+    ...OPERATIONAL_PATHS,
     { path: 'health/*path', method: RequestMethod.GET },
     { path: '.well-known/*path', method: RequestMethod.GET },
     { path: '.well-known/*path', method: RequestMethod.OPTIONS },
@@ -118,6 +122,10 @@ async function bootstrap() {
   // check's here, and `/api/auth/*`'s below.
   const render = fallbackLocaleRenderer(app.get<I18nService<I18nTranslations>>(I18nService));
   const hostCheck = createHostCheck({ rule: createHostRule(serverNames), render });
+  const operationalGate = createOperationalGate({
+    sourceRule: createSourceRule(configService.getOrThrow<string[]>('operational.sources')),
+    render,
+  });
 
   if (allowsEveryHost(serverNames)) {
     Logger.warn(
@@ -145,11 +153,18 @@ async function bootstrap() {
         },
       }),
     )
-    .use(helmet())
+    // helmet's headers, without the https upgrade on the operational port, which
+    // is plain HTTP (#1511).
+    .use(createSecurityHeaders())
     // Ahead of the web client and the better-auth mount below, so it covers the
     // whole Express app. It reads the Host header and not `req.hostname`, which
     // `trust proxy` above takes from X-Forwarded-Host (#977).
     .use(hostCheck.handler)
+    // Keeps each listener to its own routes, and the operational port to the
+    // addresses allowed to reach it (#1511). Mounted without a path, so it reads
+    // the whole request target, and after the Host check, which stays the first
+    // answer on both listeners.
+    .use(operationalGate)
     .use(compression())
     .setGlobalPrefix(globalPrefix, { exclude: unprefixedRoutes })
     .enableCors({
@@ -182,49 +197,14 @@ async function bootstrap() {
   // `app.close()` still invokes all `OnApplicationShutdown` providers.
 
   const authInstance = app.get(AUTH_INSTANCE);
-  const swagger = configService.get<boolean>('swagger.enabled');
 
-  Logger.debug(`Swagger enabled: ${swagger}`, LOGGER_CONTEXT);
-
-  if (swagger) {
-    const swaggerConfig = new DocumentBuilder()
-      .setTitle(configService.getOrThrow('swagger.title'))
-      .setDescription(configService.getOrThrow('swagger.description'))
-      .setVersion(configService.getOrThrow('swagger.version'))
-      .addBearerAuth()
-      .addApiKey({
-        type: 'apiKey',
-        // The header HttpActorMiddleware reads a key from (#1418).
-        name: API_KEY_HEADER,
-        in: 'header',
-      })
-      .build();
-
-    const openAPISchema: OpenAPIObject = await authInstance.api.generateOpenAPISchema();
-    const paths = Object.entries(openAPISchema.paths).reduce<OpenAPIObject['paths']>(
-      (acc, [path, methods]) => ({
-        ...acc,
-        [path.startsWith(`/${globalPrefix}/auth`) ? path : `/${globalPrefix}/auth${path}`]: methods,
-      }),
-      {},
-    );
-
-    const document = SwaggerModule.createDocument(app, swaggerConfig);
-    const merged = {
-      ...document,
-      paths: { ...document.paths, ...paths },
-      components: {
-        ...document.components,
-        schemas: { ...document.components?.schemas, ...openAPISchema.components?.schemas },
-      },
-    };
-    SwaggerModule.setup(globalPrefix, app, merged, {
-      jsonDocumentUrl: `${globalPrefix}/swagger/json`,
-      yamlDocumentUrl: `${globalPrefix}/swagger/yaml`,
-    });
-
-    Logger.debug('Swagger document created and setup completed', LOGGER_CONTEXT);
-  }
+  // The API document, on the operational port only: the gate refuses it on the
+  // public port. It is built on the first request for it, not at boot (#1511).
+  setupApiDocument(app, {
+    config: configService.getOrThrow<SwaggerConfig>('swagger'),
+    globalPrefix,
+    loadAuthSchema: () => authInstance.api.generateOpenAPISchema(),
+  });
 
   const redisAdapter = new RedisIoAdapter(hostCheck.allowRequest, app);
   await redisAdapter.connectToRedis(configService);
@@ -257,11 +237,81 @@ async function bootstrap() {
   httpServer.requestTimeout = API_REQUEST_TIMEOUT_MS;
   installRequestBodyRateGuard(httpServer);
 
-  registerShutdownHandlers(app, otel, bootstrapLogger);
+  // The second listener, for `/health`, `/metrics` and the API document
+  // (#1511). It hands each request to the same Express app, marked, so the
+  // gate and the health controller can tell which port it came in on.
+  // Socket.IO stays on the public server alone.
+  //
+  // Nothing is uploaded here, so it keeps Node's request timeout (5 minutes)
+  // rather than the public server's hour, and Node's 60-second
+  // `headersTimeout`. The rate guard still cuts off a trickled body.
+  const operationalServer = createServer((req, res) => {
+    markOperationalRequest(req);
+    server(req, res);
+  });
+  installRequestBodyRateGuard(operationalServer);
 
-  const port = configService.get<number>('system.port', 33333);
+  // The operational listener stops taking connections as the app starts to
+  // close, and Node closes its idle keep-alive connections, such as a
+  // scraper's. A request still running there is not waited for past
+  // `app.close()`: a first API document request held by a sign-in provider
+  // that never answers, or a health check of an outside service, could
+  // otherwise hold up the app's destroy hooks and the last spans (#1511).
+  registerShutdownHandlers(
+    {
+      close: async () => {
+        const operationalClosed = closeServer(operationalServer).catch((error: unknown) =>
+          bootstrapLogger.error({ err: error }, 'closing the operational port failed'),
+        );
+        try {
+          await app.close();
+        } finally {
+          operationalServer.closeAllConnections();
+          await operationalClosed;
+        }
+      },
+    },
+    otel,
+    bootstrapLogger,
+  );
+
+  // `app.init()` registers Nest's routes, which both listeners serve. The
+  // operational port is bound before the public one, so a bind failure
+  // (EADDRINUSE) exits through the catch below before the public port's
+  // readiness ever answers (#1511). Bound on every interface, as the public
+  // port is: the allowed sources decide who may use it.
+  await app.init();
+
+  const operationalPort = configService.getOrThrow<number>('operational.port');
+  await listen(operationalServer, operationalPort);
+  Logger.log(`Operational routes on port ${operationalPort}`, LOGGER_CONTEXT);
+
+  const port = configService.getOrThrow<number>('system.port');
   await app.listen(port);
   Logger.log(`🚀 Application is running on: http://localhost:${port}/${globalPrefix}`, LOGGER_CONTEXT);
+}
+
+/** `server.listen`, resolved once it is listening and rejected with a bind error. */
+function listen(server: Server, port: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(port, () => {
+      server.off('error', reject);
+      resolve();
+    });
+  });
+}
+
+/** `server.close`, resolved at once for a server that never started listening. */
+function closeServer(server: Server): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (!server.listening) {
+      resolve();
+      return;
+    }
+
+    server.close((error) => (error ? reject(error) : resolve()));
+  });
 }
 
 bootstrap().catch((error) => {

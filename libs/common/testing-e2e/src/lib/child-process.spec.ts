@@ -258,6 +258,41 @@ describe('launchOnFreePort', () => {
     }
   });
 
+  // A launch may bind a second port of its own (#1511), so the warning names
+  // the address the child reported, not the port this function chose.
+  it('names the address the child lost in its retry warning', async () => {
+    const { bundle, boundTo } = losesItsPortUntil('names-the-address', 2);
+    const ports: number[] = [];
+
+    const launched = await launchOnFreePort(launchOn(bundle, () => fs.existsSync(boundTo), ports));
+
+    try {
+      expect(jest.mocked(console.warn)).toHaveBeenCalledWith(
+        expect.stringContaining(`(EADDRINUSE: address already in use 127.0.0.1:${ports[0]})`),
+      );
+    } finally {
+      await stopChild(launched.child);
+    }
+  });
+
+  it('awaits an async launch on every attempt, so a second port is fresh each time too (#1511)', async () => {
+    const { bundle, boundTo } = losesItsPortUntil('async-launch', 2);
+    const ports: number[] = [];
+    const sync = launchOn(bundle, () => fs.existsSync(boundTo), ports);
+
+    const launched = await launchOnFreePort(async (port) => {
+      await Promise.resolve();
+      return sync(port);
+    });
+
+    try {
+      expect(ports).toHaveLength(2);
+      expect(launched.port).toBe(ports[1]);
+    } finally {
+      await stopChild(launched.child);
+    }
+  });
+
   it('does not launch again after a boot death that is not a lost port', async () => {
     const bundle = path.join(scripts, 'dies.cjs');
     fs.writeFileSync(bundle, 'process.exit(3);');

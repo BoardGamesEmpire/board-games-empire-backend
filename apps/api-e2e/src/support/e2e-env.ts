@@ -53,12 +53,39 @@ export const E2E_REDIS_FLUSH_OK_VAR = 'BGE_E2E_REDIS_FLUSH_OK';
 export const E2E_BASE_URL_VAR = 'BGE_E2E_BASE_URL';
 
 /**
+ * Where the same API answers its operational routes (#1511): `/health`,
+ * `/metrics` and the API document, on a second port the public one refuses
+ * them on. Assigned by `global-setup` beside {@link E2E_BASE_URL_VAR}; specs
+ * read it back through {@link requireOperationalUrl}.
+ */
+export const E2E_OPERATIONAL_URL_VAR = 'BGE_E2E_OPERATIONAL_URL';
+
+/**
  * The variable the API's `system` config reads its listen port from (see
  * `apps/api/src/app/configuration/system.config.ts`). Named here rather than
  * inlined because getting it wrong is invisible: the server boots happily on
  * its 33333 default and the readiness probe just times out.
  */
 export const API_PORT_VAR = 'PORT';
+
+/**
+ * The variable the API's `operational` config reads its second port from
+ * (#1511). Pinned like {@link API_PORT_VAR}: left to its 33334 default, two
+ * runs on one machine would collide, and a developer's own server would too.
+ */
+export const API_OPERATIONAL_PORT_VAR = 'OPERATIONAL_PORT';
+
+/** The CIDR ranges the API's `operational` config admits to the second port (#1511). */
+export const API_OPERATIONAL_SOURCES_VAR = 'OPERATIONAL_SOURCES';
+
+/** Loopback alone, where every request in the suite comes from; see {@link apiEnvOverrides}. */
+export const LOOPBACK_OPERATIONAL_SOURCES = '127.0.0.0/8,::1/128';
+
+/** The URLs the full health report pings, as `name|url` pairs (`health.config.ts`). */
+export const API_HEALTH_CHECK_URLS_VAR = 'HTTP_HEALTH_CHECK_URLS';
+
+/** A set value that the config reads as no URLs; see {@link apiEnvOverrides}. */
+export const NO_HEALTH_CHECK_URLS = ',';
 
 /**
  * The directory the harness gives the API as its plugins root (#1094), made
@@ -106,7 +133,7 @@ export interface MailpitEndpoint {
  * `test` (not `development`) is the correct member: the per-environment
  * defaults, such as `DATA_ENCRYPTION_KEY`'s, are keyed on it, and it keeps
  * `env.isDevelopment` false so the suite does not silently exercise
- * development-only branches such as Swagger auto-enablement.
+ * development-only branches.
  *
  * The worker child runs under the same value (see {@link workerEnvOverrides}).
  */
@@ -157,6 +184,21 @@ export const API_THROTTLE_TTL_MS = 60_000;
  */
 export const API_CONFIGURED_SERVER_NAME = 'bge-e2e.test';
 
+/** Where the harness is about to launch the API child; see {@link apiEnvOverrides}. */
+export interface ApiLaunchAddresses {
+  /** The public origin, `http://127.0.0.1:<port>`. */
+  readonly baseUrl: string;
+
+  /** The second port, for the operational routes (#1511). */
+  readonly operationalPort: number;
+
+  /** The directory the harness made for the API's plugins (#1094). */
+  readonly pluginsRoot: string;
+
+  /** The public port. */
+  readonly port: number;
+}
+
 /**
  * Environment the API child gets on top of the inherited process env, given
  * the ephemeral origin it is about to bind.
@@ -190,12 +232,33 @@ export const API_CONFIGURED_SERVER_NAME = 'bge-e2e.test';
  * server would default to inside the checkout: the install ingress writes there
  * (#1094), and a run must neither leave plugin artifacts in the working tree
  * nor read ones an earlier run left.
+ *
+ * `OPERATIONAL_PORT` is a second free port, which the operational routes
+ * answer on (#1511). `OPERATIONAL_SOURCES` is pinned to loopback, where every
+ * request in the suite comes from: naming any range replaces the default list,
+ * so a developer's `.env` that lists only their LAN would have every
+ * operational request refused with 403.
+ *
+ * `HTTP_HEALTH_CHECK_URLS` names no URL, so the full health report pings
+ * nothing: the suite must never reach a third party, and a ping's blip would
+ * turn it red (#1511). It is `','` and not `''`, because `@bge/env` reads an
+ * empty value as unset, and any default or a developer's `.env` would fill it.
+ * The config splits on commas and drops empty entries, so `','` is the empty
+ * list.
  */
-export function apiEnvOverrides(baseUrl: string, port: number, pluginsRoot: string): Record<string, string> {
+export function apiEnvOverrides({
+  baseUrl,
+  operationalPort,
+  pluginsRoot,
+  port,
+}: ApiLaunchAddresses): Record<string, string> {
   const trustedOrigins = [baseUrl, baseUrl.replace('127.0.0.1', 'localhost'), `https://${API_CONFIGURED_SERVER_NAME}`];
 
   return {
     [API_PORT_VAR]: String(port),
+    [API_OPERATIONAL_PORT_VAR]: String(operationalPort),
+    [API_OPERATIONAL_SOURCES_VAR]: LOOPBACK_OPERATIONAL_SOURCES,
+    [API_HEALTH_CHECK_URLS_VAR]: NO_HEALTH_CHECK_URLS,
     NODE_ENV: API_NODE_ENV,
     BETTER_AUTH_URL: baseUrl,
     TRUSTED_ORIGINS: trustedOrigins.join(','),
@@ -460,13 +523,23 @@ export function redisOwnershipOverride(mode: Provisioning['mode']): Record<strin
 
 /** The launched API's base URL, or a loud failure if globalSetup never ran. */
 export function requireBaseUrl(env: Readonly<Record<string, string | undefined>>): string {
-  const baseUrl = env[E2E_BASE_URL_VAR]?.trim();
+  return requireLaunchedUrl(env, E2E_BASE_URL_VAR);
+}
 
-  if (!baseUrl) {
-    throw new Error(`${E2E_BASE_URL_VAR} is not set — did the e2e globalSetup run (and pass its readiness probe)?`);
+/** The launched API's operational URL (#1511), or a loud failure if globalSetup never published it. */
+export function requireOperationalUrl(env: Readonly<Record<string, string | undefined>>): string {
+  return requireLaunchedUrl(env, E2E_OPERATIONAL_URL_VAR);
+}
+
+/** A URL `global-setup` publishes once the API passes its readiness probe, or a loud failure. */
+function requireLaunchedUrl(env: Readonly<Record<string, string | undefined>>, name: string): string {
+  const url = env[name]?.trim();
+
+  if (!url) {
+    throw new Error(`${name} is not set — did the e2e globalSetup run (and pass its readiness probe)?`);
   }
 
-  return baseUrl;
+  return url;
 }
 
 /** The Mailpit endpoint `global-setup` published, or a loud failure if it never did. */

@@ -10,14 +10,19 @@ export interface SystemConfig {
   port: number;
 }
 
+/** What `PORT` falls back to; the root schema compares it with the operational port when `PORT` is unset (#1511). */
+export const DEFAULT_PORT = 33333;
+
 export default registerAs('system', () =>
   env.provideMany<SystemConfig>(
     [
       {
         keyTo: 'port',
         key: 'PORT',
-        defaultValue: 33333,
-        mutators: [(value: string) => parseInt(value, 10)],
+        defaultValue: DEFAULT_PORT,
+        // `Number`, as Joi converts it: `parseInt` reads `1e3` as 1, so the root
+        // schema's collision check would compare a port the listener never binds.
+        mutators: [(value: string) => Number(value)],
       },
       {
         keyTo: 'api_base_url',

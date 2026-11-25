@@ -122,43 +122,6 @@ describe('createHostCheck (#977)', () => {
       expect(warn.mock.calls[0][0]).toContain('evil.example');
     });
 
-    it('stops logging after 100 distinct names, and says so once', () => {
-      const check = checkFor();
-
-      for (let name = 0; name < 150; name++) {
-        handle(check, request(`evil-${name}.example`));
-      }
-
-      expect(warn).toHaveBeenCalledTimes(101);
-      expect(warn.mock.calls[99][0]).toContain('evil-99.example');
-      expect(warn.mock.calls[100][0]).not.toContain('evil-100.example');
-      expect(warn.mock.calls[100][0]).toMatch(/not logged/i);
-    });
-
-    // Outside traffic can fill the cap, and an operator who later adds a proxy or
-    // a domain still needs to see which name is being refused.
-    it('logs again after an hour, even once the cap was reached', () => {
-      const now = jest.spyOn(Date, 'now').mockReturnValue(0);
-      const check = checkFor();
-
-      for (let name = 0; name < 150; name++) {
-        handle(check, request(`evil-${name}.example`));
-      }
-
-      warn.mockClear();
-
-      now.mockReturnValue(59 * 60 * 1000);
-      handle(check, request('proxy-rewrite.example'));
-      expect(warn).not.toHaveBeenCalled();
-
-      now.mockReturnValue(60 * 60 * 1000);
-      handle(check, request('proxy-rewrite.example'));
-      expect(warn).toHaveBeenCalledTimes(1);
-      expect(warn.mock.calls[0][0]).toContain('proxy-rewrite.example');
-
-      now.mockRestore();
-    });
-
     it('truncates a logged name to 253 characters', () => {
       handle(checkFor(), request('x'.repeat(2000)));
 
@@ -166,6 +129,24 @@ describe('createHostCheck (#977)', () => {
 
       expect(message).toContain('x'.repeat(253));
       expect(message).not.toContain('x'.repeat(254));
+    });
+
+    // The operator acts on these two lines, so their wording is pinned here;
+    // the cap and the hourly reset are refusal-log.spec.ts's (#977, #1511).
+    it('logs a refused name, and the cap, in the exact words an operator reads', () => {
+      const check = checkFor();
+
+      for (let i = 0; i <= 100; i += 1) {
+        handle(check, request(`evil-${i}.example`));
+      }
+
+      expect(warn).toHaveBeenCalledTimes(101);
+      expect(warn.mock.calls[0][0]).toBe(
+        "Refused a request for 'evil-0.example'. If this server answers there, add it to TRUSTED_ORIGINS",
+      );
+      expect(warn.mock.calls[100][0]).toBe(
+        'Refused requests for 100 different names. Others are not logged for up to an hour',
+      );
     });
 
     it('shares one log between the handler and allowRequest', () => {

@@ -563,9 +563,11 @@ connections appear with `name=bge`.
 
 The cache connection — which the health indicator shares with the cache and
 gateway registry — uses `maxRetriesPerRequest: 3` (fail-fast). If
-`/health/ready` reports Redis down but other functionality still works, the
-underlying Redis is intermittently reachable but slow enough that the
-health probe gives up. Investigate network or server health.
+`/health/ready` on the operational port reports Redis down but other
+functionality still works, the underlying Redis is intermittently reachable
+but slow enough that the health probe gives up. Investigate network or server
+health. The public port's `/health/ready` answers its status only, without
+naming the dependency that is down ([DEPLOYMENT.md](DEPLOYMENT.md#the-operational-port)).
 
 ### Signed-in requests answer 503
 

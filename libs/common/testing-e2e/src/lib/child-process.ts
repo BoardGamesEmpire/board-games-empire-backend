@@ -281,29 +281,40 @@ export function getFreePort(): Promise<number> {
  * A lost port is recognised by EADDRINUSE in the child's output, because
  * Node surfaces the bind error only in the child's own stderr. The parent
  * sees a plain non-zero exit.
+ *
+ * `launch` may be async, so a child that binds a second port, as the api's
+ * operational port does (#1511), takes a fresh one on each attempt too.
  */
 export async function launchOnFreePort(
-  launch: (port: number) => ChildLaunch,
+  launch: (port: number) => ChildLaunch | Promise<ChildLaunch>,
 ): Promise<{ readonly child: ChildProcess; readonly port: number }> {
   for (let attempt = 1; ; attempt += 1) {
     const port = await getFreePort();
-    const config = launch(port);
+    const config = await launch(port);
     const outcome = await launchChild(config);
 
     if (outcome.kind === 'ready') {
       return { child: outcome.child, port };
     }
 
-    const lostThePort = outcome.kind === 'exited' && outcome.outputTail.some((line) => line.includes('EADDRINUSE'));
-    if (lostThePort && attempt < PORT_ATTEMPTS) {
+    const lostPortLine =
+      outcome.kind === 'exited' ? outcome.outputTail.find((line) => line.includes('EADDRINUSE')) : undefined;
+    if (lostPortLine !== undefined && attempt < PORT_ATTEMPTS) {
+      // The child's own error names the address it lost, which may be a second
+      // port its launch chose (#1511), not `port`.
       console.warn(
-        `[e2e] ${config.label} lost port ${port} on launch attempt ${attempt}/${PORT_ATTEMPTS}, retrying on a fresh port...`,
+        `[e2e] ${config.label} lost a port on launch attempt ${attempt}/${PORT_ATTEMPTS} (${describeLostPort(lostPortLine)}), retrying on a fresh port...`,
       );
       continue;
     }
 
     throw new Error(outcome.failure);
   }
+}
+
+/** The child's `EADDRINUSE: address already in use <address>`, cut out of a plain or JSON log line. */
+function describeLostPort(line: string): string {
+  return /EADDRINUSE[^"\\\n]*/.exec(line)?.[0].trim() ?? 'EADDRINUSE';
 }
 
 /**

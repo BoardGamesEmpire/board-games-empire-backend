@@ -3,6 +3,7 @@
 // their `.ts` sources.
 import {
   E2E_VERBOSE_VAR,
+  getFreePort,
   killOnExit,
   launchOnFreePort,
   requireBundle,
@@ -23,6 +24,7 @@ import {
   E2E_DATABASE_CONTAINER_ADDRESS_VAR,
   E2E_FAKE_PROVIDER_URL_VAR,
   E2E_MAILPIT_VAR,
+  E2E_OPERATIONAL_URL_VAR,
   E2E_PLUGINS_ROOT_VAR,
   fakeProviderEnv,
   MAILPIT_IMAGE,
@@ -80,9 +82,23 @@ function runPrisma(args: readonly string[], databaseUrl: string): void {
 interface LaunchedApi {
   readonly baseUrl: string;
   readonly child: ChildProcess;
+
+  /** Where the same server answers its operational routes (#1511). */
+  readonly operationalUrl: string;
 }
 
 const apiBaseUrl = (port: number): string => `http://127.0.0.1:${port}`;
+
+/** Whether `url` answers 200 yet; a refused connection is "not yet", not a failure. */
+async function answersOk(url: string): Promise<boolean> {
+  try {
+    const response = await fetch(url);
+    return response.status === 200;
+  } catch {
+    // Not listening yet — keep polling.
+    return false;
+  }
+}
 
 /**
  * Launches the built API bundle as a real child process — the same
@@ -95,36 +111,40 @@ const apiBaseUrl = (port: number): string => `http://127.0.0.1:${port}`;
  * `BGE_E2E_VERBOSE`), because a server that dies during boot is useless to
  * debug without its logs. A port lost before the API could bind it is
  * retried on a fresh one (`launchOnFreePort`).
+ *
+ * The API binds a second port, for its operational routes (#1511). It takes a
+ * fresh one on each attempt, never the public port, which the API would refuse
+ * at boot. The API binds it before the public one and exits if it can't, so
+ * the public port answering means it is up. Readiness checks both anyway.
  */
 async function launchApi(env: NodeJS.ProcessEnv, pluginsRoot: string): Promise<LaunchedApi> {
   requireBundle('API', API_BUNDLE, '@boardgamesempire/api:build');
 
   const verbose = env[E2E_VERBOSE_VAR] === 'true';
+  let operationalPort = 0;
 
-  const { child, port } = await launchOnFreePort((port) => {
+  const { child, port } = await launchOnFreePort(async (port) => {
+    do {
+      operationalPort = await getFreePort();
+    } while (operationalPort === port);
+
     const baseUrl = apiBaseUrl(port);
-    console.log(`[e2e] launching API (${API_BUNDLE}) on ${baseUrl}...`);
+    const operationalUrl = apiBaseUrl(operationalPort);
+    console.log(`[e2e] launching API (${API_BUNDLE}) on ${baseUrl}, operational routes on ${operationalUrl}...`);
 
     return {
       label: 'API',
       bundle: API_BUNDLE,
-      env: { ...env, ...apiEnvOverrides(baseUrl, port, pluginsRoot) },
+      env: { ...env, ...apiEnvOverrides({ baseUrl, operationalPort, pluginsRoot, port }) },
       verbose,
-      isReady: async () => {
-        try {
-          const response = await fetch(`${baseUrl}/health/ready`);
-          return response.status === 200;
-        } catch {
-          // Not listening yet — keep polling.
-          return false;
-        }
-      },
+      isReady: async () =>
+        (await answersOk(`${baseUrl}/health/ready`)) && (await answersOk(`${operationalUrl}/health/live`)),
       timeoutMs: READINESS_TIMEOUT_MS,
       pollMs: READINESS_POLL_MS,
     };
   });
 
-  return { child, baseUrl: apiBaseUrl(port) };
+  return { child, baseUrl: apiBaseUrl(port), operationalUrl: apiBaseUrl(operationalPort) };
 }
 
 /**
@@ -155,8 +175,10 @@ async function launchApi(env: NodeJS.ProcessEnv, pluginsRoot: string): Promise<L
  *     `BGE_E2E_FAKE_PROVIDER_URL`.
  *  7. A fresh plugins root for the API, published via `BGE_E2E_PLUGINS_ROOT`
  *     and removed by teardown (#1094).
- *  8. The built API bundle as a child process, gated on `/health/ready`;
- *     its base URL is published via `BGE_E2E_BASE_URL`.
+ *  8. The built API bundle as a child process, gated on `/health/ready`
+ *     and on its operational port answering; its base URL is published via
+ *     `BGE_E2E_BASE_URL`, and its operational URL via
+ *     `BGE_E2E_OPERATIONAL_URL` (#1511).
  *
  * Handles are stashed on `globalThis` for `global-teardown`. If the process
  * dies without teardown, testcontainers' reaper (ryuk) removes the
@@ -265,13 +287,14 @@ export default async function globalSetup(): Promise<void> {
     const launched = await launchApi(process.env, pluginsRoot);
     api = launched.child;
     process.env[E2E_BASE_URL_VAR] = launched.baseUrl;
+    process.env[E2E_OPERATIONAL_URL_VAR] = launched.operationalUrl;
 
     // Covers every exit path of THIS process, including unhandled throws; a
     // no-op after a clean teardown, since the child has exited by then.
     killOnExit(api);
 
     setE2EGlobalState({ postgres, redis, mailpit, api, signInProvider, pluginsRoot });
-    console.log(`[e2e] harness ready — API at ${launched.baseUrl}`);
+    console.log(`[e2e] harness ready — API at ${launched.baseUrl}, operational routes at ${launched.operationalUrl}`);
   } catch (error) {
     // Teardown never runs when setup throws — stop whatever already started.
     api?.kill('SIGKILL');

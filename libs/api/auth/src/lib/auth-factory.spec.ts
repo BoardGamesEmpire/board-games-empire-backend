@@ -592,7 +592,7 @@ describe("authFactory's app sign-in", () => {
   it.each([
     ['with no optional plugins', config],
     [
-      'with sign-in providers and the API docs',
+      'with sign-in providers',
       new ConfigService({
         auth: {
           url: 'http://localhost:33333',
@@ -609,7 +609,6 @@ describe("authFactory's app sign-in", () => {
             },
           ],
         },
-        swagger: { enabled: true },
       }),
     ],
   ])('is the first plugin, %s (#1019)', (_case, configService) => {
@@ -654,5 +653,35 @@ describe("authFactory's password reset mail", () => {
     const options = withDispatcher().options as { verification?: { storeIdentifier?: unknown } };
 
     expect(options.verification?.storeIdentifier).toBeUndefined();
+  });
+});
+
+/**
+ * better-auth's schema is half of the API document, which the api serves only
+ * on the operational port (#1511). Its plugin would also serve that schema and
+ * a reference page over HTTP, under `/api/auth` on the public port, so both
+ * routes are disabled, and the api reads the schema with a direct call, which
+ * no route serves.
+ */
+describe("authFactory's half of the API document (#1511)", () => {
+  const auth = authFactory(noUsers, config);
+
+  it('gives its schema to a direct call, whatever the configuration', async () => {
+    const schema = await auth.api.generateOpenAPISchema();
+
+    expect(Object.keys(schema.paths)).toContain('/sign-in/email');
+  });
+
+  it.each([
+    '/api/auth/open-api/generate-schema',
+    '/api/auth/open-api/generate-schema/',
+    '/api/auth/open-api/generate-schema?x=1',
+    '/api/auth/Open-Api/generate-schema',
+    '/api/auth/reference',
+    '/api/auth/reference/',
+  ])('serves nothing at %s over HTTP', async (path) => {
+    const response = await auth.handler(new Request(`http://localhost:33333${path}`));
+
+    expect(response.status).toBe(404);
   });
 });

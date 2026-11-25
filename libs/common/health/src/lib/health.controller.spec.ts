@@ -1,19 +1,23 @@
+import { CodedHttpException } from '@bge/i18n';
 import { CACHE_REDIS_CLIENT, QUEUE_REDIS_CLIENT } from '@bge/redis';
 import { SecureHttpService } from '@bge/secure-http';
 import { StorageService } from '@bge/storage';
 import type { MockDatabaseService } from '@bge/testing';
 import { createTestingModuleWithDb } from '@bge/testing';
-import { Logger } from '@nestjs/common';
+import { ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import type { HealthCheckResult } from '@nestjs/terminus';
-import { TerminusModule } from '@nestjs/terminus';
+import { HealthCheckService, TerminusModule } from '@nestjs/terminus';
 import type { TestingModule } from '@nestjs/testing';
+import type { IncomingMessage } from 'node:http';
 import { HealthController } from './health.controller';
 import { CacheRedisHealthIndicator } from './indicators/cache-redis.health-indicator';
 import { HttpTargetHealthIndicator } from './indicators/http-target.health-indicator';
 import { PrismaHealthIndicator } from './indicators/prisma.health-indicator';
 import { QueueRedisHealthIndicator } from './indicators/queue-redis.health-indicator';
 import { StorageHealthIndicator } from './indicators/storage.health-indicator';
+import { markOperationalRequest } from './operational-request';
 
 // ---------------------------------------------------------------------------
 // Config mocking — same pattern as libs/api/well-known security-txt spec.
@@ -21,13 +25,11 @@ import { StorageHealthIndicator } from './indicators/storage.health-indicator';
 // ---------------------------------------------------------------------------
 
 interface MockHealthConfig {
-  enableHealthChecks?: boolean;
   httpHealthCheckUrls?: string[];
 }
 
 function buildMockConfigService(config: MockHealthConfig): jest.Mocked<Pick<ConfigService, 'get'>> {
   const configMap: Record<string, unknown> = {
-    'health.enableHealthChecks': config.enableHealthChecks ?? true,
     'health.httpHealthCheckUrls': config.httpHealthCheckUrls ?? [],
   };
 
@@ -130,18 +132,25 @@ async function buildController(options: BuildOptions = {}): Promise<BuildResult>
   };
 }
 
-/**
- * Type guard discriminating a real Terminus health-check result from the
- * `{ status: 'disabled' }` short-circuit returned by the Surrogate
- * pre-handler.
- */
-function isHealthCheckResult(value: unknown): value is HealthCheckResult {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'status' in value &&
-    (value as { status: string }).status !== 'disabled'
-  );
+/** A request the public port accepted: no listener marked it. */
+const publicRequest = () => ({ headers: {} }) as unknown as IncomingMessage;
+
+/** A request the operational port accepted (#1511). */
+function operationalRequest(): IncomingMessage {
+  const req = publicRequest();
+  markOperationalRequest(req);
+  return req;
+}
+
+/** The report Terminus answers the operational port with, which the public port never carries (#1511). */
+async function readyReport(controller: HealthController): Promise<HealthCheckResult> {
+  const result = await controller.ready(operationalRequest());
+
+  if (!('details' in result)) {
+    throw new Error('expected the Terminus report, got the status-only answer');
+  }
+
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -155,24 +164,14 @@ describe('HealthController', () => {
 
       expect(controller.live()).toEqual({ status: 'ok' });
     });
-
-    it('returns ok even when ENABLE_HEALTH_CHECKS=false (liveness is never disabled)', async () => {
-      const { controller } = await buildController({ enableHealthChecks: false });
-
-      expect(controller.live()).toEqual({ status: 'ok' });
-    });
   });
 
   describe('GET /health/ready (readiness)', () => {
-    describe('healthy paths', () => {
+    describe('on the operational port: the full report (#1511)', () => {
       it('returns ok when database and both Redis connections are healthy', async () => {
         const { controller } = await buildController();
 
-        const result = await controller.ready();
-
-        if (!isHealthCheckResult(result)) {
-          throw new Error('expected HealthCheckResult, got disabled response');
-        }
+        const result = await readyReport(controller);
 
         expect(result.status).toBe('ok');
         expect(result.info).toMatchObject({
@@ -185,11 +184,7 @@ describe('HealthController', () => {
       it('reports cache as "not configured" (still up) when CACHE_REDIS_CLIENT is unbound', async () => {
         const { controller } = await buildController({ cacheRedis: null });
 
-        const result = await controller.ready();
-
-        if (!isHealthCheckResult(result)) {
-          throw new Error('expected HealthCheckResult, got disabled response');
-        }
+        const result = await readyReport(controller);
 
         expect(result.status).toBe('ok');
         expect(result.info?.cache).toEqual({ status: 'up', message: 'not configured' });
@@ -198,11 +193,7 @@ describe('HealthController', () => {
       it('reports queue as "not configured" (still up) when QUEUE_REDIS_CLIENT is unbound', async () => {
         const { controller } = await buildController({ queueRedis: null });
 
-        const result = await controller.ready();
-
-        if (!isHealthCheckResult(result)) {
-          throw new Error('expected HealthCheckResult, got disabled response');
-        }
+        const result = await readyReport(controller);
 
         expect(result.info?.queue).toEqual({ status: 'up', message: 'not configured' });
       });
@@ -210,11 +201,7 @@ describe('HealthController', () => {
       it('passes with both Redis connections unbound — minimum-config processes still ready', async () => {
         const { controller } = await buildController({ cacheRedis: null, queueRedis: null });
 
-        const result = await controller.ready();
-
-        if (!isHealthCheckResult(result)) {
-          throw new Error('expected HealthCheckResult, got disabled response');
-        }
+        const result = await readyReport(controller);
 
         expect(result.status).toBe('ok');
         expect(result.info?.database).toEqual({ status: 'up' });
@@ -225,11 +212,7 @@ describe('HealthController', () => {
       it('reports storage "not configured" (still up) when StorageService is unbound', async () => {
         const { controller } = await buildController();
 
-        const result = await controller.ready();
-
-        if (!isHealthCheckResult(result)) {
-          throw new Error('expected HealthCheckResult, got disabled response');
-        }
+        const result = await readyReport(controller);
 
         expect(result.info?.storage).toEqual({ status: 'up', message: 'not configured' });
       });
@@ -237,22 +220,31 @@ describe('HealthController', () => {
       it('reports storage up when the backend ping resolves', async () => {
         const { controller } = await buildController({ storage: { ping: jest.fn().mockResolvedValue(undefined) } });
 
-        const result = await controller.ready();
-
-        if (!isHealthCheckResult(result)) {
-          throw new Error('expected HealthCheckResult, got disabled response');
-        }
+        const result = await readyReport(controller);
 
         expect(result.info?.storage).toEqual({ status: 'up' });
       });
     });
 
-    describe('unhealthy paths (Terminus throws ServiceUnavailableException)', () => {
+    describe("on the operational port: a failing dependency keeps Terminus's own refusal (#1511)", () => {
+      it("rethrows Terminus's own ServiceUnavailableException, with its details", async () => {
+        const { controller, db } = await buildController();
+        db.$queryRaw.mockRejectedValue(new Error('connection refused'));
+
+        const refusal = await controller.ready(operationalRequest()).catch((error: unknown) => error);
+
+        expect(refusal).toBeInstanceOf(ServiceUnavailableException);
+        expect(refusal).not.toBeInstanceOf(CodedHttpException);
+        expect(refusal).toMatchObject({
+          response: expect.objectContaining({ details: expect.objectContaining({ database: expect.anything() }) }),
+        });
+      });
+
       it('throws 503 when the database is down', async () => {
         const { controller, db } = await buildController();
         db.$queryRaw.mockRejectedValue(new Error('connection refused'));
 
-        await expect(controller.ready()).rejects.toMatchObject({
+        await expect(controller.ready(operationalRequest())).rejects.toMatchObject({
           response: expect.objectContaining({
             status: 'error',
             error: expect.objectContaining({
@@ -267,7 +259,7 @@ describe('HealthController', () => {
         cacheRedis.ping.mockRejectedValue(new Error('cache unreachable'));
         const { controller } = await buildController({ cacheRedis });
 
-        await expect(controller.ready()).rejects.toMatchObject({
+        await expect(controller.ready(operationalRequest())).rejects.toMatchObject({
           response: expect.objectContaining({
             error: expect.objectContaining({
               cache: { status: 'down', message: 'cache unreachable' },
@@ -281,7 +273,7 @@ describe('HealthController', () => {
         queueRedis.ping.mockRejectedValue(new Error('queue unreachable'));
         const { controller } = await buildController({ queueRedis });
 
-        await expect(controller.ready()).rejects.toMatchObject({
+        await expect(controller.ready(operationalRequest())).rejects.toMatchObject({
           response: expect.objectContaining({
             error: expect.objectContaining({
               queue: { status: 'down', message: 'queue unreachable' },
@@ -294,7 +286,7 @@ describe('HealthController', () => {
         const storage = { ping: jest.fn().mockRejectedValue(new Error('volume gone')) };
         const { controller } = await buildController({ storage });
 
-        await expect(controller.ready()).rejects.toMatchObject({
+        await expect(controller.ready(operationalRequest())).rejects.toMatchObject({
           response: expect.objectContaining({
             error: expect.objectContaining({ storage: { status: 'down', message: 'volume gone' } }),
           }),
@@ -302,38 +294,88 @@ describe('HealthController', () => {
       });
     });
 
-    describe('disable behavior (Surrogate pre-handler)', () => {
-      it('returns { status: "disabled" } when ENABLE_HEALTH_CHECKS=false', async () => {
-        const { controller } = await buildController({ enableHealthChecks: false });
+    describe('on the public port: the status only (#1511)', () => {
+      it('answers exactly { status: "ok" } when every dependency is healthy', async () => {
+        const { controller } = await buildController();
 
-        const result = await controller.ready();
-
-        expect(result).toEqual({ status: 'disabled' });
+        await expect(controller.ready(publicRequest())).resolves.toEqual({ status: 'ok' });
       });
 
-      it('skips every indicator when disabled', async () => {
-        const cacheRedis = makeRedis();
-        const queueRedis = makeRedis();
-        const { controller, db } = await buildController({
-          enableHealthChecks: false,
-          cacheRedis,
-          queueRedis,
+      it('answers { status: "ok" } for a dependency that is "not configured" too', async () => {
+        const { controller } = await buildController({ cacheRedis: null, queueRedis: null });
+
+        await expect(controller.ready(publicRequest())).resolves.toEqual({ status: 'ok' });
+      });
+
+      it('refuses with 503 and the code NOT_READY when a dependency is down', async () => {
+        const { controller, db } = await buildController();
+        db.$queryRaw.mockRejectedValue(new Error('connection refused'));
+
+        const refusal = await controller.ready(publicRequest()).catch((error: unknown) => error);
+
+        expect(refusal).toBeInstanceOf(CodedHttpException);
+        expect(refusal).toMatchObject({
+          status: 503,
+          response: {
+            statusCode: 503,
+            code: 'NOT_READY',
+            status: 'error',
+            message: { message: 'errors.health.not_ready' },
+          },
         });
-
-        await controller.ready();
-
-        expect(db.$queryRaw).not.toHaveBeenCalled();
-        expect(cacheRedis.ping).not.toHaveBeenCalled();
-        expect(queueRedis.ping).not.toHaveBeenCalled();
       });
 
-      it('warn-logs a single message when entering the disabled path', async () => {
-        const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
-        const { controller } = await buildController({ enableHealthChecks: false });
+      it('names no dependency and carries no Terminus field in the refusal', async () => {
+        const { controller, db } = await buildController();
+        db.$queryRaw.mockRejectedValue(new Error('connection refused to db.internal:5432'));
 
-        await controller.ready();
+        const refusal = await controller.ready(publicRequest()).catch((error: unknown) => error);
 
-        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('disabled by configuration'));
+        if (!(refusal instanceof CodedHttpException)) {
+          throw new Error('expected a CodedHttpException');
+        }
+
+        const body = JSON.stringify(refusal.getResponse());
+
+        expect(Object.keys(refusal.getResponse()).sort()).toEqual(['code', 'error', 'message', 'status', 'statusCode']);
+        for (const leaked of ['info', 'details', 'database', 'connection refused', 'db.internal', 'cache', 'queue']) {
+          expect(body).not.toContain(leaked);
+        }
+      });
+
+      // The failing dependency reaches the operator elsewhere: Terminus's
+      // HealthCheckService logs each failed check itself, and the operational
+      // port's `/health/ready` answers the full report (#1511).
+      it('carries the Terminus refusal as the cause of the public refusal', async () => {
+        const { controller, db } = await buildController();
+        db.$queryRaw.mockRejectedValue(new Error('connection refused'));
+
+        const refusal = await controller.ready(publicRequest()).catch((error: unknown) => error);
+
+        expect(refusal).toMatchObject({ cause: expect.any(ServiceUnavailableException) });
+      });
+
+      it('refuses the same way for each dependency that can be down', async () => {
+        const cacheRedis = makeRedis();
+        cacheRedis.ping.mockRejectedValue(new Error('cache unreachable'));
+        const storage = { ping: jest.fn().mockRejectedValue(new Error('volume gone')) };
+
+        for (const options of [{ cacheRedis }, { storage }]) {
+          const { controller } = await buildController(options);
+
+          await expect(controller.ready(publicRequest())).rejects.toMatchObject({
+            status: 503,
+            response: { code: 'NOT_READY', status: 'error' },
+          });
+        }
+      });
+
+      it('rethrows a fault that is not Terminus refusing, as it was', async () => {
+        const { controller, module } = await buildController();
+        const fault = new TypeError('the check itself broke');
+        jest.spyOn(module.get(HealthCheckService), 'check').mockRejectedValue(fault);
+
+        await expect(controller.ready(publicRequest())).rejects.toBe(fault);
       });
     });
   });
@@ -385,17 +427,52 @@ describe('HealthController', () => {
       await expect(controller.detail()).resolves.toMatchObject({ info: { github: { status: 'up' } } });
       expect(http.request).toHaveBeenCalledWith('https://github.com', expect.anything());
     });
+  });
 
-    it('returns { status: "disabled" } and skips HTTP checks when ENABLE_HEALTH_CHECKS=false', async () => {
-      const { controller, http } = await buildController({
-        enableHealthChecks: false,
-        httpHealthCheckUrls: ['google|https://www.google.com'],
+  // The served document describes both ports' answers, not Terminus's full
+  // report alone, so a client reading it knows the public port's body (#1511).
+  describe('readiness in the API document (#1511)', () => {
+    async function readyResponses() {
+      const { module } = await buildController();
+      const app = module.createNestApplication({ logger: false });
+      const document = SwaggerModule.createDocument(app, new DocumentBuilder().build());
+      await app.close();
+
+      return document.paths['/health/ready'].get?.responses ?? {};
+    }
+
+    it("describes the public port's status-only body beside the full report", async () => {
+      const responses = await readyResponses();
+
+      expect(responses['200']).toMatchObject({
+        content: {
+          'application/json': {
+            schema: {
+              oneOf: [
+                { additionalProperties: false, properties: { status: { enum: ['ok'] } } },
+                { required: ['status', 'details'] },
+              ],
+            },
+          },
+        },
       });
+    });
 
-      const result = await controller.detail();
+    it("describes the public port's NOT_READY envelope beside the full report", async () => {
+      const responses = await readyResponses();
 
-      expect(result).toEqual({ status: 'disabled' });
-      expect(http.request).not.toHaveBeenCalled();
+      expect(responses['503']).toMatchObject({
+        content: {
+          'application/json': {
+            schema: {
+              oneOf: [
+                { properties: { code: { enum: ['NOT_READY'] }, status: { enum: ['error'] } } },
+                { required: ['status', 'details'] },
+              ],
+            },
+          },
+        },
+      });
     });
   });
 
@@ -409,7 +486,7 @@ describe('HealthController', () => {
       expect(module.get(StorageHealthIndicator)).toBeInstanceOf(StorageHealthIndicator);
     });
 
-    it('configService is resolved (Surrogate runConditions can access it on the controller)', async () => {
+    it('configService is resolved (the HTTP indicator list reads the configured URLs from it)', async () => {
       const { module, configService } = await buildController();
 
       expect(module.get(ConfigService)).toBe(configService);
