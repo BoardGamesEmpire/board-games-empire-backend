@@ -1,18 +1,13 @@
 import { Controller, Get, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ApiOkResponse, ApiServiceUnavailableResponse, ApiTags } from '@nestjs/swagger';
-import {
-  HealthCheck,
-  HealthCheckResult,
-  HealthCheckService,
-  HealthIndicatorFunction,
-  HttpHealthIndicator,
-} from '@nestjs/terminus';
+import { HealthCheck, HealthCheckResult, HealthCheckService, HealthIndicatorFunction } from '@nestjs/terminus';
 import { SkipThrottle } from '@nestjs/throttler';
 import { AllowAnonymous } from '@thallesp/nestjs-better-auth';
 import type { NextParameters } from 'surrogate';
 import { NextAsyncPre, SurrogateDelegate } from 'surrogate';
 import { CacheRedisHealthIndicator } from './indicators/cache-redis.health-indicator';
+import { HttpTargetHealthIndicator } from './indicators/http-target.health-indicator';
 import { PrismaHealthIndicator } from './indicators/prisma.health-indicator';
 import { QueueRedisHealthIndicator } from './indicators/queue-redis.health-indicator';
 import { StorageHealthIndicator } from './indicators/storage.health-indicator';
@@ -74,7 +69,7 @@ export class HealthController {
   constructor(
     private readonly configService: ConfigService,
     private readonly health: HealthCheckService,
-    private readonly http: HttpHealthIndicator,
+    private readonly http: HttpTargetHealthIndicator,
     private readonly prismaIndicator: PrismaHealthIndicator,
     private readonly cacheRedisIndicator: CacheRedisHealthIndicator,
     private readonly queueRedisIndicator: QueueRedisHealthIndicator,
@@ -123,7 +118,8 @@ export class HealthController {
   }
 
   /**
-   * Extended health report — pings each URL in `HTTP_HEALTH_CHECK_URLS`.
+   * Extended health report — runs an HTTP check on each URL in
+   * `HTTP_HEALTH_CHECK_URLS`.
    *
    * Intended for monitoring dashboards and on-call debugging, not K8s probes.
    * URLs are operator-configured as `name|url` pairs in the env var. A
@@ -131,13 +127,14 @@ export class HealthController {
    * tool rather than a K8s readiness probe unless they explicitly want
    * external-URL availability to gate their pods.
    *
-   * Empty configuration is fine; the indicator list is empty and Terminus
-   * returns a passing result.
+   * Empty configuration is fine, and it is the default: the indicator list is
+   * empty, nothing is sent, and Terminus returns a passing result. A
+   * configured HTTP check goes through the outbound HTTP policy (#1509).
    */
   @HealthCheck()
   @Get()
-  @ApiOkResponse({ description: 'All HTTP pings succeeded (or checks disabled / none configured)' })
-  @ApiServiceUnavailableResponse({ description: 'One or more HTTP pings failed' })
+  @ApiOkResponse({ description: 'All HTTP checks succeeded (or checks disabled / none configured)' })
+  @ApiServiceUnavailableResponse({ description: 'One or more HTTP checks failed' })
   detail(): Promise<HealthCheckResult> | DisabledResponse {
     return this.health.check(this.buildHttpIndicators());
   }
@@ -146,7 +143,7 @@ export class HealthController {
    * Parses `HTTP_HEALTH_CHECK_URLS` (comma-separated `name|url` entries) into
    * Terminus indicator functions. Malformed entries (anything other than
    * exactly one `|` separator producing two non-empty parts) are silently
-   * dropped — better to ping the well-formed entries than crash the entire
+   * dropped — better to check the well-formed entries than crash the entire
    * health endpoint over a typo in one URL.
    */
   private buildHttpIndicators(): HealthIndicatorFunction[] {
@@ -160,7 +157,7 @@ export class HealthController {
       .map(
         ([name, url]) =>
           () =>
-            this.http.pingCheck(name.trim(), url.trim()),
+            this.http.check(name.trim(), url.trim()),
       );
   }
 

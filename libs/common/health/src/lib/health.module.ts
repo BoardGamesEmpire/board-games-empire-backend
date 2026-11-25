@@ -1,18 +1,18 @@
 import { DatabaseModule } from '@bge/database';
-import { HttpModule } from '@nestjs/axios';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { TerminusModule } from '@nestjs/terminus';
 import healthConfig from './configuration/health.config';
 import { HealthController } from './health.controller';
 import { CacheRedisHealthIndicator } from './indicators/cache-redis.health-indicator';
+import { HttpTargetHealthIndicator } from './indicators/http-target.health-indicator';
 import { PrismaHealthIndicator } from './indicators/prisma.health-indicator';
 import { QueueRedisHealthIndicator } from './indicators/queue-redis.health-indicator';
 import { StorageHealthIndicator } from './indicators/storage.health-indicator';
 
 /**
  * HealthModule wires the three internal-dependency indicators (Prisma + cache
- * Redis + queue Redis) and HTTP ping support into a single controller.
+ * Redis + queue Redis) and HTTP checks into a single controller.
  *
  * The Redis indicators are `@Optional()` injection — processes that don't
  * configure the corresponding connection via `@bge/redis` pass the check with
@@ -30,11 +30,22 @@ import { StorageHealthIndicator } from './indicators/storage.health-indicator';
  * No import of `@bge/redis` is needed: `CACHE_REDIS_CLIENT` and
  * `QUEUE_REDIS_CLIENT` are provided by `RedisModule.forRootAsync` which
  * registers itself as a `global: true` module in each app's bootstrap.
+ *
+ * `HttpTargetHealthIndicator` needs `SecureHttpService`, which `SecureHttpModule`
+ * provides globally in the api, the only app that loads this module (#1509).
+ * An app that loads HealthModule without it fails at boot on the missing
+ * provider.
  */
 @Module({
   controllers: [HealthController],
-  imports: [ConfigModule.forFeature(healthConfig), DatabaseModule, HttpModule, TerminusModule],
-  providers: [CacheRedisHealthIndicator, PrismaHealthIndicator, QueueRedisHealthIndicator, StorageHealthIndicator],
+  imports: [ConfigModule.forFeature(healthConfig), DatabaseModule, TerminusModule],
+  providers: [
+    CacheRedisHealthIndicator,
+    HttpTargetHealthIndicator,
+    PrismaHealthIndicator,
+    QueueRedisHealthIndicator,
+    StorageHealthIndicator,
+  ],
   exports: [CacheRedisHealthIndicator, PrismaHealthIndicator, QueueRedisHealthIndicator, StorageHealthIndicator],
 })
 export class HealthModule {}

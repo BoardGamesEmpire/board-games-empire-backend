@@ -1,14 +1,16 @@
 import { CACHE_REDIS_CLIENT, QUEUE_REDIS_CLIENT } from '@bge/redis';
+import { SecureHttpService } from '@bge/secure-http';
 import { StorageService } from '@bge/storage';
 import type { MockDatabaseService } from '@bge/testing';
 import { createTestingModuleWithDb } from '@bge/testing';
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { HealthCheckResult } from '@nestjs/terminus';
-import { HttpHealthIndicator, TerminusModule } from '@nestjs/terminus';
+import { TerminusModule } from '@nestjs/terminus';
 import type { TestingModule } from '@nestjs/testing';
 import { HealthController } from './health.controller';
 import { CacheRedisHealthIndicator } from './indicators/cache-redis.health-indicator';
+import { HttpTargetHealthIndicator } from './indicators/http-target.health-indicator';
 import { PrismaHealthIndicator } from './indicators/prisma.health-indicator';
 import { QueueRedisHealthIndicator } from './indicators/queue-redis.health-indicator';
 import { StorageHealthIndicator } from './indicators/storage.health-indicator';
@@ -69,20 +71,16 @@ interface BuildOptions extends MockHealthConfig {
 }
 
 /**
- * `HttpHealthIndicator` is request-scoped in Terminus v11, so `module.get()`
- * can't retrieve the singleton instance the controller injected. We replace
- * it at module-build time with a stable mock via `overrideProviders` — that
- * mock is both the value injected into the controller AND the handle the
- * test asserts against. No `module.resolve()` and no scope-mismatch.
+ * The HTTP checks go through the real `HttpTargetHealthIndicator` onto a mocked
+ * `SecureHttpService`, so a test asserts what would leave the server: the mock
+ * is the handle for "was anything sent" (#1509).
  */
-interface MockHttpHealthIndicator {
-  pingCheck: jest.Mock;
+interface MockSecureHttp {
+  request: jest.Mock;
 }
 
-function makeHttpIndicator(): MockHttpHealthIndicator {
-  return {
-    pingCheck: jest.fn().mockImplementation((key: string) => Promise.resolve({ [key]: { status: 'up' } })),
-  };
+function makeSecureHttp(): MockSecureHttp {
+  return { request: jest.fn().mockResolvedValue({ status: 200 }) };
 }
 
 interface BuildResult {
@@ -90,7 +88,7 @@ interface BuildResult {
   configService: jest.Mocked<Pick<ConfigService, 'get'>>;
   controller: HealthController;
   db: MockDatabaseService;
-  http: MockHttpHealthIndicator;
+  http: MockSecureHttp;
   module: TestingModule;
   queueRedis: MockRedis | null;
 }
@@ -99,7 +97,7 @@ async function buildController(options: BuildOptions = {}): Promise<BuildResult>
   const cacheRedis = options.cacheRedis === null ? null : (options.cacheRedis ?? makeRedis());
   const queueRedis = options.queueRedis === null ? null : (options.queueRedis ?? makeRedis());
   const configService = buildMockConfigService(options);
-  const http = makeHttpIndicator();
+  const http = makeSecureHttp();
 
   const { module, db } = await createTestingModuleWithDb({
     controllers: [HealthController],
@@ -109,12 +107,13 @@ async function buildController(options: BuildOptions = {}): Promise<BuildResult>
       CacheRedisHealthIndicator,
       QueueRedisHealthIndicator,
       StorageHealthIndicator,
+      HttpTargetHealthIndicator,
+      { provide: SecureHttpService, useValue: http },
       { provide: ConfigService, useValue: configService },
       ...(options.storage ? [{ provide: StorageService, useValue: options.storage }] : []),
       ...(cacheRedis !== null ? [{ provide: CACHE_REDIS_CLIENT, useValue: cacheRedis }] : []),
       ...(queueRedis !== null ? [{ provide: QUEUE_REDIS_CLIENT, useValue: queueRedis }] : []),
     ],
-    overrideProviders: [{ provide: HttpHealthIndicator, useValue: http }],
   });
 
   // Default the mocked $queryRaw to succeed; specific tests override.
@@ -339,29 +338,26 @@ describe('HealthController', () => {
     });
   });
 
-  describe('GET /health (detail / HTTP pings)', () => {
-    it('returns ok with an empty indicator set when HTTP_HEALTH_CHECK_URLS is empty', async () => {
-      const { controller } = await buildController({ httpHealthCheckUrls: [] });
+  describe('GET /health (detail / HTTP checks)', () => {
+    // No HTTP target is the default; the config spec proves an unset
+    // HTTP_HEALTH_CHECK_URLS reads as no entries, which is what this passes.
+    it('sends nothing and answers ok with no HTTP target configured (#1509)', async () => {
+      const { controller, http } = await buildController({ httpHealthCheckUrls: [] });
 
-      const result = await controller.detail();
-
-      if (!isHealthCheckResult(result)) {
-        throw new Error('expected HealthCheckResult, got disabled response');
-      }
-
-      expect(result.status).toBe('ok');
-      expect(Object.keys(result.info ?? {})).toHaveLength(0);
+      await expect(controller.detail()).resolves.toEqual({ status: 'ok', info: {}, error: {}, details: {} });
+      expect(http.request).not.toHaveBeenCalled();
     });
 
-    it('runs a pingCheck per well-formed name|url entry', async () => {
+    it('runs an HTTP check per well-formed name|url entry, through the outbound HTTP policy (#1509)', async () => {
       const { controller, http } = await buildController({
         httpHealthCheckUrls: ['google|https://www.google.com', 'github|https://www.github.com'],
       });
 
-      await controller.detail();
-
-      expect(http.pingCheck).toHaveBeenCalledWith('google', 'https://www.google.com');
-      expect(http.pingCheck).toHaveBeenCalledWith('github', 'https://www.github.com');
+      await expect(controller.detail()).resolves.toMatchObject({
+        info: { google: { status: 'up' }, github: { status: 'up' } },
+      });
+      expect(http.request).toHaveBeenCalledWith('https://www.google.com', expect.objectContaining({ method: 'GET' }));
+      expect(http.request).toHaveBeenCalledWith('https://www.github.com', expect.objectContaining({ method: 'GET' }));
     });
 
     it('drops malformed entries instead of crashing', async () => {
@@ -377,21 +373,20 @@ describe('HealthController', () => {
 
       await controller.detail();
 
-      expect(http.pingCheck).toHaveBeenCalledTimes(1);
-      expect(http.pingCheck).toHaveBeenCalledWith('valid', 'https://valid.example.com');
+      expect(http.request).toHaveBeenCalledTimes(1);
+      expect(http.request).toHaveBeenCalledWith('https://valid.example.com', expect.anything());
     });
 
-    it('trims whitespace from name and url before pinging', async () => {
+    it('trims whitespace from name and url before checking', async () => {
       const { controller, http } = await buildController({
         httpHealthCheckUrls: ['  github  |  https://github.com  '],
       });
 
-      await controller.detail();
-
-      expect(http.pingCheck).toHaveBeenCalledWith('github', 'https://github.com');
+      await expect(controller.detail()).resolves.toMatchObject({ info: { github: { status: 'up' } } });
+      expect(http.request).toHaveBeenCalledWith('https://github.com', expect.anything());
     });
 
-    it('returns { status: "disabled" } and skips pings when ENABLE_HEALTH_CHECKS=false', async () => {
+    it('returns { status: "disabled" } and skips HTTP checks when ENABLE_HEALTH_CHECKS=false', async () => {
       const { controller, http } = await buildController({
         enableHealthChecks: false,
         httpHealthCheckUrls: ['google|https://www.google.com'],
@@ -400,7 +395,7 @@ describe('HealthController', () => {
       const result = await controller.detail();
 
       expect(result).toEqual({ status: 'disabled' });
-      expect(http.pingCheck).not.toHaveBeenCalled();
+      expect(http.request).not.toHaveBeenCalled();
     });
   });
 
