@@ -133,6 +133,31 @@ describe('UpdateHouseholdDto', () => {
       ).resolves.toEqual([]);
     });
 
+    it.each([Reach.Private, Reach.Friends])('accepts the game pool reach %s (#367)', async (gamePoolReach) => {
+      await expect(propertiesWithErrors({ settings: { gamePoolReach } })).resolves.toEqual([]);
+    });
+
+    // The rungs the household's own reach accepts, and no others: the game
+    // pool can't reach anyone the household doesn't. Null would reach a
+    // non-nullable column as a 500 (#367).
+    it.each([['Public'], ['FriendsOfFriends'], [null], ['x']])(
+      'refuses the game pool reach %p (#367)',
+      async (gamePoolReach) => {
+        const dto = plainToInstance(
+          UpdateHouseholdDto,
+          { settings: { gamePoolReach } },
+          { enableImplicitConversion: true },
+        );
+        const errors = await validate(dto, { whitelist: true, forbidNonWhitelisted: true });
+
+        // forbidNonWhitelisted can also put an error on `settings`; the case
+        // stands on the nested child's own refusal.
+        expect(errors.map((error) => error.property)).toEqual(['settings']);
+        expect(errors[0].children?.[0]?.property).toBe('gamePoolReach');
+        expect(Object.keys(errors[0].children?.[0]?.constraints ?? {})).toContain('isIn');
+      },
+    );
+
     it('accepts settings that leave the policy out', async () => {
       await expect(propertiesWithErrors({ name: 'Renamed', settings: {} })).resolves.toEqual([]);
     });

@@ -19,6 +19,8 @@ import { HouseholdInviteService } from './invite/household-invite.service';
 import { PartyInviteController } from './invite/party-invite.controller';
 import { PartyInviteService } from './invite/party-invite.service';
 import { HouseholdNotificationListener } from './listeners/household-notification.listener';
+import { CollectionSharingController } from './member/collection-sharing.controller';
+import { CollectionSharingService } from './member/collection-sharing.service';
 import { HouseholdMemberController } from './member/household-member.controller';
 import { HouseholdMemberService } from './member/household-member.service';
 import { HouseholdQuotaController } from './quota/household-quota.controller';
@@ -41,6 +43,7 @@ import { HouseholdQuotaController } from './quota/household-quota.controller';
   controllers: [
     HouseholdController,
     HouseholdMemberController,
+    CollectionSharingController,
     HouseholdInviteController,
     PartyInviteController,
     HouseholdQuotaController,
@@ -52,6 +55,7 @@ import { HouseholdQuotaController } from './quota/household-quota.controller';
     HouseholdService,
     AdminHouseholdService,
     HouseholdMemberService,
+    CollectionSharingService,
     HouseholdInviteService,
     PartyInviteService,
     HouseholdGameShareService,

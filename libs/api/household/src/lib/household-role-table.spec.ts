@@ -306,6 +306,14 @@ const HOUSEHOLD_ROLE_TABLE: readonly TableRow[] = [
     ask: (ability, actor) => yesNo(ability.can(Action.delete, memberRow(actor, actor, ACTOR))),
   },
   {
+    // Every household role decides for itself whether its games join the
+    // household's game pool, and which of them are excluded games (#367, #170).
+    action: 'Change their own collection sharing and excluded games',
+    grantedBy: 'Household role',
+    cells: { HouseholdOwner: 'Yes', HouseholdAdmin: 'Yes', HouseholdMember: 'Yes', HouseholdGuest: 'Yes' },
+    ask: (ability, actor) => yesNo(ability.can(Action.update, memberRow(actor, actor, ACTOR))),
+  },
+  {
     action: "List the household's invites",
     grantedBy: 'Household role',
     cells: { HouseholdOwner: 'Yes', HouseholdAdmin: 'Yes', HouseholdMember: 'No', HouseholdGuest: 'No' },
@@ -522,7 +530,9 @@ const HOUSEHOLD_ROLE_TABLE: readonly TableRow[] = [
             userId: OTHER,
             deletedAt: null,
             user: {
-              householdMember: [{ showAllGames: true, household: { deletedAt: null, members: [{ userId: ACTOR }] } }],
+              householdMember: [
+                { collectionSharing: true, household: { deletedAt: null, members: [{ userId: ACTOR }] } },
+              ],
             },
             excludedFromHouseholds: [],
           }),
@@ -572,6 +582,26 @@ describe('what each household role can do (#168)', () => {
     '%s: %s',
     (_action, role, row) => {
       expect(row.ask(abilityFor(role), role)).toBe(row.cells[role]);
+    },
+  );
+
+  // The self-only grant stops at the acting user's own membership: a member
+  // or guest changes no one else's collection sharing or excluded games
+  // (#367, #170). Owners and admins reach other rows only through the roster
+  // management they already hold, and the service pins the acting user there.
+  it.each([SystemRole.HouseholdMember, SystemRole.HouseholdGuest] as const)(
+    "lets %s update its own membership and no one else's (#367, #170)",
+    (role) => {
+      const ability = abilityFor(role);
+
+      expect(ability.can(Action.update, memberRow(role, role, ACTOR))).toBe(true);
+      expect(ability.can(Action.update, memberRow(role, SystemRole.HouseholdMember, OTHER))).toBe(false);
+      expect(
+        ability.can(
+          Action.update,
+          subject(ResourceType.HouseholdMember, { householdId: 'hh-2', userId: ACTOR, role: { role: { name: role } } }),
+        ),
+      ).toBe(false);
     },
   );
 

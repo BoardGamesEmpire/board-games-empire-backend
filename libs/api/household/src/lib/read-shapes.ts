@@ -60,9 +60,9 @@ import { SHOWN_NAME_SELECT } from './shown-name';
  *
  * `@bge/invites` renders an invite's `inviter` the same way, and
  * `read-shapes.spec.ts` pins that the two cannot drift into two spellings of
- * the same thing.
+ * the same thing. The game pool's owners are rendered this way too (#367).
  */
-const ACTOR_SELECT = {
+export const ACTOR_SELECT = {
   id: true,
   username: true,
   profile: {
@@ -92,7 +92,7 @@ export const MEMBER_SELECT = {
   id: true,
   userId: true,
   householdId: true,
-  showAllGames: true,
+  collectionSharing: true,
   createdAt: true,
   updatedAt: true,
 
@@ -126,11 +126,14 @@ export const MEMBER_SCALARS_OMITTED = {
  * A household's settings as the household's detail, its lists and its update
  * return them (#166), to every reader of the household: a member's client
  * needs the member invite policy to know whether to offer an invite, and the
- * member share policy to know whether to offer a share (#810).
+ * member share policy to know whether to offer a share (#810), and the game
+ * pool reach to show who besides members and guests may see the game pool
+ * (#367).
  */
 export const HOUSEHOLD_SETTINGS_SELECT = {
   memberInvitePolicy: true,
   memberSharePolicy: true,
+  gamePoolReach: true,
 } as const satisfies Prisma.HouseholdSettingsSelect;
 
 /**

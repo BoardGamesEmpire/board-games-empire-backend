@@ -57,7 +57,7 @@ describe('household read shapes', () => {
 
     it('publishes the roster scalars named by D-296-5', () => {
       expect(scalarKeysOf(MEMBER_SELECT).sort()).toEqual(
-        ['createdAt', 'householdId', 'id', 'showAllGames', 'updatedAt', 'userId'].sort(),
+        ['createdAt', 'householdId', 'id', 'collectionSharing', 'updatedAt', 'userId'].sort(),
       );
     });
 
@@ -89,6 +89,10 @@ describe('household read shapes', () => {
 
     it('publishes the member share policy, which a member needs to know whether they may share (#810)', () => {
       expect(scalarKeysOf(HOUSEHOLD_SETTINGS_SELECT)).toContain('memberSharePolicy');
+    });
+
+    it('publishes the game pool reach, which says who besides members and guests may see the game pool (#367)', () => {
+      expect(scalarKeysOf(HOUSEHOLD_SETTINGS_SELECT)).toContain('gamePoolReach');
     });
   });
 

@@ -1,10 +1,16 @@
 import { MemberInvitePolicy, MemberSharePolicy } from '@bge/database';
 import { i18nValidationMessage } from '@bge/i18n';
+import { ReachProperty } from '@bge/shared';
 import { ApiPropertyOptional, OmitType, PartialType } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsEnum, IsObject, IsOptional, ValidateIf, ValidateNested } from 'class-validator';
 import type { HouseholdReach } from './create-household.dto';
-import { CreateHouseholdDto, HouseholdNameProperty, HouseholdReachProperty } from './create-household.dto';
+import {
+  CreateHouseholdDto,
+  HOUSEHOLD_REACHES,
+  HouseholdNameProperty,
+  HouseholdReachProperty,
+} from './create-household.dto';
 
 /**
  * A household's own settings (#166), as its owners and admins change them.
@@ -38,6 +44,22 @@ export class UpdateHouseholdSettingsDto {
   @ValidateIf((_, value) => value !== undefined)
   @IsEnum(MemberSharePolicy, { message: i18nValidationMessage('validation.isEnum') })
   memberSharePolicy?: MemberSharePolicy;
+
+  /**
+   * Who besides members and guests may open the game pool (#367). The rungs
+   * the household's own reach accepts, through the same decorator, which
+   * refuses `null` as its siblings here do. Whether the value fits the
+   * household's reach is the service's to judge: that needs the stored reach.
+   */
+  @ReachProperty({
+    reaches: HOUSEHOLD_REACHES,
+    description:
+      'Who besides members and guests may open the game pool, `GET /households/:id/games`. `Private` (the ' +
+      "default): no one. `Friends`: each member's friends, who see only the collection entries they could already " +
+      "read. Can't be wider than the household's reach: `Friends` is refused while the household is `Private`, and " +
+      'narrowing the household to `Private` lowers it to `Private` as well.',
+  })
+  gamePoolReach?: HouseholdReach;
 }
 
 /**

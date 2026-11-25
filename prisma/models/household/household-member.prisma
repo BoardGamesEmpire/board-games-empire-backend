@@ -7,7 +7,7 @@ model HouseholdMember {
   householdId String    @map("household_id")
   household   Household @relation(fields: [householdId], references: [id])
 
-  showAllGames           Boolean        @default(true) @map("show_all_games")
+  collectionSharing      Boolean        @default(true) @map("collection_sharing")
   excludedFromHouseholds ExcludedGame[]
 
   role HouseholdRole?

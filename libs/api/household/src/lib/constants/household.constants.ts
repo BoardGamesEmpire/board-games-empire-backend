@@ -40,6 +40,12 @@ export const HOUSEHOLD_INVITE_MAX_MESSAGE_LENGTH = 1_000;
 export const HOUSEHOLD_BAN_MAX_REASON_LENGTH = 1_000;
 
 /**
+ * Wire-contract cap on an excluded game's reason (#170): a note the member
+ * keeps for themselves, as long as a ban's reason.
+ */
+export const EXCLUDED_GAME_MAX_REASON_LENGTH = 1_000;
+
+/**
  * DB name of the `@@unique([householdId, userId])` constraint, as mapped in
  * `prisma/models/household/household-member.prisma`.
  *

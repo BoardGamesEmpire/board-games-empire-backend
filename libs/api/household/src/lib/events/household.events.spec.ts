@@ -2,14 +2,23 @@ import { Auditable } from '@bge/actor-context';
 import { HouseholdMembershipOrigin, MemberInvitePolicy, MemberSharePolicy, Reach, ResourceType } from '@bge/database';
 import { Reflector } from '@nestjs/core';
 import { HouseholdEvents } from '../constants/household-events.constant';
-import type { HouseholdBanSnapshot, HouseholdMembershipSnapshot, HouseholdStateRow } from './household.events';
+import type {
+  CollectionSharingSnapshot,
+  ExcludedGameSnapshot,
+  HouseholdBanSnapshot,
+  HouseholdMembershipSnapshot,
+  HouseholdStateRow,
+} from './household.events';
 import {
   HouseholdBanCreatedEvent,
   HouseholdBanLiftedEvent,
   HouseholdBanUpdatedEvent,
   HouseholdCreatedEvent,
   HouseholdDeletedEvent,
+  HouseholdExcludedGameAddedEvent,
+  HouseholdExcludedGameRemovedEvent,
   HouseholdMemberAdmittedEvent,
+  HouseholdMemberCollectionSharingChangedEvent,
   HouseholdMemberRemovedEvent,
   HouseholdMemberRoleChangedEvent,
   HouseholdRestoredEvent,
@@ -37,6 +46,22 @@ const ban = (overrides: Partial<HouseholdBanSnapshot> = {}): HouseholdBanSnapsho
   ...overrides,
 });
 
+const collectionSharing = (overrides: Partial<CollectionSharingSnapshot> = {}): CollectionSharingSnapshot => ({
+  householdId: 'hh-1',
+  memberId: 'member-1',
+  userId: 'user-1',
+  collectionSharing: true,
+  ...overrides,
+});
+
+const excludedGame = (overrides: Partial<ExcludedGameSnapshot> = {}): ExcludedGameSnapshot => ({
+  householdId: 'hh-1',
+  memberId: 'member-1',
+  userId: 'user-1',
+  collectionEntryId: 'entry-1',
+  ...overrides,
+});
+
 /** Each household change's domain event class and the name it is emitted under (#245). */
 const NAMED_CLASSES = [
   [HouseholdCreatedEvent, HouseholdEvents.Created],
@@ -46,6 +71,9 @@ const NAMED_CLASSES = [
   [HouseholdMemberAdmittedEvent, HouseholdEvents.MemberAdmitted],
   [HouseholdMemberRoleChangedEvent, HouseholdEvents.MemberRoleChanged],
   [HouseholdMemberRemovedEvent, HouseholdEvents.MemberRemoved],
+  [HouseholdMemberCollectionSharingChangedEvent, HouseholdEvents.MemberCollectionSharingChanged],
+  [HouseholdExcludedGameAddedEvent, HouseholdEvents.ExcludedGameAdded],
+  [HouseholdExcludedGameRemovedEvent, HouseholdEvents.ExcludedGameRemoved],
   [HouseholdBanCreatedEvent, HouseholdEvents.BanCreated],
   [HouseholdBanUpdatedEvent, HouseholdEvents.BanUpdated],
   [HouseholdBanLiftedEvent, HouseholdEvents.BanLifted],
@@ -154,6 +182,69 @@ describe('household domain events (#245)', () => {
     });
   });
 
+  describe('HouseholdMemberCollectionSharingChangedEvent', () => {
+    it('is an update of the household, with the collection sharing before and after (#170)', () => {
+      const before = collectionSharing({ collectionSharing: true });
+      const after = collectionSharing({ collectionSharing: false });
+
+      const event = new HouseholdMemberCollectionSharingChangedEvent(before, after, INITIATED_AT);
+
+      expect(event).toMatchObject({ subject: ResourceType.Household, subjectId: 'hh-1', action: 'update' });
+      expect(event.before).toBe(before);
+      expect(event.after).toBe(after);
+    });
+  });
+
+  describe('HouseholdExcludedGameAddedEvent', () => {
+    it('is an update of the household, building a before with no excluded game (#170)', () => {
+      const after = excludedGame();
+
+      const event = new HouseholdExcludedGameAddedEvent(after, INITIATED_AT);
+
+      expect(event).toMatchObject({ subject: ResourceType.Household, subjectId: 'hh-1', action: 'update' });
+      expect(event.before).toEqual({
+        householdId: 'hh-1',
+        memberId: 'member-1',
+        userId: 'user-1',
+        collectionEntryId: null,
+      });
+      expect(event.after).toBe(after);
+    });
+
+    // The reason is the member's own note on why they excluded a game; it
+    // stays out of the audit entry and the webhook payload alike (#170).
+    it('carries no reason for the excluded game (#170)', () => {
+      // @ts-expect-error -- an excluded game's snapshot has no reason field (#170)
+      const withReason: ExcludedGameSnapshot = { ...excludedGame(), reason: 'Too fragile to lend' };
+
+      expect(Object.keys(new HouseholdExcludedGameAddedEvent(excludedGame(), INITIATED_AT).after).sort()).toEqual([
+        'collectionEntryId',
+        'householdId',
+        'memberId',
+        'userId',
+      ]);
+      // Only the type error above is asserted; the value is never read.
+      void withReason;
+    });
+  });
+
+  describe('HouseholdExcludedGameRemovedEvent', () => {
+    it('is an update of the household, building an after with no excluded game (#170)', () => {
+      const before = excludedGame();
+
+      const event = new HouseholdExcludedGameRemovedEvent(before, INITIATED_AT);
+
+      expect(event).toMatchObject({ subject: ResourceType.Household, subjectId: 'hh-1', action: 'update' });
+      expect(event.before).toBe(before);
+      expect(event.after).toEqual({
+        householdId: 'hh-1',
+        memberId: 'member-1',
+        userId: 'user-1',
+        collectionEntryId: null,
+      });
+    });
+  });
+
   describe('HouseholdMemberRemovedEvent', () => {
     it.each(Object.values(MembershipEndCause))(
       'is an update of the household, building an after with no membership and the cause %s',
@@ -229,6 +320,7 @@ describe('household domain events (#245)', () => {
       settings: {
         memberInvitePolicy: MemberInvitePolicy.Direct,
         memberSharePolicy: MemberSharePolicy.NeedsApproval,
+        gamePoolReach: Reach.Friends,
       },
     };
 
@@ -242,6 +334,7 @@ describe('household domain events (#245)', () => {
         languageTagId: 'lang-en',
         memberInvitePolicy: MemberInvitePolicy.Direct,
         memberSharePolicy: MemberSharePolicy.NeedsApproval,
+        gamePoolReach: Reach.Friends,
       });
     });
 
@@ -257,6 +350,7 @@ describe('household domain events (#245)', () => {
 
       expect(Object.keys(householdStateSnapshot(wider)).sort()).toEqual([
         'description',
+        'gamePoolReach',
         'id',
         'image',
         'languageTagId',
@@ -272,6 +366,7 @@ describe('household domain events (#245)', () => {
 
       expect(snapshot.memberInvitePolicy).toBeNull();
       expect(snapshot.memberSharePolicy).toBeNull();
+      expect(snapshot.gamePoolReach).toBeNull();
       expect(snapshot.name).toBe('The Meeple House');
     });
   });

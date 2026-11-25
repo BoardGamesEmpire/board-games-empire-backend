@@ -125,7 +125,7 @@ describe('household member game sample', () => {
     const { household, viewer, member, membership } = await arrangeHousehold();
     const privateEntry = await arrangeCollectionEntry(db.client, member.user.id, Reach.Private);
     const publicEntry = await arrangeCollectionEntry(db.client, member.user.id, Reach.Public);
-    await db.client.householdMember.update({ where: { id: membership.id }, data: { showAllGames: false } });
+    await db.client.householdMember.update({ where: { id: membership.id }, data: { collectionSharing: false } });
 
     // The Public entry is the control: the sample still reaches this member,
     // so the Private entry's absence is collection sharing's doing.

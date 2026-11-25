@@ -169,6 +169,50 @@ export class HouseholdController {
   }
 
   @ApiOperation({
+    summary: 'List the game pool of one household',
+    description:
+      'The games the household’s members share with it, a page at a time. The game pool is the games ' +
+      'members share with their household: an entry is in it when its owner has collection sharing on in this ' +
+      'household and hasn’t excluded it here. Each row is a game, with `owners`: one per collection entry that ' +
+      'puts it there, naming the member (`memberId`), the user, the entry (`collectionEntryId`) and its ' +
+      '`platform`. A member who owns the game on two platforms is named twice. Owners are ordered by shown name, ' +
+      'then `memberId`, then entry id, so one member’s entries stay together. Only entries the caller can read ' +
+      'name an owner, and a game the caller can’t open at `GET /games/:id` is left out and not counted. Open to ' +
+      'the household’s members, and, when its `gamePoolReach` is `Friends`, to a friend of a member who can ' +
+      'read the household. Anyone let in this way sees only the entries they could already read. Anyone else, ' +
+      'server staff included, is refused. Ordered by title, then id. Paginated: `?page=` (1-based) and ' +
+      '`?limit=`, with a `pagination` envelope carrying `total`, `totalPages` and `hasMore`; `total` counts ' +
+      'games, not entries. Pages are offsets into a live list, so a game added or removed between requests can ' +
+      'shift the rows after it. See #367.',
+  })
+  @ApiPaginatedEnvelope('games')
+  @ApiResponse({ status: Http.BadRequest, description: 'A page or limit out of range, or an unknown query parameter' })
+  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
+  @ApiResponse({
+    status: Http.Forbidden,
+    description:
+      'Insufficient permissions, a household whose game pool is closed to the caller, or an actor kind with ' +
+      'no user (plugin, system, external) — provisional: see #395',
+  })
+  @ApiResponse({ status: Http.NotFound, description: 'Household not found, or deleted' })
+  // The household it opens, the entries that name the owners, and the games
+  // that are the rows.
+  @CheckPolicies(
+    (ability) =>
+      ability.can(Action.read, ResourceType.Household) &&
+      ability.can(Action.read, ResourceType.GameCollection) &&
+      ability.can(Action.read, ResourceType.Game),
+  )
+  // Beside the other game pool route, above `GET :id` with the household's
+  // other reads (#367).
+  @Get(':id/games')
+  listGamePool(@Param('id') id: string, @Query() pagination: DefaultPaginationQueryDto) {
+    return from(this.gamePool.listGamePool(id, pagination)).pipe(
+      map((page) => paginated('games', page, pagination, ResourceType.Game)),
+    );
+  }
+
+  @ApiOperation({
     summary: 'Create a household',
     description:
       'Idempotent when `clientRequestId` is supplied: a repeat submission with the same key (per user) ' +
@@ -208,6 +252,12 @@ export class HouseholdController {
     return from(this.householdService.getHouseholdById(id)).pipe(map((household) => ({ household })));
   }
 
+  @ApiResponse({
+    status: Http.BadRequest,
+    description:
+      'Invalid body, or a game pool reach wider than the household’s own reach ' +
+      '(code GAME_POOL_REACH_WIDER_THAN_HOUSEHOLD, #367)',
+  })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @ApiResponse({ status: Http.NotFound, description: 'Household not found, or deleted' })

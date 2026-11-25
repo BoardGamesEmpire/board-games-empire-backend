@@ -73,7 +73,7 @@ const NEW_MEMBER: HouseholdMemberWithRelations = {
   id: 'member-new',
   userId: INVITEE_ID,
   householdId: HOUSEHOLD_ID,
-  showAllGames: true,
+  collectionSharing: true,
   createdAt: NOW,
   updatedAt: NOW,
   user: { id: INVITEE_ID, username: 'sam', profile: { avatarUrl: null, displayName: 'Sam' } },

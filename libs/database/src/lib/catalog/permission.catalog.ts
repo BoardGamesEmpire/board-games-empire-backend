@@ -1478,15 +1478,15 @@ export const PERMISSION_CATALOG = [
     reason: 'View your own game collection',
   }),
   // Row visible when the owner shares a household with the acting user, the
-  // owner's membership in that household has `showAllGames`, and the row is
+  // owner's membership in that household has `collectionSharing`, and the row is
   // not excluded from a household the acting user belongs to. Its reach is
   // not read: a household shares its members' games, and the reach says who
   // beyond the owner's households sees the row. A member keeps an entry from
-  // a household by excluding it, or all of them with `showAllGames` (#495).
+  // a household by excluding it, or all of them with `collectionSharing` (#495).
   // The shared household must be live: a deleted one keeps its member rows
   // until it is purged, so membership alone would still match it.
   //
-  // Known approximation: `showAllGames` and the ExcludedGame check cannot be
+  // Known approximation: `collectionSharing` and the ExcludedGame check cannot be
   // correlated to the *same* shared household from inside this flat Prisma
   // clause — when owner and viewer share 2+ households with differing
   // exclusions/flags, an exclusion in any shared household hides the row.
@@ -1499,7 +1499,7 @@ export const PERMISSION_CATALOG = [
         is: {
           householdMember: {
             some: {
-              showAllGames: true,
+              collectionSharing: true,
               household: { is: liveHouseholdOf('{{ user.id }}') },
             },
           },
@@ -1891,6 +1891,24 @@ export const PERMISSION_CATALOG = [
     slug: 'delete:household_member:leave',
     riskLevel: RiskLevel.Low,
     reason: 'Leave a household you belong to',
+  }),
+  // A member's own say over how their games join the household's game pool:
+  // their collection sharing and their excluded games (#170). One slug
+  // covers both, since each is an update of the acting user's own membership
+  // and CASL can't tell two grants of one action on one subject apart. Self-
+  // scoped by conditions like the leave grant above, so every household role
+  // holds it, and the service pins `userId` in its `where` for the same reason:
+  // an Owner/Admin's `manage` implies `update` on the whole roster.
+  permission({
+    action: Action.update,
+    subject: ResourceType.HouseholdMember,
+    conditions: {
+      userId: '{{ user.id }}',
+      householdId: '{{ householdId }}',
+    },
+    slug: 'update:household_member:own',
+    riskLevel: RiskLevel.Low,
+    reason: 'Change how you share your games with a household you belong to',
   }),
   // Household bans (#782), held by household owners and admins alike. A ban
   // of a current member removes them, and the service asks about removing

@@ -9,10 +9,11 @@ import {
   isPrismaDependentRecordNotFoundError,
   normalizeClientRequestId,
   Prisma,
+  Reach,
   ResourceType,
   SystemRole,
 } from '@bge/database';
-import { t } from '@bge/i18n';
+import { CodedHttpException, t } from '@bge/i18n';
 import { InviteService } from '@bge/invites';
 import { canonicalizeTag } from '@bge/locale';
 import {
@@ -34,8 +35,10 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { Http } from '@status/codes';
 import assert from 'node:assert';
 import { HOUSEHOLD_RESTORE_PERMISSION_SLUG, HOUSEHOLD_RESTORE_WINDOW_MS } from './constants/household.constants';
+import type { UpdateHouseholdSettingsDto } from './dto';
 import { CreateHouseholdDto, UpdateHouseholdDto } from './dto';
 import { HouseholdEventPublisher, householdWebhook } from './events/household-event.publisher';
 import type { HouseholdStateSnapshot } from './events/household.events';
@@ -49,7 +52,7 @@ import {
 import type { LockFreeReadClient } from './household-access.helpers';
 import {
   assertHouseholdExists,
-  householdExists,
+  householdRefusal,
   lockDeletedHousehold,
   lockHouseholdForRoleTransition,
 } from './household-access.helpers';
@@ -140,7 +143,47 @@ const HOUSEHOLD_EDITABLE_COLUMNS: { readonly [Column in Exclude<keyof HouseholdS
   languageTagId: 'languageTagId',
   memberInvitePolicy: 'memberInvitePolicy',
   memberSharePolicy: 'memberSharePolicy',
+  gamePoolReach: 'gamePoolReach',
 };
+
+/**
+ * The settings an edit writes, with the game pool reach kept within the
+ * household's reach once the edit lands (#367). A friend who can't see the
+ * household can't see its game pool either, so:
+ *
+ * - a patch that sets the game pool reach to `Friends` while the household is,
+ *   or becomes, `Private` is refused with a 400 naming what to change first;
+ * - a patch that narrows the household to `Private` and leaves the game pool
+ *   reach out lowers a stored `Friends` to `Private` in the same write, so the
+ *   game pool never reaches further than the household it belongs to.
+ *
+ * Lowered rather than refused: narrowing a household is the stronger privacy
+ * choice, and refusing it until the owner also changed a second setting would
+ * keep the household wider than they asked for.
+ */
+function settingsWithinHouseholdReach(
+  settings: Partial<UpdateHouseholdSettingsDto>,
+  householdReach: Reach,
+  stored: { readonly gamePoolReach: Reach } | null,
+): Partial<UpdateHouseholdSettingsDto> {
+  if (householdReach !== Reach.Private) {
+    return settings;
+  }
+
+  if (settings.gamePoolReach === Reach.Friends) {
+    throw new CodedHttpException(
+      Http.BadRequest,
+      'GAME_POOL_REACH_WIDER_THAN_HOUSEHOLD',
+      t('errors.household.game_pool_reach_wider_than_household'),
+    );
+  }
+
+  if (settings.gamePoolReach === undefined && stored?.gamePoolReach === Reach.Friends) {
+    return { ...settings, gamePoolReach: Reach.Private };
+  }
+
+  return settings;
+}
 
 @Injectable()
 export class HouseholdService {
@@ -196,11 +239,7 @@ export class HouseholdService {
     if (!household) {
       // The scoped read matched nothing: probe existence to distinguish a
       // missing household (404) from one that exists but isn't visible (403).
-      if (await householdExists(this.db, id)) {
-        throw new ForbiddenException(t('common.forbidden.view'));
-      }
-
-      throw new NotFoundException(t('errors.household.not_found', { id }));
+      throw await householdRefusal(this.db, id, t('common.forbidden.view'));
     }
 
     const memberGamesPromises = household.members.map((member) => this.getSelectMemberGames(member.userId, member.id));
@@ -247,10 +286,13 @@ export class HouseholdService {
    * The games the member excluded from this household sit beside the
    * composed clause, as a filter on the entry's `ExcludedGame` rows for this
    * membership, so the roster read never has to carry them (#868). The
-   * ceiling's household rule approximates `showAllGames` and excluded games
+   * ceiling's household rule approximates `collectionSharing` and excluded games
    * across every household the owner and viewer share, not just this one; the
    * exact rule for a single household belongs to the collection pool read
-   * (#367).
+   * (#367). So a member who turned sharing off here, and keeps it on in another
+   * household the viewer is in, still shows entries here: only ones the viewer
+   * can read by id, and sharing off was never meant to hide what the reach
+   * admits on its own (#495).
    */
   private async getSelectMemberGames(memberId: string, householdMemberId: string) {
     // One where for both reads: the member's live entries under the ceiling,
@@ -453,9 +495,15 @@ export class HouseholdService {
    *
    * A household with no settings row has no member invite or share policy,
    * which no invite or share grant matches. The row the upsert creates gives
-   * it both, the one the patch sent and the other's column default, so both
-   * are recorded as changed: the second is a change in what members may do,
-   * though the patch did not name it.
+   * it every setting, the ones the patch sent and the others' column defaults,
+   * so each is recorded as changed. The policies' defaults change what members
+   * may do, though the patch did not name them; the game pool reach's default
+   * is recorded because the row now holds it, though it admits no one new.
+   *
+   * The game pool reach is kept within the household's reach as the edit
+   * leaves it (#367): see {@link settingsWithinHouseholdReach}. A household
+   * narrowed to `Private` lowers it in the same write, and that is recorded as
+   * a change too.
    */
   async updateHousehold(id: string, updateHouseholdDto: UpdateHouseholdDto) {
     const initiatedAt = new Date();
@@ -498,6 +546,14 @@ export class HouseholdService {
           include: { settings: { select: HOUSEHOLD_SETTINGS_SELECT } },
         });
 
+        // Judged against the stored row read under the lock, so a concurrent
+        // edit to the household's reach can't slip past it (#367). That holds
+        // only while this transaction stays at READ COMMITTED: the read after
+        // the lock is a new statement that sees a concurrent writer's commit,
+        // where RepeatableRead would snapshot at the earlier count, before the
+        // lock.
+        const written = settingsWithinHouseholdReach(settings, fields.reach ?? stored.reach, stored.settings);
+
         const household = await tx.household.update({
           where: editable,
           data: {
@@ -509,9 +565,9 @@ export class HouseholdService {
                   },
                 }
               : undefined,
-            ...(Object.keys(settings).length === 0
+            ...(Object.keys(written).length === 0
               ? {}
-              : { settings: { upsert: { create: settings, update: settings } } }),
+              : { settings: { upsert: { create: written, update: written } } }),
           },
           include: { settings: { select: HOUSEHOLD_SETTINGS_SELECT } },
         });
@@ -921,9 +977,7 @@ export class HouseholdService {
     forbidden: ReturnType<typeof t>,
     client: LockFreeReadClient = this.db,
   ): Promise<ForbiddenException | NotFoundException> {
-    return (await householdExists(client, id))
-      ? new ForbiddenException(forbidden)
-      : new NotFoundException(t('errors.household.not_found', { id }));
+    return householdRefusal(client, id, forbidden);
   }
 
   /**

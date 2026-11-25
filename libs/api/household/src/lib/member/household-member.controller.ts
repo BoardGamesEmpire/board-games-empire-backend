@@ -34,7 +34,7 @@ export class HouseholdMemberController {
       '`total`, `totalPages` and `hasMore`. `total` counts only the members this caller may ' +
       'see, so it never reveals a hidden roster size. See #230. ' +
       'Every member read on this controller returns the `select`-shaped roster row (#296): identity, ' +
-      '`showAllGames`, timestamps and the member’s role. Membership provenance — `origin` and ' +
+      '`collectionSharing`, timestamps and the member’s role. Membership provenance — `origin` and ' +
       '`addedById` (#276) — is an audit surface and is deliberately NOT returned.',
   })
   @ApiParam({ name: 'householdId', type: String })

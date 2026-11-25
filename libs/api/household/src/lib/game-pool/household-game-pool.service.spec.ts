@@ -1,4 +1,12 @@
-import { Action, GAME_SUMMARY_SELECT, Prisma, ResourceType } from '@bge/database';
+import {
+  acceptedFriendOf,
+  Action,
+  GAME_SUMMARY_SELECT,
+  Prisma,
+  Reach,
+  REACHES_ADMITTING_FRIENDS,
+  ResourceType,
+} from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
 import { RandomSampleQueryDto } from '@bge/shared';
@@ -8,8 +16,10 @@ import {
   createMockDatabaseService,
   createTestingModuleWithDb,
   MOCK_ACTING_USER_ID,
+  paginationQuery,
 } from '@bge/testing';
-import { ForbiddenException } from '@nestjs/common';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { ACTOR_SELECT } from '../read-shapes';
 import { gamePoolEntryScope } from './game-pool-scope';
 import { HouseholdGamePoolService } from './household-game-pool.service';
 
@@ -159,5 +169,255 @@ describe('HouseholdGamePoolService', () => {
     expect(rejection).toBeInstanceOf(ForbiddenException);
     expect((rejection as ForbiddenException).getResponse()).toEqual(t('common.forbidden.access'));
     expect(db.$transaction).not.toHaveBeenCalled();
+  });
+
+  /**
+   * #367. One household's game pool, a page at a time: one row per game, each
+   * naming the members whose readable entries put it there.
+   */
+  describe('listGamePool', () => {
+    const HOUSEHOLD_ID = 'hh-a';
+    const PAGE = paginationQuery({ page: 2, limit: 2 });
+
+    const gameOf = (id: string, title: string) => ({ id, title, thumbnail: null, description: null });
+
+    const userOf = (id: string, displayName: string | null, username = `user-${id}`) => ({
+      id,
+      username,
+      profile: { avatarUrl: null, displayName },
+    });
+
+    const entryOf = (id: string, user: ReturnType<typeof userOf>, gameId: string, platform = 'pc') => ({
+      id,
+      user,
+      platformGame: { gameId, platform: { id: `platform-${platform}`, name: platform.toUpperCase() } },
+    });
+
+    const listOf = () => service.listGamePool(HOUSEHOLD_ID, PAGE);
+
+    beforeEach(() => {
+      tx.household.findFirst.mockResolvedValue({ id: HOUSEHOLD_ID } as never);
+      tx.game.count.mockResolvedValue(5);
+      tx.game.findMany.mockResolvedValue([gameOf('g-1', 'Azul'), gameOf('g-2', 'Catan')] as never);
+      tx.gameCollection.findMany.mockResolvedValue([]);
+      tx.householdMember.findMany.mockResolvedValue([]);
+    });
+
+    // The game pool reach is a door, not a grant: it lets a friend of a
+    // member in when it is `Friends` and the household reaches friends, and
+    // the Household read ceiling still decides whether they may read the
+    // household at all. The friendship is stated, not left to the ceiling,
+    // which lets staff read every household. A household with no settings row
+    // matches no `settings` clause, so it reads as `Private`.
+    it('opens the household to its members, or to a friend of a member when its game pool reach is Friends (#367)', async () => {
+      await listOf();
+
+      expect(compose).toHaveBeenCalledWith(ResourceType.Household, Action.read, {
+        id: HOUSEHOLD_ID,
+        deletedAt: null,
+        OR: [
+          { members: { some: { userId: MOCK_ACTING_USER_ID } } },
+          {
+            reach: { in: [...REACHES_ADMITTING_FRIENDS] },
+            settings: { is: { gamePoolReach: Reach.Friends } },
+            members: { some: { user: { is: acceptedFriendOf(MOCK_ACTING_USER_ID) } } },
+          },
+        ],
+      });
+      expect(tx.household.findFirst).toHaveBeenCalledWith({
+        where: composedFor(ResourceType.Household),
+        select: { id: true },
+      });
+    });
+
+    // As `GET /households/:id` answers: a household the caller may not open
+    // is 403 when it exists, and 404 when it does not, and nothing is read.
+    it('refuses a household that exists but is closed to the caller with 403 (#367)', async () => {
+      tx.household.findFirst.mockResolvedValue(null);
+      tx.household.count.mockResolvedValue(1);
+
+      const rejection: unknown = await listOf().catch((error: unknown) => error);
+
+      expect(rejection).toBeInstanceOf(ForbiddenException);
+      expect((rejection as ForbiddenException).getResponse()).toEqual(t('common.forbidden.view'));
+      expect(tx.household.count).toHaveBeenCalledWith({ where: { id: HOUSEHOLD_ID, deletedAt: null } });
+      expect(tx.game.count).not.toHaveBeenCalled();
+      expect(tx.game.findMany).not.toHaveBeenCalled();
+      expect(tx.gameCollection.findMany).not.toHaveBeenCalled();
+    });
+
+    it('answers 404 for a household that does not exist, or is deleted (#367)', async () => {
+      tx.household.findFirst.mockResolvedValue(null);
+      tx.household.count.mockResolvedValue(0);
+
+      const rejection: unknown = await listOf().catch((error: unknown) => error);
+
+      expect(rejection).toBeInstanceOf(NotFoundException);
+      expect((rejection as NotFoundException).getResponse()).toEqual(
+        t('errors.household.not_found', { id: HOUSEHOLD_ID }),
+      );
+      expect(tx.game.findMany).not.toHaveBeenCalled();
+    });
+
+    // The game is the row, so a game several members own is one row. The game
+    // pool rule for this one household decides which entries count, under the
+    // GameCollection ceiling; the Game ceiling keeps out a game the caller
+    // could not open at `GET /games/:id`.
+    it("composes this household's game pool rule under the GameCollection ceiling, inside a game read under the Game ceiling (#367)", async () => {
+      await listOf();
+
+      expect(compose).toHaveBeenCalledWith(
+        ResourceType.GameCollection,
+        Action.read,
+        gamePoolEntryScope([HOUSEHOLD_ID]),
+      );
+      expect(composedFor(ResourceType.GameCollection)).toEqual({
+        ...gamePoolEntryScope([HOUSEHOLD_ID]),
+        AND: [ceilingOf(ResourceType.GameCollection)],
+      });
+      expect(compose).toHaveBeenCalledWith(ResourceType.Game, Action.read, {
+        deletedAt: null,
+        platformGames: { some: { collections: { some: composedFor(ResourceType.GameCollection) } } },
+      });
+    });
+
+    // `total` counts games, not entries, and two games with the same title
+    // page the same way on every read: title, then id.
+    it('counts and pages the games through one Game where, by title then id, in one REPEATABLE READ transaction (#367)', async () => {
+      const page = await listOf();
+
+      expect(db.$transaction.mock.calls[0][1 as never]).toEqual({
+        isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+      });
+      expect(tx.game.count).toHaveBeenCalledWith({ where: composedFor(ResourceType.Game) });
+      expect(tx.game.findMany).toHaveBeenCalledWith({
+        where: composedFor(ResourceType.Game),
+        select: GAME_SUMMARY_SELECT,
+        orderBy: [{ title: 'asc' }, { id: 'asc' }],
+        skip: PAGE.skip,
+        take: PAGE.pageSize,
+      });
+      expect(page.total).toBe(5);
+      expect(page.rows.map((row) => row.id)).toEqual(['g-1', 'g-2']);
+
+      expect(db.household.findFirst).not.toHaveBeenCalled();
+      expect(db.game.count).not.toHaveBeenCalled();
+      expect(db.game.findMany).not.toHaveBeenCalled();
+      expect(db.gameCollection.findMany).not.toHaveBeenCalled();
+      expect(db.householdMember.findMany).not.toHaveBeenCalled();
+    });
+
+    // The owners come from the same entries where the games were counted
+    // through, so an entry its owner excluded, or one the caller can't read,
+    // names no owner: a game two members own, one of whom excluded it, lists
+    // only the other.
+    it("reads the page's owners through the same entries where, in the same transaction (#367)", async () => {
+      await listOf();
+
+      expect(tx.gameCollection.findMany).toHaveBeenCalledWith({
+        where: {
+          AND: [composedFor(ResourceType.GameCollection), { platformGame: { gameId: { in: ['g-1', 'g-2'] } } }],
+        },
+        select: {
+          id: true,
+          user: { select: ACTOR_SELECT },
+          platformGame: { select: { gameId: true, platform: { select: { id: true, name: true } } } },
+        },
+      });
+    });
+
+    // One owner per readable entry: a member owning a game on two platforms
+    // appears twice. Owners are in shown-name order, then entry id, so a
+    // client lists them the same way on every read.
+    it('names one owner per entry, with their membership, in shown-name then entry-id order (#367)', async () => {
+      const zoe = userOf('u-zoe', 'Zoe');
+      const ana = userOf('u-ana', null, 'ana');
+      tx.gameCollection.findMany.mockResolvedValue([
+        entryOf('e-3', zoe, 'g-1'),
+        entryOf('e-2', ana, 'g-1', 'switch'),
+        entryOf('e-1', ana, 'g-1'),
+        entryOf('e-4', zoe, 'g-2'),
+      ] as never);
+      tx.householdMember.findMany.mockResolvedValue([
+        { id: 'm-zoe', userId: 'u-zoe' },
+        { id: 'm-ana', userId: 'u-ana' },
+      ] as never);
+
+      const page = await listOf();
+
+      expect(tx.householdMember.findMany).toHaveBeenCalledWith({
+        where: { householdId: HOUSEHOLD_ID, userId: { in: ['u-zoe', 'u-ana'] } },
+        select: { id: true, userId: true },
+      });
+      expect(page.rows).toEqual([
+        {
+          ...gameOf('g-1', 'Azul'),
+          owners: [
+            { memberId: 'm-ana', user: ana, collectionEntryId: 'e-1', platform: { id: 'platform-pc', name: 'PC' } },
+            {
+              memberId: 'm-ana',
+              user: ana,
+              collectionEntryId: 'e-2',
+              platform: { id: 'platform-switch', name: 'SWITCH' },
+            },
+            { memberId: 'm-zoe', user: zoe, collectionEntryId: 'e-3', platform: { id: 'platform-pc', name: 'PC' } },
+          ],
+        },
+        {
+          ...gameOf('g-2', 'Catan'),
+          owners: [
+            { memberId: 'm-zoe', user: zoe, collectionEntryId: 'e-4', platform: { id: 'platform-pc', name: 'PC' } },
+          ],
+        },
+      ]);
+    });
+
+    // Two members can share a shown name. Ordering by membership before entry
+    // id keeps each member's entries side by side, so a client never lists
+    // one member, then the other, then the first again (#367).
+    it("keeps one member's entries together when two members share a shown name (#367)", async () => {
+      const samA = userOf('u-sam-a', 'Sam');
+      const samB = userOf('u-sam-b', 'Sam');
+      tx.gameCollection.findMany.mockResolvedValue([
+        entryOf('e-1', samB, 'g-1'),
+        entryOf('e-2', samA, 'g-1'),
+        entryOf('e-3', samB, 'g-1', 'switch'),
+      ] as never);
+      tx.householdMember.findMany.mockResolvedValue([
+        { id: 'm-sam-a', userId: 'u-sam-a' },
+        { id: 'm-sam-b', userId: 'u-sam-b' },
+      ] as never);
+
+      const page = await listOf();
+
+      expect(page.rows[0]?.owners.map((owner) => [owner.memberId, owner.collectionEntryId])).toEqual([
+        ['m-sam-a', 'e-2'],
+        ['m-sam-b', 'e-1'],
+        ['m-sam-b', 'e-3'],
+      ]);
+    });
+
+    // A page past the end reads no owners: there are no games to name them for.
+    it('answers an empty page without reading owners (#367)', async () => {
+      tx.game.findMany.mockResolvedValue([]);
+
+      expect(await listOf()).toEqual({ rows: [], total: 5 });
+      expect(tx.gameCollection.findMany).not.toHaveBeenCalled();
+      expect(tx.householdMember.findMany).not.toHaveBeenCalled();
+    });
+
+    // PROVISIONAL (#395), as for the game pool sample: a game pool is opened
+    // by membership or friendship, which an actor with no user has neither of.
+    it('refuses an actor kind with no user behind it (#367)', async () => {
+      abilityService.getActingUserId.mockImplementation(() => {
+        throw new ForbiddenException(t('errors.actor_context.not_user_attributable', { kind: 'plugin' }));
+      });
+
+      const rejection: unknown = await listOf().catch((error: unknown) => error);
+
+      expect(rejection).toBeInstanceOf(ForbiddenException);
+      expect((rejection as ForbiddenException).getResponse()).toEqual(t('common.forbidden.access'));
+      expect(db.$transaction).not.toHaveBeenCalled();
+    });
   });
 });

@@ -142,6 +142,7 @@
   "read:household_member": "View the roster of a household you belong to.",
   "read:household_member:friends": "View the roster of a friend's household that friends can see.",
   "delete:household_member:leave": "Leave a household you belong to.",
+  "update:household_member:own": "Change how you share your games with a household you belong to.",
   "read:household_ban": "View the bans from a household you own or administer.",
   "create:household_ban": "Ban someone from a household you own or administer.",
   "update:household_ban": "Change the reason for a ban from a household you own or administer.",

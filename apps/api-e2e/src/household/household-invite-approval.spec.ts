@@ -1,4 +1,4 @@
-import { InviteStatus, MemberInvitePolicy, MemberSharePolicy, ResourceType, SystemRole } from '@bge/database';
+import { InviteStatus, MemberInvitePolicy, MemberSharePolicy, Reach, ResourceType, SystemRole } from '@bge/database';
 import type { Actors, SessionActor } from '@bge/testing-e2e';
 import { arrangeInvite, createActors } from '@bge/testing-e2e';
 import request from 'supertest';
@@ -178,10 +178,12 @@ describe('member invites, their approval, and the invites a user has sent', () =
       await expect(read(member)).resolves.toEqual({
         memberInvitePolicy: MemberInvitePolicy.NeedsApproval,
         memberSharePolicy: MemberSharePolicy.NeedsApproval,
+        gamePoolReach: Reach.Private,
       });
       await expect(read(guest)).resolves.toEqual({
         memberInvitePolicy: MemberInvitePolicy.NeedsApproval,
         memberSharePolicy: MemberSharePolicy.NeedsApproval,
+        gamePoolReach: Reach.Private,
       });
 
       // The list carries it as well, so a client need not read each household.
@@ -193,6 +195,7 @@ describe('member invites, their approval, and the invites a user has sent', () =
       expect((listed as unknown as { settings: unknown } | undefined)?.settings).toEqual({
         memberInvitePolicy: MemberInvitePolicy.NeedsApproval,
         memberSharePolicy: MemberSharePolicy.NeedsApproval,
+        gamePoolReach: Reach.Private,
       });
 
       // The invite policy moves off its default first, so that a share patch
@@ -207,6 +210,7 @@ describe('member invites, their approval, and the invites a user has sent', () =
       expect((patched.household as unknown as { settings: unknown }).settings).toEqual({
         memberInvitePolicy: MemberInvitePolicy.Off,
         memberSharePolicy: MemberSharePolicy.Direct,
+        gamePoolReach: Reach.Private,
       });
       await patchSettings(admin, householdId, { memberSharePolicy: MemberSharePolicy.Off }).expect(200);
       await expect(read(member)).resolves.toMatchObject({ memberSharePolicy: MemberSharePolicy.Off });
@@ -220,6 +224,7 @@ describe('member invites, their approval, and the invites a user has sent', () =
       await expect(read(owner)).resolves.toEqual({
         memberInvitePolicy: MemberInvitePolicy.Off,
         memberSharePolicy: MemberSharePolicy.Off,
+        gamePoolReach: Reach.Private,
       });
     });
 
@@ -239,6 +244,7 @@ describe('member invites, their approval, and the invites a user has sent', () =
       expect(detail.settings).toEqual({
         memberInvitePolicy: MemberInvitePolicy.NeedsApproval,
         memberSharePolicy: MemberSharePolicy.Direct,
+        gamePoolReach: Reach.Private,
       });
     });
   });

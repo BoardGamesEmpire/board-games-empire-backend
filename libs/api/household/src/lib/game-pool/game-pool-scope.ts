@@ -26,7 +26,7 @@ export function gamePoolEntryScope(householdIds: readonly string[]): Prisma.Game
   return {
     deletedAt: null,
     OR: householdIds.map((householdId) => ({
-      user: { is: { householdMember: { some: { householdId, showAllGames: true } } } },
+      user: { is: { householdMember: { some: { householdId, collectionSharing: true } } } },
       excludedFromHouseholds: { none: { householdMember: { is: { householdId } } } },
     })),
   };

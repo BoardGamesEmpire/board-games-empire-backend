@@ -7,7 +7,7 @@ describe('gamePoolEntryScope', () => {
     expect(gamePoolEntryScope(['hh-a', 'hh-b'])).toEqual({
       deletedAt: null,
       OR: ['hh-a', 'hh-b'].map((householdId) => ({
-        user: { is: { householdMember: { some: { householdId, showAllGames: true } } } },
+        user: { is: { householdMember: { some: { householdId, collectionSharing: true } } } },
         excludedFromHouseholds: { none: { householdMember: { is: { householdId } } } },
       })),
     });

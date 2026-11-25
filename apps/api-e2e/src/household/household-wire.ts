@@ -53,7 +53,7 @@ export type HouseholdWire = Wire<Household>;
  * suite would stop being an independent check of the wire contract.
  */
 export type HouseholdMemberWire = Wire<
-  Pick<HouseholdMember, 'id' | 'userId' | 'householdId' | 'showAllGames' | 'createdAt' | 'updatedAt'>
+  Pick<HouseholdMember, 'id' | 'userId' | 'householdId' | 'collectionSharing' | 'createdAt' | 'updatedAt'>
 >;
 
 /** The `role` embed on a member in `getHouseholdById`'s select shape. */
@@ -92,8 +92,10 @@ export interface LanguageTagProjection {
   readonly tag: string;
 }
 
-/** A household's settings as the detail, the lists and `PATCH` publish them (#166). */
-export type HouseholdSettingsProjection = Wire<Pick<HouseholdSettings, 'memberInvitePolicy' | 'memberSharePolicy'>>;
+/** A household's settings as the detail, the lists and `PATCH` publish them (#166, #367). */
+export type HouseholdSettingsProjection = Wire<
+  Pick<HouseholdSettings, 'memberInvitePolicy' | 'memberSharePolicy' | 'gamePoolReach'>
+>;
 
 /**
  * `getHouseholdById`'s shape: the row plus its member, language and settings
@@ -255,7 +257,8 @@ export interface MemberEnvelope {
 
 /**
  * `DELETE …/members/:memberId` and `DELETE …/members/me`: `{ message, member }`,
- * where `member` is the membership that was deleted.
+ * where `member` is the membership that was deleted. `PATCH …/members/me`
+ * answers the same envelope with the caller's changed roster row (#367).
  *
  * `userId` is checked as well as `id`, unlike the household rows above: the
  * remove and leave cases assert WHOSE membership went, and `userId` is the
@@ -475,6 +478,181 @@ export function restorableListEnvelope(
   }
 
   return { households: households as readonly RestorableHouseholdWire[], pagination };
+}
+
+/** The game summary every game pool read returns a game as (#367). */
+export interface GameSummaryWire {
+  readonly description: string | null;
+  readonly id: string;
+  readonly thumbnail: string | null;
+  readonly title: string;
+}
+
+/**
+ * One of the caller's excluded games, as `…/members/me/excluded-games`
+ * returns it (#170). The reason is the caller's own note, returned to them
+ * here and nowhere else.
+ */
+export interface ExcludedGameWire {
+  readonly collectionEntryId: string;
+  readonly excludedAt: string;
+  readonly platformGame: { readonly game: GameSummaryWire; readonly id: string };
+  readonly reason: string | null;
+}
+
+export interface ExcludedGameEnvelope {
+  readonly excludedGame: ExcludedGameWire;
+  readonly message: string;
+}
+
+export interface ExcludedGamesEnvelope {
+  readonly excludedGames: readonly ExcludedGameWire[];
+}
+
+/**
+ * Narrows an excluded game: a string entry id, a `reason` that is a string or
+ * `null` (never missing, since a missing key reads as no reason to a client
+ * that set one), and the game it holds.
+ */
+function asExcludedGame(value: unknown): ExcludedGameWire | undefined {
+  if (!isRecord(value) || !isNonEmptyString(value['collectionEntryId'])) {
+    return undefined;
+  }
+
+  const reason = value['reason'];
+  if (reason !== null && typeof reason !== 'string') {
+    return undefined;
+  }
+
+  const platformGame = value['platformGame'];
+  const game = isRecord(platformGame) ? platformGame['game'] : undefined;
+
+  return isRecord(game) && isNonEmptyString(game['id']) ? (value as unknown as ExcludedGameWire) : undefined;
+}
+
+/** `POST …/members/me/excluded-games`: `{ message, excludedGame }` (#170). */
+export function excludedGameEnvelope(response: HttpResponseLike, request: RequestDescription): ExcludedGameEnvelope {
+  if (!isRecord(response.body)) {
+    return fail('the body is not an object', request, response);
+  }
+
+  const excludedGame = asExcludedGame(response.body['excludedGame']);
+  if (excludedGame === undefined) {
+    return fail(
+      "it carried no 'excludedGame' with a string collectionEntryId, a reason and a platformGame.game",
+      request,
+      response,
+    );
+  }
+
+  const message = response.body['message'];
+  if (typeof message !== 'string') {
+    return fail("it carried no 'message' string", request, response);
+  }
+
+  return { message, excludedGame };
+}
+
+/** `GET …/members/me/excluded-games`: `{ excludedGames }` (#170). */
+export function excludedGamesEnvelope(response: HttpResponseLike, request: RequestDescription): ExcludedGamesEnvelope {
+  if (!isRecord(response.body) || !Array.isArray(response.body['excludedGames'])) {
+    return fail("it carried no 'excludedGames' array", request, response);
+  }
+
+  const excludedGames: ExcludedGameWire[] = [];
+  for (const entry of response.body['excludedGames'] as unknown[]) {
+    const excludedGame = asExcludedGame(entry);
+    if (excludedGame === undefined) {
+      return fail(
+        'one of its excluded games has no string collectionEntryId, reason or platformGame.game',
+        request,
+        response,
+      );
+    }
+
+    excludedGames.push(excludedGame);
+  }
+
+  return { excludedGames };
+}
+
+/** One collection entry that puts a game in a household's game pool, and whose it is (#367). */
+export interface GamePoolOwnerWire {
+  readonly collectionEntryId: string;
+  readonly memberId: string;
+  readonly platform: { readonly id: string; readonly name: string };
+  readonly user: ActorProjection;
+}
+
+/** A row of `GET /api/households/:id/games` (#367): a game, and the owners the caller can see. */
+export interface GamePoolRowWire extends GameSummaryWire {
+  readonly owners: readonly GamePoolOwnerWire[];
+}
+
+export interface GamePoolEnvelope {
+  readonly games: readonly GamePoolRowWire[];
+  readonly pagination: PaginationWire;
+}
+
+/**
+ * `GET /api/households/:id/games`: `{ games, pagination }` (#367). Every row
+ * must carry a non-empty `owners` array of entries with string ids: a game is
+ * in the game pool only through an entry, so a row with no owner is one the
+ * read should not have counted.
+ *
+ * The page bounds are the ones {@link listEnvelope} checks, for its reasons.
+ */
+export function gamePoolEnvelope(response: HttpResponseLike, request: RequestDescription): GamePoolEnvelope {
+  if (!isRecord(response.body) || !Array.isArray(response.body['games'])) {
+    return fail("it carried no 'games' array", request, response);
+  }
+
+  const games = response.body['games'] as unknown[];
+
+  for (const row of games) {
+    if (!isRecord(row) || !isNonEmptyString(row['id']) || !Array.isArray(row['owners'])) {
+      return fail("one of its games has no string id or no 'owners' array", request, response);
+    }
+
+    const owners = row['owners'] as unknown[];
+    const valid =
+      owners.length > 0 &&
+      owners.every(
+        (owner) =>
+          isRecord(owner) &&
+          isNonEmptyString(owner['collectionEntryId']) &&
+          isNonEmptyString(owner['memberId']) &&
+          isRecord(owner['user']) &&
+          isRecord(owner['platform']),
+      );
+
+    if (!valid) {
+      return fail(
+        `game '${row['id']}' carried no owners, or an owner without collectionEntryId, memberId, user and platform`,
+        request,
+        response,
+      );
+    }
+  }
+
+  const pagination = asPagination(response.body['pagination']);
+  if (pagination === undefined) {
+    return fail(
+      "it carried no 'pagination' envelope whose page, limit, total, totalPages and hasMore agree",
+      request,
+      response,
+    );
+  }
+
+  if (games.length > pagination.limit || games.length > pagination.total) {
+    return fail(
+      `it carried ${games.length} games, more than its limit ${pagination.limit} or total ${pagination.total}`,
+      request,
+      response,
+    );
+  }
+
+  return { games: games as unknown as readonly GamePoolRowWire[], pagination };
 }
 
 /** A household owner as a row of `GET /api/admin/households` names them (#419). */

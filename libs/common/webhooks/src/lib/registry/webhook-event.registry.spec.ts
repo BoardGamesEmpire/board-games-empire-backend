@@ -118,6 +118,7 @@ describe('WebhookEventRegistry', () => {
         WebhookEventType.HouseholdMemberAdmitted,
         WebhookEventType.HouseholdMemberRoleChanged,
         WebhookEventType.HouseholdMemberRemoved,
+        WebhookEventType.HouseholdMemberCollectionSharingChanged,
       ].sort(),
     );
   });
@@ -140,6 +141,10 @@ describe('WebhookEventRegistry', () => {
       [WebhookEventType.HouseholdMemberAdmitted]: 'household.member.admitted.v1',
       [WebhookEventType.HouseholdMemberRoleChanged]: 'household.member.role-changed.v1',
       [WebhookEventType.HouseholdMemberRemoved]: 'household.member.removed.v1',
+      // A member's collection sharing (#170), which every roster read shows.
+      // Excluded games have no webhook type: the roster read keeps them from
+      // the household's other readers (#868).
+      [WebhookEventType.HouseholdMemberCollectionSharingChanged]: 'household.member.collection-sharing-changed.v1',
     };
 
     for (const [type, wireName] of Object.entries(wireNames)) {

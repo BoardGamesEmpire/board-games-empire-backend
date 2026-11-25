@@ -144,6 +144,13 @@ export enum MembershipEndCause {
  */
 export interface HouseholdStateSnapshot {
   readonly description: string | null;
+
+  /**
+   * Who besides members and guests may open the game pool (#367). Null for a
+   * household with no settings row.
+   */
+  readonly gamePoolReach: Reach | null;
+
   readonly id: string;
   readonly image: string | null;
   readonly languageTagId: string | null;
@@ -217,6 +224,35 @@ export interface HouseholdMembershipSnapshot {
   readonly userId: string;
 }
 
+/** A member's collection sharing, on one side of a change to it (#170). */
+export interface CollectionSharingSnapshot {
+  readonly collectionSharing: boolean;
+  readonly householdId: string;
+
+  /** The `HouseholdMember` row's id. */
+  readonly memberId: string;
+
+  readonly userId: string;
+}
+
+/**
+ * One of a member's excluded games, on one side of a change to it (#170). The
+ * side with no excluded game has a null `collectionEntryId`. The member's
+ * reason for excluding it is deliberately absent: it is theirs alone, and
+ * stays out of the audit entry and the webhook payload alike.
+ */
+export interface ExcludedGameSnapshot {
+  /** The excluded collection entry's id, or null on the side with no excluded game. */
+  readonly collectionEntryId: string | null;
+
+  readonly householdId: string;
+
+  /** The `HouseholdMember` row's id. */
+  readonly memberId: string;
+
+  readonly userId: string;
+}
+
 /**
  * One user's ban from the household, on one side of a change to it (#782,
  * #245). The side with no ban has a null `banId` and `reason`. The reason is
@@ -258,6 +294,7 @@ export function householdStateSnapshot(row: HouseholdStateRow): HouseholdStateSn
     languageTagId: row.languageTagId,
     memberInvitePolicy: row.settings?.memberInvitePolicy ?? null,
     memberSharePolicy: row.settings?.memberSharePolicy ?? null,
+    gamePoolReach: row.settings?.gamePoolReach ?? null,
   };
 }
 
@@ -396,6 +433,65 @@ export class HouseholdMemberRemovedEvent extends MutationEvent<HouseholdMembersh
       { householdId: before.householdId, userId: before.userId, memberId: null, role: null, cause },
       initiatedAt,
     );
+    this.subjectId = before.householdId;
+  }
+}
+
+/**
+ * Emitted once, after commit, when a member turns their collection sharing on
+ * or off (#170), and only when it changes. Both snapshots are populated, so
+ * `action` derives to `update`; the household is the subject, since what
+ * changed is which games its game pool holds.
+ */
+export class HouseholdMemberCollectionSharingChangedEvent extends MutationEvent<CollectionSharingSnapshot> {
+  static readonly eventName = HouseholdEvents.MemberCollectionSharingChanged;
+  readonly eventName = HouseholdMemberCollectionSharingChangedEvent.eventName;
+  declare readonly before: CollectionSharingSnapshot;
+  declare readonly after: CollectionSharingSnapshot;
+  readonly subject = ResourceType.Household;
+  readonly subjectId: string;
+
+  constructor(before: CollectionSharingSnapshot, after: CollectionSharingSnapshot, initiatedAt: Date) {
+    super(before, after, initiatedAt);
+    this.subjectId = after.householdId;
+  }
+}
+
+/**
+ * Emitted once, after commit, when a member makes one of their collection
+ * entries an excluded game (#170). The household changed, not a row of its
+ * own, so `action` derives to `update`: `before` is the same member with no
+ * excluded game.
+ */
+export class HouseholdExcludedGameAddedEvent extends MutationEvent<ExcludedGameSnapshot> {
+  static readonly eventName = HouseholdEvents.ExcludedGameAdded;
+  readonly eventName = HouseholdExcludedGameAddedEvent.eventName;
+  declare readonly before: ExcludedGameSnapshot;
+  declare readonly after: ExcludedGameSnapshot;
+  readonly subject = ResourceType.Household;
+  readonly subjectId: string;
+
+  constructor(after: ExcludedGameSnapshot, initiatedAt: Date) {
+    super({ ...after, collectionEntryId: null }, after, initiatedAt);
+    this.subjectId = after.householdId;
+  }
+}
+
+/**
+ * Emitted once, after commit, when a member stops excluding one of their
+ * collection entries (#170). `after` is the same member with no excluded game,
+ * so `action` derives to `update`.
+ */
+export class HouseholdExcludedGameRemovedEvent extends MutationEvent<ExcludedGameSnapshot> {
+  static readonly eventName = HouseholdEvents.ExcludedGameRemoved;
+  readonly eventName = HouseholdExcludedGameRemovedEvent.eventName;
+  declare readonly before: ExcludedGameSnapshot;
+  declare readonly after: ExcludedGameSnapshot;
+  readonly subject = ResourceType.Household;
+  readonly subjectId: string;
+
+  constructor(before: ExcludedGameSnapshot, initiatedAt: Date) {
+    super(before, { ...before, collectionEntryId: null }, initiatedAt);
     this.subjectId = before.householdId;
   }
 }
