@@ -73,6 +73,7 @@ describe('IsCidrConstraint', () => {
       'fc00::/7x',
       '10.0.0.0/00', // a leading zero: would be read as /0
       '10.0.0.0/08',
+      'fe80::1%eth0/64', // IPv6 zone ID, which no rule can match on (#1525)
       '',
     ])('rejects %s', (input) => {
       expect(c.validate(input)).toBe(false);

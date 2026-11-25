@@ -58,6 +58,14 @@ describe('parseIp', () => {
       const result = parseIp('FE80::1');
       expect(result?.canonical).toBe('fe80::1');
     });
+
+    // #1525: DNS results and peer addresses can carry a zone; the address
+    // still has to read as itself so the fe80::/10 block keeps applying.
+    it('reads a scoped address as its address, without the zone ID (#1525)', () => {
+      const result = parseIp('fe80::1%eth0');
+      expect(result?.family).toBe(6);
+      expect(result?.canonical).toBe('fe80::1');
+    });
   });
 
   describe('IPv4-mapped IPv6', () => {
