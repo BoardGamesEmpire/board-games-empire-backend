@@ -18,7 +18,6 @@ import {
 } from '../nomination/events/nomination.events';
 import { LIVE_DATE_STATUSES } from '../occurrence/live-dates.util';
 import { lockLiveEventDates } from '../utils/lock-live-event.util';
-import { rsvpDateFor } from '../utils/rsvp-date.util';
 import type { AssignableAttendeeRole } from './dto/add-attendee.dto';
 import { AttendeeAddedEvent } from './events/attendee.events';
 
@@ -402,9 +401,9 @@ export function emitGamesNobodyBrings(
   emitRemovedGames(emitter, eventId, games, LineupRemovalReason.NobodyBringing, actingUserId, initiatedAt);
 }
 
-/** Whom {@link seatUserWithin} seats on an event, and how. */
+/** Whom {@link seatUserWithin} seats on an event, and in which role. */
 export interface SeatUserParams {
-  /** When the seat is written: the date an answered status holds (#1027). */
+  /** When the seat is written: the date its `Attending` answer holds (#1027). */
   readonly at: Date;
 
   readonly eventId: string;
@@ -416,9 +415,7 @@ export interface SeatUserParams {
    */
   readonly invitedByAttendeeId: string | null;
 
-  readonly notes?: string;
   readonly roleName: AssignableAttendeeRole;
-  readonly status: EventParticipationStatus;
   readonly userId: string;
 }
 
@@ -438,8 +435,11 @@ export interface UserSeat {
 
 /**
  * Seats a user with an account on the event, on the caller's transaction:
- * the attendee row, in `roleName`, at `status`. The caller holds the event's
- * lock (`shareLiveEvent`) and has settled whether the user may be seated.
+ * the attendee row, in `roleName`, `Attending`, with its RSVP dated `at`
+ * (#1027). Accepting an invite is the only way a user with an account joins,
+ * and accepting means attending, so there is no other status to seat with,
+ * and no notes (#742). The caller holds the event's lock (`shareLiveEvent`)
+ * and has settled whether the user may be seated.
  *
  * Someone a host removed keeps their row, and the (event, user) key with it,
  * so seating them again revives that row rather than inserting a second
@@ -458,7 +458,7 @@ export interface UserSeat {
  * does.
  */
 export async function seatUserWithin(tx: Prisma.TransactionClient, params: SeatUserParams): Promise<UserSeat> {
-  const { at, eventId, invitedByAttendeeId, roleName, status, userId } = params;
+  const { at, eventId, invitedByAttendeeId, roleName, userId } = params;
 
   const existing = await tx.eventAttendee.findFirst({
     where: { eventId, userId },
@@ -470,12 +470,9 @@ export async function seatUserWithin(tx: Prisma.TransactionClient, params: SeatU
   }
 
   const fields = {
-    status,
-    // Seated with an answer, the row holds that answer from now; seated as
-    // invited, it holds none yet. A revived row takes the date of the status
-    // it is revived with (#1027).
-    rsvpDate: rsvpDateFor(status, at),
-    notes: params.notes,
+    status: EventParticipationStatus.Attending,
+    // The row holds its answer from now, a revived one included (#1027).
+    rsvpDate: at,
     role: { create: { role: { connect: { name: roleName } } } },
   };
 

@@ -55,7 +55,7 @@ import { upcomingDateWhere, upcomingEventWhere } from './utils/upcoming-events.u
 
 const COND = { id: 'sentinel-condition' };
 
-/** What the daily cap's `consume` answers when no quota row applies. */
+/** What the daily invite quota's `consume` answers when no quota row applies. */
 const UNCONSTRAINED: QuotaCheckResult = {
   allowed: true,
   scope: null,
@@ -1588,7 +1588,7 @@ describe('EventService', () => {
       expect(invites.createWithin).not.toHaveBeenCalled();
     });
 
-    it('announces each invite after commit, and warns of the soft caps they went past (#742)', async () => {
+    it('announces each invite after commit, and warns of the soft quotas they went past (#742)', async () => {
       const steps: string[] = [];
       db.$transaction.mockImplementation(async (cb: (tx: MockDatabaseService) => unknown) => {
         const result = await cb(db);
@@ -1618,7 +1618,7 @@ describe('EventService', () => {
 
     // Each invite takes one of the creator's event invites for the day, so a
     // create with more invitees than the day has left is refused whole.
-    it('charges the daily cap once per invitee, and refuses the whole create past a hard cap', async () => {
+    it('charges the daily invite quota once per invitee, and refuses the whole create past a hard quota (#742)', async () => {
       quotas.consume.mockResolvedValueOnce(UNCONSTRAINED).mockResolvedValueOnce({
         ...UNCONSTRAINED,
         allowed: false,

@@ -15,7 +15,7 @@ import { mintApiKey, mintApiKeyWithArrangedScopes } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import type { TestDatabase } from '../support/test-db';
 import { createTestDatabase } from '../support/test-db';
-import { inviteAndAccept } from './event-join';
+import { createEventInviteClient, inviteAndAccept } from './event-join';
 import { BROWSE_PATH, createEventClient, EVENTS_PATH } from './event-request';
 import type { ListEventsEnvelope } from './event-wire';
 import { listEventsEnvelope } from './event-wire';
@@ -51,6 +51,7 @@ describe('browsing upcoming events (#962)', () => {
   });
 
   const { createdEventId } = createEventClient(baseUrl);
+  const { sentInvite } = createEventInviteClient(baseUrl);
 
   /** `hours` from now, as the wire sends a date. */
   const soon = (hours: number) => new Date(Date.now() + hours * 3_600_000).toISOString();
@@ -176,11 +177,7 @@ describe('browsing upcoming events (#962)', () => {
 
     // The controls: someone with no row sees it listed, and so does someone
     // invited who hasn't accepted, who has no row until they do (#742).
-    await request(baseUrl)
-      .post(`${EVENTS_PATH}/${eventId}/invites`)
-      .set(host.headers)
-      .send({ userId: invitee.user.id })
-      .expect(201);
+    await sentInvite(host, eventId, { userId: invitee.user.id });
     expect(await browse(stranger)).toContain(eventId);
     expect(await browse(invitee)).toContain(eventId);
 

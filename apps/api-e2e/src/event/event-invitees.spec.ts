@@ -7,14 +7,15 @@ import { requireBaseUrl } from '../support/e2e-env';
 import { expectErrorEnvelope } from '../support/error-envelope';
 import type { TestDatabase } from '../support/test-db';
 import { createTestDatabase } from '../support/test-db';
+import { createEventInviteClient } from './event-join';
 import { createEventClient, EVENTS_PATH } from './event-request';
 import { eventDetailEnvelope, eventReplayEnvelope } from './event-wire';
 
 /** The server policy's refusal. */
-const FRIENDS_ONLY = 'This server only allows you to place your friends on an event';
+const FRIENDS_ONLY = 'This server only lets you invite your friends to an event.';
 
 /** A block's or a preference's refusal: one message, so the caller cannot tell which. */
-const REFUSED = 'You cannot place this user on an event';
+const REFUSED = "You can't invite this person to this event.";
 
 /**
  * Whom a user may invite to an event by id (#546), on both ways of doing it:
@@ -31,7 +32,7 @@ const REFUSED = 'You cannot place this user on an event';
  * The settings row is on the isolation sweep's preserved list, so each test
  * puts the policy back.
  */
-describe('inviting a user to an event', () => {
+describe('inviting a user to an event (#546, #742)', () => {
   const baseUrl = requireBaseUrl(process.env);
 
   let db: TestDatabase;
@@ -64,9 +65,7 @@ describe('inviting a user to an event', () => {
 
   const { createEvent, createdEventId } = createEventClient(baseUrl);
 
-  /** `POST /api/events/:eventId/invites`, the route an invite to an existing event is sent on (#742). */
-  const invite = (actor: AuthenticatedActor, eventId: string, userId: string) =>
-    request(baseUrl).post(`${EVENTS_PATH}/${eventId}/invites`).set(actor.headers).send({ userId });
+  const { invite } = createEventInviteClient(baseUrl);
 
   const addAttendee = (actor: AuthenticatedActor, eventId: string, body: Record<string, unknown>) =>
     request(baseUrl).post(`${EVENTS_PATH}/${eventId}/attendees`).set(actor.headers).send(body);
@@ -134,7 +133,7 @@ describe('inviting a user to an event', () => {
   };
 
   describe('an id that names no person', () => {
-    it('answers 404 on the create, where it answered 500, and writes no event or invite', async () => {
+    it('answers 404 on the create, where it answered 500, and writes no event or invite (#742)', async () => {
       const host = await actors.user();
       const invitee = await actors.user();
 
@@ -151,13 +150,13 @@ describe('inviting a user to an event', () => {
       expect(await invitesSentBy(host)).toBe(before.invites);
     });
 
-    it('answers 404 on the invite route, and sends no invite', async () => {
+    it('answers 404 on the invite route, and sends no invite (#742)', async () => {
       const host = await actors.user();
       const eventId = await createdEventId(host);
 
-      await invite(host, eventId, randomUUID()).expect(404);
+      await invite(host, eventId, { userId: randomUUID() }).expect(404);
       for (const id of await nonPersonIds()) {
-        await invite(host, eventId, id).expect(404);
+        await invite(host, eventId, { userId: id }).expect(404);
       }
 
       expect(await inviteCount(eventId)).toBe(0);
@@ -210,7 +209,7 @@ describe('inviting a user to an event', () => {
   });
 
   // Everyone with an account is invited instead (#742).
-  it('refuses a userId on the direct add with 400 ATTENDEE_ACCOUNT_NEEDS_INVITE, and adds no one', async () => {
+  it('refuses a userId on the direct add with 400 ATTENDEE_ACCOUNT_NEEDS_INVITE, and adds no one (#742)', async () => {
     const [host, user] = await Promise.all([actors.user(), actors.user()]);
     const eventId = await createdEventId(host);
     const before = await attendeeCount(eventId);
@@ -238,7 +237,7 @@ describe('inviting a user to an event', () => {
 
       for (const refused of [blocker, blocked]) {
         expect((await createEvent(host, { inviteUserIds: [refused.user.id] }).expect(403)).body.message).toBe(REFUSED);
-        expect((await invite(host, eventId, refused.user.id).expect(403)).body.message).toBe(REFUSED);
+        expect((await invite(host, eventId, { userId: refused.user.id }).expect(403)).body.message).toBe(REFUSED);
       }
 
       expect(await eventsCreatedBy(host)).toBe(before.events);
@@ -252,10 +251,10 @@ describe('inviting a user to an event', () => {
       const eventId = await createdEventId(host);
 
       expect((await createEvent(host, { inviteUserIds: [closed.user.id] }).expect(403)).body.message).toBe(REFUSED);
-      expect((await invite(host, eventId, closed.user.id).expect(403)).body.message).toBe(REFUSED);
+      expect((await invite(host, eventId, { userId: closed.user.id }).expect(403)).body.message).toBe(REFUSED);
 
       await createEvent(host, { inviteUserIds: [householdOnly.user.id] }).expect(201);
-      await invite(host, eventId, householdOnly.user.id).expect(201);
+      await invite(host, eventId, { userId: householdOnly.user.id }).expect(201);
     });
   });
 
@@ -269,10 +268,10 @@ describe('inviting a user to an event', () => {
       expect((await createEvent(host, { inviteUserIds: [stranger.user.id] }).expect(403)).body.message).toBe(
         FRIENDS_ONLY,
       );
-      expect((await invite(host, eventId, stranger.user.id).expect(403)).body.message).toBe(FRIENDS_ONLY);
+      expect((await invite(host, eventId, { userId: stranger.user.id }).expect(403)).body.message).toBe(FRIENDS_ONLY);
 
       await createEvent(host, { inviteUserIds: [friend.user.id] }).expect(201);
-      await invite(host, eventId, friend.user.id).expect(201);
+      await invite(host, eventId, { userId: friend.user.id }).expect(201);
     });
 
     it("is the event's own: the household policy at Friends refuses no one here", async () => {

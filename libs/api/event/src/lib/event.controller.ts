@@ -27,8 +27,9 @@ export class EventController {
     summary: 'List events the caller is an attendee of',
     description:
       'Attendance-scoped: events the caller holds an attendee row for, hosts included, and nothing else — the ' +
-      'same kind of result for every caller. The row counts whatever its RSVP status, so events the caller is ' +
-      'only invited to, or has declined, are listed too. Newest first, soft-deleted events excluded. ' +
+      'same kind of result for every caller. The row counts whatever its RSVP status, so an event the caller has ' +
+      'declined is listed too. An open invite is no row, so an event the caller is only invited to is not ' +
+      'listed until they accept the invite (#742). Newest first, soft-deleted events excluded. ' +
       'Archived events are left out unless `?includeArchived=true`, and stay readable by id (#795). Each event ' +
       'carries a `status` worked out from its cancel, archive and confirmed dates. Each event carries `attendance`, ' +
       'the acting user\u2019s own attendee row: `attendeeId`, `status` (their RSVP), `role` and `rsvpDate`. It is ' +

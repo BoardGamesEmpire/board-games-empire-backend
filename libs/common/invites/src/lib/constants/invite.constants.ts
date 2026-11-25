@@ -21,6 +21,16 @@ export const OUTSTANDING_INVITE_STATUSES = [InviteStatus.AwaitingApproval, Invit
 export type OutstandingInviteStatus = (typeof OUTSTANDING_INVITE_STATUSES)[number];
 
 /**
+ * What an invite list shows when it is asked for no status: the invites still
+ * open, and those that expired, whether or not the sweep has marked them so,
+ * so an inviter or a host sees an invite lapse and can send another (#751,
+ * #742). Settled ones need `?status=`. The household's
+ * and the event's sent lists and the event's own list share it, so they
+ * cannot drift apart.
+ */
+export const LISTED_BY_DEFAULT_INVITE_STATUSES = [...OUTSTANDING_INVITE_STATUSES, InviteStatus.Expired] as const;
+
+/**
  * The invite types whose rows name a context, and so the kinds a party route
  * serves and its `?type=` takes (#742). A `System` or `Campaign` invite names
  * neither and has no party route. The one list: `ContextualInviteType` derives

@@ -14,7 +14,7 @@ import { requireBaseUrl } from '../support/e2e-env';
 import type { TestDatabase } from '../support/test-db';
 import { createTestDatabase } from '../support/test-db';
 import { arrangeListEntry } from './event-fixtures';
-import { inviteAndAccept } from './event-join';
+import { createEventInviteClient, inviteAndAccept } from './event-join';
 import { createEventClient, EVENTS_PATH } from './event-request';
 import type { ListEventsEnvelope } from './event-wire';
 import {
@@ -61,6 +61,7 @@ describe('event read scope', () => {
   });
 
   const { createdEventId } = createEventClient(baseUrl);
+  const { sentInvite } = createEventInviteClient(baseUrl);
 
   const readEvent = (actor: AuthenticatedActor, eventId: string) =>
     request(baseUrl).get(`${EVENTS_PATH}/${eventId}`).set(actor.headers);
@@ -118,11 +119,7 @@ describe('event read scope', () => {
 
       // Someone invited is no attendee until they accept (#742), so the event
       // is not theirs to list yet.
-      await request(baseUrl)
-        .post(`${EVENTS_PATH}/${firstId}/invites`)
-        .set(host.headers)
-        .send({ userId: invitee.user.id })
-        .expect(201);
+      await sentInvite(host, firstId, { userId: invitee.user.id });
       const invitedPage = listEventsEnvelope(await listEvents(invitee).expect(200), 'GET /api/events as an invitee');
       expect(idsOf(invitedPage)).toEqual([]);
     });

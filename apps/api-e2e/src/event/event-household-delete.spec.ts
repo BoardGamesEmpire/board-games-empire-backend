@@ -6,7 +6,7 @@ import type { Caller } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import type { TestDatabase } from '../support/test-db';
 import { createTestDatabase } from '../support/test-db';
-import { inviteAndAccept } from './event-join';
+import { createEventInviteClient, inviteAndAccept } from './event-join';
 import { attendeesPath, BROWSE_PATH, createEventClient, EVENTS_PATH } from './event-request';
 import { eventDetailEnvelope, listEventsEnvelope } from './event-wire';
 
@@ -73,9 +73,7 @@ describe("a deleted household's events (#992)", () => {
     return { householdId: household.id, eventId };
   };
 
-  /** `POST /api/events/:eventId/invites`: how a person with an account is asked to join (#742). */
-  const invite = (host: AuthenticatedActor, eventId: string, invitee: AuthenticatedActor) =>
-    request(baseUrl).post(`${EVENTS_PATH}/${eventId}/invites`).set(host.headers).send({ userId: invitee.user.id });
+  const { invite } = createEventInviteClient(baseUrl);
 
   const hostAttendeeId = async (host: AuthenticatedActor, eventId: string) => {
     const row = await db.client.eventAttendee.findFirstOrThrow({
@@ -147,7 +145,7 @@ describe("a deleted household's events (#992)", () => {
     await deleteHousehold(owner, householdId);
 
     await request(baseUrl).patch(`${EVENTS_PATH}/${eventId}`).set(owner.headers).send({ title: 'Gone' }).expect(404);
-    await invite(owner, eventId, friend).expect(404);
+    await invite(owner, eventId, { userId: friend.user.id }).expect(404);
 
     expect(await db.client.invite.count({ where: { eventId } })).toBe(0);
     expect(await db.client.eventAttendee.count({ where: { eventId, userId: friend.user.id } })).toBe(0);

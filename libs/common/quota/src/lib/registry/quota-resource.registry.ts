@@ -93,9 +93,9 @@ export class QuotaResourceRegistry {
       },
     ],
     [
-      // The household cap's twin for events (#742): the event invites the
-      // inviter sent in the last 24 hours, whatever their status since, so
-      // revoking one frees no slot. User scope only: an event has no
+      // The household daily invite quota's twin for events (#742): the event
+      // invites the inviter sent in the last 24 hours, whatever their status
+      // since, so revoking one frees no slot. User scope only: an event has no
       // household-style allowance, and its invites are sent by id, so none is
       // withheld.
       'event_invite_daily_count',

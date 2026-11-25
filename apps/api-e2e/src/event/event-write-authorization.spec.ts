@@ -19,7 +19,7 @@ import { requireBaseUrl } from '../support/e2e-env';
 import type { TestDatabase } from '../support/test-db';
 import { createTestDatabase } from '../support/test-db';
 import { arrangeListEntry, hoursFromNow } from './event-fixtures';
-import { inviteAndAccept } from './event-join';
+import { createEventInviteClient, inviteAndAccept } from './event-join';
 import { createEventClient, EVENTS_PATH } from './event-request';
 import {
   attendeeEnvelope,
@@ -316,8 +316,7 @@ describe('event write authorization', () => {
       ...(role === undefined ? {} : { role }),
     });
 
-    const invite = (actor: AuthenticatedActor, eventId: string, body: Record<string, unknown>) =>
-      request(baseUrl).post(`${EVENTS_PATH}/${eventId}/invites`).set(actor.headers).send(body);
+    const { invite } = createEventInviteClient(baseUrl);
 
     it('lets a host manage the attendees of an event they have just created', async () => {
       // The host's graph is built and cached by the create request itself,

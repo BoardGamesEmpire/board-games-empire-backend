@@ -620,7 +620,7 @@ export class EventService {
     );
 
     // The invites, after the event they invite to: any expired rivals the
-    // lib stamped, then each invite, then the soft caps they went past.
+    // lib stamped, then each invite, then the soft quotas they went past.
     this.invites.emit(sent.events);
     this.quotas.emitSoftOverages(sent.softOverages);
 

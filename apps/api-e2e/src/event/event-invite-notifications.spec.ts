@@ -1,14 +1,13 @@
 import { NotificationType, SystemRole } from '@bge/database';
 import type { Actors, SessionActor } from '@bge/testing-e2e';
 import { createActors } from '@bge/testing-e2e';
-import request from 'supertest';
-import { inviteEnvelope } from '../household/household-invite-wire';
 import type { UnreadNotificationWire } from '../notification/notification-wire';
 import { unreadWhen } from '../notification/unread-poll';
 import { requireBaseUrl } from '../support/e2e-env';
 import type { TestDatabase } from '../support/test-db';
 import { createTestDatabase } from '../support/test-db';
-import { createEventClient, EVENTS_PATH } from './event-request';
+import { createEventInviteClient } from './event-join';
+import { createEventClient } from './event-request';
 
 type Unread = readonly UnreadNotificationWire[];
 
@@ -43,23 +42,7 @@ describe('event invite notifications (#742)', () => {
     await db.close();
   });
 
-  const invitesPath = (eventId: string) => `${EVENTS_PATH}/${eventId}/invites`;
-
-  const inviteTo = async (inviter: SessionActor, invitee: SessionActor, eventId: string) =>
-    inviteEnvelope(
-      await request(baseUrl)
-        .post(invitesPath(eventId))
-        .set(inviter.headers)
-        .send({ userId: invitee.user.id, role: SystemRole.EventParticipant })
-        .expect(201),
-      'POST /api/events/:eventId/invites',
-    ).invite;
-
-  const accept = (actor: SessionActor, inviteId: string) =>
-    request(baseUrl).post(`/api/invites/${inviteId}/accept`).set(actor.headers);
-
-  const decline = (actor: SessionActor, inviteId: string) =>
-    request(baseUrl).post(`/api/invites/${inviteId}/decline`).set(actor.headers);
+  const { sentInvite, accept, decline } = createEventInviteClient(baseUrl);
 
   /** A user's display name, or their username when it is unset or blank: how a notification names them. */
   const nameOf = async (actor: SessionActor) => {
@@ -79,11 +62,11 @@ describe('event invite notifications (#742)', () => {
   const titleOf = async (eventId: string) =>
     (await db.client.event.findUniqueOrThrow({ where: { id: eventId }, select: { title: true } })).title;
 
-  it('an invite tells its invitee once, naming the event and the inviter, and tells the inviter nothing', async () => {
+  it('an invite tells its invitee once, naming the event and the inviter, and tells the inviter nothing (#742)', async () => {
     const [host, invitee] = await Promise.all([actors.user(), actors.user()]);
     const eventId = await createdEventId(host);
 
-    const invite = await inviteTo(host, invitee, eventId);
+    const invite = await sentInvite(host, eventId, { userId: invitee.user.id });
 
     const told = await unread(invitee, holds(NotificationType.EventInviteReceived, invite.id));
 
@@ -101,7 +84,7 @@ describe('event invite notifications (#742)', () => {
 
     // The sentinel: a later invite to the host, which they wait for.
     const otherEventId = await createdEventId(invitee);
-    const back = await inviteTo(invitee, host, otherEventId);
+    const back = await sentInvite(invitee, otherEventId, { userId: host.user.id });
     const hostTold = await unread(host, holds(NotificationType.EventInviteReceived, back.id));
 
     expect(hostTold.map((notification) => notification.type)).toEqual([NotificationType.EventInviteReceived]);
@@ -124,10 +107,10 @@ describe('event invite notifications (#742)', () => {
     ]);
   });
 
-  it('an accept tells the inviter, naming the invitee, and tells the invitee nothing', async () => {
+  it('an accept tells the inviter, naming the invitee, and tells the invitee nothing (#742)', async () => {
     const [host, invitee] = await Promise.all([actors.user(), actors.user()]);
     const eventId = await createdEventId(host);
-    const invite = await inviteTo(host, invitee, eventId);
+    const invite = await sentInvite(host, eventId, { userId: invitee.user.id });
 
     await accept(invitee, invite.id).expect(200);
 
@@ -147,16 +130,16 @@ describe('event invite notifications (#742)', () => {
     // The invitee's own list holds the invite they were sent and nothing of
     // their answer; the sentinel is a later invite, which they wait for.
     const laterEventId = await createdEventId(host);
-    const later = await inviteTo(host, invitee, laterEventId);
+    const later = await sentInvite(host, laterEventId, { userId: invitee.user.id });
     const inviteeList = await unread(invitee, holds(NotificationType.EventInviteReceived, later.id));
 
     expect(inviteeList.map((notification) => notification.type)).not.toContain(NotificationType.EventInviteAccepted);
   });
 
-  it('a decline tells the inviter, naming the invitee', async () => {
+  it('a decline tells the inviter, naming the invitee (#742)', async () => {
     const [host, invitee] = await Promise.all([actors.user(), actors.user()]);
     const eventId = await createdEventId(host);
-    const invite = await inviteTo(host, invitee, eventId);
+    const invite = await sentInvite(host, eventId, { userId: invitee.user.id });
 
     await decline(invitee, invite.id).expect(200);
 
@@ -185,7 +168,7 @@ describe('event invite notifications (#742)', () => {
         role: { create: { role: { connect: { name: SystemRole.EventCoHost } } } },
       },
     });
-    const invite = await inviteTo(coHost, invitee, eventId);
+    const invite = await sentInvite(coHost, eventId, { userId: invitee.user.id });
 
     await accept(invitee, invite.id).expect(200);
 
@@ -195,7 +178,7 @@ describe('event invite notifications (#742)', () => {
 
     // The host hears nothing of it: the sentinel is a later invite to them.
     const laterEventId = await createdEventId(coHost);
-    const later = await inviteTo(coHost, host, laterEventId);
+    const later = await sentInvite(coHost, laterEventId, { userId: host.user.id });
     const hostList = await unread(host, holds(NotificationType.EventInviteReceived, later.id));
 
     expect(about(hostList, NotificationType.EventInviteAccepted, invite.id)).toEqual([]);

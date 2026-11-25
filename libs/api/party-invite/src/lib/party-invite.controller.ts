@@ -256,7 +256,8 @@ export class PartyInviteController {
     description:
       'Takes back an invite you sent, pending or awaiting approval, whatever your role in its context is now. ' +
       'To cancel a household invite someone else sent, a household owner or household admin revokes it: ' +
-      '`POST /households/:householdId/invites/:inviteId/revoke`; for an event invite, the host or a co-host: ' +
+      '`POST /households/:householdId/invites/:inviteId/revoke`; for an event invite, the host or a co-host, ' +
+      "or for a household's event an owner or admin of that household: " +
       '`POST /events/:eventId/invites/:inviteId/revoke`.',
   })
   @ApiParam({ name: 'inviteId', type: String })

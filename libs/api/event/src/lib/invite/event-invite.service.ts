@@ -1,4 +1,4 @@
-import { Action, DatabaseService, InviteStatus, InviteType, Prisma, ResourceType, SystemRole } from '@bge/database';
+import { Action, DatabaseService, InviteType, Prisma, ResourceType, SystemRole } from '@bge/database';
 import { SHOWN_NAME_SELECT, shownName } from '@bge/household';
 import { t } from '@bge/i18n';
 import type { InviteContextView, InviteDomainEvent, InvitePartyView } from '@bge/invites';
@@ -6,7 +6,7 @@ import {
   CONTEXT_INVITE_SELECT,
   effectiveInviteStatusWhere,
   InviteService,
-  OUTSTANDING_INVITE_STATUSES,
+  LISTED_BY_DEFAULT_INVITE_STATUSES,
   withEffectiveInviteStatus,
 } from '@bge/invites';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
@@ -30,13 +30,6 @@ import { assertMayInvite, eventInviteSubject, readEventInviteAuthority } from '.
  */
 const REVOKE_FIELD = Prisma.InviteScalarFieldEnum.status;
 
-/**
- * The statuses the event's list shows by default (#742): the invites still
- * open, and the ones that ran out unanswered, which the host may want to send
- * again. Settled ones need `?status=`.
- */
-const LISTED_BY_DEFAULT: readonly InviteStatus[] = [...OUTSTANDING_INVITE_STATUSES, InviteStatus.Expired];
-
 /** One invite to the event, as the route and the event's create both send one (#742). */
 export interface EventInviteInput {
   readonly eventId: string;
@@ -50,7 +43,7 @@ export interface EventInviteInput {
  * What {@link EventInviteService.inviteWithin} hands back: the invite as its
  * inviter sees it, and what the caller emits after its transaction commits,
  * in order: the domain events (any expired rivals the lib stamped, then the
- * created invite), then the soft caps the invite went past.
+ * created invite), then the soft quotas the invite went past.
  */
 export interface EventInviteCreation {
   readonly events: readonly InviteDomainEvent[];
@@ -88,9 +81,10 @@ export class EventInviteService {
    * 3. The acting user's authority is asked before anything about the
    *    invitee, so a caller with no say over the event learns nothing about
    *    who exists or attends it ({@link assertMayInvite}).
-   * 4. {@link inviteWithin}: whom they may invite, the daily cap, the insert.
+   * 4. {@link inviteWithin}: whom they may invite, the daily invite
+   *    quota, the insert.
    *
-   * The domain events go out after commit, then any soft cap the invite went
+   * The domain events go out after commit, then any soft quota the invite went
    * past.
    */
   async createInvite(eventId: string, dto: CreateEventInviteDto): Promise<InvitePartyView> {
@@ -127,7 +121,7 @@ export class EventInviteService {
    *    nothing. A removed attendee may be invited back; accepting revives
    *    their row.
    * 4. The invite takes one of the inviter's event invites for the day, under
-   *    the cap's advisory lock: 402 past a hard cap.
+   *    the quota's advisory lock: 402 past a hard quota.
    * 5. The lib inserts, naming the invitee as the event's list shows them. A
    *    second outstanding invite to the same person is the database's 409,
    *    through the lib.
@@ -191,7 +185,7 @@ export class EventInviteService {
     const now = new Date();
     const statusWhere =
       query.status === undefined
-        ? { status: { in: [...LISTED_BY_DEFAULT] } }
+        ? { status: { in: [...LISTED_BY_DEFAULT_INVITE_STATUSES] } }
         : effectiveInviteStatusWhere(query.status, now);
     const where = this.scopeComposer.compose(ResourceType.Invite, Action.read, { eventId, AND: [statusWhere] });
 
@@ -259,9 +253,9 @@ export class EventInviteService {
 
   /**
    * Takes one invite from the inviter's day of event invites (#742), on the
-   * caller's transaction and under the cap's advisory lock, so the insert that
-   * follows cannot overshoot a hard cap: 402 past one. Hands back the soft
-   * caps it went past, for the caller to warn of after commit.
+   * caller's transaction and under the quota's advisory lock, so the insert
+   * that follows cannot overshoot a hard quota: 402 past one. Hands back the
+   * soft quotas it went past, for the caller to warn of after commit.
    */
   private async takeDailyInvite(
     tx: Prisma.TransactionClient,

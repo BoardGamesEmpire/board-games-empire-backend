@@ -21,7 +21,7 @@ Only a person signed in as themself. Joining a household or an event, or turning
 - A household invite goes to `HouseholdInviteResponder`, which admits a household member on accept.
 - An event invite goes to `EventInviteResponder`, which seats an attendee on accept, `Attending`, in the role the invite offered. Someone a host removed earlier has their attendee row revived.
 
-Every kind the party routes serve has a responder, and the service picks it by a lookup keyed by kind, so a kind added to `CONTEXTUAL_INVITE_TYPES` without one fails to compile rather than meeting a 404 at runtime. An accept answers `{ message, type, invite, ... }`, with `member` for a household invite and `attendee` for an event invite. An invite of a kind no party route serves meets the same 404 a stranger meets.
+Every kind the party routes serve has a responder. Accept picks it with a `switch` over the kind, one branch per kind so each answer carries the acceptance its own context made; decline and withdraw pick it by a lookup keyed by kind. Either way, a kind added to `CONTEXTUAL_INVITE_TYPES` without a responder fails to compile rather than meeting a 404 at runtime. An accept answers `{ message, type, invite, ... }`, with `member` for a household invite and `attendee` for an event invite. An invite of a kind no party route serves meets the same 404 a stranger meets.
 
 ## The lists
 

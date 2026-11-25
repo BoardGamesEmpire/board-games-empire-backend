@@ -1,4 +1,4 @@
-import { DatabaseService, EventParticipationStatus, InviteStatus, InviteType } from '@bge/database';
+import { DatabaseService, InviteStatus, InviteType } from '@bge/database';
 import { t } from '@bge/i18n';
 import type { InvitePartyView, InviteResponder, InviteTarget, RespondToInviteParams } from '@bge/invites';
 import { inviteNotOutstanding, InviteService } from '@bge/invites';
@@ -147,7 +147,6 @@ export class EventInviteResponder implements InviteResponder<EventInviteAcceptan
         eventId,
         userId: inviteeId,
         roleName: role,
-        status: EventParticipationStatus.Attending,
         invitedByAttendeeId: inviter?.id ?? null,
         at: initiatedAt,
       });

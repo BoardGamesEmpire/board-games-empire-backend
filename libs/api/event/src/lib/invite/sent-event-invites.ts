@@ -1,14 +1,12 @@
-import type { Prisma } from '@bge/database';
-import { InviteStatus, InviteType, liveEventWhere } from '@bge/database';
-import { effectiveInviteStatusWhere, OUTSTANDING_INVITE_STATUSES, unexpiredInviteWhere } from '@bge/invites';
+import type { InviteStatus, Prisma } from '@bge/database';
+import { InviteType, liveEventWhere } from '@bge/database';
+import {
+  effectiveInviteStatusWhere,
+  LISTED_BY_DEFAULT_INVITE_STATUSES,
+  OUTSTANDING_INVITE_STATUSES,
+  unexpiredInviteWhere,
+} from '@bge/invites';
 import { NOT_REMOVED } from '../constants/not-removed.constant';
-
-/**
- * What the sent list shows by default, as for household invites (#751): the
- * invites still open, and those that expired, whether or not the sweep has
- * marked them so, so an inviter sees an invite lapse and can send another.
- */
-const SENT_DEFAULT_STATUSES = [...OUTSTANDING_INVITE_STATUSES, InviteStatus.Expired] as const;
 
 /**
  * The event invites this user has sent (#742): how an attendee who invited
@@ -34,7 +32,9 @@ const SENT_DEFAULT_STATUSES = [...OUTSTANDING_INVITE_STATUSES, InviteStatus.Expi
  */
 export function sentEventInviteWhere(userId: string, now: Date, status?: InviteStatus): Prisma.InviteWhereInput {
   const statusWhere: Prisma.InviteWhereInput =
-    status === undefined ? { status: { in: [...SENT_DEFAULT_STATUSES] } } : effectiveInviteStatusWhere(status, now);
+    status === undefined
+      ? { status: { in: [...LISTED_BY_DEFAULT_INVITE_STATUSES] } }
+      : effectiveInviteStatusWhere(status, now);
 
   return {
     type: InviteType.Event,

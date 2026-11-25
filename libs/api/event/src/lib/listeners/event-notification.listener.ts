@@ -92,8 +92,9 @@ export class EventNotificationListener {
   /**
    * An event invite is told to its invitee (#742), exactly when their inbox
    * would list it: the inbox's own predicate is asked about this one invite,
-   * so nobody hears of an invite they cannot see (a withheld one, #278, or one
-   * to an event they already attend). A household invite is the household
+   * so nobody hears of an invite they cannot see (one to an event they
+   * already attend, or one already answered). An event invite names its
+   * invitee by id and is never withheld. A household invite is the household
    * listener's.
    */
   @OnEvent(InviteEvents.Created, { async: true })
@@ -152,6 +153,11 @@ export class EventNotificationListener {
    * Tells the inviter of an event invite how it was answered (#742), naming
    * the invitee as they are shown, never by an address. The invitee is the one
    * answering, so an inviter who is also the invitee is told nothing.
+   *
+   * Unlike the household twin, nothing checks that the inviter still stands:
+   * an accept already passed the sender check, a removal revoked the sender's
+   * invites, and an inviter holding only the household variant attends
+   * nothing, so a check on a live attendee row would wrongly silence them.
    */
   private async notifyInviterOfAnswer(
     invite: InviteSnapshot,
@@ -223,8 +229,8 @@ export class EventNotificationListener {
       }
 
       const [attendeeName, changedByName] = await Promise.all([
-        userId === null ? null : this.displayNameOf(userId),
-        rsvpChangedFor === null || actingUserId === null ? null : this.displayNameOf(actingUserId),
+        userId === null ? null : this.nameOf(userId),
+        rsvpChangedFor === null || actingUserId === null ? null : this.nameOf(actingUserId),
       ]);
 
       // Every user has a username, so a missing name is a user deleted since
@@ -293,20 +299,15 @@ export class EventNotificationListener {
     }
   }
 
-  /** A user's name as the household notifications show it, or null once the user is deleted. */
+  /**
+   * A user's name as it is shown, or null once the user is deleted. One rule
+   * for every notification here, the household's `shownName`, so an invite
+   * and an RSVP name the same person the same way (#742).
+   */
   private async nameOf(userId: string): Promise<string | null> {
     const user = await this.db.user.findUnique({ where: { id: userId }, select: SHOWN_NAME_SELECT });
 
     return user ? shownName(user) : null;
-  }
-
-  private async displayNameOf(userId: string): Promise<string | null> {
-    const user = await this.db.user.findUnique({
-      where: { id: userId },
-      select: { username: true, profile: { select: { displayName: true } } },
-    });
-
-    return user?.profile?.displayName ?? user?.username ?? null;
   }
 
   @OnEvent(NominationEvent.NominationCreated, { async: true })

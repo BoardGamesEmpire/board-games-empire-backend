@@ -63,7 +63,7 @@ export class EventInviteController {
   }
 
   @ApiOperation({
-    summary: "List the event's invites (host or co-host)",
+    summary: "List the event's invites (host, co-host, or the event household's owner or admin)",
     description:
       'Newest first. By default the invites still open and the ones that expired unanswered; `?status=` ' +
       'picks any one status, judged as it stands now, so an outstanding invite past its expiry is ' +
@@ -87,7 +87,7 @@ export class EventInviteController {
   // The type-only check below passes the host of any event; the service asks
   // again about an invite to this one, under its lock.
   @ApiOperation({
-    summary: 'Revoke an invite someone else sent (host or co-host)',
+    summary: "Revoke an invite someone else sent (host, co-host, or the event household's owner or admin)",
     description:
       'Cancels an open invite to the event that someone else sent, whether or not they still attend. An ' +
       'invite you sent yourself is refused here: withdraw it with `POST /invites/:inviteId/withdraw`, ' +

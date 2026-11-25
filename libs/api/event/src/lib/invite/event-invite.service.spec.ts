@@ -218,7 +218,7 @@ describe('EventInviteService', () => {
       expect(invite).toBe(creation.invite);
     });
 
-    it('emits the expired rivals and the created invite after commit, then any soft cap (#742)', async () => {
+    it('emits the expired rivals and the created invite after commit, then any soft quota (#742)', async () => {
       const overage = { eventName: 'quota.soft_overage' } as unknown as QuotaSoftOverageEvent;
       quotas.consume.mockResolvedValue({ ...UNCONSTRAINED, softOverages: [overage] });
       db.$transaction.mockImplementation((async (callback: (client: MockDatabaseService) => Promise<unknown>) => {
@@ -377,8 +377,8 @@ describe('EventInviteService', () => {
       expect(invites.createWithin).not.toHaveBeenCalled();
     });
 
-    describe('the daily cap (#742)', () => {
-      it('charges the daily cap inside the transaction', async () => {
+    describe('the daily invite quota (#742)', () => {
+      it('charges the daily invite quota inside the transaction', async () => {
         await service.createInvite('ev-1', dto());
 
         expect(quotas.consume).toHaveBeenCalledWith('event_invite_daily_count', 1n, { userId: 'host-1' }, db);
@@ -387,7 +387,7 @@ describe('EventInviteService', () => {
         );
       });
 
-      it('refuses past a hard cap with 402, and writes nothing', async () => {
+      it('refuses past a hard quota with 402, and writes nothing', async () => {
         quotas.consume.mockResolvedValue({
           ...UNCONSTRAINED,
           allowed: false,

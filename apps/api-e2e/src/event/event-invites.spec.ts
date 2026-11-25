@@ -12,13 +12,13 @@ import type { Actors, AuthenticatedActor, SessionActor } from '@bge/testing-e2e'
 import { createActors } from '@bge/testing-e2e';
 import request from 'supertest';
 import { inviteEnvelope, inviteListEnvelope, revokeEnvelope } from '../household/household-invite-wire';
-import type { Caller } from '../support/api-key';
 import { mintApiKey } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import type { TestDatabase } from '../support/test-db';
 import { createTestDatabase } from '../support/test-db';
 import { arrangeListEntry, hoursFromNow } from './event-fixtures';
-import { eventAcceptEnvelope, partyInvitesEnvelope } from './event-invite-wire';
+import { partyInvitesEnvelope } from './event-invite-wire';
+import { createEventInviteClient, PARTY_INVITES_PATH } from './event-join';
 import { createEventClient, eventPolicyPath, EVENTS_PATH } from './event-request';
 import { availabilitySummaryEnvelope, eventDetailEnvelope, nominationEnvelope } from './event-wire';
 
@@ -27,9 +27,6 @@ const MEMBER_INVITES_OFF = 'MEMBER_INVITES_OFF';
 
 /** A settled invite answers an accept with this code, and the status it settled in (#1513). */
 const INVITE_NOT_OUTSTANDING = 'INVITE_NOT_OUTSTANDING';
-
-/** Where a party answers an invite of every kind (#742). */
-const INVITES_PATH = '/api/invites';
 
 /**
  * Inviting someone to an event (#742): `POST /api/events/:eventId/invites`
@@ -59,21 +56,16 @@ describe('event invites (#742)', () => {
 
   const { createdEventId } = createEventClient(baseUrl);
 
-  const invitesPath = (eventId: string) => `${EVENTS_PATH}/${eventId}/invites`;
-
-  const invite = (actor: AuthenticatedActor, eventId: string, body: Record<string, unknown>) =>
-    request(baseUrl).post(invitesPath(eventId)).set(actor.headers).send(body);
-
-  const sentInvite = async (actor: AuthenticatedActor, eventId: string, body: Record<string, unknown>) =>
-    inviteEnvelope(await invite(actor, eventId, body).expect(201), 'POST /api/events/:eventId/invites').invite;
-
-  const listInvites = (actor: AuthenticatedActor, eventId: string, query: Record<string, string> = {}) =>
-    request(baseUrl).get(invitesPath(eventId)).query(query).set(actor.headers);
-
-  const revoke = (actor: AuthenticatedActor, eventId: string, inviteId: string) =>
-    request(baseUrl)
-      .post(`${invitesPath(eventId)}/${inviteId}/revoke`)
-      .set(actor.headers);
+  const {
+    invite,
+    sentInvite,
+    listInvites,
+    revoke,
+    accept: acceptInvite,
+    accepted,
+    decline: declineInvite,
+    withdraw: withdrawInvite,
+  } = createEventInviteClient(baseUrl);
 
   const deleteEvent = (actor: AuthenticatedActor, eventId: string) =>
     request(baseUrl).delete(`${EVENTS_PATH}/${eventId}`).set(actor.headers);
@@ -104,23 +96,10 @@ describe('event invites (#742)', () => {
     return { host, participant, eventId };
   };
 
-  const acceptInvite = (caller: Caller, inviteId: string) =>
-    request(baseUrl).post(`${INVITES_PATH}/${inviteId}/accept`).set(caller.headers);
-
-  const declineInvite = (actor: AuthenticatedActor, inviteId: string) =>
-    request(baseUrl).post(`${INVITES_PATH}/${inviteId}/decline`).set(actor.headers);
-
-  const withdrawInvite = (actor: AuthenticatedActor, inviteId: string) =>
-    request(baseUrl).post(`${INVITES_PATH}/${inviteId}/withdraw`).set(actor.headers);
-
-  /** The acceptance an event invite answers with, failing the test unless the accept answers 200. */
-  const accepted = async (actor: AuthenticatedActor, inviteId: string) =>
-    eventAcceptEnvelope(await acceptInvite(actor, inviteId).expect(200), 'POST /api/invites/:inviteId/accept');
-
   /** The ids of a party list's rows, in the order served: the inbox, or with `sent` the sent list. */
   const listedIds = async (actor: AuthenticatedActor, list: '' | '/sent', query: Record<string, string> = {}) =>
     partyInvitesEnvelope(
-      await request(baseUrl).get(`${INVITES_PATH}${list}`).query(query).set(actor.headers).expect(200),
+      await request(baseUrl).get(`${PARTY_INVITES_PATH}${list}`).query(query).set(actor.headers).expect(200),
       `GET /api/invites${list}`,
     ).invites.map((row) => row.id);
 
@@ -264,7 +243,7 @@ describe('event invites (#742)', () => {
 
     const refused = await invite(host, eventId, { userId: invitee.user.id }).expect(403);
 
-    expect(refused.body.message).toBe('You cannot place this user on an event');
+    expect(refused.body.message).toBe("You can't invite this person to this event.");
     expect(await invitesTo(eventId)).toBe(0);
   });
 
@@ -346,7 +325,7 @@ describe('event invites (#742)', () => {
     expect((await storedInvite(declined.id)).status).toBe(InviteStatus.Declined);
   });
 
-  it('a sixth invite past a cap of five is refused with 402, and writes nothing', async () => {
+  it('a sixth invite past a daily invite quota of five is refused with 402, and writes nothing', async () => {
     const host = await actors.user();
     const invitees = await Promise.all(Array.from({ length: 6 }, () => actors.user()));
     await db.client.quota.create({
@@ -615,7 +594,7 @@ describe('event invites (#742)', () => {
       const { title } = await db.client.event.findUniqueOrThrow({ where: { id: eventId }, select: { title: true } });
 
       const inbox = partyInvitesEnvelope(
-        await request(baseUrl).get(INVITES_PATH).set(invitee.headers).expect(200),
+        await request(baseUrl).get(PARTY_INVITES_PATH).set(invitee.headers).expect(200),
         'GET /api/invites',
       );
 
@@ -630,7 +609,7 @@ describe('event invites (#742)', () => {
       expect(await listedIds(invitee, '', { type: InviteType.Event })).toEqual([eventInvite.id]);
 
       const sent = partyInvitesEnvelope(
-        await request(baseUrl).get(`${INVITES_PATH}/sent`).set(host.headers).expect(200),
+        await request(baseUrl).get(`${PARTY_INVITES_PATH}/sent`).set(host.headers).expect(200),
         'GET /api/invites/sent',
       );
 

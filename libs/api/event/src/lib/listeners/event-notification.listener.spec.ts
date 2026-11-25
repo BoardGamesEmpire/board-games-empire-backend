@@ -223,7 +223,7 @@ describe('EventNotificationListener', () => {
         });
       });
 
-      it('tells nobody of an invite their inbox does not list, such as a withheld one (#742)', async () => {
+      it('tells nobody of an invite their inbox does not list, such as one to an event they already attend, or one already answered (#742)', async () => {
         db.invite.count.mockResolvedValue(0);
 
         await listener.onInviteCreated(created());
@@ -547,6 +547,19 @@ describe('EventNotificationListener', () => {
     it('names the attendee by their username when they have no display name (#802)', async () => {
       db.eventAttendee.findMany.mockResolvedValue([{ userId: 'u-host' }] as never);
       db.user.findUnique.mockResolvedValue({ username: 'ada', profile: null } as never);
+
+      await listener.onAttendeeRsvp(rsvp('u-a', 'u-a'));
+
+      expect(notifications.createMany).toHaveBeenCalledWith([
+        expect.objectContaining({ userId: 'u-host', payload: expect.objectContaining({ attendeeName: 'ada' }) }),
+      ]);
+    });
+
+    // One name rule for every notification this listener sends, the invite
+    // ones included: a blank display name is no name (#742).
+    it('names the attendee by their username when their display name is blank (#742)', async () => {
+      db.eventAttendee.findMany.mockResolvedValue([{ userId: 'u-host' }] as never);
+      db.user.findUnique.mockResolvedValue({ username: 'ada', profile: { displayName: '' } } as never);
 
       await listener.onAttendeeRsvp(rsvp('u-a', 'u-a'));
 
