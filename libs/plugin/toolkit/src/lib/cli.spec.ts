@@ -197,6 +197,14 @@ describe('runCli (#1093)', () => {
       expect(plain.stdout()).toBe('');
       expect(plain.stderr()).toMatch(/^error USAGE: /);
     });
+
+    it('answers in JSON for --json=<value>, which the parser refuses, since the caller still asked for JSON (#1093)', async () => {
+      const cli = setup();
+
+      await expect(cli.run('validate', 'p', '--json=1')).resolves.toBe(2);
+      expect(JSON.parse(cli.stdout())).toMatchObject({ errors: [{ code: 'USAGE' }], ok: false });
+      expect(cli.stderr()).toBe('');
+    });
   });
 
   describe('help', () => {

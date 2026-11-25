@@ -1,5 +1,9 @@
 import type { StaticAnalysisFindingKind } from '@boardgamesempire/plugin-analysis';
-import { quoteUntrustedText } from '@boardgamesempire/plugin-analysis';
+import {
+  MAX_ADVISORY_FINDINGS,
+  MAX_GATING_EXAMPLES_PER_SPECIFIER,
+  quoteUntrustedText,
+} from '@boardgamesempire/plugin-analysis';
 import type { PluginArchiveRule } from '@boardgamesempire/plugin-manifest';
 import {
   PLUGIN_ARCHIVE_MAX_COMPRESSED_BYTES,
@@ -33,6 +37,9 @@ export const TOOLKIT_MESSAGE_CODES = [
   // Beyond the plan's fixed list: a file left out of a plugin artifact breaks
   // the plugin at runtime, so the plugin author hears about it (#1093).
   'PLUGIN_ARTIFACT_LEFT_OUT',
+  // Beyond the plan's fixed list: a scan report the server cut short says so,
+  // so a long list of warnings never reads as the complete one (#1093).
+  'SCAN_REPORT_TRUNCATED',
   // Beyond the plan's fixed list: every line the CLI prints carries a stable
   // code, the line for an error nobody foresaw included (#1093).
   'UNEXPECTED_ERROR',
@@ -67,9 +74,9 @@ const MESSAGES: Readonly<Record<MessageCode, string>> = {
   AGAINST_UNREADABLE:
     'The earlier version of the plugin given with --against could not be read as a plugin manifest or a plugin artifact, so nothing was compared.',
   CONSENT_COMPARISON_SKIPPED:
-    "The plugin manifest was not compared with an earlier version of the plugin. Pass --against with that version's manifest.json or plugin artifact to see which permissions households and users would newly have to consent to.",
+    'The plugin manifest was not compared with an earlier version of the plugin, so this report does not show which permissions households and users would newly have to consent to.',
   NOT_CHECKED_PERMISSION_CATALOG:
-    "The core permissions the plugin manifest requests were not checked against a server's permission catalog. The server checks that each one exists when the plugin is installed.",
+    "Some checks need a server's permission catalog, so they were not made here: that each core permission the plugin manifest requests exists, that none of them covers every kind of data, and that each one requested at household or user consent scope is limited to that household or user. A server makes these checks when the plugin is installed.",
   NOT_CHECKED_BEYOND_SCAN:
     'The scan reads the code for forbidden imports without running it, so it cannot see everything the code does. A clean report is not a security guarantee.',
   LOCKFILE_MISSING:
@@ -84,6 +91,7 @@ const MESSAGES: Readonly<Record<MessageCode, string>> = {
   ARTIFACT_TOO_LARGE: `The plugin artifact is larger than the ${mebibytes(PLUGIN_ARCHIVE_MAX_COMPRESSED_BYTES)} a server accepts.`,
   PLUGIN_ARTIFACT_LEFT_OUT:
     '{entry} is left out of the plugin artifact because its name ends like a plugin artifact or its checksum. If the plugin needs this file, rename it.',
+  SCAN_REPORT_TRUNCATED: `The scan found more than its report can hold, so it lists at most ${MAX_ADVISORY_FINDINGS} warnings, and at most ${MAX_GATING_EXAMPLES_PER_SPECIFIER} files for each forbidden import. Every forbidden import is still named.`,
   UNEXPECTED_ERROR: 'bge-plugin stopped on an unexpected error: {detail}.',
 
   'not-gzip': 'The plugin artifact is not a gzip-compressed archive.',
@@ -107,6 +115,16 @@ const MESSAGES: Readonly<Record<MessageCode, string>> = {
   'read-failure': 'The scan could not read this file, so it was not checked.',
   'parse-failure': 'The scan could not parse this file, so it was not checked.',
 };
+
+/**
+ * Why the consent comparison did not run, appended to CONSENT_COMPARISON_SKIPPED
+ * (#1093). A sentence of the toolkit's own, not a `{placeholder}`: `message()`
+ * quotes every value it fills in, as text from the plugin, and these are not.
+ */
+export const CONSENT_COMPARISON_SKIPPED_REASONS = {
+  invalidManifest: 'Fix the errors in the plugin manifest first, then run validate again with --against.',
+  noAgainst: "Pass --against with that version's manifest.json or plugin artifact to compare them.",
+} as const;
 
 /**
  * The message for `code`, with each `{name}` filled from `params`, quoted and

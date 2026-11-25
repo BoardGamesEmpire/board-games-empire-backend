@@ -7,6 +7,7 @@ import { message } from './messages.js';
 import type { ArtifactOutcome, ReportItem, ValidationReport } from './report.js';
 import { renderErrorLine, renderJson, renderText } from './report.js';
 import { ToolkitError } from './toolkit.errors.js';
+import { runValidate } from './validate/validate-command.js';
 
 export interface CliIo {
   stderr: { write(text: string): unknown };
@@ -47,7 +48,7 @@ const notBuiltYet = (command: string): never => {
 
 const DEFAULT_COMMANDS: CliCommands = {
   build: async () => notBuiltYet('build'),
-  validate: async () => notBuiltYet('validate'),
+  validate: runValidate,
 };
 
 const DEFAULT_LOCALE = 'en';
@@ -215,7 +216,8 @@ const render = (outcome: BuildOutcome, json: boolean): string => {
 const wantsJson = (argv: readonly string[]): boolean => {
   const end = argv.indexOf('--');
 
-  return (end === -1 ? argv : argv.slice(0, end)).includes('--json');
+  // `--json=1` is a usage error to the parser, but it still asks for JSON.
+  return (end === -1 ? argv : argv.slice(0, end)).some((arg) => arg === '--json' || arg.startsWith('--json='));
 };
 
 /**

@@ -62,6 +62,7 @@ describe('messages (#1093)', () => {
         'SYMLINK_REFUSED',
         'ARTIFACT_TOO_LARGE',
         'PLUGIN_ARTIFACT_LEFT_OUT',
+        'SCAN_REPORT_TRUNCATED',
         'UNEXPECTED_ERROR',
       ].sort(),
     );
