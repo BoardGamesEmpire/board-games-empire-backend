@@ -351,7 +351,8 @@
       "webhook_subscription_count": "The limit on webhook subscriptions has been reached.",
       "storage_bytes": "The storage limit has been reached.",
       "plugin_install_count": "The limit on installed plugins has been reached.",
-      "household_invite_daily_count": "The daily limit on household invites has been reached."
+      "household_invite_daily_count": "The daily limit on household invites has been reached.",
+      "event_invite_daily_count": "The daily limit on event invites has been reached."
     },
     "check_amount_negative": "check amount must be non-negative",
     "consume_amount_negative": "consume amount must be non-negative",
