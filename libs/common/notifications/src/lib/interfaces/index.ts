@@ -139,6 +139,21 @@ export interface EventRefPayload {
   eventTitle: string;
 }
 
+/** A user was invited to an event; sent to the invitee once their inbox lists the invite (#742). */
+export interface EventInviteReceivedPayload extends EventRefPayload {
+  inviteId: string;
+  inviterName: string;
+}
+
+/**
+ * An invitee answered an event invite; sent to the inviter (#742). The name is
+ * the invitee's as it is shown, never an address.
+ */
+export interface EventInviteAnsweredPayload extends EventRefPayload {
+  inviteeName: string;
+  inviteId: string;
+}
+
 /** An event the recipient attends was cancelled, with the host's reason if given (#795). */
 export interface EventCancelledPayload extends EventRefPayload {
   reason: string | null;
@@ -335,7 +350,9 @@ export type NotificationPayloadMap = {
   [NotificationType.EventCancelled]: EventCancelledPayload;
   [NotificationType.EventCreated]: EventRefPayload;
   [NotificationType.EventDeleted]: EventRefPayload;
-  [NotificationType.EventInviteReceived]: EventRefPayload;
+  [NotificationType.EventInviteAccepted]: EventInviteAnsweredPayload;
+  [NotificationType.EventInviteDeclined]: EventInviteAnsweredPayload;
+  [NotificationType.EventInviteReceived]: EventInviteReceivedPayload;
   [NotificationType.EventOccurrenceCanceled]: OccurrenceChangePayload;
   [NotificationType.EventOccurrenceConfirmed]: OccurrenceChangePayload;
   [NotificationType.EventOccurrenceDeclined]: OccurrenceChangePayload;

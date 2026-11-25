@@ -79,7 +79,17 @@ enum NotificationType {
   HouseholdInviteDeclined
   HouseholdOwnershipTransferred
 
+  /**
+   * Event invite notifications follow the invite (#742):
+   * EventInviteReceived: the invitee, when their inbox lists the invite.
+   * Payload: { eventId, eventTitle, inviteId, inviterName }
+   * EventInviteAccepted: the inviter, once the invitee is an attendee.
+   * EventInviteDeclined: the inviter.
+   * Payload of both: { eventId, eventTitle, inviteId, inviteeName }
+   */
   EventInviteReceived
+  EventInviteAccepted
+  EventInviteDeclined
 
   /**
    * Event occurrence notifications are sent to attendees when an occurrence they're attending changes status, and to hosts when an occurrence is proposed.
