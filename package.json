@@ -236,7 +236,7 @@
     "ts-proto": "2.18.4",
     "tslib": "2.9.1",
     "tsx": "4.23.15",
-    "typescript": "5.9.3",
+    "typescript": "6.0.3",
     "typescript-eslint": "8.72.2",
     "verdaccio": "6.11.1",
     "webpack-cli": "5.1.4"
@@ -268,7 +268,6 @@
     }
   },
   "overrides": {
-    "multer": "$multer",
-    "ts-loader": "9.5.4"
+    "multer": "$multer"
   }
 }
