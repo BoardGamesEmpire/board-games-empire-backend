@@ -10,13 +10,16 @@ export interface SystemConfig {
   port: number;
 }
 
+/** What `PORT` falls back to; the root schema compares it with the operational port when `PORT` is unset (#1511). */
+export const DEFAULT_PORT = 33333;
+
 export default registerAs('system', () =>
   env.provideMany<SystemConfig>(
     [
       {
         keyTo: 'port',
         key: 'PORT',
-        defaultValue: 33333,
+        defaultValue: DEFAULT_PORT,
         mutators: [(value: string) => parseInt(value, 10)],
       },
       {
