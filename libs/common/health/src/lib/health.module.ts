@@ -12,7 +12,7 @@ import { StorageHealthIndicator } from './indicators/storage.health-indicator';
 
 /**
  * HealthModule wires the three internal-dependency indicators (Prisma + cache
- * Redis + queue Redis) and HTTP ping support into a single controller.
+ * Redis + queue Redis) and HTTP checks into a single controller.
  *
  * The Redis indicators are `@Optional()` injection — processes that don't
  * configure the corresponding connection via `@bge/redis` pass the check with

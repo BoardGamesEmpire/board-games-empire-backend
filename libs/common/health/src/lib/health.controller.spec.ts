@@ -338,26 +338,13 @@ describe('HealthController', () => {
     });
   });
 
-  describe('GET /health (detail / HTTP pings)', () => {
-    // The config spec proves an unset HTTP_HEALTH_CHECK_URLS reads as no entries.
-    it('sends nothing and answers ok with no HTTP target configured, the default (#1509)', async () => {
-      const { controller, http } = await buildController();
-
-      await expect(controller.detail()).resolves.toEqual({ status: 'ok', info: {}, error: {}, details: {} });
-      expect(http.request).not.toHaveBeenCalled();
-    });
-
-    it('returns ok with an empty indicator set when HTTP_HEALTH_CHECK_URLS is empty', async () => {
+  describe('GET /health (detail / HTTP checks)', () => {
+    // No HTTP target is the default; the config spec proves an unset
+    // HTTP_HEALTH_CHECK_URLS reads as no entries, which is what this passes.
+    it('sends nothing and answers ok with no HTTP target configured (#1509)', async () => {
       const { controller, http } = await buildController({ httpHealthCheckUrls: [] });
 
-      const result = await controller.detail();
-
-      if (!isHealthCheckResult(result)) {
-        throw new Error('expected HealthCheckResult, got disabled response');
-      }
-
-      expect(result.status).toBe('ok');
-      expect(Object.keys(result.info ?? {})).toHaveLength(0);
+      await expect(controller.detail()).resolves.toEqual({ status: 'ok', info: {}, error: {}, details: {} });
       expect(http.request).not.toHaveBeenCalled();
     });
 
@@ -390,7 +377,7 @@ describe('HealthController', () => {
       expect(http.request).toHaveBeenCalledWith('https://valid.example.com', expect.anything());
     });
 
-    it('trims whitespace from name and url before pinging', async () => {
+    it('trims whitespace from name and url before checking', async () => {
       const { controller, http } = await buildController({
         httpHealthCheckUrls: ['  github  |  https://github.com  '],
       });
@@ -399,7 +386,7 @@ describe('HealthController', () => {
       expect(http.request).toHaveBeenCalledWith('https://github.com', expect.anything());
     });
 
-    it('returns { status: "disabled" } and skips pings when ENABLE_HEALTH_CHECKS=false', async () => {
+    it('returns { status: "disabled" } and skips HTTP checks when ENABLE_HEALTH_CHECKS=false', async () => {
       const { controller, http } = await buildController({
         enableHealthChecks: false,
         httpHealthCheckUrls: ['google|https://www.google.com'],

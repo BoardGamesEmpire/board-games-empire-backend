@@ -118,7 +118,8 @@ export class HealthController {
   }
 
   /**
-   * Extended health report — pings each URL in `HTTP_HEALTH_CHECK_URLS`.
+   * Extended health report — runs an HTTP check on each URL in
+   * `HTTP_HEALTH_CHECK_URLS`.
    *
    * Intended for monitoring dashboards and on-call debugging, not K8s probes.
    * URLs are operator-configured as `name|url` pairs in the env var. A
@@ -132,8 +133,8 @@ export class HealthController {
    */
   @HealthCheck()
   @Get()
-  @ApiOkResponse({ description: 'All HTTP pings succeeded (or checks disabled / none configured)' })
-  @ApiServiceUnavailableResponse({ description: 'One or more HTTP pings failed' })
+  @ApiOkResponse({ description: 'All HTTP checks succeeded (or checks disabled / none configured)' })
+  @ApiServiceUnavailableResponse({ description: 'One or more HTTP checks failed' })
   detail(): Promise<HealthCheckResult> | DisabledResponse {
     return this.health.check(this.buildHttpIndicators());
   }
@@ -142,7 +143,7 @@ export class HealthController {
    * Parses `HTTP_HEALTH_CHECK_URLS` (comma-separated `name|url` entries) into
    * Terminus indicator functions. Malformed entries (anything other than
    * exactly one `|` separator producing two non-empty parts) are silently
-   * dropped — better to ping the well-formed entries than crash the entire
+   * dropped — better to check the well-formed entries than crash the entire
    * health endpoint over a typo in one URL.
    */
   private buildHttpIndicators(): HealthIndicatorFunction[] {
