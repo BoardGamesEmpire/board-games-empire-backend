@@ -8,7 +8,6 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
-  GoneException,
   InternalServerErrorException,
   Logger,
   NotFoundException,
@@ -36,6 +35,12 @@ import type { InviteTransitionRow } from './read-shapes';
 import { CONTEXT_INVITE_SELECT, INVITE_SNAPSHOT_SELECT, PARTY_INVITE_SELECT, TRANSITION_SELECT } from './read-shapes';
 
 const PAST = new Date('2026-10-01T00:00:00Z');
+
+// An expired invite answers the conflict a row stamped `Expired` does (#1513).
+const EXPIRED_REFUSAL = {
+  status: 409,
+  response: expect.objectContaining({ code: 'INVITE_NOT_OUTSTANDING', state: InviteStatus.Expired }),
+};
 const FUTURE = new Date('2099-01-01T00:00:00Z');
 const INVITER_ID = 'user-inviter';
 const INVITEE_ID = 'user-invitee';
@@ -912,7 +917,7 @@ describe('InviteService', () => {
       expect(tx.invite.updateManyAndReturn).not.toHaveBeenCalled();
     });
 
-    it('410s an expired invite, stamping Expired OUTSIDE the caller transaction and announcing it', async () => {
+    it('409s an expired invite, stamping Expired OUTSIDE the caller transaction and announcing it (#1513)', async () => {
       tx.invite.findFirst.mockResolvedValue(rowWithToken({ expiresAt: PAST }) as never);
       db.invite.updateMany.mockResolvedValue({ count: 1 });
 
@@ -922,7 +927,7 @@ describe('InviteService', () => {
           actingUserId: INVITEE_ID,
           type: InviteType.Household,
         }),
-      ).rejects.toThrow(GoneException);
+      ).rejects.toMatchObject(EXPIRED_REFUSAL);
       await settled();
 
       // The refusal rolls the caller's transaction back, so the stamp lives on
@@ -957,10 +962,10 @@ describe('InviteService', () => {
           actingUserId: INVITEE_ID,
           type: InviteType.Household,
         }),
-      ).rejects.toThrow(GoneException);
+      ).rejects.toMatchObject(EXPIRED_REFUSAL);
     });
 
-    it('still answers 410 when the stamp fails, and logs the failure', async () => {
+    it('still answers 409 when the stamp fails, and logs the failure (#1513)', async () => {
       tx.invite.findFirst.mockResolvedValue(rowWithToken({ expiresAt: PAST }) as never);
       db.invite.updateMany.mockRejectedValue(new Error('pool exhausted'));
 
@@ -970,7 +975,7 @@ describe('InviteService', () => {
           actingUserId: INVITEE_ID,
           type: InviteType.Household,
         }),
-      ).rejects.toThrow(GoneException);
+      ).rejects.toMatchObject(EXPIRED_REFUSAL);
       await settled();
 
       expect(error).toHaveBeenCalledTimes(1);
@@ -978,7 +983,7 @@ describe('InviteService', () => {
       expect(emitter.emit).not.toHaveBeenCalled();
     });
 
-    it('410s an expired invite without announcing when something else stamped it first', async () => {
+    it('409s an expired invite without announcing when something else stamped it first (#1513)', async () => {
       tx.invite.findFirst.mockResolvedValue(rowWithToken({ expiresAt: PAST }) as never);
       db.invite.updateMany.mockResolvedValue({ count: 0 });
 
@@ -988,10 +993,32 @@ describe('InviteService', () => {
           actingUserId: INVITEE_ID,
           type: InviteType.Household,
         }),
-      ).rejects.toThrow(GoneException);
+      ).rejects.toMatchObject(EXPIRED_REFUSAL);
       await settled();
 
       expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('answers the same 409 whether or not the sweep has stamped it (#1513)', async () => {
+      const accept = () =>
+        service
+          .acceptWithin(asTx(tx), {
+            target: { inviteId: 'inv-1' },
+            actingUserId: INVITEE_ID,
+            type: InviteType.Household,
+          })
+          .catch((thrown: HttpException) => ({ status: thrown.getStatus(), response: thrown.getResponse() }));
+      db.invite.updateMany.mockResolvedValue({ count: 1 });
+
+      tx.invite.findFirst.mockResolvedValue(rowWithToken({ expiresAt: PAST }) as never);
+      const unstamped = await accept();
+
+      tx.invite.findFirst.mockResolvedValue(rowWithToken({ status: InviteStatus.Expired, expiresAt: PAST }) as never);
+      const stamped = await accept();
+      await settled();
+
+      expect(unstamped).toMatchObject(EXPIRED_REFUSAL);
+      expect(stamped).toEqual(unstamped);
     });
 
     it('reports the transition the row now refuses when a rival moved it first', async () => {
@@ -1134,7 +1161,7 @@ describe('InviteService', () => {
       });
     });
 
-    it('410s an expired invite', async () => {
+    it('409s an expired invite (#1513)', async () => {
       tx.invite.findFirst.mockResolvedValue(rowWithToken({ expiresAt: PAST }) as never);
       db.invite.updateMany.mockResolvedValue({ count: 1 });
 
@@ -1144,7 +1171,7 @@ describe('InviteService', () => {
           actingUserId: INVITEE_ID,
           type: InviteType.Household,
         }),
-      ).rejects.toThrow(GoneException);
+      ).rejects.toMatchObject(EXPIRED_REFUSAL);
     });
 
     it('declines an invite by address by its id when the caller vouches for that address', async () => {
@@ -1240,13 +1267,13 @@ describe('InviteService', () => {
       });
     });
 
-    it('410s an expired invite', async () => {
+    it('409s an expired invite (#1513)', async () => {
       tx.invite.findFirst.mockResolvedValue(rowWithToken({ expiresAt: PAST }) as never);
       db.invite.updateMany.mockResolvedValue({ count: 1 });
 
       await expect(
         service.withdrawWithin(asTx(tx), { inviteId: 'inv-1', actingUserId: INVITER_ID, type: InviteType.Household }),
-      ).rejects.toThrow(GoneException);
+      ).rejects.toMatchObject(EXPIRED_REFUSAL);
     });
 
     it('403s the invitee', async () => {
@@ -1336,13 +1363,13 @@ describe('InviteService', () => {
       });
     });
 
-    it('410s an expired invite rather than revoking it', async () => {
+    it('409s an expired invite rather than revoking it (#1513)', async () => {
       tx.invite.findFirst.mockResolvedValue(rowWithToken({ expiresAt: PAST }) as never);
       db.invite.updateMany.mockResolvedValue({ count: 1 });
 
-      await expect(service.revokeWithin(asTx(tx), { inviteId: 'inv-1', revokerId: REVOKER_ID, scope })).rejects.toThrow(
-        GoneException,
-      );
+      await expect(
+        service.revokeWithin(asTx(tx), { inviteId: 'inv-1', revokerId: REVOKER_ID, scope }),
+      ).rejects.toMatchObject(EXPIRED_REFUSAL);
       expect(tx.invite.updateManyAndReturn).not.toHaveBeenCalled();
     });
 
@@ -1446,8 +1473,8 @@ describe('InviteService', () => {
       expect(tx.invite.findFirst).not.toHaveBeenCalled();
     });
 
-    it.each([InviteStatus.Pending, ...TERMINAL])('409s an invite that is %s, not awaiting approval', async (status) => {
-      tx.invite.findFirst.mockResolvedValue(rowWithToken({ status }) as never);
+    it('409s a Pending invite as not awaiting approval: it is outstanding, just past that step (#1513)', async () => {
+      tx.invite.findFirst.mockResolvedValue(rowWithToken({ status: InviteStatus.Pending }) as never);
 
       await expect(
         service.approveWithin(asTx(tx), { inviteId: 'inv-1', approverId: 'user-admin', scope }),
@@ -1457,7 +1484,42 @@ describe('InviteService', () => {
       });
     });
 
-    it('410s an expired invite rather than approving it', async () => {
+    it.each(TERMINAL)(
+      '409s a settled invite (%s) as every transition does, naming its state (#1513)',
+      async (status) => {
+        tx.invite.findFirst.mockResolvedValue(rowWithToken({ status }) as never);
+
+        await expect(
+          service.approveWithin(asTx(tx), { inviteId: 'inv-1', approverId: 'user-admin', scope }),
+        ).rejects.toMatchObject({
+          status: 409,
+          response: expect.objectContaining({ code: 'INVITE_NOT_OUTSTANDING', state: status }),
+        });
+        expect(tx.invite.updateManyAndReturn).not.toHaveBeenCalled();
+      },
+    );
+
+    it('answers the same 409 whether or not the sweep has stamped it (#1513)', async () => {
+      const approve = () =>
+        service
+          .approveWithin(asTx(tx), { inviteId: 'inv-1', approverId: 'user-admin', scope })
+          .catch((thrown: HttpException) => ({ status: thrown.getStatus(), response: thrown.getResponse() }));
+      db.invite.updateMany.mockResolvedValue({ count: 1 });
+
+      tx.invite.findFirst.mockResolvedValue(
+        rowWithToken({ status: InviteStatus.AwaitingApproval, expiresAt: PAST }) as never,
+      );
+      const unstamped = await approve();
+
+      tx.invite.findFirst.mockResolvedValue(rowWithToken({ status: InviteStatus.Expired, expiresAt: PAST }) as never);
+      const stamped = await approve();
+      await settled();
+
+      expect(unstamped).toMatchObject(EXPIRED_REFUSAL);
+      expect(stamped).toEqual(unstamped);
+    });
+
+    it('409s an expired invite rather than approving it (#1513)', async () => {
       tx.invite.findFirst.mockResolvedValue(
         rowWithToken({ status: InviteStatus.AwaitingApproval, expiresAt: PAST }) as never,
       );
@@ -1465,7 +1527,7 @@ describe('InviteService', () => {
 
       await expect(
         service.approveWithin(asTx(tx), { inviteId: 'inv-1', approverId: 'user-admin', scope }),
-      ).rejects.toThrow(GoneException);
+      ).rejects.toMatchObject(EXPIRED_REFUSAL);
       expect(db.invite.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: expect.objectContaining({ status: InviteStatus.AwaitingApproval }) }),
       );

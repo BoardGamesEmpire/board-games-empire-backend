@@ -212,8 +212,8 @@ export class HouseholdInviteService {
    * 3. The question is asked again of the roster read under the lock, and that
    *    answer decides.
    * 4. The lib revokes, bound to this household: 404 for an id from another
-   *    one, 403 for the invite's own inviter, who withdraws it instead, 410
-   *    once expired, 409 once settled.
+   *    one, 403 for the invite's own inviter, who withdraws it instead, 409
+   *    once expired or settled.
    *
    * The revoked invite is announced after commit. The row stays, so it still
    * counts against the day's invite quotas it was counted against (#279).
@@ -245,7 +245,7 @@ export class HouseholdInviteService {
    *    inviter's was taken then. A full cap answers ahead of the invite's own
    *    state below.
    * 5. The lib approves, bound to this household: 404 for an id from another
-   *    one, 410 once expired, 409 unless it is awaiting approval.
+   *    one, 409 once expired or when it is not awaiting approval.
    * 6. Its sender must still be able to send it, directly or for approval,
    *    on the roster and policy read under the lock: the question an accept
    *    asks of an approved invite (#747). If not, the answer is 409 and the

@@ -196,7 +196,7 @@ describe('accepting a household invite', () => {
       expect(await db.client.householdMember.count({ where: { householdId: household.id } })).toBe(1);
     });
 
-    it('answers 410 for an expired invite and 409 for a declined or revoked one', async () => {
+    it('answers 409 for an expired, declined or revoked invite (#1513)', async () => {
       const [owner, lapsed, declined, revoked] = await Promise.all(Array.from({ length: 4 }, () => actors.user()));
       const { household } = await actors.householdWithMembers({ owner });
 
@@ -219,7 +219,10 @@ describe('accepting a household invite', () => {
         status: InviteStatus.Revoked,
       });
 
-      await acceptById(lapsed, expiredInvite.id).expect(410);
+      expect((await acceptById(lapsed, expiredInvite.id).expect(409)).body).toMatchObject({
+        code: 'INVITE_NOT_OUTSTANDING',
+        state: InviteStatus.Expired,
+      });
       await acceptById(declined, declinedInvite.id).expect(409);
       await acceptById(revoked, revokedInvite.id).expect(409);
 

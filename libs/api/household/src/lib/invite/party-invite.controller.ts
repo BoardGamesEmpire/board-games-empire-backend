@@ -28,8 +28,8 @@ const ACCEPTED_DESCRIPTION =
   'Joined: `{ message, invite, member }`, where `member` is the new membership, with the role the invite offered.';
 
 const ACCEPT_CONFLICT_DESCRIPTION =
-  'Already a member of the household, in which case the invite stays open; or the invite was settled, is still ' +
-  'awaiting approval, or changed while it was being accepted';
+  'Already a member of the household, in which case the invite stays open; or the invite was settled, has ' +
+  'expired, is still awaiting approval, or changed while it was being accepted';
 
 const ACCEPT_FORBIDDEN_DESCRIPTION = 'Your own invite, or not a signed-in user: API keys cannot join a household';
 
@@ -37,7 +37,8 @@ const DECLINED_DESCRIPTION = 'Declined: `{ message, invite }`, the invite as you
 
 const DECLINE_FORBIDDEN_DESCRIPTION = 'Your own invite, or not a signed-in user: API keys cannot decline an invite';
 
-const SETTLED_CONFLICT_DESCRIPTION = 'The invite was already settled, or changed while it was being answered';
+const SETTLED_CONFLICT_DESCRIPTION =
+  'The invite was already settled, has expired, or changed while it was being answered';
 
 /** Both accept routes answer alike, whichever way the invite was named. */
 function acceptedResponse({ invite, member }: HouseholdInviteAcceptance) {
@@ -122,7 +123,6 @@ export class PartyInviteController {
   @ApiResponse({ status: Http.Forbidden, description: ACCEPT_FORBIDDEN_DESCRIPTION })
   @ApiResponse({ status: Http.NotFound, description: 'No invite matches the link, or its household is gone' })
   @ApiResponse({ status: Http.Conflict, description: ACCEPT_CONFLICT_DESCRIPTION })
-  @ApiResponse({ status: Http.Gone, description: 'The invite has expired' })
   @HttpCode(Http.Ok)
   @Post('accept')
   acceptByToken(@Body() dto: InviteTokenDto) {
@@ -142,7 +142,6 @@ export class PartyInviteController {
   @ApiResponse({ status: Http.Forbidden, description: ACCEPT_FORBIDDEN_DESCRIPTION })
   @ApiResponse({ status: Http.NotFound, description: 'No invite of yours has that id, or its household is gone' })
   @ApiResponse({ status: Http.Conflict, description: ACCEPT_CONFLICT_DESCRIPTION })
-  @ApiResponse({ status: Http.Gone, description: 'The invite has expired' })
   @HttpCode(Http.Ok)
   @Post(':inviteId/accept')
   accept(@Param('inviteId') inviteId: string) {
@@ -161,7 +160,6 @@ export class PartyInviteController {
   @ApiResponse({ status: Http.Forbidden, description: DECLINE_FORBIDDEN_DESCRIPTION })
   @ApiResponse({ status: Http.NotFound, description: 'No invite matches the link' })
   @ApiResponse({ status: Http.Conflict, description: SETTLED_CONFLICT_DESCRIPTION })
-  @ApiResponse({ status: Http.Gone, description: 'The invite has expired' })
   @HttpCode(Http.Ok)
   @Post('decline')
   declineByToken(@Body() dto: InviteTokenDto) {
@@ -181,7 +179,6 @@ export class PartyInviteController {
   @ApiResponse({ status: Http.Forbidden, description: DECLINE_FORBIDDEN_DESCRIPTION })
   @ApiResponse({ status: Http.NotFound, description: 'No invite of yours has that id' })
   @ApiResponse({ status: Http.Conflict, description: SETTLED_CONFLICT_DESCRIPTION })
-  @ApiResponse({ status: Http.Gone, description: 'The invite has expired' })
   @HttpCode(Http.Ok)
   @Post(':inviteId/decline')
   decline(@Param('inviteId') inviteId: string) {
@@ -207,7 +204,6 @@ export class PartyInviteController {
   })
   @ApiResponse({ status: Http.NotFound, description: 'No invite of yours has that id' })
   @ApiResponse({ status: Http.Conflict, description: SETTLED_CONFLICT_DESCRIPTION })
-  @ApiResponse({ status: Http.Gone, description: 'The invite has expired' })
   @HttpCode(Http.Ok)
   @Post(':inviteId/withdraw')
   withdraw(@Param('inviteId') inviteId: string) {

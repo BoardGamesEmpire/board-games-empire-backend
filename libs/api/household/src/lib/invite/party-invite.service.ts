@@ -191,7 +191,7 @@ export class PartyInviteService {
    *    The admission in step 6 takes the same lock again, as it must for a
    *    caller that has not; held already, it costs a round-trip and no wait.
    * 3. The lib reads the invite as it would accept it: 403 for the inviter,
-   *    410 once expired, 409 once settled or still awaiting approval.
+   *    409 once expired, settled or still awaiting approval.
    * 4. Its sender must still be able to send it ({@link senderCouldStillSend},
    *    on the roster and policy read under the lock). If not, it is revoked
    *    instead, and the answer is the 409 a revoked invite gets (#747). Unless
@@ -284,7 +284,7 @@ export class PartyInviteService {
    * type is the 404 a stranger meets. Only the invite row moves, so no
    * household lock is taken; a soft delete that revoked the invite first
    * leaves the decline its 409. The lib answers the rest: 403 for the
-   * inviter, 410 once expired, 409 once settled. After commit the declined
+   * inviter, 409 once expired or settled. After commit the declined
    * invite is announced.
    */
   async decline(target: InviteTarget): Promise<InvitePartyView> {
@@ -310,7 +310,7 @@ export class PartyInviteService {
    *
    * Bound to a household invite as {@link decline} is, and for the same
    * reason no lock is taken. The lib answers 404 to anyone who is not a party,
-   * 403 to the invitee, 410 once expired and 409 once settled. After commit
+   * 403 to the invitee, 409 once expired or settled. After commit
    * the withdrawn invite is announced.
    */
   async withdraw(inviteId: string): Promise<InvitePartyView> {

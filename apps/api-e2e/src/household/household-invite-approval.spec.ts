@@ -375,9 +375,13 @@ describe('member invites, their approval, and the invites a user has sent', () =
       expect(expiresAt.getTime()).toBeGreaterThanOrEqual(approvedAt + 7 * DAY_MS);
     });
 
-    it('answers 403 to a member and a guest, 404 for an invite from another household, 409 unless it waits, 410 once expired', async () => {
+    it('answers 403 to a member and a guest, 404 for an invite from another household, 409 unless it waits, and the same 409 once expired whether or not the sweep stamped it (#1513)', async () => {
       const { householdId, owner, member, guest, invitee, other } = await household();
-      const [otherOwner, lapsedInvitee] = await Promise.all([actors.user(), actors.user()]);
+      const [otherOwner, lapsedInvitee, sweptInvitee] = await Promise.all([
+        actors.user(),
+        actors.user(),
+        actors.user(),
+      ]);
       const { household: elsewhere } = await actors.householdWithMembers({ owner: otherOwner });
       const waiting = await createdInvite(member, householdId, { inviteeId: invitee.user.id });
       const open = await createdInvite(owner, householdId, { inviteeId: other.user.id });
@@ -388,6 +392,14 @@ describe('member invites, their approval, and the invites a user has sent', () =
         status: InviteStatus.AwaitingApproval,
         expiresAt: new Date(Date.now() - DAY_MS),
       });
+      // The same lapse after the expiry sweep has stamped it.
+      const swept = await arrangeInvite(db.client, {
+        inviter: member,
+        householdId: householdId,
+        inviteeId: sweptInvitee.user.id,
+        status: InviteStatus.Expired,
+        expiresAt: new Date(Date.now() - DAY_MS),
+      });
 
       await approve(member, householdId, waiting.id).expect(403);
       await approve(guest, householdId, waiting.id).expect(403);
@@ -395,7 +407,9 @@ describe('member invites, their approval, and the invites a user has sent', () =
       // Authorized over its own household, handed this one's invite id.
       await approve(otherOwner, elsewhere.id, waiting.id).expect(404);
       await approve(owner, householdId, open.id).expect(409);
-      await approve(owner, householdId, lapsed.id).expect(410);
+      const unstamped = await approve(owner, householdId, lapsed.id).expect(409);
+      expect(unstamped.body).toMatchObject({ code: 'INVITE_NOT_OUTSTANDING', state: InviteStatus.Expired });
+      expect((await approve(owner, householdId, swept.id).expect(409)).body).toEqual(unstamped.body);
 
       await expect(storedInvite(waiting.id)).resolves.toMatchObject({ status: InviteStatus.AwaitingApproval });
     });
