@@ -1,7 +1,7 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { artifactNameFor, FALLBACK_ARTIFACT_NAME, readArtifactName } from './artifact-name.js';
+import { artifactNameFor, FALLBACK_ARTIFACT_NAME, isArtifactNameTooLong, readArtifactName } from './artifact-name.js';
 
 const manifest = (fields: Record<string, unknown>): string => JSON.stringify({ name: { en: 'Demo' }, ...fields });
 
@@ -24,6 +24,25 @@ describe('artifactNameFor (#1093)', () => {
   ])('falls back to package for %s, leaving the validator to report it', (_name, text) => {
     expect(artifactNameFor(text)).toBe(FALLBACK_ARTIFACT_NAME);
     expect(FALLBACK_ARTIFACT_NAME).toBe('package');
+  });
+});
+
+describe('isArtifactNameTooLong (#1093)', () => {
+  // `.tgz.sha256` adds 11 bytes, so 244 is the longest name whose checksum file fits in 255.
+  it('accepts a name whose checksum file name is exactly 255 bytes', () => {
+    expect(isArtifactNameTooLong('a'.repeat(244))).toBe(false);
+  });
+
+  it('refuses a name one byte longer', () => {
+    expect(isArtifactNameTooLong('a'.repeat(245))).toBe(true);
+  });
+
+  it('refuses the longest slug with a long version, which the plugin manifest validator accepts', () => {
+    expect(
+      isArtifactNameTooLong(
+        artifactNameFor(manifest({ slug: `a${'b'.repeat(63)}`, version: `1.2.0-${'c'.repeat(200)}` })),
+      ),
+    ).toBe(true);
   });
 });
 

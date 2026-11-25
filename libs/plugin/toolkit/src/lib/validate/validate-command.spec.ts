@@ -164,6 +164,37 @@ describe('runValidate (#1093)', () => {
     );
 
     it(
+      'fails a plugin with an npm-shrinkwrap.json, as build would refuse it (#1093)',
+      async () => {
+        const pluginDir = await writePluginFixture(root, {
+          files: { 'npm-shrinkwrap.json': JSON.stringify({ lockfileVersion: 3, packages: {} }) },
+          packageJson: { files: ['dist', 'npm-shrinkwrap.json'] },
+        });
+
+        const report = await runValidate(pluginDir, OPTIONS);
+
+        expect(report.errors).toEqual([
+          { at: 'npm-shrinkwrap.json', code: 'SHRINKWRAP_REFUSED', message: expect.any(String) },
+        ]);
+      },
+      NPM_TIMEOUT,
+    );
+
+    it(
+      'fails a plugin whose slug and version are too long to name its plugin artifact, once, not on every entry (#1093)',
+      async () => {
+        const pluginDir = await writePluginFixture(root, { manifest: { version: `1.2.0-${'a'.repeat(240)}` } });
+
+        const report = await runValidate(pluginDir, OPTIONS);
+
+        expect(report.errors).toEqual([
+          { at: 'manifest.json', code: 'ARTIFACT_NAME_TOO_LONG', message: expect.stringContaining('255 bytes') },
+        ]);
+      },
+      NPM_TIMEOUT,
+    );
+
+    it(
       'warns about a file left out because its name ends like a plugin artifact, with no error',
       async () => {
         const pluginDir = await writePluginFixture(root, {

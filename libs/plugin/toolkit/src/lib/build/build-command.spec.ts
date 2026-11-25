@@ -287,6 +287,46 @@ describe('runBuild (#1093)', () => {
       expect(JSON.stringify(outcome.report)).not.toContain('s3cr3t');
       expect(existsSync(join(pluginDir, 'bge-artifacts'))).toBe(false);
     });
+
+    it('refuses an npm-shrinkwrap.json before npm ci installs from it in place of package-lock.json (#1093)', async () => {
+      // The host does not resolve: had npm ci read this file, the build would fail as DEPENDENCY_INSTALL_FAILED.
+      const pluginDir = await writePlugin({
+        files: {
+          'npm-shrinkwrap.json': JSON.stringify({
+            lockfileVersion: 3,
+            name: 'demo-sink',
+            packages: {
+              '': { dependencies: { dep: '1.0.0' }, name: 'demo-sink', version: '1.2.0' },
+              'node_modules/dep': { resolved: 'https://registry.invalid/dep/-/dep-1.0.0.tgz', version: '1.0.0' },
+            },
+            requires: true,
+            version: '1.2.0',
+          }),
+        },
+        lockfile: true,
+        packageJson: { files: ['dist', 'npm-shrinkwrap.json'] },
+      });
+
+      const outcome = await runBuild(pluginDir, optionsFor(pluginDir));
+
+      expect(outcome.artifact).toBeUndefined();
+      expect(outcome.report.errors).toEqual([
+        { at: 'npm-shrinkwrap.json', code: 'SHRINKWRAP_REFUSED', message: expect.any(String) },
+      ]);
+      expect(existsSync(join(pluginDir, 'bge-artifacts'))).toBe(false);
+    });
+
+    it('refuses a slug and version too long to name the files as ARTIFACT_NAME_TOO_LONG, once, and writes nothing (#1093)', async () => {
+      const pluginDir = await writePlugin({ lockfile: true, manifest: { version: `1.2.0-${'a'.repeat(240)}` } });
+
+      const outcome = await runBuild(pluginDir, optionsFor(pluginDir));
+
+      expect(outcome.artifact).toBeUndefined();
+      expect(outcome.report.errors).toEqual([
+        { at: 'manifest.json', code: 'ARTIFACT_NAME_TOO_LONG', message: expect.stringContaining('255 bytes') },
+      ]);
+      expect(existsSync(join(pluginDir, 'bge-artifacts'))).toBe(false);
+    });
   });
 
   it('removes an earlier checksum file before the new plugin artifact lands, so a failed checksum write leaves no stale one beside it (#1093)', async () => {

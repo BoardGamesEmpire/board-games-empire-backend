@@ -10,6 +10,7 @@ import {
   PLUGIN_ARCHIVE_MAX_ENTRIES,
   PLUGIN_ARCHIVE_MAX_EXTRACTED_BYTES,
   PLUGIN_ARCHIVE_MAX_MANIFEST_BYTES,
+  PLUGIN_ARCHIVE_MAX_SEGMENT_BYTES,
 } from '@boardgamesempire/plugin-manifest';
 
 /**
@@ -36,7 +37,13 @@ export const TOOLKIT_MESSAGE_CODES = [
   // A token written into a dependency's URL would ship to every server that
   // installs the plugin (#1093).
   'URL_CREDENTIALS_REFUSED',
+  // npm ci installs from npm-shrinkwrap.json in place of package-lock.json,
+  // which SOURCES.md and the checks read, so the two could disagree (#1093).
+  'SHRINKWRAP_REFUSED',
   'ARTIFACT_TOO_LARGE',
+  // A file name past the filesystem limit fails the write; the plugin author
+  // hears why, with a code, rather than as UNEXPECTED_ERROR (#1093).
+  'ARTIFACT_NAME_TOO_LONG',
   // A file left out of a plugin artifact breaks the plugin at runtime, so the
   // plugin author hears about it (#1093).
   'PLUGIN_ARTIFACT_LEFT_OUT',
@@ -93,7 +100,10 @@ const MESSAGES: Readonly<Record<MessageCode, string>> = {
     'The plugin holds a symbolic link or another special file, which a plugin artifact may not contain. Replace it with the file or folder it stands for.',
   URL_CREDENTIALS_REFUSED:
     'This file holds a URL with a user name or password in it, at {field}, and the file ships in the plugin artifact. Take the credentials out of every URL in the file and give them to npm another way, such as an auth token in the .npmrc in your home folder, or a git credential helper, then run npm install again.',
+  SHRINKWRAP_REFUSED:
+    'The plugin has an npm-shrinkwrap.json. npm would install its dependencies from that file, but SOURCES.md and these checks read package-lock.json, so the two could disagree. Delete npm-shrinkwrap.json and run npm install to bring package-lock.json up to date.',
   ARTIFACT_TOO_LARGE: `The plugin artifact is larger than the ${mebibytes(PLUGIN_ARCHIVE_MAX_COMPRESSED_BYTES)} a server accepts.`,
+  ARTIFACT_NAME_TOO_LONG: `The plugin manifest's slug and version make the plugin artifact's file names longer than the ${PLUGIN_ARCHIVE_MAX_SEGMENT_BYTES} bytes a file name may have, counting the .tgz.sha256 its checksum file adds. Shorten the slug or the version.`,
   PLUGIN_ARTIFACT_LEFT_OUT:
     '{entry} is left out of the plugin artifact because its name ends like a plugin artifact or its checksum. If the plugin needs this file, rename it.',
   SCAN_REPORT_TRUNCATED: `The scan found more than its report can hold, so it lists at most ${MAX_ADVISORY_FINDINGS} warnings, and at most ${MAX_GATING_EXAMPLES_PER_SPECIFIER} files for each forbidden import. Every forbidden import is still named.`,

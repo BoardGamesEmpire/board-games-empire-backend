@@ -148,6 +148,12 @@ Messages are in English for now (#1514).
   such URL is, never the URL itself. Give npm the credentials another way,
   such as an auth token in the `.npmrc` in your home folder or a git
   credential helper, then run `npm install` again.
+- **No `npm-shrinkwrap.json`.** npm installs from `npm-shrinkwrap.json` in
+  place of `package-lock.json`, but `SOURCES.md` and the checks read
+  `package-lock.json`. So an `npm-shrinkwrap.json` that npm would pack stops
+  `build` before npm installs anything, and fails `validate` of a plugin
+  folder, with `SHRINKWRAP_REFUSED`. Delete it and run `npm install` to bring
+  `package-lock.json` up to date.
 - **Symbolic links.** npm leaves a plugin author's symbolic links out of its
   selection, as `npm publish` would. Only a linked `manifest.json` or
   `package-lock.json`, or a link under `node_modules` after the install,
@@ -162,7 +168,10 @@ Messages are in English for now (#1514).
   whose one top-level folder is `<slug>-<version>/`. One larger than the
   server's compressed-size cap (100 MiB, `PLUGIN_ARCHIVE_MAX_COMPRESSED_BYTES`
   in `@boardgamesempire/plugin-manifest`) is reported as `ARTIFACT_TOO_LARGE`
-  and not written.
+  and not written. A slug and version so long that
+  `<slug>-<version>.tgz.sha256` passes 255 bytes, the longest file name most
+  filesystems allow, is reported as `ARTIFACT_NAME_TOO_LONG` by `build` and
+  by `validate` of a plugin folder.
 - **It is reproducible.** Entries are sorted by path, byte by byte. Every
   entry's time is `SOURCE_DATE_EPOCH` when it holds a whole number of seconds
   from 0 to 2147483647; any other value is ignored, and the time is 0. The

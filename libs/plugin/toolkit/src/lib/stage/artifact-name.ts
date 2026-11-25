@@ -1,4 +1,4 @@
-import { PLUGIN_SLUG_PATTERN } from '@boardgamesempire/plugin-manifest';
+import { PLUGIN_ARCHIVE_MAX_SEGMENT_BYTES, PLUGIN_SLUG_PATTERN } from '@boardgamesempire/plugin-manifest';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { valid } from 'semver';
@@ -6,6 +6,18 @@ import { z } from 'zod';
 
 /** npm's own top-level folder name, the name used when the plugin manifest gives no usable slug and version. */
 export const FALLBACK_ARTIFACT_NAME = 'package';
+
+/** The longest file name the build writes for a plugin artifact named `<name>`: its checksum file. */
+const CHECKSUM_FILE_SUFFIX = '.tgz.sha256';
+
+/**
+ * Whether `name` gives file names past the 255 bytes a file name may have on
+ * most filesystems, the limit the archive rules set for one path segment
+ * (#1093). A slug of up to 64 characters and a version of up to 256 can pass
+ * it, and the write would then fail with no code to report.
+ */
+export const isArtifactNameTooLong = (name: string): boolean =>
+  Buffer.byteLength(`${name}${CHECKSUM_FILE_SUFFIX}`, 'utf8') > PLUGIN_ARCHIVE_MAX_SEGMENT_BYTES;
 
 /**
  * The two plugin manifest fields the name comes from, read before the

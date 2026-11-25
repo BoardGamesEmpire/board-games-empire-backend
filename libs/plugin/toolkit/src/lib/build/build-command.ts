@@ -9,6 +9,7 @@ import type { ArtifactOutcome, BuildOutcome } from '../report.js';
 import type { ArtifactEntry } from '../stage/artifact-entries.js';
 import type { SelectPluginFilesOptions } from '../stage/select-plugin-files.js';
 import { leftOutWarnings, requireOwnPackageJson, selectPluginFiles } from '../stage/select-plugin-files.js';
+import { shrinkwrapErrors } from '../stage/shrinkwrap.js';
 import { stagePluginFiles } from '../stage/stage-plugin-files.js';
 import { urlCredentialErrors } from '../stage/url-credentials.js';
 import { ToolkitError } from '../toolkit.errors.js';
@@ -125,7 +126,8 @@ const writeArtifact = async (
  *
  * The plugin's own build runs first. Then npm's selection of its files is
  * copied into a temporary folder; a URL with credentials in its package.json
- * or package-lock.json stops the build there, before npm reads either. Its
+ * or package-lock.json, or an npm-shrinkwrap.json, stops the build there,
+ * before npm reads any of them. Its
  * production dependencies are installed there as package-lock.json records
  * them, and SOURCES.md lists them. That copy goes through the server's
  * archive rules and the same checks `validate` runs. Any error returns the
@@ -151,11 +153,12 @@ export const runBuild = async (projectDir: string, options: BuildOptions): Promi
     await stagePluginFiles(projectDir, files, stageDir);
 
     // Before npm ci, which would fetch with a password a URL holds, or fail
-    // on a stale one before this refusal is reported (#1093).
-    const credentialErrors = await urlCredentialErrors(stageDir);
+    // on a stale one before this refusal is reported, and would install from
+    // an npm-shrinkwrap.json rather than package-lock.json (#1093).
+    const metadataErrors = [...(await shrinkwrapErrors(stageDir)), ...(await urlCredentialErrors(stageDir))];
 
-    if (credentialErrors.length > 0) {
-      return { report: { errors: credentialErrors, notes: [], warnings: leftOutWarnings(leftOut) } };
+    if (metadataErrors.length > 0) {
+      return { report: { errors: metadataErrors, notes: [], warnings: leftOutWarnings(leftOut) } };
     }
 
     await installDependencies(stageDir);
