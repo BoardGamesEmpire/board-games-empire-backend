@@ -124,4 +124,25 @@ describe('the operational port (#1511)', () => {
       expectErrorEnvelope(response, { status: 421, code: 'HOST_NOT_ALLOWED' });
     });
   });
+
+  // The same route answers both ports with different bodies, so a dependency's
+  // name and message reach only whoever can reach the operational port (#1511).
+  describe('readiness on each port', () => {
+    it('answers its status only on the public port', async () => {
+      const response = await request(baseUrl).get('/health/ready');
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ status: 'ok' });
+    });
+
+    it('answers the full report on the operational port', async () => {
+      const response = await request(operationalUrl).get('/health/ready');
+
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({
+        status: 'ok',
+        info: { database: { status: 'up' } },
+      });
+    });
+  });
 });

@@ -62,12 +62,11 @@ describe("the api's configuration schema", () => {
     expect(value).not.toHaveProperty('GATEWAY_COORDINATOR_PORT');
   });
 
-  // Auth, health, security.txt and Prometheus load their configs with
+  // Auth, security.txt and Prometheus load their configs with
   // `forFeature` too.
   it.each([
     ['BETTER_AUTH_SECRET', 'short'],
     ['BETTER_AUTH_URL', 'not a url'],
-    ['ENABLE_HEALTH_CHECKS', 'sometimes'],
     ['SECURITY_POLICY_URL', 'not a url'],
     ['PROMETHEUS_DEFAULT_METRICS_TIMEOUT', 'soon'],
     ['PROMETHEUS_DEFAULT_METRICS_ENABLED', 'sometimes'],

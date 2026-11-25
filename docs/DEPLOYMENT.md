@@ -82,7 +82,7 @@ The DataGateway images listen on gRPC too, each on its `*_GATEWAY_GRPC_PORT`, an
 
 What "ready" means here, role by role:
 
-- **The api** answers `/health/ready` once it has booted. That checks Postgres, the api's cache and queue Redis connections, and its storage. `/health/live` answers whenever the server is up. Both answer on the public port and on the operational port, so a probe that can reach only the public port still works. The full health report, `/health`, answers on the operational port only ([The operational port](#the-operational-port)). A first boot migrates and seeds before anything listens, so give the api a startup probe that allows minutes ([BOOTSTRAP.md](BOOTSTRAP.md), "First boot takes longer").
+- **The api** answers `/health/ready` once it has booted. That checks Postgres, the api's cache and queue Redis connections, and its storage. `/health/live` answers whenever the server is up. Both answer on the public port and on the operational port, so a probe that can reach only the public port still works. On the public port, `/health/ready` answers its status only: `{ "status": "ok" }` with a 200, or a 503 with the code `NOT_READY` and `"status": "error"`, and never the name of a dependency that is down. On the operational port it answers the full report, with an entry for each dependency and the message of each one that is down, so an operator can see which one failed. The full health report, `/health`, answers on the operational port only ([The operational port](#the-operational-port)). No setting turns these probes off. A first boot migrates and seeds before anything listens, so give the api a startup probe that allows minutes ([BOOTSTRAP.md](BOOTSTRAP.md), "First boot takes longer").
 - **The coordinator and the DataGateways** serve no standard gRPC health service (`grpc.health.v1.Health`) yet, so a Kubernetes `grpc` probe fails against them. Probe the port over TCP (`tcpSocket`). The coordinator opens its port once its bootstrap is done; the DataGateways have no database and open theirs at start.
 - **`worker` and `gateway-fetch`** listen on nothing, so there is nothing to probe. Their `Bootstrap complete` log line is the evidence they came up. A role that fails exits, and the restart policy brings it back.
 
@@ -250,7 +250,7 @@ The api listens on a second port, `OPERATIONAL_PORT` (default 33334), for an ope
 - `/metrics`, the Prometheus metrics, in the Prometheus text format;
 - `/health`, the full health report;
 - the API document: its page at `/docs`, as JSON at `/docs/json` and as YAML at `/docs/yaml`;
-- `/health/live` and `/health/ready`, the probes, which the public port answers too.
+- `/health/live` and `/health/ready`, the probes, which the public port answers too. The public port's `/health/ready` carries its status only; this port's carries the full report.
 
 Every other path answers 404 with the code `ROUTE_NOT_FOUND`, as an unknown route does. The public port answers 404 in the same way to `/health` itself, `/metrics` and `/docs`, so no one can read them through the public port.
 

@@ -1,9 +1,8 @@
-import { env, isTrue, splitTrimFilter } from '@bge/env';
+import { env, splitTrimFilter } from '@bge/env';
 import { registerAs } from '@nestjs/config';
 import Joi from 'joi';
 
 export interface HealthConfig {
-  enableHealthChecks: boolean;
   httpHealthCheckUrls: string[];
 }
 
@@ -16,12 +15,6 @@ export default registerAs('health', () =>
       defaultValue: '',
       mutators: (value) => splitTrimFilter(value),
     },
-    {
-      keyTo: 'enableHealthChecks',
-      key: 'ENABLE_HEALTH_CHECKS',
-      defaultValue: true,
-      mutators: isTrue,
-    },
   ]),
 );
 
@@ -33,5 +26,4 @@ export default registerAs('health', () =>
  */
 export const healthConfigValidationSchema = {
   HTTP_HEALTH_CHECK_URLS: Joi.string().allow(''),
-  ENABLE_HEALTH_CHECKS: Joi.boolean().allow(''),
 };

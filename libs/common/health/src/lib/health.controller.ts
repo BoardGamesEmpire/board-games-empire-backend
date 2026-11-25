@@ -1,27 +1,18 @@
-import { Controller, Get, Logger } from '@nestjs/common';
+import { CodedHttpException, t } from '@bge/i18n';
+import { Controller, Get, Req, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ApiOkResponse, ApiServiceUnavailableResponse, ApiTags } from '@nestjs/swagger';
 import { HealthCheck, HealthCheckResult, HealthCheckService, HealthIndicatorFunction } from '@nestjs/terminus';
 import { SkipThrottle } from '@nestjs/throttler';
+import { Http } from '@status/codes';
 import { AllowAnonymous } from '@thallesp/nestjs-better-auth';
-import type { NextParameters } from 'surrogate';
-import { NextAsyncPre, SurrogateDelegate } from 'surrogate';
+import type { IncomingMessage } from 'node:http';
 import { CacheRedisHealthIndicator } from './indicators/cache-redis.health-indicator';
 import { HttpTargetHealthIndicator } from './indicators/http-target.health-indicator';
 import { PrismaHealthIndicator } from './indicators/prisma.health-indicator';
 import { QueueRedisHealthIndicator } from './indicators/queue-redis.health-indicator';
 import { StorageHealthIndicator } from './indicators/storage.health-indicator';
-
-/**
- * Shape returned by Surrogate when `ENABLE_HEALTH_CHECKS=false`. Distinct
- * from `HealthCheckResult` so consumers can discriminate between "no checks
- * ran" and "all checks passed".
- */
-interface DisabledResponse {
-  status: 'disabled';
-}
-
-const DISABLED_RESPONSE: DisabledResponse = { status: 'disabled' };
+import { isOperationalRequest } from './operational-request';
 
 /**
  * Exempt from rate limiting, for the reason the liveness docblock below already
@@ -59,13 +50,10 @@ const DISABLED_RESPONSE: DisabledResponse = { status: 'disabled' };
 // Must stay out of the response cache: every probe is the same anonymous
 // caller, and the cache stores successes but never errors, so one cached 200
 // would keep answering through the outage that followed it (#528).
-@SurrogateDelegate()
 @ApiTags('health')
 @AllowAnonymous()
 @Controller('health')
 export class HealthController {
-  private readonly logger = new Logger(HealthController.name);
-
   constructor(
     private readonly configService: ConfigService,
     private readonly health: HealthCheckService,
@@ -82,7 +70,7 @@ export class HealthController {
    * to restart the pod, which is the right response for a hung process but
    * the wrong response for a transient DB blip.
    *
-   * NEVER disabled via config: a liveness probe that can be silenced is
+   * No setting turns it off: a liveness probe that can be silenced is
    * indistinguishable from no probe.
    */
   @Get('live')
@@ -101,20 +89,50 @@ export class HealthController {
    * A failure returns 503; K8s removes the pod from rotation but does NOT
    * restart it. This is the right response for transient dependency outages.
    *
-   * `ENABLE_HEALTH_CHECKS=false` short-circuits to `{ status: 'disabled' }`
-   * with a 200 — the pod stays in rotation.
+   * Both ports answer this route, but not with the same body (#1511). The
+   * public port answers its status only: a dependency's name and the message
+   * its client threw name the server's internals to anyone who can reach the
+   * port, and a probe reads the status code and nothing else. A request the
+   * operational port accepted gets the whole Terminus report, which is what an
+   * operator reads to find which dependency is down.
    */
   @HealthCheck()
   @Get('ready')
-  @ApiOkResponse({ description: 'All critical dependencies healthy (or checks disabled)' })
-  @ApiServiceUnavailableResponse({ description: 'One or more critical dependencies are unhealthy' })
-  ready(): Promise<HealthCheckResult> | DisabledResponse {
-    return this.health.check([
+  @ApiOkResponse({
+    description:
+      "All critical dependencies healthy. The public port answers `{ status: 'ok' }`; the operational port answers the full report, one entry per dependency",
+  })
+  @ApiServiceUnavailableResponse({
+    description:
+      "One or more critical dependencies are unhealthy. The public port answers the error envelope with the code `NOT_READY` and `status: 'error'`; the operational port answers the full report with each failing dependency's `message`",
+  })
+  async ready(@Req() req: IncomingMessage): Promise<HealthCheckResult | { status: 'ok' }> {
+    const report = this.health.check([
       () => this.prismaIndicator.isHealthy('database'),
       () => this.cacheRedisIndicator.isHealthy('cache'),
       () => this.queueRedisIndicator.isHealthy('queue'),
       () => this.storageIndicator?.isHealthy('storage'),
     ]);
+
+    if (isOperationalRequest(req)) {
+      return report;
+    }
+
+    try {
+      await report;
+      return { status: 'ok' };
+    } catch (error) {
+      // Only Terminus's own refusal becomes the public answer. Anything else
+      // is a fault in the check itself and keeps its own handling.
+      if (!(error instanceof ServiceUnavailableException)) {
+        throw error;
+      }
+
+      throw new CodedHttpException(Http.ServiceUnavailable, 'NOT_READY', t('errors.health.not_ready'), {
+        fields: { status: 'error' },
+        cause: error,
+      });
+    }
   }
 
   /**
@@ -133,9 +151,9 @@ export class HealthController {
    */
   @HealthCheck()
   @Get()
-  @ApiOkResponse({ description: 'All HTTP checks succeeded (or checks disabled / none configured)' })
+  @ApiOkResponse({ description: 'All HTTP checks succeeded (or none configured)' })
   @ApiServiceUnavailableResponse({ description: 'One or more HTTP checks failed' })
-  detail(): Promise<HealthCheckResult> | DisabledResponse {
+  detail(): Promise<HealthCheckResult> {
     return this.health.check(this.buildHttpIndicators());
   }
 
@@ -159,18 +177,5 @@ export class HealthController {
           () =>
             this.http.check(name.trim(), url.trim()),
       );
-  }
-
-  @NextAsyncPre({
-    action: ['ready', 'detail'],
-    options: {
-      runConditions(this: HealthController) {
-        return this.configService.get<boolean>('health.enableHealthChecks', true) !== true;
-      },
-    },
-  })
-  protected onDisabled({ next }: NextParameters<HealthController>) {
-    this.logger.warn('Health checks are disabled by configuration; returning 200 with status "disabled"');
-    return next.bail({ bailWith: DISABLED_RESPONSE });
   }
 }

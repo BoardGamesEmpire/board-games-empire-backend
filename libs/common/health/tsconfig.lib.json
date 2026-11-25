@@ -24,6 +24,9 @@
       "path": "../../database/tsconfig.lib.json"
     },
     {
+      "path": "../i18n/tsconfig.lib.json"
+    },
+    {
       "path": "../testing/tsconfig.lib.json"
     },
     {
