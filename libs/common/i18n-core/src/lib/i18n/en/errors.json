@@ -235,6 +235,9 @@
   "host": {
     "not_allowed": "This server doesn't answer at this address. If you run this server, add the address to TRUSTED_ORIGINS"
   },
+  "operational": {
+    "source_not_allowed": "This address is for the server's own monitoring, and your network can't reach it. If you run this server, add your network to OPERATIONAL_SOURCES"
+  },
   "auth": {
     "impersonated_session": "Impersonated sessions are not supported",
     "no_token": "No token provided",

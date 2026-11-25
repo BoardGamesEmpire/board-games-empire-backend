@@ -4,14 +4,13 @@ import { Logger } from '@nestjs/common';
 import { Http } from '@status/codes';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { HostRule } from './host-rule';
+import { createRefusalLog } from './refusal-log';
 
 const REFUSAL_CODE = 'HOST_NOT_ALLOWED';
 const REFUSAL_MESSAGE_KEY: I18nPath = 'errors.host.not_allowed';
 
 /** The longest a DNS name can be, and so the most of one worth logging. */
 const MAX_LOGGED_NAME_LENGTH = 253;
-const MAX_LOGGED_NAMES = 100;
-const LOG_WINDOW_MS = 60 * 60 * 1000;
 
 export interface HostCheckDeps {
   readonly logger?: Pick<Logger, 'warn'>;
@@ -40,45 +39,24 @@ export interface HostCheck {
  * makes that prefer `X-Forwarded-Host`, which a rebound page can set on its own
  * `fetch`.
  *
- * A refused name is logged so an operator can see which address to add. The log
- * remembers each name once and stops at a cap, so someone sending endless
- * distinct names can't flood it or grow this set. It starts over each hour, so
- * outside traffic filling the cap can't hide a name the operator later needs.
+ * A refused name is logged so an operator can see which address to add, once
+ * an hour and up to a cap (`createRefusalLog`).
  */
 export function createHostCheck({ rule, render, logger = new Logger('HostCheck') }: HostCheckDeps): HostCheck {
-  const loggedNames = new Set<string>();
-  let capReported = false;
-  let logWindowStart = Date.now();
   let renderedMessage: string | undefined;
 
   // Rendered at the first refusal, when the app is up, and then kept: the key and
   // the locale never change, and this path takes no session.
   const refusalMessage = (): string => (renderedMessage ??= render(REFUSAL_MESSAGE_KEY));
 
+  const refusalLog = createRefusalLog({
+    logger,
+    refused: (name) => `Refused a request for '${name}'. If this server answers there, add it to TRUSTED_ORIGINS`,
+    capReached: (max) => `Refused requests for ${max} different names. Others are not logged for up to an hour`,
+  });
+
   const logRefusal = (host: string | undefined): void => {
-    const name = String(host).slice(0, MAX_LOGGED_NAME_LENGTH);
-    const now = Date.now();
-
-    if (now - logWindowStart >= LOG_WINDOW_MS) {
-      logWindowStart = now;
-      loggedNames.clear();
-      capReported = false;
-    }
-
-    if (loggedNames.has(name)) {
-      return;
-    }
-
-    if (loggedNames.size < MAX_LOGGED_NAMES) {
-      loggedNames.add(name);
-      logger.warn(`Refused a request for '${name}'. If this server answers there, add it to TRUSTED_ORIGINS`);
-      return;
-    }
-
-    if (!capReported) {
-      capReported = true;
-      logger.warn(`Refused requests for ${MAX_LOGGED_NAMES} different names. Others are not logged for up to an hour`);
-    }
+    refusalLog(String(host).slice(0, MAX_LOGGED_NAME_LENGTH));
   };
 
   const isAllowed = (req: IncomingMessage): boolean => {

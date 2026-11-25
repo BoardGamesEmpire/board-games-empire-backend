@@ -122,43 +122,6 @@ describe('createHostCheck (#977)', () => {
       expect(warn.mock.calls[0][0]).toContain('evil.example');
     });
 
-    it('stops logging after 100 distinct names, and says so once', () => {
-      const check = checkFor();
-
-      for (let name = 0; name < 150; name++) {
-        handle(check, request(`evil-${name}.example`));
-      }
-
-      expect(warn).toHaveBeenCalledTimes(101);
-      expect(warn.mock.calls[99][0]).toContain('evil-99.example');
-      expect(warn.mock.calls[100][0]).not.toContain('evil-100.example');
-      expect(warn.mock.calls[100][0]).toMatch(/not logged/i);
-    });
-
-    // Outside traffic can fill the cap, and an operator who later adds a proxy or
-    // a domain still needs to see which name is being refused.
-    it('logs again after an hour, even once the cap was reached', () => {
-      const now = jest.spyOn(Date, 'now').mockReturnValue(0);
-      const check = checkFor();
-
-      for (let name = 0; name < 150; name++) {
-        handle(check, request(`evil-${name}.example`));
-      }
-
-      warn.mockClear();
-
-      now.mockReturnValue(59 * 60 * 1000);
-      handle(check, request('proxy-rewrite.example'));
-      expect(warn).not.toHaveBeenCalled();
-
-      now.mockReturnValue(60 * 60 * 1000);
-      handle(check, request('proxy-rewrite.example'));
-      expect(warn).toHaveBeenCalledTimes(1);
-      expect(warn.mock.calls[0][0]).toContain('proxy-rewrite.example');
-
-      now.mockRestore();
-    });
-
     it('truncates a logged name to 253 characters', () => {
       handle(checkFor(), request('x'.repeat(2000)));
 
