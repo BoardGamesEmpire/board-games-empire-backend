@@ -29,10 +29,13 @@ export const configModuleOptions = {
   expandVariables: true,
   validationSchema: configurationValidationSchema,
   validationOptions: {
-    // Names every invalid variable in one message.
-    abortEarly: false,
-    cache: !env.isProduction,
-    debug: !env.isProduction,
-    stack: !env.isProduction,
+    // Joi reads its own options from `libraryOptions`.
+    libraryOptions: {
+      // Names every invalid variable in one message.
+      abortEarly: false,
+      cache: !env.isProduction,
+      debug: !env.isProduction,
+      stack: !env.isProduction,
+    },
   },
 } satisfies ConfigModuleOptions;

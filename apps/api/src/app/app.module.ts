@@ -37,7 +37,7 @@ import { FeedbackQueueProducerModule } from '@bge/queue-feedback';
 import { WebhookQueueProducerModule } from '@bge/queue-webhooks';
 import { QuotasModule } from '@bge/quotas';
 import type { Redis } from '@bge/redis';
-import { CACHE_REDIS_CLIENT, createCacheStore, QUEUE_REDIS_CLIENT, RedisModule } from '@bge/redis';
+import { CACHE_REDIS_CLIENT, createCacheModuleStore, QUEUE_REDIS_CLIENT, RedisModule } from '@bge/redis';
 import { SafeHttpModule } from '@bge/safe-http';
 import { SecureHttpModule } from '@bge/secure-http';
 import { PrivacyPolicyModule, SystemSettingsModule } from '@bge/system-settings';
@@ -125,7 +125,7 @@ import { apiPluginModuleOptions } from './plugin-module.options';
       isGlobal: true,
       inject: [CACHE_REDIS_CLIENT, ConfigService],
       useFactory: (cacheClient: Redis, configService: ConfigService) => ({
-        stores: [createCacheStore(cacheClient, API_CACHE_NAMESPACE)],
+        stores: [createCacheModuleStore(cacheClient, API_CACHE_NAMESPACE)],
         ttl: configService.get<number>('cache.ttl'),
       }),
     }),

@@ -2,10 +2,26 @@ import { AuditContextService, SystemActorScope } from '@bge/actor-context';
 import { JOB_META_KEY } from '@bge/queue-actor-context';
 import { getQueueToken } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
-import { SCHEDULE_INTERVAL_OPTIONS, SCHEDULER_NAME } from '@nestjs/schedule/dist/schedule.constants';
+import { Interval } from '@nestjs/schedule';
 import { Test } from '@nestjs/testing';
 import { EXTENDED_NETWORK_QUEUE, ExtendedNetworkJobNames } from './extended-network-queue.constants';
 import { ExtendedNetworkScheduleService } from './extended-network-schedule.service';
+
+/**
+ * The schedule a daily rebuild should carry. `@nestjs/schedule` exports no
+ * metadata keys, so the method's metadata is compared with what the decorator
+ * leaves on this function.
+ */
+const dailyRebuild = (): void => undefined;
+Interval('extended-network-rebuild', 24 * 60 * 60 * 1000)({}, 'run', { value: dailyRebuild });
+
+/** The metadata decorators left on a method, by key, without the compiler's `design:` types. */
+const metadataOf = (method: object) =>
+  Object.fromEntries(
+    Reflect.getMetadataKeys(method)
+      .filter((key) => !String(key).startsWith('design:'))
+      .map((key) => [key, Reflect.getMetadata(key, method)]),
+  );
 
 describe('ExtendedNetworkScheduleService (#497)', () => {
   const systemActor = { kind: 'system', reason: 'extended-network-rebuild' };
@@ -91,12 +107,7 @@ describe('ExtendedNetworkScheduleService (#497)', () => {
     await schedule.rebuildDaily();
 
     expectFullRebuildQueued();
-    expect(Reflect.getMetadata(SCHEDULER_NAME, ExtendedNetworkScheduleService.prototype.rebuildDaily)).toBe(
-      'extended-network-rebuild',
-    );
-    expect(
-      Reflect.getMetadata(SCHEDULE_INTERVAL_OPTIONS, ExtendedNetworkScheduleService.prototype.rebuildDaily),
-    ).toEqual({ timeout: 24 * 60 * 60 * 1000 });
+    expect(metadataOf(ExtendedNetworkScheduleService.prototype.rebuildDaily)).toEqual(metadataOf(dailyRebuild));
   });
 
   // The worker still starts. The next day's run, and every friendship

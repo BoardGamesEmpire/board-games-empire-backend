@@ -48,7 +48,8 @@ export class RedisIoAdapter extends IoAdapter {
       },
     };
 
-    const server = super.createIOServer(port, serverOptions);
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Nest declares a full ServerOptions here but hands it to socket.io's `new Server()`, which takes a Partial; so do the gateways' own options
+    const server = super.createIOServer(port, serverOptions as ServerOptions);
     server.adapter(this.adapterConstructor);
     return server;
   }
