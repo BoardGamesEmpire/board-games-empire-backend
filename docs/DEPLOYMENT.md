@@ -341,7 +341,7 @@ The IGDB gateway is `igdb-gateway` on port 50054.
 
 ## Shutdown
 
-On `SIGTERM` each role closes its application, flushes its telemetry, and exits. The api closes its operational port first, then its public port. A connection held open between requests, such as a scraper's keep-alive connection, is closed and not waited for. A role registers those handlers once its bootstrap is done. The role's process is PID 1 in its container, and PID 1 ignores a signal it has no handler for, so a container stopped before then stops only at the kill timeout. The split profile sets `init: true`, which puts an init process in front of the role and lets the signal end it at once. In Kubernetes, the pod's grace period applies.
+On `SIGTERM` each role closes its application, flushes its telemetry, and exits. The api stops taking connections on its operational port as it starts to close, then closes its public port. A connection held open between requests, such as a scraper's keep-alive connection, is closed and not waited for. A request still running on the operational port is waited for only until the api has closed, then cut off. A role registers those handlers once its bootstrap is done. The role's process is PID 1 in its container, and PID 1 ignores a signal it has no handler for, so a container stopped before then stops only at the kill timeout. The split profile sets `init: true`, which puts an init process in front of the role and lets the signal end it at once. In Kubernetes, the pod's grace period applies.
 
 ## Upgrades and rollback
 

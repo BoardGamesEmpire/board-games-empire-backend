@@ -64,8 +64,9 @@ export const configurationValidationSchema = Joi.object({
     : Number(variables.OPERATIONAL_PORT);
 
   // Two listeners on one port would fail at listen with EADDRINUSE, after the
-  // rest of boot (#1511).
-  return port === operationalPort
+  // rest of boot (#1511). Port 0 asks the OS for a free port, a different one
+  // for each listener, so two 0s never collide.
+  return port !== 0 && port === operationalPort
     ? helpers.message({
         custom: `OPERATIONAL_PORT must differ from PORT, and both are ${port}. Set OPERATIONAL_PORT, or PORT, to another port`,
       })

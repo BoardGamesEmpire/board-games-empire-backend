@@ -251,32 +251,44 @@ async function bootstrap() {
   });
   installRequestBodyRateGuard(operationalServer);
 
-  // Closes the operational listener first, then the app and the public one.
-  // Node closes idle keep-alive connections on close, so a scraper holding
-  // one doesn't keep the process up.
+  // The operational listener stops taking connections as the app starts to
+  // close, and Node closes its idle keep-alive connections, such as a
+  // scraper's. A request still running there is not waited for past
+  // `app.close()`: a first API document request held by a sign-in provider
+  // that never answers, or a health check of an outside service, could
+  // otherwise hold up the app's destroy hooks and the last spans (#1511).
   registerShutdownHandlers(
     {
       close: async () => {
-        await closeServer(operationalServer).catch((error: unknown) =>
+        const operationalClosed = closeServer(operationalServer).catch((error: unknown) =>
           bootstrapLogger.error({ err: error }, 'closing the operational port failed'),
         );
-        await app.close();
+        try {
+          await app.close();
+        } finally {
+          operationalServer.closeAllConnections();
+          await operationalClosed;
+        }
       },
     },
     otel,
     bootstrapLogger,
   );
 
-  const port = configService.getOrThrow<number>('system.port');
-  await app.listen(port);
-  Logger.log(`🚀 Application is running on: http://localhost:${port}/${globalPrefix}`, LOGGER_CONTEXT);
+  // `app.init()` registers Nest's routes, which both listeners serve. The
+  // operational port is bound before the public one, so a bind failure
+  // (EADDRINUSE) exits through the catch below before the public port's
+  // readiness ever answers (#1511). Bound on every interface, as the public
+  // port is: the allowed sources decide who may use it.
+  await app.init();
 
-  // After `app.listen`, which is where Nest registers its routes. Bound on
-  // every interface, as the public port is: the allowed sources decide who
-  // may use it. A failure (EADDRINUSE) rejects, and the catch below exits.
   const operationalPort = configService.getOrThrow<number>('operational.port');
   await listen(operationalServer, operationalPort);
   Logger.log(`Operational routes on port ${operationalPort}`, LOGGER_CONTEXT);
+
+  const port = configService.getOrThrow<number>('system.port');
+  await app.listen(port);
+  Logger.log(`🚀 Application is running on: http://localhost:${port}/${globalPrefix}`, LOGGER_CONTEXT);
 }
 
 /** `server.listen`, resolved once it is listening and rejected with a bind error. */

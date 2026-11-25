@@ -114,8 +114,8 @@ async function answersOk(url: string): Promise<boolean> {
  *
  * The API binds a second port, for its operational routes (#1511). It takes a
  * fresh one on each attempt, never the public port, which the API would refuse
- * at boot. Readiness waits for that port too: the API listens on it just after
- * the public one, so a probe of the public port alone could pass first.
+ * at boot. The API binds it before the public one and exits if it can't, so
+ * the public port answering means it is up. Readiness checks both anyway.
  */
 async function launchApi(env: NodeJS.ProcessEnv, pluginsRoot: string): Promise<LaunchedApi> {
   requireBundle('API', API_BUNDLE, '@boardgamesempire/api:build');

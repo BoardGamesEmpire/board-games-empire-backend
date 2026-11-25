@@ -138,3 +138,17 @@ describe("the api's sign-in provider variables", () => {
     expect(error?.details.map(({ path }) => path.join('.')) ?? []).not.toContain('OIDC_OLD_DISCOVERY_URL');
   });
 });
+
+describe("the api's two ports", () => {
+  // Two listeners on one port would fail at listen, after the rest of boot (#1511).
+  it('refuses an OPERATIONAL_PORT equal to PORT', () => {
+    expect(validate({ PORT: '40000', OPERATIONAL_PORT: '40000' }).error?.message).toMatch(
+      /OPERATIONAL_PORT must differ from PORT/,
+    );
+  });
+
+  // Port 0 asks the OS for a free port, a different one for each listener (#1511).
+  it('lets PORT and OPERATIONAL_PORT both be 0', () => {
+    expect(validate({ PORT: '0', OPERATIONAL_PORT: '0' }).error).toBeUndefined();
+  });
+});
