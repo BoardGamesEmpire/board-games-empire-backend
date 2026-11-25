@@ -288,7 +288,10 @@ describe('extractPluginArchive (#1094)', () => {
     expect(await exists(intoDir)).toBe(false);
   });
 
-  it('refuses a name the filesystem cannot hold as unsafe-path (#1094)', async () => {
+  // The checker's name caps (#1166) refuse this 300-byte segment before it
+  // reaches the disk. The extractor's own ENAMETOOLONG mapping stays for paths
+  // the disk refuses below those caps (a shorter limit, say).
+  it('refuses a name the filesystem cannot hold as unsafe-path (#1094, #1166)', async () => {
     await write([...VALID, { name: `package/${'n'.repeat(300)}`, content: 'x' }]);
 
     const err = await refusal();
