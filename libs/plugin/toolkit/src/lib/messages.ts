@@ -30,6 +30,9 @@ export const TOOLKIT_MESSAGE_CODES = [
   'DEPENDENCY_INSTALL_FAILED',
   'SYMLINK_REFUSED',
   'ARTIFACT_TOO_LARGE',
+  // Beyond the plan's fixed list: a file left out of a plugin artifact breaks
+  // the plugin at runtime, so the plugin author hears about it (#1093).
+  'PLUGIN_ARTIFACT_LEFT_OUT',
   // Beyond the plan's fixed list: every line the CLI prints carries a stable
   // code, the line for an error nobody foresaw included (#1093).
   'UNEXPECTED_ERROR',
@@ -74,12 +77,13 @@ const MESSAGES: Readonly<Record<MessageCode, string>> = {
   LOCKFILE_UNSUPPORTED:
     'The package-lock.json is in a form the build cannot read. Run npm install with npm 7 or later to update it.',
   PLUGIN_BUILD_FAILED: "The plugin's own build script failed (npm run build).",
-  NPM_PACK_FAILED:
-    "npm could not list the plugin's files (npm pack --dry-run). Check that the folder holds a valid package.json.",
+  NPM_PACK_FAILED: "npm could not list the plugin's files (npm pack --dry-run).",
   DEPENDENCY_INSTALL_FAILED: "npm could not install the plugin's dependencies from package-lock.json (npm ci).",
   SYMLINK_REFUSED:
     'The plugin holds a symbolic link or another special file, which a plugin artifact may not contain. Replace it with the file or folder it stands for.',
   ARTIFACT_TOO_LARGE: `The plugin artifact is larger than the ${mebibytes(PLUGIN_ARCHIVE_MAX_COMPRESSED_BYTES)} a server accepts.`,
+  PLUGIN_ARTIFACT_LEFT_OUT:
+    '{entry} is left out of the plugin artifact because its name ends like a plugin artifact or its checksum. If the plugin needs this file, rename it.',
   UNEXPECTED_ERROR: 'bge-plugin stopped on an unexpected error: {detail}.',
 
   'not-gzip': 'The plugin artifact is not a gzip-compressed archive.',

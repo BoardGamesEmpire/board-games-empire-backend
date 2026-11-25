@@ -61,6 +61,7 @@ describe('messages (#1093)', () => {
         'DEPENDENCY_INSTALL_FAILED',
         'SYMLINK_REFUSED',
         'ARTIFACT_TOO_LARGE',
+        'PLUGIN_ARTIFACT_LEFT_OUT',
         'UNEXPECTED_ERROR',
       ].sort(),
     );
