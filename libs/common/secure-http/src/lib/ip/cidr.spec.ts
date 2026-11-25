@@ -60,10 +60,23 @@ describe('parseCidr', () => {
     '10.0.0.0/+8',
     '10.0.0.0/8/9',
     '10.0.0.0/',
-    '10.0.0.0/0008',
+    '10.0.0.0/1000',
     'fc00::/7x',
   ])('rejects a prefix that is not 1 to 3 digits alone: %s (#1519)', (input) => {
     expect(parseCidr(input)).toBeNull();
+  });
+
+  // #1519: a leading zero would let `/00` stand for `/0`, every address, so a
+  // prefix has one spelling.
+  it.each(['10.0.0.0/00', '10.0.0.0/08', '10.0.0.0/032', 'fc00::/07'])(
+    'rejects a prefix with a leading zero: %s (#1519)',
+    (input) => {
+      expect(parseCidr(input)).toBeNull();
+    },
+  );
+
+  it('accepts a prefix of 0 alone (#1519)', () => {
+    expect(parseCidr('10.0.0.0/0')?.prefixLength).toBe(0);
   });
 
   it('rejects malformed address', () => {

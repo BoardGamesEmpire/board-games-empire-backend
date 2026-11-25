@@ -71,6 +71,8 @@ describe('IsCidrConstraint', () => {
       '10.0.0.0/0x10', // was read as /0, every IPv4 address
       '10.0.0.0/8/9',
       'fc00::/7x',
+      '10.0.0.0/00', // a leading zero: would be read as /0
+      '10.0.0.0/08',
       '',
     ])('rejects %s', (input) => {
       expect(c.validate(input)).toBe(false);

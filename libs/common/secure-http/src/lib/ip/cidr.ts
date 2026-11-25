@@ -15,7 +15,8 @@ export interface ParsedCidr {
   prefixLength: number;
 }
 
-const PREFIX_DIGITS = /^\d{1,3}$/;
+/** A plain decimal number of up to three digits: `0`, or no leading zero. */
+const PREFIX_DIGITS = /^(?:0|[1-9]\d{0,2})$/;
 
 /**
  * Parse a CIDR string (`10.0.0.0/8`, `fc00::/7`) into an internal form.
@@ -37,6 +38,8 @@ export function parseCidr(input: string): ParsedCidr | null {
   const prefixPart = input.slice(slashIndex + 1);
   // Digits only (#1519): parseInt alone reads `/0x10` as `/0` and `/8abc`
   // as `/8`, turning a typo into a different, possibly match-all, entry.
+  // A leading zero is refused for the same reason: `/00` would be read as
+  // `/0`, every address, though it may be a mistyped `/10`.
   if (!PREFIX_DIGITS.test(prefixPart)) {
     return null;
   }

@@ -65,8 +65,8 @@ describe("the api's operational port config (#1511)", () => {
 
   // `parseCidrList` drops an entry it can't read, which would narrow the rule
   // without telling the operator, so boot refuses it instead.
-  // `parseCidr` reads the prefix with `parseInt`, so `/8x` and `/2 4` would
-  // pass as /8 and /2 and widen the range; the config requires digits only.
+  // `/8x` and `/2 4` must not pass as /8 and /2 and widen the range;
+  // `parseCidr` refuses a prefix that isn't a plain decimal number (#1519).
   it.each([
     '10.0.0.0/33',
     '10.0.0.5',
