@@ -7,7 +7,7 @@ import { AllowAnonymous } from '@thallesp/nestjs-better-auth';
 import type { NextParameters } from 'surrogate';
 import { NextAsyncPre, SurrogateDelegate } from 'surrogate';
 import { CacheRedisHealthIndicator } from './indicators/cache-redis.health-indicator';
-import { HttpPingHealthIndicator } from './indicators/http-ping.health-indicator';
+import { HttpTargetHealthIndicator } from './indicators/http-target.health-indicator';
 import { PrismaHealthIndicator } from './indicators/prisma.health-indicator';
 import { QueueRedisHealthIndicator } from './indicators/queue-redis.health-indicator';
 import { StorageHealthIndicator } from './indicators/storage.health-indicator';
@@ -69,7 +69,7 @@ export class HealthController {
   constructor(
     private readonly configService: ConfigService,
     private readonly health: HealthCheckService,
-    private readonly http: HttpPingHealthIndicator,
+    private readonly http: HttpTargetHealthIndicator,
     private readonly prismaIndicator: PrismaHealthIndicator,
     private readonly cacheRedisIndicator: CacheRedisHealthIndicator,
     private readonly queueRedisIndicator: QueueRedisHealthIndicator,
@@ -128,7 +128,7 @@ export class HealthController {
    *
    * Empty configuration is fine, and it is the default: the indicator list is
    * empty, nothing is sent, and Terminus returns a passing result. A
-   * configured ping goes through the outbound HTTP policy (#1509).
+   * configured HTTP check goes through the outbound HTTP policy (#1509).
    */
   @HealthCheck()
   @Get()
@@ -156,7 +156,7 @@ export class HealthController {
       .map(
         ([name, url]) =>
           () =>
-            this.http.pingCheck(name.trim(), url.trim()),
+            this.http.check(name.trim(), url.trim()),
       );
   }
 

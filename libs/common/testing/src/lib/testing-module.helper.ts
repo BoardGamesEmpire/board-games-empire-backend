@@ -70,7 +70,7 @@ export type ProviderToken = Type<unknown> | string | symbol;
  *
  * Use for providers that come from an imported module and aren't trivially
  * replaceable by re-listing them in `providers` — most commonly request- or
- * transient-scoped providers (e.g. `HttpHealthIndicator` from Terminus),
+ * transient-scoped providers (e.g. `GRPCHealthIndicator` from Terminus),
  * which `module.get()` rejects.
  */
 export interface ProviderOverride {
@@ -99,7 +99,7 @@ export interface CreateTestingModuleOptions extends ModuleMetadata {
    *
    * @example
    *   overrideProviders: [
-   *     { provide: HttpHealthIndicator, useValue: { pingCheck: jest.fn() } },
+   *     { provide: GRPCHealthIndicator, useValue: { checkService: jest.fn() } },
    *   ]
    */
   overrideProviders?: ProviderOverride[];

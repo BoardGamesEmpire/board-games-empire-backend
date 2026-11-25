@@ -10,7 +10,7 @@ import { TerminusModule } from '@nestjs/terminus';
 import type { TestingModule } from '@nestjs/testing';
 import { HealthController } from './health.controller';
 import { CacheRedisHealthIndicator } from './indicators/cache-redis.health-indicator';
-import { HttpPingHealthIndicator } from './indicators/http-ping.health-indicator';
+import { HttpTargetHealthIndicator } from './indicators/http-target.health-indicator';
 import { PrismaHealthIndicator } from './indicators/prisma.health-indicator';
 import { QueueRedisHealthIndicator } from './indicators/queue-redis.health-indicator';
 import { StorageHealthIndicator } from './indicators/storage.health-indicator';
@@ -71,7 +71,7 @@ interface BuildOptions extends MockHealthConfig {
 }
 
 /**
- * The pings go through the real `HttpPingHealthIndicator` onto a mocked
+ * The HTTP checks go through the real `HttpTargetHealthIndicator` onto a mocked
  * `SecureHttpService`, so a test asserts what would leave the server: the mock
  * is the handle for "was anything sent" (#1509).
  */
@@ -107,7 +107,7 @@ async function buildController(options: BuildOptions = {}): Promise<BuildResult>
       CacheRedisHealthIndicator,
       QueueRedisHealthIndicator,
       StorageHealthIndicator,
-      HttpPingHealthIndicator,
+      HttpTargetHealthIndicator,
       { provide: SecureHttpService, useValue: http },
       { provide: ConfigService, useValue: configService },
       ...(options.storage ? [{ provide: StorageService, useValue: options.storage }] : []),
@@ -339,17 +339,11 @@ describe('HealthController', () => {
   });
 
   describe('GET /health (detail / HTTP pings)', () => {
-    it('sends nothing and answers ok when HTTP_HEALTH_CHECK_URLS is unset (#1509)', async () => {
+    // The config spec proves an unset HTTP_HEALTH_CHECK_URLS reads as no entries.
+    it('sends nothing and answers ok with no HTTP target configured, the default (#1509)', async () => {
       const { controller, http } = await buildController();
 
-      const result = await controller.detail();
-
-      if (!isHealthCheckResult(result)) {
-        throw new Error('expected HealthCheckResult, got disabled response');
-      }
-
-      expect(result.status).toBe('ok');
-      expect(Object.keys(result.info ?? {})).toHaveLength(0);
+      await expect(controller.detail()).resolves.toEqual({ status: 'ok', info: {}, error: {}, details: {} });
       expect(http.request).not.toHaveBeenCalled();
     });
 
@@ -367,20 +361,16 @@ describe('HealthController', () => {
       expect(http.request).not.toHaveBeenCalled();
     });
 
-    it('pings each well-formed name|url entry through the outbound HTTP policy', async () => {
+    it('runs an HTTP check per well-formed name|url entry, through the outbound HTTP policy (#1509)', async () => {
       const { controller, http } = await buildController({
         httpHealthCheckUrls: ['google|https://www.google.com', 'github|https://www.github.com'],
       });
 
-      const result = await controller.detail();
-
-      if (!isHealthCheckResult(result)) {
-        throw new Error('expected HealthCheckResult, got disabled response');
-      }
-
+      await expect(controller.detail()).resolves.toMatchObject({
+        info: { google: { status: 'up' }, github: { status: 'up' } },
+      });
       expect(http.request).toHaveBeenCalledWith('https://www.google.com', expect.objectContaining({ method: 'GET' }));
       expect(http.request).toHaveBeenCalledWith('https://www.github.com', expect.objectContaining({ method: 'GET' }));
-      expect(result.info).toMatchObject({ google: { status: 'up' }, github: { status: 'up' } });
     });
 
     it('drops malformed entries instead of crashing', async () => {
@@ -405,14 +395,8 @@ describe('HealthController', () => {
         httpHealthCheckUrls: ['  github  |  https://github.com  '],
       });
 
-      const result = await controller.detail();
-
-      if (!isHealthCheckResult(result)) {
-        throw new Error('expected HealthCheckResult, got disabled response');
-      }
-
+      await expect(controller.detail()).resolves.toMatchObject({ info: { github: { status: 'up' } } });
       expect(http.request).toHaveBeenCalledWith('https://github.com', expect.anything());
-      expect(result.info).toHaveProperty('github');
     });
 
     it('returns { status: "disabled" } and skips pings when ENABLE_HEALTH_CHECKS=false', async () => {

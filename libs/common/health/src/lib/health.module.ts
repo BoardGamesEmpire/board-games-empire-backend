@@ -5,7 +5,7 @@ import { TerminusModule } from '@nestjs/terminus';
 import healthConfig from './configuration/health.config';
 import { HealthController } from './health.controller';
 import { CacheRedisHealthIndicator } from './indicators/cache-redis.health-indicator';
-import { HttpPingHealthIndicator } from './indicators/http-ping.health-indicator';
+import { HttpTargetHealthIndicator } from './indicators/http-target.health-indicator';
 import { PrismaHealthIndicator } from './indicators/prisma.health-indicator';
 import { QueueRedisHealthIndicator } from './indicators/queue-redis.health-indicator';
 import { StorageHealthIndicator } from './indicators/storage.health-indicator';
@@ -31,7 +31,7 @@ import { StorageHealthIndicator } from './indicators/storage.health-indicator';
  * `QUEUE_REDIS_CLIENT` are provided by `RedisModule.forRootAsync` which
  * registers itself as a `global: true` module in each app's bootstrap.
  *
- * `HttpPingHealthIndicator` needs `SecureHttpService`, which `SecureHttpModule`
+ * `HttpTargetHealthIndicator` needs `SecureHttpService`, which `SecureHttpModule`
  * provides globally in the api, the only app that loads this module (#1509).
  * An app that loads HealthModule without it fails at boot on the missing
  * provider.
@@ -41,7 +41,7 @@ import { StorageHealthIndicator } from './indicators/storage.health-indicator';
   imports: [ConfigModule.forFeature(healthConfig), DatabaseModule, TerminusModule],
   providers: [
     CacheRedisHealthIndicator,
-    HttpPingHealthIndicator,
+    HttpTargetHealthIndicator,
     PrismaHealthIndicator,
     QueueRedisHealthIndicator,
     StorageHealthIndicator,
