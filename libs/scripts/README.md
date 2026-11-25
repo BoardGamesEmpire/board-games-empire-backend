@@ -8,7 +8,7 @@ Nothing imports this library. Its entrypoints are invoked by path, from Nx targe
 | ------------------------------------ | -------------------------------------------------------------------- |
 | `src/bin/prisma-generate.js`         | `@bge/database:generate`                                             |
 | `src/bin/buf-export.js`              | `@boardgamesempire/proto-gateway:buf-export`                         |
-| `src/bin/generate-bge-version.js`    | `@board-games-empire/version:generate`                               |
+| `src/bin/generate-bge-version.js`    | `@board-games-empire/version:generate`, `plugin-toolkit:generate`    |
 | `src/bin/check-spec-swcrc.js`        | the "Check spec swcrc source maps" step in `ci.yml`'s `main` job     |
 | `src/bin/check-migrations.js`        | `npm run db:migrate:check`, which `ci.yml`'s `main` job runs         |
 | `src/bin/check-migration-history.js` | `npm run db:migrate:check-history`, which `ci.yml`'s `main` job runs |
