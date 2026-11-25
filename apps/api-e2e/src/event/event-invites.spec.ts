@@ -1,15 +1,35 @@
-import { FriendshipStatus, InviteStatus, InviteType, QuotaScope, SystemRole } from '@bge/database';
+import {
+  EventParticipationStatus,
+  FriendshipStatus,
+  GameAdditionMode,
+  InviteStatus,
+  InviteType,
+  NominationStatus,
+  QuotaScope,
+  SystemRole,
+} from '@bge/database';
 import type { Actors, AuthenticatedActor, SessionActor } from '@bge/testing-e2e';
 import { createActors } from '@bge/testing-e2e';
 import request from 'supertest';
 import { inviteEnvelope, inviteListEnvelope, revokeEnvelope } from '../household/household-invite-wire';
+import type { Caller } from '../support/api-key';
+import { mintApiKey } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import type { TestDatabase } from '../support/test-db';
 import { createTestDatabase } from '../support/test-db';
-import { createEventClient, EVENTS_PATH } from './event-request';
+import { arrangeListEntry, hoursFromNow } from './event-fixtures';
+import { eventAcceptEnvelope, partyInvitesEnvelope } from './event-invite-wire';
+import { createEventClient, eventPolicyPath, EVENTS_PATH } from './event-request';
+import { availabilitySummaryEnvelope, eventDetailEnvelope, nominationEnvelope } from './event-wire';
 
 /** `allowMemberInvites` off refuses a participant with this code (#742). */
 const MEMBER_INVITES_OFF = 'MEMBER_INVITES_OFF';
+
+/** A settled invite answers an accept with this code, and the status it settled in (#1513). */
+const INVITE_NOT_OUTSTANDING = 'INVITE_NOT_OUTSTANDING';
+
+/** Where a party answers an invite of every kind (#742). */
+const INVITES_PATH = '/api/invites';
 
 /**
  * Inviting someone to an event (#742): `POST /api/events/:eventId/invites`
@@ -83,6 +103,38 @@ describe('event invites (#742)', () => {
 
     return { host, participant, eventId };
   };
+
+  const acceptInvite = (caller: Caller, inviteId: string) =>
+    request(baseUrl).post(`${INVITES_PATH}/${inviteId}/accept`).set(caller.headers);
+
+  const declineInvite = (actor: AuthenticatedActor, inviteId: string) =>
+    request(baseUrl).post(`${INVITES_PATH}/${inviteId}/decline`).set(actor.headers);
+
+  const withdrawInvite = (actor: AuthenticatedActor, inviteId: string) =>
+    request(baseUrl).post(`${INVITES_PATH}/${inviteId}/withdraw`).set(actor.headers);
+
+  /** The acceptance an event invite answers with, failing the test unless the accept answers 200. */
+  const accepted = async (actor: AuthenticatedActor, inviteId: string) =>
+    eventAcceptEnvelope(await acceptInvite(actor, inviteId).expect(200), 'POST /api/invites/:inviteId/accept');
+
+  /** The ids of a party list's rows, in the order served: the inbox, or with `sent` the sent list. */
+  const listedIds = async (actor: AuthenticatedActor, list: '' | '/sent', query: Record<string, string> = {}) =>
+    partyInvitesEnvelope(
+      await request(baseUrl).get(`${INVITES_PATH}${list}`).query(query).set(actor.headers).expect(200),
+      `GET /api/invites${list}`,
+    ).invites.map((row) => row.id);
+
+  const readEvent = (actor: AuthenticatedActor, eventId: string) =>
+    request(baseUrl).get(`${EVENTS_PATH}/${eventId}`).set(actor.headers);
+
+  const removeAttendee = (actor: AuthenticatedActor, eventId: string, attendeeId: string) =>
+    request(baseUrl).delete(`${EVENTS_PATH}/${eventId}/attendees/${attendeeId}`).set(actor.headers);
+
+  const attendeeRowOf = (eventId: string, actor: SessionActor) =>
+    db.client.eventAttendee.findUniqueOrThrow({
+      where: { eventId_userId: { eventId, userId: actor.user.id } },
+      include: { role: { include: { role: true } } },
+    });
 
   it('the host invites, and the invitee gets no attendee row or event role until they accept', async () => {
     const [host, invitee] = await Promise.all([actors.user(), actors.user()]);
@@ -322,5 +374,303 @@ describe('event invites (#742)', () => {
       attemptedAmount: '1',
     });
     expect(await invitesTo(eventId)).toBe(5);
+  });
+
+  // The invitee answers at the party routes, which hand an event invite to the
+  // event's responder (#742). Accepting is what seats them.
+  describe('answering through /invites', () => {
+    it('accepting writes the attendee row with the invite’s role, attending, invited by the host (#742)', async () => {
+      const [host, invitee] = await Promise.all([actors.user(), actors.user()]);
+      const eventId = await createdEventId(host);
+      const sent = await sentInvite(host, eventId, { userId: invitee.user.id, role: SystemRole.EventCoHost });
+
+      const answer = await accepted(invitee, sent.id);
+
+      expect(answer.type).toBe(InviteType.Event);
+      expect(answer.message).toBe('Invite accepted; you are now attending the event');
+      expect(answer.invite).toMatchObject({ id: sent.id, type: InviteType.Event, status: InviteStatus.Accepted });
+      expect(answer.attendee).toMatchObject({
+        eventId,
+        userId: invitee.user.id,
+        status: EventParticipationStatus.Attending,
+        removedAt: null,
+        role: { role: { name: SystemRole.EventCoHost } },
+      });
+
+      const [row, hostRow] = await Promise.all([attendeeRowOf(eventId, invitee), attendeeRowOf(eventId, host)]);
+      expect(row.id).toBe(answer.attendee.id);
+      expect(row.status).toBe(EventParticipationStatus.Attending);
+      expect(row.rsvpDate).toBeInstanceOf(Date);
+      expect(row.role?.role.name).toBe(SystemRole.EventCoHost);
+      expect(row.invitedById).toBe(hostRow.id);
+      expect((await storedInvite(sent.id)).status).toBe(InviteStatus.Accepted);
+
+      // The co-host role holds from their very next request: their cached
+      // ability was evicted after the accept committed.
+      await listInvites(invitee, eventId).expect(200);
+    });
+
+    it('the invitee reads the event before accepting, with its dates and policy and no attendees (#742)', async () => {
+      const [host, invitee] = await Promise.all([actors.user(), actors.user()]);
+      const eventId = await createdEventId(host, {
+        occurrences: [{ startDate: hoursFromNow(48) }],
+        policy: { allowMemberInvites: true },
+      });
+      await sentInvite(host, eventId, { userId: invitee.user.id });
+
+      const event = eventDetailEnvelope(
+        await readEvent(invitee, eventId).expect(200),
+        'GET /api/events/:id as the invitee',
+      );
+
+      expect(event.id).toBe(eventId);
+      // Who attends shows once they accept.
+      expect(event.attendees).toEqual([]);
+      expect(event.attendance).toBeNull();
+      // The dates and the policy, so the client can show its own event screen.
+      expect(event.occurrences).toHaveLength(1);
+      expect(event.policy).toMatchObject({ allowMemberInvites: true });
+    });
+
+    it('a stranger can’t read it (#742)', async () => {
+      const [host, invitee, stranger] = await Promise.all([actors.user(), actors.user(), actors.user()]);
+      const eventId = await createdEventId(host);
+      await sentInvite(host, eventId, { userId: invitee.user.id });
+
+      await readEvent(stranger, eventId).expect(404);
+    });
+
+    it('revives a removed attendee’s row on accept, and the nominations of the games they offer reopen (#742, #551)', async () => {
+      const [host, invitee] = await Promise.all([actors.user(), actors.user()]);
+      const eventId = await createdEventId(host, { policy: { gameAdditionMode: GameAdditionMode.RequiresVote } });
+      const { id: rowId } = await db.client.eventAttendee.create({
+        data: {
+          event: { connect: { id: eventId } },
+          user: { connect: { id: invitee.user.id } },
+          status: EventParticipationStatus.Attending,
+          role: { create: { role: { connect: { name: SystemRole.EventParticipant } } } },
+        },
+        select: { id: true },
+      });
+      const entry = await arrangeListEntry(db.client, eventId, invitee.user.id);
+      const nomination = nominationEnvelope(
+        await request(baseUrl)
+          .post(`${EVENTS_PATH}/${eventId}/nominations`)
+          .set(host.headers)
+          .send({ platformGameId: entry.platformGameId, suppliedFromId: entry.suppliedById })
+          .expect(201),
+        'POST /api/events/:eventId/nominations',
+      );
+      const nominationStatus = async () =>
+        (await db.client.eventGameNomination.findUniqueOrThrow({ where: { id: nomination.id } })).status;
+
+      await removeAttendee(host, eventId, rowId).expect(200);
+      expect(await nominationStatus()).toBe(NominationStatus.Paused);
+
+      const sent = await sentInvite(host, eventId, { userId: invitee.user.id, role: SystemRole.EventSpectator });
+      const { attendee } = await accepted(invitee, sent.id);
+
+      // The same row, not a second one beside it.
+      expect(attendee.id).toBe(rowId);
+      expect(await attendeeRows(eventId, invitee)).toBe(1);
+      const row = await attendeeRowOf(eventId, invitee);
+      expect(row.removedAt).toBeNull();
+      expect(row.status).toBe(EventParticipationStatus.Attending);
+      expect(row.role?.role.name).toBe(SystemRole.EventSpectator);
+      expect(await nominationStatus()).toBe(NominationStatus.Open);
+    });
+
+    it('accept after the event is deleted writes nothing: 404, the invite left revoked (#742)', async () => {
+      const [host, invitee] = await Promise.all([actors.user(), actors.user()]);
+      const eventId = await createdEventId(host);
+      const sent = await sentInvite(host, eventId, { userId: invitee.user.id });
+      await deleteEvent(host, eventId).expect(200);
+
+      await acceptInvite(invitee, sent.id).expect(404);
+
+      expect((await storedInvite(sent.id)).status).toBe(InviteStatus.Revoked);
+      expect(await attendeeRows(eventId, invitee)).toBe(0);
+    });
+
+    // A household's delete stamps only the household, so the invite to its
+    // event stays Pending; the lists and the accept read the event as gone
+    // through the household's liveness (#742).
+    it('an invite to a household event is hidden from both lists, and its accept answers 404, once the household is deleted (#742)', async () => {
+      const [owner, invitee] = await Promise.all([actors.user(), actors.user()]);
+      const { household } = await actors.householdWithMembers({ owner, members: [] });
+      const eventId = await createdEventId(owner, { householdId: household.id });
+      const sent = await sentInvite(owner, eventId, { userId: invitee.user.id });
+
+      // The control: both lists carry the invite while the household is live.
+      expect(await listedIds(invitee, '')).toEqual([sent.id]);
+      expect(await listedIds(owner, '/sent')).toEqual([sent.id]);
+
+      await request(baseUrl).delete(`/api/households/${household.id}`).set(owner.headers).expect(200);
+
+      expect(await listedIds(invitee, '')).toEqual([]);
+      expect(await listedIds(owner, '/sent')).toEqual([]);
+
+      await acceptInvite(invitee, sent.id).expect(404);
+
+      expect(await attendeeRows(eventId, invitee)).toBe(0);
+    });
+
+    it('an inviter who was removed leaves their invite revoked, and its accept answers 409 (#742)', async () => {
+      const { host, participant, eventId } = await eventWithParticipant();
+      const invitee = await actors.user();
+      const sent = await sentInvite(participant, eventId, { userId: invitee.user.id });
+      const { id: participantRowId } = await attendeeRowOf(eventId, participant);
+
+      await removeAttendee(host, eventId, participantRowId).expect(200);
+
+      expect((await storedInvite(sent.id)).status).toBe(InviteStatus.Revoked);
+      expect(await listedIds(invitee, '')).toEqual([]);
+
+      const refused = await acceptInvite(invitee, sent.id).expect(409);
+
+      expect(refused.body).toMatchObject({ code: INVITE_NOT_OUTSTANDING, state: InviteStatus.Revoked });
+      expect(await attendeeRows(eventId, invitee)).toBe(0);
+    });
+
+    it('an invite its sender could no longer send is revoked at accept, and answers 409 (#742)', async () => {
+      const { host, participant, eventId } = await eventWithParticipant();
+      const invitee = await actors.user();
+      const sent = await sentInvite(participant, eventId, { userId: invitee.user.id });
+
+      // Sent as a participant while the policy let them; it doesn't now.
+      await request(baseUrl)
+        .patch(eventPolicyPath(eventId))
+        .set(host.headers)
+        .send({ allowMemberInvites: false })
+        .expect(200);
+
+      const refused = await acceptInvite(invitee, sent.id).expect(409);
+
+      expect(refused.body).toMatchObject({ code: INVITE_NOT_OUTSTANDING, state: InviteStatus.Revoked });
+      expect((await storedInvite(sent.id)).status).toBe(InviteStatus.Revoked);
+      expect(await attendeeRows(eventId, invitee)).toBe(0);
+    });
+
+    it('someone already attending gets 409 on accept, and the invite stays open (#742)', async () => {
+      const [host, invitee] = await Promise.all([actors.user(), actors.user()]);
+      const eventId = await createdEventId(host);
+      const sent = await sentInvite(host, eventId, { userId: invitee.user.id });
+      await seat(eventId, invitee, SystemRole.EventParticipant);
+
+      const refused = await acceptInvite(invitee, sent.id).expect(409);
+
+      expect(refused.body.message).toBe('User is already an attendee of this event.');
+      expect((await storedInvite(sent.id)).status).toBe(InviteStatus.Pending);
+      expect(await attendeeRows(eventId, invitee)).toBe(1);
+    });
+
+    it('decline, and withdraw by the inviter, through /invites (#742)', async () => {
+      const [host, first, second] = await Promise.all([actors.user(), actors.user(), actors.user()]);
+      const eventId = await createdEventId(host);
+      const toDecline = await sentInvite(host, eventId, { userId: first.user.id });
+      const toWithdraw = await sentInvite(host, eventId, { userId: second.user.id });
+
+      // Each party answers only their own side of it.
+      await declineInvite(host, toDecline.id).expect(403);
+      await withdrawInvite(second, toWithdraw.id).expect(403);
+
+      const declined = inviteEnvelope(
+        await declineInvite(first, toDecline.id).expect(200),
+        'POST /api/invites/:inviteId/decline',
+      );
+      const withdrawn = inviteEnvelope(
+        await withdrawInvite(host, toWithdraw.id).expect(200),
+        'POST /api/invites/:inviteId/withdraw',
+      );
+
+      expect(declined).toMatchObject({
+        message: 'Invite declined',
+        invite: { id: toDecline.id, type: InviteType.Event, status: InviteStatus.Declined },
+      });
+      expect(withdrawn).toMatchObject({
+        message: 'Invite withdrawn',
+        invite: { id: toWithdraw.id, type: InviteType.Event, status: InviteStatus.Withdrawn },
+      });
+      expect((await storedInvite(toDecline.id)).status).toBe(InviteStatus.Declined);
+      expect((await storedInvite(toWithdraw.id)).status).toBe(InviteStatus.Withdrawn);
+      // The event's read ends with the open invite that gave it.
+      await readEvent(first, eventId).expect(404);
+      await readEvent(second, eventId).expect(404);
+      expect(await attendeeRows(eventId, first)).toBe(0);
+    });
+
+    it('routes by type: each list carries the event invite as an event row, and ?type= keeps one kind (#742)', async () => {
+      const [owner, host, invitee] = await Promise.all([actors.user(), actors.user(), actors.user()]);
+      const { household } = await actors.householdWithMembers({ owner });
+      const householdInvite = inviteEnvelope(
+        await request(baseUrl)
+          .post(`/api/households/${household.id}/invites`)
+          .set(owner.headers)
+          .send({ inviteeId: invitee.user.id })
+          .expect(201),
+        'POST /api/households/:householdId/invites',
+      ).invite;
+      const eventId = await createdEventId(host);
+      const eventInvite = await sentInvite(host, eventId, { userId: invitee.user.id });
+      const { title } = await db.client.event.findUniqueOrThrow({ where: { id: eventId }, select: { title: true } });
+
+      const inbox = partyInvitesEnvelope(
+        await request(baseUrl).get(INVITES_PATH).set(invitee.headers).expect(200),
+        'GET /api/invites',
+      );
+
+      // Newest first, both kinds, each naming its own context.
+      expect(inbox.invites.map((row) => row.id)).toEqual([eventInvite.id, householdInvite.id]);
+      expect(inbox.invites[0]).toMatchObject({
+        type: InviteType.Event,
+        event: { id: eventId, title },
+        household: null,
+      });
+      expect(await listedIds(invitee, '', { type: InviteType.Household })).toEqual([householdInvite.id]);
+      expect(await listedIds(invitee, '', { type: InviteType.Event })).toEqual([eventInvite.id]);
+
+      const sent = partyInvitesEnvelope(
+        await request(baseUrl).get(`${INVITES_PATH}/sent`).set(host.headers).expect(200),
+        'GET /api/invites/sent',
+      );
+
+      expect(sent.invites).toEqual([
+        expect.objectContaining({ id: eventInvite.id, type: InviteType.Event, event: { id: eventId, title } }),
+      ]);
+      expect(await listedIds(host, '/sent', { type: InviteType.Household })).toEqual([]);
+      expect(await listedIds(host, '/sent', { type: InviteType.Event })).toEqual([eventInvite.id]);
+    });
+
+    it('an API key can’t accept: the invite stays open and nobody is seated (#742)', async () => {
+      const [host, invitee] = await Promise.all([actors.user(), actors.user()]);
+      const eventId = await createdEventId(host);
+      const sent = await sentInvite(host, eventId, { userId: invitee.user.id });
+      const key = await mintApiKey(baseUrl, db.client, invitee);
+
+      await acceptInvite(key, sent.id).expect(403);
+
+      expect((await storedInvite(sent.id)).status).toBe(InviteStatus.Pending);
+      expect(await attendeeRows(eventId, invitee)).toBe(0);
+    });
+
+    it('an invitee isn’t counted in the availability poll until they accept (#742)', async () => {
+      const [host, invitee] = await Promise.all([actors.user(), actors.user()]);
+      const eventId = await createdEventId(host, { occurrences: [{ startDate: hoursFromNow(48) }] });
+      const sent = await sentInvite(host, eventId, { userId: invitee.user.id });
+
+      const eligibleVoters = async () =>
+        availabilitySummaryEnvelope(
+          await request(baseUrl)
+            .get(`${EVENTS_PATH}/${eventId}/occurrences/summary/availability`)
+            .set(host.headers)
+            .expect(200),
+          'GET /api/events/:eventId/occurrences/summary/availability',
+        ).eligibleVoters;
+
+      const before = await eligibleVoters();
+      await accepted(invitee, sent.id);
+
+      expect(await eligibleVoters()).toBe(before + 1);
+    });
   });
 });

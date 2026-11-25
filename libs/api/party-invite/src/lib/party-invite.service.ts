@@ -1,5 +1,7 @@
 import { AuditContextService, requireSessionUserId } from '@bge/actor-context';
 import { DatabaseService, InviteType, Prisma } from '@bge/database';
+import type { EventInviteAcceptance } from '@bge/event';
+import { EventInviteResponder, receivedEventInviteWhere, sentEventInviteWhere } from '@bge/event';
 import type { HouseholdInviteAcceptance } from '@bge/household';
 import {
   HouseholdInviteResponder,
@@ -7,35 +9,45 @@ import {
   sentHouseholdInviteWhere,
   vouchedEmailOf,
 } from '@bge/household';
-import { t } from '@bge/i18n';
-import type { ContextualInviteType, InvitePartyView, InviteTarget } from '@bge/invites';
-import { InviteService, PARTY_INVITE_SELECT, withEffectiveInviteStatus } from '@bge/invites';
+import type { ContextualInviteType, InvitePartyView, InviteResponder, InviteTarget } from '@bge/invites';
+import { CONTEXTUAL_INVITE_TYPES, InviteService, PARTY_INVITE_SELECT, withEffectiveInviteStatus } from '@bge/invites';
 import type { PaginatedRows, PaginationQueryDto } from '@bge/shared';
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import type { ListReceivedInvitesQueryDto, ListSentInvitesQueryDto } from './dto';
 
 /**
  * A listed invite of the reader's, received or sent: the party shape, plus the
  * context it is into. The party shape leaves the context's id out, which is
  * right for a single invite its party acted on, and would leave a list unable
- * to tell which household each row is about. Each row's `type` says which
- * context it carries (#742).
+ * to tell which household or event each row is about. Each row's `type` says
+ * which context it carries: a household invite its `household`, an event
+ * invite its `event`, and the other `null` (#742).
  */
 export const LISTED_PARTY_INVITE_SELECT = {
   ...PARTY_INVITE_SELECT,
   household: { select: { id: true, name: true } },
+  event: { select: { id: true, title: true } },
 } as const satisfies Prisma.InviteSelect;
 
 export type ListedPartyInviteView = Prisma.InviteGetPayload<{ select: typeof LISTED_PARTY_INVITE_SELECT }>;
 
-/** An accepted invite, the kind it was, and what its context made of it. */
-export type PartyAcceptance = HouseholdInviteAcceptance & { readonly type: typeof InviteType.Household };
+/**
+ * An accepted invite, the kind it was, and what its context made of it: a
+ * household membership, or an attendee row (#742). `type` tells them apart.
+ */
+export type PartyAcceptance =
+  | (EventInviteAcceptance & { readonly type: typeof InviteType.Event })
+  | (HouseholdInviteAcceptance & { readonly type: typeof InviteType.Household });
 
 /**
  * One `where` per kind of invite a party list reads, each from the lib that
- * owns that context. A kind with no lib answering for it yet has no arm.
+ * owns that context. Every kind the party routes serve has one, so a kind
+ * added to them without its arm fails to compile (#742).
  */
-type PartyListArms = Readonly<Partial<Record<ContextualInviteType, Prisma.InviteWhereInput>>>;
+type PartyListArms = Readonly<Record<ContextualInviteType, Prisma.InviteWhereInput>>;
+
+/** A responder as decline and withdraw use it, whatever its context makes of an accept. */
+type PartyResponder = InviteResponder<{ readonly invite: InvitePartyView }>;
 
 /**
  * A party's side of an invite, of every kind the party routes serve (#742):
@@ -48,8 +60,8 @@ type PartyListArms = Readonly<Partial<Record<ContextualInviteType, Prisma.Invite
  * `OR` of one arm per kind, from the lib that owns that context.
  *
  * Who the acting user may be is decided here, once per action: only a person
- * signed in as themself, since joining a household, or turning down or taking
- * back an invite, is that person's own act (#276). An API key acts for its
+ * signed in as themself, since joining a household or an event, or turning
+ * down or taking back an invite, is that person's own act (#276). An API key acts for its
  * owner but is not the owner, neither a plugin nor the system joins anyone,
  * and no invite by id can name an anonymous user. No CASL rule of the acting
  * user's stands behind any of it: a party holds no grant on `Invite`, and
@@ -63,35 +75,47 @@ export class PartyInviteService {
     private readonly auditContext: AuditContextService,
     private readonly invites: InviteService,
     private readonly households: HouseholdInviteResponder,
+    private readonly events: EventInviteResponder,
   ) {}
 
   /**
    * One page of the invites the acting user has received, newest first: those
    * open to them in their inbox. Each context's lib says which of its invites
-   * those are, and why ({@link receivedHouseholdInviteWhere}).
+   * those are, and why ({@link receivedHouseholdInviteWhere},
+   * {@link receivedEventInviteWhere}).
    */
   async listReceived(query: ListReceivedInvitesQueryDto): Promise<PaginatedRows<ListedPartyInviteView>> {
     const userId = requireSessionUserId(this.auditContext.getActor());
     const vouchedEmail = await vouchedEmailOf(this.db, userId);
     const now = new Date();
 
-    return this.pageOf({ [InviteType.Household]: receivedHouseholdInviteWhere(userId, vouchedEmail, now) }, query);
+    return this.pageOf(
+      {
+        [InviteType.Household]: receivedHouseholdInviteWhere(userId, vouchedEmail, now),
+        [InviteType.Event]: receivedEventInviteWhere(userId, now),
+      },
+      query,
+    );
   }
 
   /**
    * One page of the invites the acting user has sent, newest first (#751): how
    * an inviter who cannot read the context's own list finds their invites.
    * Each context's lib says which of its invites those are
-   * ({@link sentHouseholdInviteWhere}); `?status=` picks any one status as it
-   * stands now. Each row reports its status as it stands now, so an
-   * outstanding row past its date reads `Expired`.
+   * ({@link sentHouseholdInviteWhere}, {@link sentEventInviteWhere});
+   * `?status=` picks any one status as it stands now. Each row reports its
+   * status as it stands now, so an outstanding row past its date reads
+   * `Expired`.
    */
   async listSent(query: ListSentInvitesQueryDto): Promise<PaginatedRows<ListedPartyInviteView>> {
     const userId = requireSessionUserId(this.auditContext.getActor());
     const now = new Date();
 
     const { rows, total } = await this.pageOf(
-      { [InviteType.Household]: sentHouseholdInviteWhere(userId, now, query.status) },
+      {
+        [InviteType.Household]: sentHouseholdInviteWhere(userId, now, query.status),
+        [InviteType.Event]: sentEventInviteWhere(userId, now, query.status),
+      },
       query,
     );
 
@@ -101,19 +125,27 @@ export class PartyInviteService {
   /**
    * The acting user accepts an invite they received, by id or by the token
    * from its link. The responder for its type does the accepting, and the
-   * answer says which type that was.
+   * answer says which type that was. One branch per kind, so each answer
+   * carries the acceptance its own context made (#742), and a kind the party
+   * routes serve without a branch here fails to compile.
    */
   async accept(target: InviteTarget): Promise<PartyAcceptance> {
     const inviteeId = requireSessionUserId(this.auditContext.getActor());
-    const responder = this.responderFor(await this.inviteeTypeOf(target, inviteeId), target);
+    const type = await this.inviteeTypeOf(target, inviteeId);
 
-    return { type: responder.type, ...(await responder.accept(target, inviteeId)) };
+    switch (type) {
+      case InviteType.Household:
+        return { type, ...(await this.households.accept(target, inviteeId)) };
+
+      case InviteType.Event:
+        return { type, ...(await this.events.accept(target, inviteeId)) };
+    }
   }
 
   /** The acting user declines an invite they received, by id or by the token from its link. */
   async decline(target: InviteTarget): Promise<InvitePartyView> {
     const inviteeId = requireSessionUserId(this.auditContext.getActor());
-    const responder = this.responderFor(await this.inviteeTypeOf(target, inviteeId), target);
+    const responder = this.responderFor(await this.inviteeTypeOf(target, inviteeId));
 
     return responder.decline(target, inviteeId);
   }
@@ -131,7 +163,7 @@ export class PartyInviteService {
     const type = await this.db.$transaction((tx) =>
       this.invites.findPartyTypeWithin(tx, { target, actingUserId: inviterId }),
     );
-    const responder = this.responderFor(type, target);
+    const responder = this.responderFor(type);
 
     return responder.withdraw(inviteId, inviterId);
   }
@@ -154,25 +186,25 @@ export class PartyInviteService {
   }
 
   /**
-   * The responder for an invite of this type. A type no lib answers for yet
-   * meets the 404 a stranger meets, worded as `@bge/invites` words it, so the
-   * answer never confirms that the invite exists.
+   * The responder for an invite of this type: one for every kind the party
+   * routes serve, so a kind added to them without its responder fails to
+   * compile here, rather than meeting a 404 at runtime (#742). A kind they
+   * don't serve never gets this far: the type read answers it the 404 a
+   * stranger meets.
    */
-  private responderFor(type: ContextualInviteType, target: InviteTarget): HouseholdInviteResponder {
-    if (type === this.households.type) {
-      return this.households;
-    }
+  private responderFor(type: ContextualInviteType): PartyResponder {
+    const responders = {
+      [InviteType.Household]: this.households,
+      [InviteType.Event]: this.events,
+    } as const satisfies Record<ContextualInviteType, PartyResponder>;
 
-    // The token is never echoed.
-    throw new NotFoundException(
-      'inviteId' in target ? t('errors.invite.not_found', { id: target.inviteId }) : t('errors.invite.link_not_found'),
-    );
+    return responders[type];
   }
 
   /**
    * One page of a party's invites, newest first, and how many match in all.
-   * `type` keeps one arm; a kind with no arm answers an empty page without a
-   * query.
+   * `type` keeps one arm; without it, every kind's, in the order the kinds
+   * are listed.
    *
    * REPEATABLE READ, so `total` and the rows come from one snapshot (#230).
    * `id` breaks ties on `createdAt`, so a row cannot cross a page boundary
@@ -182,14 +214,8 @@ export class PartyInviteService {
     arms: PartyListArms,
     query: PaginationQueryDto & { readonly type?: ContextualInviteType },
   ): Promise<PaginatedRows<ListedPartyInviteView>> {
-    const chosenArms = query.type === undefined ? Object.values(arms) : [arms[query.type]];
-    const servedArms = chosenArms.filter((arm): arm is Prisma.InviteWhereInput => arm !== undefined);
-
-    if (servedArms.length === 0) {
-      return { rows: [], total: 0 };
-    }
-
-    const where: Prisma.InviteWhereInput = { OR: servedArms };
+    const kinds: readonly ContextualInviteType[] = query.type === undefined ? CONTEXTUAL_INVITE_TYPES : [query.type];
+    const where: Prisma.InviteWhereInput = { OR: kinds.map((kind) => arms[kind]) };
 
     const [rows, total] = await this.db.$transaction(
       [

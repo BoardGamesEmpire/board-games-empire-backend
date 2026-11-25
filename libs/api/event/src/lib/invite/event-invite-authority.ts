@@ -4,6 +4,7 @@ import { CodedHttpException, t } from '@bge/i18n';
 import type { AbilityService } from '@bge/permissions';
 import { Http } from '@status/codes';
 import type { AssignableAttendeeRole } from '../attendee/dto/add-attendee.dto';
+import { ASSIGNABLE_ATTENDEE_ROLES } from '../attendee/dto/add-attendee.dto';
 import { NOT_REMOVED } from '../constants/not-removed.constant';
 
 /**
@@ -143,6 +144,31 @@ export function eventAttendeeSubject(authority: EventInviteAuthority, role: Assi
 /** Whether offering `role` needs more than an invite grant: every role but participant does (#742). */
 export function offersMoreThanParticipant(role: AssignableAttendeeRole): boolean {
   return role !== SystemRole.EventParticipant;
+}
+
+/**
+ * The event role an invite offers, as the accept seats it and the sender
+ * check asks about it (#742). No role is participant, the role an invite
+ * offers by default. The create stores only an assignable role, so another
+ * is drift in the data: a server error, and nothing the invitee did.
+ */
+export function offeredAttendeeRole(invite: {
+  readonly id: string;
+  readonly role: { readonly name: string } | null;
+}): AssignableAttendeeRole {
+  const name = invite.role?.name;
+
+  if (name === undefined) {
+    return SystemRole.EventParticipant;
+  }
+
+  const role = ASSIGNABLE_ATTENDEE_ROLES.find((assignable) => assignable === name);
+
+  if (role === undefined) {
+    throw new Error(`Invite ${invite.id} offers the role '${name}', which no attendee can hold`);
+  }
+
+  return role;
 }
 
 /**

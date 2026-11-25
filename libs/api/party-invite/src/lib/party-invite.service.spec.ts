@@ -1,6 +1,8 @@
 import type { Actor } from '@bge/actor-context';
 import { AuditContextService } from '@bge/actor-context';
 import { InviteStatus, InviteType, Prisma, SystemRole } from '@bge/database';
+import type { EventInviteAcceptance } from '@bge/event';
+import { EventInviteResponder } from '@bge/event';
 import type { HouseholdInviteAcceptance } from '@bge/household';
 import { HouseholdInviteResponder } from '@bge/household';
 import type { InvitePartyView } from '@bge/invites';
@@ -42,8 +44,20 @@ const ACCEPTANCE = {
   member: { id: 'member-new', householdId: 'hh-1' },
 } as unknown as HouseholdInviteAcceptance;
 
-/** Every row a party list reads: the party shape, plus the context it is into. */
-const LISTED_SELECT = { ...PARTY_INVITE_SELECT, household: { select: { id: true, name: true } } };
+const EVENT_ACCEPTANCE = {
+  invite: partyView({ id: 'invite-2', type: InviteType.Event }),
+  attendee: { id: 'att-new', eventId: 'event-1', availableGames: [] },
+} as unknown as EventInviteAcceptance;
+
+/** Every row a party list reads: the party shape, plus the context it is into, by its kind (#742). */
+const LISTED_SELECT = {
+  ...PARTY_INVITE_SELECT,
+  household: { select: { id: true, name: true } },
+  event: { select: { id: true, title: true } },
+};
+
+/** An event live as every event read judges it: not deleted, nor in a deleted household (#992). */
+const LIVE_EVENT = { deletedAt: null, OR: [{ householdId: null }, { household: { is: { deletedAt: null } } }] };
 
 const receivedQuery = (init: Partial<ListReceivedInvitesQueryDto> = {}) =>
   boundPageQuery(ListReceivedInvitesQueryDto, init);
@@ -68,6 +82,9 @@ describe('PartyInviteService', () => {
   let households: jest.Mocked<Pick<HouseholdInviteResponder, 'accept' | 'decline' | 'withdraw'>> & {
     readonly type: typeof InviteType.Household;
   };
+  let events: jest.Mocked<Pick<EventInviteResponder, 'accept' | 'decline' | 'withdraw'>> & {
+    readonly type: typeof InviteType.Event;
+  };
 
   beforeEach(async () => {
     auditContext = { getActor: jest.fn().mockReturnValue(SESSION_USER) };
@@ -78,6 +95,12 @@ describe('PartyInviteService', () => {
       decline: jest.fn().mockResolvedValue(partyView({ status: InviteStatus.Declined })),
       withdraw: jest.fn().mockResolvedValue(partyView({ status: InviteStatus.Withdrawn })),
     };
+    events = {
+      type: InviteType.Event,
+      accept: jest.fn().mockResolvedValue(EVENT_ACCEPTANCE),
+      decline: jest.fn().mockResolvedValue(partyView({ type: InviteType.Event, status: InviteStatus.Declined })),
+      withdraw: jest.fn().mockResolvedValue(partyView({ type: InviteType.Event, status: InviteStatus.Withdrawn })),
+    };
 
     const ctx = await createTestingModuleWithDb({
       providers: [
@@ -85,6 +108,7 @@ describe('PartyInviteService', () => {
         { provide: AuditContextService, useValue: auditContext },
         { provide: InviteService, useValue: invites },
         { provide: HouseholdInviteResponder, useValue: households },
+        { provide: EventInviteResponder, useValue: events },
       ],
     });
 
@@ -165,6 +189,17 @@ describe('PartyInviteService', () => {
       ],
     };
 
+    /** The event arm of the inbox, read at NOW: by id only, whatever the address (#742). */
+    const eventReceivedWhere = {
+      type: InviteType.Event,
+      AND: [
+        { inviterId: { not: INVITEE_ID }, OR: [{ inviteeId: INVITEE_ID }] },
+        { status: InviteStatus.Pending },
+        { expiresAt: { gt: NOW } },
+        { event: { is: { ...LIVE_EVENT, attendees: { none: { userId: INVITEE_ID, removedAt: null } } } } },
+      ],
+    };
+
     it("lists the user's open invites of every kind, newest first in one snapshot (#742)", () =>
       withFakeNow(async () => {
         db.invite.findMany.mockResolvedValue(resolves([{ id: 'invite-1' }]));
@@ -172,8 +207,8 @@ describe('PartyInviteService', () => {
 
         const page = await service.listReceived(receivedQuery({ page: 2, limit: 10 }));
 
-        // One arm per kind of invite; households are the only kind with one until event invites land.
-        const where = { OR: [householdReceivedWhere] };
+        // One arm per kind of invite, each from the lib that owns its context.
+        const where = { OR: [householdReceivedWhere, eventReceivedWhere] };
         expect(db.invite.findMany).toHaveBeenCalledWith({
           where,
           select: LISTED_SELECT,
@@ -209,16 +244,11 @@ describe('PartyInviteService', () => {
           expect.objectContaining({ where: { OR: [householdReceivedWhere] } }),
         );
         expect(db.invite.count).toHaveBeenCalledWith({ where: { OR: [householdReceivedWhere] } });
+
+        await service.listReceived(receivedQuery({ type: InviteType.Event }));
+
+        expect(db.invite.count).toHaveBeenLastCalledWith({ where: { OR: [eventReceivedWhere] } });
       }));
-
-    it('answers an empty page for a kind with no arm yet, without querying (#742)', async () => {
-      // Prisma reads `OR: []` as match-nothing, but an empty page needs no round-trip to say so.
-      const page = await service.listReceived(receivedQuery({ type: InviteType.Event }));
-
-      expect(page).toEqual({ rows: [], total: 0 });
-      expect(db.invite.findMany).not.toHaveBeenCalled();
-      expect(db.invite.count).not.toHaveBeenCalled();
-    });
   });
 
   describe('listSent (#751)', () => {
@@ -249,6 +279,25 @@ describe('PartyInviteService', () => {
       ],
     };
 
+    /**
+     * The event arm, as the household one: never to an event that isn't live,
+     * and only what they can still withdraw where they no longer attend (#742).
+     */
+    const eventSentWhere = {
+      type: InviteType.Event,
+      inviterId: INVITER_ID,
+      event: { is: LIVE_EVENT },
+      AND: [
+        { status: { in: [InviteStatus.AwaitingApproval, InviteStatus.Pending, InviteStatus.Expired] } },
+        {
+          OR: [
+            { event: { is: { attendees: { some: { userId: INVITER_ID, removedAt: null } } } } },
+            { status: { in: [InviteStatus.AwaitingApproval, InviteStatus.Pending] }, expiresAt: { gt: NOW } },
+          ],
+        },
+      ],
+    };
+
     it("lists the user's outstanding and expired invites of every kind, newest first in one snapshot", () =>
       withFakeNow(async () => {
         db.invite.findMany.mockResolvedValue(
@@ -258,7 +307,7 @@ describe('PartyInviteService', () => {
 
         const page = await service.listSent(sentQuery({ page: 2, limit: 10 }));
 
-        const where = { OR: [householdSentWhere] };
+        const where = { OR: [householdSentWhere, eventSentWhere] };
         expect(db.invite.findMany).toHaveBeenCalledWith({
           where,
           select: LISTED_SELECT,
@@ -313,10 +362,9 @@ describe('PartyInviteService', () => {
 
         expect(db.invite.count).toHaveBeenCalledWith({ where: { OR: [householdSentWhere] } });
 
-        const page = await service.listSent(sentQuery({ type: InviteType.Event }));
+        await service.listSent(sentQuery({ type: InviteType.Event }));
 
-        expect(page).toEqual({ rows: [], total: 0 });
-        expect(db.invite.count).toHaveBeenCalledTimes(1);
+        expect(db.invite.count).toHaveBeenLastCalledWith({ where: { OR: [eventSentWhere] } });
       }));
   });
 
@@ -405,26 +453,27 @@ describe('PartyInviteService', () => {
     });
   });
 
-  describe('answers 404 for an invite whose type has no responder (#742)', () => {
+  describe('hands an event invite to the event responder (#742)', () => {
     beforeEach(() => invites.findPartyTypeWithin.mockResolvedValue(InviteType.Event));
 
-    it('by id, as a stranger is answered, handing nothing on', async () => {
-      const notFound = { status: 404, response: expect.objectContaining({ key: 'errors.invite.not_found' }) };
+    it('accepts through it, answering the event acceptance under its own type', async () => {
+      const result = await service.accept({ inviteId: 'invite-2' });
 
-      await expect(service.accept({ inviteId: 'invite-1' })).rejects.toMatchObject(notFound);
-      await expect(service.decline({ inviteId: 'invite-1' })).rejects.toMatchObject(notFound);
-      await expect(service.withdraw('invite-1')).rejects.toMatchObject(notFound);
-
+      expect(events.accept).toHaveBeenCalledWith({ inviteId: 'invite-2' }, INVITEE_ID);
       expect(households.accept).not.toHaveBeenCalled();
-      expect(households.decline).not.toHaveBeenCalled();
-      expect(households.withdraw).not.toHaveBeenCalled();
+      expect(result).toEqual({ type: InviteType.Event, ...EVENT_ACCEPTANCE });
     });
 
-    it('by token, never echoing the token', async () => {
-      const notFound = { status: 404, response: expect.objectContaining({ key: 'errors.invite.link_not_found' }) };
+    it('declines and withdraws through it, handing nothing to the household responder', async () => {
+      await service.decline({ token: 'live-accept-credential' });
+      auditContext.getActor.mockReturnValue(INVITER_SESSION);
+      const withdrawn = await service.withdraw('invite-2');
 
-      await expect(service.accept({ token: 'live-accept-credential' })).rejects.toMatchObject(notFound);
-      await expect(service.decline({ token: 'live-accept-credential' })).rejects.toMatchObject(notFound);
+      expect(events.decline).toHaveBeenCalledWith({ token: 'live-accept-credential' }, INVITEE_ID);
+      expect(events.withdraw).toHaveBeenCalledWith('invite-2', INVITER_ID);
+      expect(withdrawn).toEqual(partyView({ type: InviteType.Event, status: InviteStatus.Withdrawn }));
+      expect(households.decline).not.toHaveBeenCalled();
+      expect(households.withdraw).not.toHaveBeenCalled();
     });
   });
 });

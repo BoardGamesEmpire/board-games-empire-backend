@@ -48,7 +48,10 @@
     "archived": "Event archived",
     "unarchived": "Event unarchived",
     "invite_sent": "Invite sent",
-    "invite_revoked": "Invite revoked"
+    "invite_revoked": "Invite revoked",
+    "invite_accepted": "Invite accepted; you are now attending the event",
+    "invite_declined": "Invite declined",
+    "invite_withdrawn": "Invite withdrawn"
   },
   "event_policy": {
     "updated": "Event policy updated"

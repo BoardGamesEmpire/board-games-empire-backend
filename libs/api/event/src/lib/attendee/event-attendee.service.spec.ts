@@ -13,6 +13,8 @@ import {
   SystemRole,
 } from '@bge/database';
 import { CodedHttpException, t } from '@bge/i18n';
+import type { OutstandingInviteRevocation } from '@bge/invites';
+import { InviteService } from '@bge/invites';
 import { LineupRemovalReason } from '@bge/notifications-service';
 import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
 import type { MockAbilityService, MockDatabaseService } from '@bge/testing';
@@ -58,6 +60,7 @@ describe('EventAttendeeService', () => {
   let abilityService: MockAbilityService;
   let permissions: jest.Mocked<Pick<PermissionsService, 'invalidateUser'>>;
   let emitter: { emit: jest.Mock };
+  let invites: jest.Mocked<Pick<InviteService, 'revokeOutstandingOfUserWithin' | 'emit'>>;
   let compose: jest.SpyInstance;
   let forAttendees: jest.SpyInstance;
 
@@ -66,6 +69,10 @@ describe('EventAttendeeService', () => {
     abilityService.getCurrentResourceConditions.mockReturnValue([COND]);
     permissions = { invalidateUser: jest.fn().mockResolvedValue(undefined) };
     emitter = { emit: jest.fn() };
+    invites = {
+      revokeOutstandingOfUserWithin: jest.fn().mockResolvedValue({ count: 0, events: [] }),
+      emit: jest.fn(),
+    };
 
     const ctx = await createTestingModuleWithDb({
       providers: [
@@ -79,6 +86,7 @@ describe('EventAttendeeService', () => {
         { provide: EventEmitter2, useValue: emitter },
         { provide: AbilityService, useValue: abilityService },
         { provide: PermissionsService, useValue: permissions },
+        { provide: InviteService, useValue: invites },
       ],
     });
 
@@ -383,6 +391,54 @@ describe('EventAttendeeService', () => {
           GameRemovedFromEventEvent.eventName,
           expect.any(GameRemovedFromEventEvent),
         );
+      });
+
+      // Their invites end with the standing that sent them (#742). The
+      // invite rows are locked after the event's row and the attendee's, the
+      // order every invite transition on the event takes.
+      it('removeAttendee revokes the invites the removed person sent, after their role goes, announcing them after commit (#742)', async () => {
+        const revocation: OutstandingInviteRevocation = {
+          count: 1,
+          events: [{ eventName: 'invite.revoked', subjectId: 'invite-1' } as never],
+        };
+        // Recorded by hand: the mocked client and the invites mock keep
+        // separate call counters, so `invocationCallOrder` cannot compare them.
+        const order: string[] = [];
+        db.eventAttendeeRole.deleteMany.mockImplementation((async () => (order.push('role'), { count: 1 })) as never);
+        invites.revokeOutstandingOfUserWithin.mockImplementation(async () => (order.push('revoke'), revocation));
+        let committed = false;
+        db.$transaction.mockImplementation((async (work: (tx: MockDatabaseService) => Promise<unknown>) => {
+          const result = await work(db);
+          committed = true;
+
+          return result;
+        }) as never);
+        invites.emit.mockImplementation(() => expect(committed).toBe(true));
+
+        await service.removeAttendee('event-1', 'att-1');
+
+        expect(invites.revokeOutstandingOfUserWithin).toHaveBeenCalledWith(db, { eventId: 'event-1' }, 'user-1');
+        expect(order).toEqual(['role', 'revoke']);
+        expect(invites.emit).toHaveBeenCalledWith(revocation.events);
+      });
+
+      it('removeAttendee revokes no invites for an attendee added by name, who can send none (#742)', async () => {
+        db.eventAttendee.findUniqueOrThrow.mockResolvedValue(
+          attendeeRow({ userId: null, guestName: 'Pat', removedAt }),
+        );
+
+        await service.removeAttendee('event-1', 'att-1');
+
+        expect(invites.revokeOutstandingOfUserWithin).not.toHaveBeenCalled();
+      });
+
+      it('removeAttendee revokes nothing, and announces nothing, when the removal is refused (#742)', async () => {
+        db.eventAttendee.update.mockRejectedValue(recordNotFound());
+
+        await expect(service.removeAttendee('event-1', 'att-1')).rejects.toThrow(ForbiddenException);
+
+        expect(invites.revokeOutstandingOfUserWithin).not.toHaveBeenCalled();
+        expect(invites.emit).not.toHaveBeenCalled();
       });
 
       it('reports the games it deleted as left with the supplier, by the host who removed them (#769)', async () => {

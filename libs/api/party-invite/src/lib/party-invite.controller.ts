@@ -1,5 +1,8 @@
+import { InviteType } from '@bge/database';
+import type { I18nMessage } from '@bge/i18n';
 import { t } from '@bge/i18n';
-import type { InvitePartyView } from '@bge/invites';
+import type { ContextualInviteType, InvitePartyView } from '@bge/invites';
+import { isContextualInviteType } from '@bge/invites';
 import { ApiPaginatedEnvelope, paginated, Unscoped } from '@bge/shared';
 import { Body, Controller, Get, HttpCode, Param, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
@@ -35,11 +38,14 @@ const PAGINATION_DESCRIPTION =
 
 const ACCEPTED_DESCRIPTION =
   'Accepted: `{ message, type, invite, ... }`, where `type` is the kind of invite. For a household invite, ' +
-  '`member` is the new household membership, with the role the invite offered.';
+  '`member` is the new household membership, with the role the invite offered. For an event invite, ' +
+  '`attendee` is your attendee row, `Attending`, with the role the invite offered. Its `availableGames` is read ' +
+  'under the access you had before the accept, so it reads empty until your next request.';
 
 const ACCEPT_CONFLICT_DESCRIPTION =
-  'Already in the household the invite is into, in which case the invite stays open; or the invite was settled, ' +
-  'has expired, is still awaiting approval, or changed while it was being accepted';
+  'Already in the household, or already attending the event, the invite is into, in which case the invite stays ' +
+  'open; or the invite was settled, has expired, is still awaiting approval, or changed while it was being ' +
+  'accepted. An invite whose inviter can no longer send it is revoked, and answers as a revoked invite.';
 
 const ACCEPT_FORBIDDEN_DESCRIPTION = 'Your own invite, or not a signed-in user: API keys cannot accept an invite';
 
@@ -50,18 +56,63 @@ const DECLINE_FORBIDDEN_DESCRIPTION = 'Your own invite, or not a signed-in user:
 const SETTLED_CONFLICT_DESCRIPTION =
   'The invite was already settled, has expired, or changed while it was being answered';
 
-/** Both accept routes answer alike, whichever way the invite was named. */
-function acceptedResponse({ type, invite, member }: PartyAcceptance) {
-  return { message: t('success.household.invite_accepted'), type, invite, member };
+/**
+ * How a decline and a withdraw are worded, for each kind of invite the party
+ * routes serve (#742). A kind added to them fails to compile here until it
+ * has its own copy.
+ */
+const SETTLED_COPY = {
+  [InviteType.Household]: {
+    declined: () => t('success.household.invite_declined'),
+    withdrawn: () => t('success.household.invite_withdrawn'),
+  },
+  [InviteType.Event]: {
+    declined: () => t('success.event.invite_declined'),
+    withdrawn: () => t('success.event.invite_withdrawn'),
+  },
+} as const satisfies Record<ContextualInviteType, Record<'declined' | 'withdrawn', () => I18nMessage>>;
+
+/**
+ * The copy for an invite a party route answered, by its kind. Only a kind the
+ * party routes serve gets an answer: the type read refuses every other kind
+ * with the 404 a stranger meets, before any responder is asked.
+ */
+function settledCopyOf(invite: InvitePartyView): (typeof SETTLED_COPY)[ContextualInviteType] {
+  if (!isContextualInviteType(invite.type)) {
+    throw new Error(`Invite ${invite.id} is a ${invite.type} invite, which no party route answers`);
+  }
+
+  return SETTLED_COPY[invite.type];
+}
+
+/**
+ * Both accept routes answer alike, whichever way the invite was named: worded
+ * for its kind, and carrying what its context made of it (#742).
+ */
+function acceptedResponse(acceptance: PartyAcceptance) {
+  switch (acceptance.type) {
+    case InviteType.Household: {
+      const { type, invite, member } = acceptance;
+
+      return { message: t('success.household.invite_accepted'), type, invite, member };
+    }
+
+    case InviteType.Event: {
+      const { type, invite, attendee } = acceptance;
+
+      return { message: t('success.event.invite_accepted'), type, invite, attendee };
+    }
+  }
 }
 
 /** Both decline routes answer alike, whichever way the invite was named. */
 function declinedResponse(invite: InvitePartyView) {
-  return { message: t('success.household.invite_declined'), invite };
+  return { message: settledCopyOf(invite).declined(), invite };
 }
 
 // The actions a party takes on an invite of theirs, of every kind, beside each
-// context's own routes (`/households/:householdId/invites`), as the invites
+// context's own routes (`/households/:householdId/invites`,
+// `/events/:eventId/invites`), as the invites
 // lib splits a party's primitives from a context authority's: the invitee
 // lists, accepts or declines, and the inviter lists (#751) and withdraws. The
 // route is the same for every kind; the service reads the invite's type and
@@ -87,7 +138,9 @@ export class PartyInviteController {
       'The invites still open to you: sent to your user id, or to your email address once it is verified; ' +
       '`Pending` and not expired. A household invite is listed while its household exists and you are not ' +
       'already in it; one that waits for a household owner or household admin to approve it is not listed ' +
-      'until it is approved. Newest first. Each carries the role it offers, the inviter, and the message. ' +
+      'until it is approved. An event invite, sent to your user id, is listed while its event exists and you ' +
+      "don't attend it. Newest first. Each carries the role it offers, the inviter, the message, and the " +
+      '`household` or `event` it is into. ' +
       `${PARTY_INVITE_TYPE_DESCRIPTION} ${PAGINATION_DESCRIPTION}`,
   })
   @ApiPaginatedEnvelope('invites')
@@ -106,9 +159,10 @@ export class PartyInviteController {
     description:
       'By default, the invites still open, `Pending` or `AwaitingApproval`, and those that expired, so you can ' +
       'send another. `?status=` picks any status, judged as it stands now, so an outstanding invite past its ' +
-      'expiry is `Expired`. Into a household you have left or been removed from, only the invites you can still ' +
-      'withdraw are listed, whatever the filter; none into a household that was deleted. Newest first. Each ' +
-      'carries the role it offers, the address and the message you wrote. ' +
+      'expiry is `Expired`. Into a household you have left or been removed from, or to an event you no longer ' +
+      'attend, only the invites you can still withdraw are listed, whatever the filter; none into a household or ' +
+      'to an event that was deleted. Newest first. Each carries the role it offers, the address and the message ' +
+      'you wrote, and the `household` or `event` it is into. ' +
       `${PARTY_INVITE_TYPE_DESCRIPTION} ${PAGINATION_DESCRIPTION}`,
   })
   @ApiPaginatedEnvelope('invites')
@@ -202,7 +256,8 @@ export class PartyInviteController {
     description:
       'Takes back an invite you sent, pending or awaiting approval, whatever your role in its context is now. ' +
       'To cancel a household invite someone else sent, a household owner or household admin revokes it: ' +
-      '`POST /households/:householdId/invites/:inviteId/revoke`.',
+      '`POST /households/:householdId/invites/:inviteId/revoke`; for an event invite, the host or a co-host: ' +
+      '`POST /events/:eventId/invites/:inviteId/revoke`.',
   })
   @ApiParam({ name: 'inviteId', type: String })
   @ApiResponse({
@@ -220,7 +275,7 @@ export class PartyInviteController {
   @Post(':inviteId/withdraw')
   withdraw(@Param('inviteId') inviteId: string) {
     return from(this.partyInvites.withdraw(inviteId)).pipe(
-      map((invite) => ({ message: t('success.household.invite_withdrawn'), invite })),
+      map((invite) => ({ message: settledCopyOf(invite).withdrawn(), invite })),
     );
   }
 }

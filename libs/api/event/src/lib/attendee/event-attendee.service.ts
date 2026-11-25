@@ -15,6 +15,8 @@ import {
   SystemRole,
 } from '@bge/database';
 import { CodedHttpException, t } from '@bge/i18n';
+import type { InviteRevokedEvent } from '@bge/invites';
+import { InviteService } from '@bge/invites';
 import { LineupRemovalReason } from '@bge/notifications-service';
 import { AbilityService, PermissionsService, resolveActingUserIdOrNull, ScopeComposer } from '@bge/permissions';
 import type { PaginatedRows, PaginationQueryDto } from '@bge/shared';
@@ -40,7 +42,15 @@ import { OfferedGameService } from '../offered-game/offered-game.service';
 import type { OfferedGame, OfferedGameEntry } from '../offered-game/offered-game.types';
 import { shareLiveEvent } from '../utils/lock-live-event.util';
 import { rsvpDateFor } from '../utils/rsvp-date.util';
-import { ACTIVE_NOMINATION_STATUSES, emitSuppliedGameChanges, lineupStillAhead, syncSuppliedGames } from './attendance';
+import type { AttendeeRow, UserSeat } from './attendance';
+import {
+  ACTIVE_NOMINATION_STATUSES,
+  attendeeAddedEvent,
+  emitSuppliedGameChanges,
+  lineupStillAhead,
+  seatUserWithin,
+  syncSuppliedGames,
+} from './attendance';
 import { AddAttendeeDto } from './dto/add-attendee.dto';
 import { AddGameToListDto } from './dto/add-game-to-list.dto';
 import type { OfferGameItemDto } from './dto/offer-games.dto';
@@ -56,9 +66,6 @@ import {
 import { assertInvitable } from './invitable';
 import type { OfferResult } from './offer-outcome';
 import { OfferRefusal, offerRefusalMessage } from './offer-outcome';
-
-/** An attendee row with their user and role. */
-type AttendeeRow = Prisma.EventAttendeeGetPayload<{ include: typeof ATTENDEE_USER_AND_ROLE_INCLUDE }>;
 
 /**
  * An attendee as every attendee route serves one: their user and role, and
@@ -80,6 +87,7 @@ export class EventAttendeeService {
     private readonly permissions: PermissionsService,
     private readonly scopeComposer: ScopeComposer,
     private readonly offeredGames: OfferedGameService,
+    private readonly invites: InviteService,
   ) {}
 
   /**
@@ -210,81 +218,53 @@ export class EventAttendeeService {
       throw new ConflictException(t('errors.attendee.already_attendee'));
     }
 
-    const removed = existing;
     let added: AttendeeRow;
 
     try {
       const status = dto.status ?? EventParticipationStatus.Invited;
-      const fields = {
-        guestName: dto.guestName,
-        guestEmail: dto.guestEmail,
-        status,
-        // Added with an answer, whoever added them, the row holds that
-        // answer from now; added as invited, it holds none yet. A revived
-        // row takes the date of the status it is revived with (#1027).
-        rsvpDate: rsvpDateFor(status, initiatedAt),
-        notes: dto.notes,
-        role: {
-          create: {
-            role: { connect: { name: roleName } },
-          },
-        },
-      };
+      const invitedByAttendeeId = inviter?.id ?? null;
 
-      const { attendee, changes } = await this.db.$transaction(async (tx) => {
+      const { attendee, changes, revived } = await this.db.$transaction(async (tx): Promise<UserSeat> => {
         await shareLiveEvent(tx, eventId);
 
-        // Whom the caller may place on the event, as the event's create asks
-        // of its invitees (#546).
         if (dto.userId) {
+          // Whom the caller may place on the event, as the event's create
+          // asks of its invitees (#546).
           await assertInvitable(tx, invitedByUserId, [dto.userId]);
-        }
 
-        if (!removed) {
-          const attendee = await tx.eventAttendee.create({
-            data: {
-              ...fields,
-              event: { connect: { id: eventId } },
-              user: dto.userId ? { connect: { id: dto.userId } } : undefined,
-              invitedBy: inviter ? { connect: { id: inviter.id } } : undefined,
-            },
-            include: ATTENDEE_USER_AND_ROLE_INCLUDE,
+          // The seat an accepted invite writes too (#742), reviving a
+          // removed user's row (#551).
+          return seatUserWithin(tx, {
+            eventId,
+            userId: dto.userId,
+            roleName,
+            status,
+            invitedByAttendeeId,
+            at: initiatedAt,
+            notes: dto.notes,
           });
-
-          return { attendee, changes: null };
         }
 
-        const attendee = await tx.eventAttendee.update({
-          // Matches nothing once a concurrent add has revived it, which
-          // answers as the duplicate it then is.
-          where: { id: removed.id, removedAt: { not: null } },
+        const attendee = await tx.eventAttendee.create({
           data: {
-            ...fields,
-            removedAt: null,
-            invitedBy: inviter ? { connect: { id: inviter.id } } : { disconnect: true },
+            guestName: dto.guestName,
+            guestEmail: dto.guestEmail,
+            status,
+            // Added with an answer, the row holds that answer from now; added
+            // as invited, it holds none yet (#1027).
+            rsvpDate: rsvpDateFor(status, initiatedAt),
+            notes: dto.notes,
+            role: { create: { role: { connect: { name: roleName } } } },
+            event: { connect: { id: eventId } },
+            invitedBy: invitedByAttendeeId === null ? undefined : { connect: { id: invitedByAttendeeId } },
           },
           include: ATTENDEE_USER_AND_ROLE_INCLUDE,
         });
 
-        return { attendee, changes: await syncSuppliedGames(tx, attendee, initiatedAt) };
+        return { attendee, changes: null, revived: null };
       });
 
-      this.eventEmitter.emit(
-        AttendeeAddedEvent.eventName,
-        new AttendeeAddedEvent(
-          removed ?? null,
-          {
-            id: attendee.id,
-            eventId: attendee.eventId,
-            userId: attendee.userId,
-            guestName: attendee.guestName,
-            status: attendee.status,
-            invitedById: attendee.invitedById,
-            ...(removed ? { removedAt: attendee.removedAt } : {}),
-          },
-          initiatedAt,
-        ),
-      );
+      this.eventEmitter.emit(AttendeeAddedEvent.eventName, attendeeAddedEvent(revived, attendee, initiatedAt));
 
       if (changes) {
         emitSuppliedGameChanges(
@@ -302,11 +282,9 @@ export class EventAttendeeService {
       await this.permissions.invalidateUser(attendee.userId);
       added = attendee;
     } catch (error) {
+      // A seat a concurrent add took first is already the 409 it is
+      // (`seatUserWithin`).
       this.logger.error(`Error adding attendee to event ${eventId}`, error);
-
-      if (isPrismaUniqueConstraintError(error) || (removed && isPrismaDependentRecordNotFoundError(error))) {
-        throw new ConflictException(t('errors.attendee.already_attendee'));
-      }
 
       throw error;
     }
@@ -323,8 +301,10 @@ export class EventAttendeeService {
    * it made keep their author, and adding the same user again revives it.
    * Nothing else that points at the row is touched, so no key into it can
    * refuse the removal. Their role is deleted, which takes every event grant
-   * with it, since event grants render only from that role. Then they are out
-   * of the event, as someone not attending is: the games they supply are
+   * with it, since event grants render only from that role. The invites they
+   * sent to the event that are still outstanding are revoked with it, and any
+   * still open to them (#742); each is announced after commit. Then they are
+   * out of the event, as someone not attending is: the games they supply are
    * brought into line in the same transaction (`syncSuppliedGames`).
    */
   async removeAttendee(eventId: string, attendeeId: string): Promise<AttendeeWithGames> {
@@ -345,7 +325,7 @@ export class EventAttendeeService {
     let taken: AttendeeRow;
 
     try {
-      const { removed, changes } = await this.db.$transaction(async (tx) => {
+      const { removed, revokedInvites, changes } = await this.db.$transaction(async (tx) => {
         await shareLiveEvent(tx, eventId);
 
         // Read again under the row lock the update takes anyway. A removal
@@ -379,7 +359,16 @@ export class EventAttendeeService {
           where: { id: marked.id },
           include: ATTENDEE_USER_AND_ROLE_INCLUDE,
         });
-        return { removed, changes: await syncSuppliedGames(tx, removed, initiatedAt) };
+
+        // Their invites end with the standing that sent them (#742), and
+        // with them any invite still open to them here, which would let them
+        // back in. The lock order, and why it is safe beside an accept, is
+        // stated in `shareLiveEvent`.
+        const revokedInvites: readonly InviteRevokedEvent[] = removed.userId
+          ? (await this.invites.revokeOutstandingOfUserWithin(tx, { eventId }, removed.userId)).events
+          : [];
+
+        return { removed, revokedInvites, changes: await syncSuppliedGames(tx, removed, initiatedAt) };
       });
 
       const snapshot = {
@@ -407,6 +396,7 @@ export class EventAttendeeService {
         actingUserId,
         initiatedAt,
       );
+      this.invites.emit(revokedInvites);
 
       // The event just left this user's ability surface. Without the eviction
       // a removed co-host keeps co-hosting until the cached graph expires.

@@ -1,4 +1,5 @@
 import { InviteStatus, InviteType } from '@bge/database';
+import type { AttendeeWithGames } from '@bge/event';
 import type { HouseholdMemberWithRelations } from '@bge/household';
 import type { InvitePartyView } from '@bge/invites';
 import { boundPageQuery } from '@bge/testing';
@@ -12,8 +13,10 @@ const INVITE = { id: 'invite-1', status: InviteStatus.Accepted, type: InviteType
 const RECEIVED = { id: 'invite-2', household: { id: 'hh-1', name: 'Home' } } as ListedPartyInviteView;
 const SENT = { id: 'invite-3', household: { id: 'hh-1', name: 'Home' } } as ListedPartyInviteView;
 const MEMBER = { id: 'member-1', householdId: 'hh-1' } as HouseholdMemberWithRelations;
-const DECLINED = { id: 'invite-1', status: InviteStatus.Declined } as InvitePartyView;
-const WITHDRAWN = { id: 'invite-1', status: InviteStatus.Withdrawn } as InvitePartyView;
+const DECLINED = { id: 'invite-1', status: InviteStatus.Declined, type: InviteType.Household } as InvitePartyView;
+const WITHDRAWN = { id: 'invite-1', status: InviteStatus.Withdrawn, type: InviteType.Household } as InvitePartyView;
+const EVENT_INVITE = { id: 'invite-4', status: InviteStatus.Accepted, type: InviteType.Event } as InvitePartyView;
+const ATTENDEE = { id: 'att-1', eventId: 'event-1', availableGames: [] } as unknown as AttendeeWithGames;
 
 describe('PartyInviteController (delegation)', () => {
   let controller: PartyInviteController;
@@ -40,6 +43,30 @@ describe('PartyInviteController (delegation)', () => {
       invite: INVITE,
       member: MEMBER,
     });
+  });
+
+  it('accept answers an event invite with the attendee it seated, worded for an event (#742)', async () => {
+    service.accept.mockResolvedValue({ type: InviteType.Event, invite: EVENT_INVITE, attendee: ATTENDEE });
+
+    const result = await firstValueFrom(controller.accept('invite-4'));
+
+    expect(result).toEqual({
+      message: expect.objectContaining({ key: 'success.event.invite_accepted' }),
+      type: InviteType.Event,
+      invite: EVENT_INVITE,
+      attendee: ATTENDEE,
+    });
+  });
+
+  it('decline and withdraw word their answer for the kind of invite (#742)', async () => {
+    service.decline.mockResolvedValue({ ...EVENT_INVITE, status: InviteStatus.Declined });
+    service.withdraw.mockResolvedValue({ ...EVENT_INVITE, status: InviteStatus.Withdrawn });
+
+    const declined = await firstValueFrom(controller.decline('invite-4'));
+    const withdrawn = await firstValueFrom(controller.withdraw('invite-4'));
+
+    expect(declined.message).toEqual(expect.objectContaining({ key: 'success.event.invite_declined' }));
+    expect(withdrawn.message).toEqual(expect.objectContaining({ key: 'success.event.invite_withdrawn' }));
   });
 
   it('acceptByToken forwards the token from the body as the target', async () => {

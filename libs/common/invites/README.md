@@ -1,6 +1,6 @@
 # @bge/invites
 
-The invite lifecycle for Board Games Empire, as primitives a context owner drives inside its own transaction. One service covers every kind of invite the `Invite` model knows (household, event, system, campaign); the module that owns the context (households today, events and campaigns later) injects it and decides who may call what.
+The invite lifecycle for Board Games Empire, as primitives a context owner drives inside its own transaction. One service covers every kind of invite the `Invite` model knows (household, event, system, campaign); the module that owns the context (households and events today, campaigns later) injects it and decides who may call what.
 
 The lib ships:
 
