@@ -12,6 +12,7 @@ import type { TestDatabase } from '../support/test-db';
 import { createTestDatabase } from '../support/test-db';
 import type { OfferedGameFacts } from './event-fixtures';
 import { arrangeOfferedGame, platformOfType } from './event-fixtures';
+import { inviteAndAccept } from './event-join';
 import { attendeeGamesPath, attendeesPath, createEventClient, EVENTS_PATH } from './event-request';
 import type { ListOfferedGamesEnvelope, OfferedGameWire } from './event-wire';
 import {
@@ -72,7 +73,7 @@ describe('GET /api/events/:eventId/offered-games (#1187)', () => {
       })
     ).id;
 
-  /** An event hosted by a fresh user, with fresh users invited to it as its other attendees. */
+  /** An event hosted by a fresh user, with fresh users who joined it by accepting an invite as its other attendees (#742). */
   const arrangeEvent = async (invited = 1) => {
     const host = await actors.user();
     const others: AuthenticatedActor[] = [];
@@ -80,7 +81,10 @@ describe('GET /api/events/:eventId/offered-games (#1187)', () => {
       others.push(await actors.user());
     }
 
-    const eventId = await createdEventId(host, { inviteUserIds: others.map(({ user }) => user.id) });
+    const eventId = await createdEventId(host);
+    for (const other of others) {
+      await inviteAndAccept(baseUrl, host, other, eventId);
+    }
 
     return { host, others, eventId, hostAttendeeId: await attendeeIdOf(eventId, host.user.id) };
   };

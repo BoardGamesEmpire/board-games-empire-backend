@@ -80,6 +80,9 @@ export async function lockLiveEvent(tx: Prisma.TransactionClient, id: string): P
  *   inviter's attendee row is the foreign key's `FOR KEY SHARE`, which the
  *   removal's `FOR NO KEY UPDATE` does not conflict with. Changing that lock
  *   mode would let the two wait on each other.
+ * - An event created with invitees (#742): the household's row as a share
+ *   (`lockExistingHousehold`), then the new event's as a share, then the
+ *   invite rows.
  * - None of these can wait on another in a cycle: each takes the event's row
  *   as a share, and shares never wait on each other.
  * - Removing a date writes to the nominations that name it while holding the

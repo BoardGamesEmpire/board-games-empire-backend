@@ -2232,23 +2232,23 @@ export const PERMISSION_CATALOG = [
   // and the matcher reads a missing field as `null`: the create path always
   // puts `householdId` on the subject it checks, `null` included.
   //
-  // `create:event` rates `Medium` where `create:household` rates `Low`,
-  // because an event is not created with its author alone: `inviteUserIds`
-  // writes each invitee onto it as an attendee in the same request. So the
-  // reach this write sets covers the invitees' names and avatars in the
-  // attendee embed as well as the creator's, and every attendee reads that
-  // embed. The creator's friends read the event but not its attendees
-  // (#560). One decision re-rates it: invitees will hold no role and not
-  // appear until they accept (#742), and then the write covers the creator
-  // alone and goes back to `Low`. Public reach for events (#809) leaves it as
-  // it is: a public reader sees the event, its dates and its policy, and no
-  // attendee (#495).
+  // `create:event` rates `Low`, as `create:household` does. `inviteUserIds`
+  // sends each invitee an invite in the same request, and an invitee holds
+  // no role and reads no attendee until they accept (#742): they read the
+  // event, its dates and its policy through their open invite, as a public
+  // reader does. So the write covers the creator's own name and avatar
+  // alone. The creator's friends read the event but not its attendees
+  // (#560). Public reach for events (#809) leaves it as it is: a public
+  // reader sees the event, its dates and its policy, and no attendee (#495).
+  //
+  // `create:event:household` stays `Medium`: attaching the household shows
+  // the event, and every attendee who accepts, to all of its members.
   permission({
     action: Action.create,
     subject: ResourceType.Event,
     conditions: { householdId: null },
     slug: 'create:event',
-    riskLevel: RiskLevel.Medium,
+    riskLevel: RiskLevel.Low,
     reason: 'Create an event outside any household',
   }),
   permission({
@@ -2407,20 +2407,13 @@ export const PERMISSION_CATALOG = [
     reason: 'Archive or unarchive an event you host',
   }),
 
-  // `Medium`, both, as `create:household_invite` is. Neither has a route
-  // yet, and the invite that exists today, `inviteUserIds` on the create,
-  // writes the invitee as an attendee. `read:event:participant` then lets
-  // them read the event, its attendee embed included, so an invite extends
-  // the event's reach over the attendees already on it. They re-rate with
-  // `create:event`: once invitees hold no role and don't appear until they
-  // accept (#742), an invite reaches no one else's data and both go back to
-  // `Low`. Public reach for events (#809) leaves them as they are, for the
-  // reason `create:event` gives (#495).
-  //
-  // The direct add further down, `create:event_attendee:attending-role`,
-  // stays `Low` by the decision at #544's reconcile, though it reaches at
-  // least as far without asking the user it adds. The two disagree on
-  // purpose until that decision is revisited.
+  // `Low`, both, as `create:event` is. An invitee holds no role and reads no
+  // attendee until they accept (#742): their open invite lets them read the
+  // event, its dates and its policy (`read:event:invitee`), as a public
+  // reader does, and nobody else's data. Accepting is the invitee's own act,
+  // and only then does `read:event:participant` show them the attendees.
+  // Public reach for events (#809) leaves them as they are, for the reason
+  // `create:event` gives (#495).
   permission({
     action: Action.create,
     subject: ResourceType.Invite,
@@ -2442,7 +2435,7 @@ export const PERMISSION_CATALOG = [
       },
     },
     slug: 'create:event_invite',
-    riskLevel: RiskLevel.Medium,
+    riskLevel: RiskLevel.Low,
     reason: 'Invite to event',
   }),
   permission({
@@ -2450,7 +2443,7 @@ export const PERMISSION_CATALOG = [
     subject: ResourceType.Invite,
     conditions: { event: { is: { householdId: '{{ householdId }}' } } },
     slug: 'create:event_invite:household',
-    riskLevel: RiskLevel.Medium,
+    riskLevel: RiskLevel.Low,
     reason: "Invite to your household's events",
   }),
   // The event's invites, listed for its host and co-host (#742). Whoever
@@ -2560,12 +2553,13 @@ export const PERMISSION_CATALOG = [
   // delegation (#539). Those stay with the grants above.
   //
   // The pair rates apart, by the decision at #544's reconcile (#533). The
-  // add stays `Low`, though the user it adds then appears in the attendee
-  // embed to every reader of the event's attendees, the event's other
-  // attendees among them (see the invite grants above). The removal is
-  // `Medium`: it deletes another user's attendee row, and their role and
-  // game list for the event go with it. Public reach for events (#809) leaves
-  // the add `Low`: a public reader reads no attendees (#495).
+  // add is `Low`: it places only a person without an account, by name.
+  // Everyone with an account is invited instead, and appears once they
+  // accept (#742). An invite offering one of these roles is asked about this
+  // grant too, for the row the accept will write. The removal is `Medium`: it
+  // deletes another user's attendee row, and their role and game list for
+  // the event go with it. Public reach for events (#809) leaves the add
+  // `Low`: a public reader reads no attendees (#495).
   permission({
     action: Action.create,
     subject: ResourceType.EventAttendee,

@@ -19,6 +19,7 @@ import { requireBaseUrl } from '../support/e2e-env';
 import type { TestDatabase } from '../support/test-db';
 import { createTestDatabase } from '../support/test-db';
 import { arrangeListEntry, hoursFromNow } from './event-fixtures';
+import { inviteAndAccept } from './event-join';
 import { createEventClient, EVENTS_PATH } from './event-request';
 import {
   attendeeEnvelope,
@@ -303,40 +304,54 @@ describe('event write authorization', () => {
     });
   });
 
+  // The direct add places a person without an account, by name, in a role
+  // the actor may give out (#539). Everyone with an account is invited
+  // instead and joins by accepting (#742), so delegates and co-hosts are
+  // seated that way here.
   describe('adding an attendee (#539)', () => {
+    /** A body naming a fresh person without an account, in `role` when given. */
+    const byName = (role?: SystemRole) => ({
+      guestName: 'Added by name',
+      guestEmail: `e2e-attendee-${randomUUID().slice(0, 8)}@example.com`,
+      ...(role === undefined ? {} : { role }),
+    });
+
+    const invite = (actor: AuthenticatedActor, eventId: string, body: Record<string, unknown>) =>
+      request(baseUrl).post(`${EVENTS_PATH}/${eventId}/invites`).set(actor.headers).send(body);
+
     it('lets a host manage the attendees of an event they have just created', async () => {
       // The host's graph is built and cached by the create request itself,
       // before the host row exists. The create has to evict it, or this add
       // is refused until the cache expires.
       const host = await actors.user();
-      const guest = await actors.user();
       const eventId = await createdEventId(host);
 
       const added = attendeeEnvelope(
-        await addAttendee(host, eventId, { userId: guest.user.id }).expect(201),
+        await addAttendee(host, eventId, byName()).expect(201),
         'POST /api/events/:eventId/attendees as the new host',
       );
-      expect(added.userId).toBe(guest.user.id);
+      expect(added.guestName).toBe('Added by name');
     });
 
     it('refuses the host of one event any add to an event they hold no role on, themselves included', async () => {
       const victim = await actors.user();
       const attacker = await actors.user();
-      const bystander = await actors.user();
       const targetId = await createdEventId(victim);
       const ownId = await createdEventId(attacker);
 
       // Control: the attacker holds the attendee grant, on their own event.
-      await addAttendee(attacker, ownId, { userId: bystander.user.id }).expect(201);
+      await addAttendee(attacker, ownId, byName()).expect(201);
 
-      // The self-add as co-host is the escalation #539 reported. The
-      // participant adds show the binding refuses every add, not only a
-      // managing one.
+      // The self-add as co-host is the escalation #539 reported; a person
+      // with an account now joins only through an invite, so it is asked of
+      // the invite route. The by-name adds show the binding refuses every
+      // add, not only a managing one.
       const before = await attendeeCount(targetId);
-      await addAttendee(attacker, targetId, { userId: attacker.user.id }).expect(403);
-      await addAttendee(attacker, targetId, { userId: attacker.user.id, role: SystemRole.EventCoHost }).expect(403);
-      await addAttendee(attacker, targetId, { userId: bystander.user.id }).expect(403);
+      await invite(attacker, targetId, { userId: attacker.user.id, role: SystemRole.EventCoHost }).expect(403);
+      await addAttendee(attacker, targetId, byName()).expect(403);
+      await addAttendee(attacker, targetId, byName(SystemRole.EventCoHost)).expect(403);
       expect(await attendeeCount(targetId)).toBe(before);
+      expect(await db.client.invite.count({ where: { eventId: targetId } })).toBe(0);
     });
 
     it.each([SystemRole.EventOrganizer, SystemRole.EventModerator])(
@@ -344,30 +359,22 @@ describe('event write authorization', () => {
       async (delegateRole) => {
         const host = await actors.user();
         const delegate = await actors.user();
-        const other = await actors.user();
-        const invitees = new Map<SystemRole, AuthenticatedActor>();
-        for (const role of MANAGING_ROLES) {
-          invitees.set(role, await actors.user());
-        }
-
-        const inviteeFor = (role: SystemRole) => invitees.get(role)?.user.id;
-
         const eventId = await createdEventId(host);
-        await addAttendee(host, eventId, { userId: delegate.user.id, role: delegateRole }).expect(201);
+        await inviteAndAccept(baseUrl, host, delegate, eventId, delegateRole);
 
         // Control: the delegate may add attendees here, in the roles that
         // attend the event rather than run it.
-        await addAttendee(delegate, eventId, { userId: other.user.id, role: SystemRole.EventSpectator }).expect(201);
+        await addAttendee(delegate, eventId, byName(SystemRole.EventSpectator)).expect(201);
 
         const before = await attendeeCount(eventId);
         for (const role of MANAGING_ROLES) {
-          await addAttendee(delegate, eventId, { userId: inviteeFor(role), role }).expect(403);
+          await addAttendee(delegate, eventId, byName(role)).expect(403);
         }
 
         expect(await attendeeCount(eventId)).toBe(before);
 
         for (const role of MANAGING_ROLES) {
-          await addAttendee(host, eventId, { userId: inviteeFor(role), role }).expect(201);
+          await addAttendee(host, eventId, byName(role)).expect(201);
         }
       },
     );
@@ -380,9 +387,9 @@ describe('event write authorization', () => {
         const coHost = await actors.user();
         const spectator = await actors.user();
         const eventId = await createdEventId(host);
-        await addAttendee(host, eventId, { userId: delegate.user.id, role: delegateRole }).expect(201);
-        await addAttendee(host, eventId, { userId: coHost.user.id, role: SystemRole.EventCoHost }).expect(201);
-        await addAttendee(host, eventId, { userId: spectator.user.id, role: SystemRole.EventSpectator }).expect(201);
+        await inviteAndAccept(baseUrl, host, delegate, eventId, delegateRole);
+        await inviteAndAccept(baseUrl, host, coHost, eventId, SystemRole.EventCoHost);
+        await inviteAndAccept(baseUrl, host, spectator, eventId, SystemRole.EventSpectator);
 
         const before = await attendeeCount(eventId);
         await removeAttendee(delegate, eventId, await attendeeRowId(eventId, host.user.id)).expect(403);
@@ -400,14 +407,13 @@ describe('event write authorization', () => {
       // The Owner seat goes to the first human user, so it is minted first.
       const siteOwner = await actors.owner();
       const host = await actors.user();
-      const invitee = await actors.user();
       const eventId = await createdEventId(host);
 
       const added = attendeeEnvelope(
-        await addAttendee(siteOwner, eventId, { userId: invitee.user.id, role: SystemRole.EventCoHost }).expect(201),
+        await addAttendee(siteOwner, eventId, byName(SystemRole.EventCoHost)).expect(201),
         "POST /api/events/:eventId/attendees as the site's Owner",
       );
-      expect(added.userId).toBe(invitee.user.id);
+      expect(added.guestName).toBe('Added by name');
     });
 
     it('refuses a removed co-host on their very next request', async () => {
@@ -416,19 +422,14 @@ describe('event write authorization', () => {
       // cache expires.
       const host = await actors.user();
       const coHost = await actors.user();
-      const first = await actors.user();
-      const second = await actors.user();
       const eventId = await createdEventId(host);
-      const coHostRow = attendeeEnvelope(
-        await addAttendee(host, eventId, { userId: coHost.user.id, role: SystemRole.EventCoHost }).expect(201),
-        'POST /api/events/:eventId/attendees as the host',
-      );
+      const { attendeeId: coHostRowId } = await inviteAndAccept(baseUrl, host, coHost, eventId, SystemRole.EventCoHost);
 
-      await addAttendee(coHost, eventId, { userId: first.user.id }).expect(201);
+      await addAttendee(coHost, eventId, byName()).expect(201);
 
-      await removeAttendee(host, eventId, coHostRow.id).expect(200);
+      await removeAttendee(host, eventId, coHostRowId).expect(200);
 
-      await addAttendee(coHost, eventId, { userId: second.user.id }).expect(403);
+      await addAttendee(coHost, eventId, byName()).expect(403);
     });
 
     it("lets the household's owner add a co-host to its events without attending, and refuses another household's owner", async () => {
@@ -436,7 +437,6 @@ describe('event write authorization', () => {
       const member = await actors.user();
       const otherOwner = await actors.user();
       const otherMember = await actors.user();
-      const invitee = await actors.user();
       const { household } = await actors.householdWithMembers({
         owner,
         members: [{ actor: member, role: SystemRole.HouseholdMember }],
@@ -450,15 +450,15 @@ describe('event write authorization', () => {
 
       // Control: the other owner manages attendees of their own household's
       // events, so the refusal after it is the household binding's.
-      await addAttendee(otherOwner, otherEventId, { userId: invitee.user.id }).expect(201);
-      await addAttendee(otherOwner, eventId, { userId: invitee.user.id }).expect(403);
+      await addAttendee(otherOwner, otherEventId, byName()).expect(201);
+      await addAttendee(otherOwner, eventId, byName()).expect(403);
       expect(await attendeeCount(eventId)).toBe(1);
 
       const added = attendeeEnvelope(
-        await addAttendee(owner, eventId, { userId: invitee.user.id, role: SystemRole.EventCoHost }).expect(201),
+        await addAttendee(owner, eventId, byName(SystemRole.EventCoHost)).expect(201),
         "POST /api/events/:eventId/attendees as the household's owner",
       );
-      expect(added.userId).toBe(invitee.user.id);
+      expect(added.guestName).toBe('Added by name');
     });
   });
 
@@ -503,9 +503,7 @@ describe('event write authorization', () => {
         const host = await actors.user();
         const participant = await actors.user();
         const eventId = await createdEventId(host, { policy: { gameAdditionMode } });
-        await addAttendee(host, eventId, { userId: participant.user.id, role: SystemRole.EventParticipant }).expect(
-          201,
-        );
+        await inviteAndAccept(baseUrl, host, participant, eventId, SystemRole.EventParticipant);
         const own = await arrangeListEntry(db.client, eventId, participant.user.id);
         const hostEntry = await arrangeListEntry(db.client, eventId, host.user.id);
 
@@ -523,7 +521,7 @@ describe('event write authorization', () => {
       const host = await actors.user();
       const coHost = await actors.user();
       const eventId = await createdEventId(host, { policy: { gameAdditionMode: GameAdditionMode.HostOnly } });
-      await addAttendee(host, eventId, { userId: coHost.user.id, role: SystemRole.EventCoHost }).expect(201);
+      await inviteAndAccept(baseUrl, host, coHost, eventId, SystemRole.EventCoHost);
       const own = await arrangeListEntry(db.client, eventId, coHost.user.id);
 
       await directAdd(coHost, eventId, own).expect(201);
@@ -556,14 +554,12 @@ describe('event write authorization', () => {
         // direct-add grant of its own, as the refusals above show. Only the
         // household grant can make this 201.
         const actor = householdRole === SystemRole.HouseholdOwner ? owner : admin;
-        await addAttendee(member, eventId, { userId: actor.user.id, role: SystemRole.EventParticipant }).expect(201);
+        await inviteAndAccept(baseUrl, member, actor, eventId, SystemRole.EventParticipant);
 
         // Control: a member who is neither the household's owner nor its
         // admin, attending the same way, is refused on the same event, so the
         // 201 below is the household role's.
-        await addAttendee(member, eventId, { userId: plainMember.user.id, role: SystemRole.EventParticipant }).expect(
-          201,
-        );
+        await inviteAndAccept(baseUrl, member, plainMember, eventId, SystemRole.EventParticipant);
         await directAdd(plainMember, eventId, offered).expect(403);
         expect(await lineupCount(eventId)).toBe(0);
 
@@ -576,7 +572,7 @@ describe('event write authorization', () => {
       const host = await actors.user();
       const participant = await actors.user();
       const eventId = await createdEventId(host, { policy: { gameAdditionMode: GameAdditionMode.Direct } });
-      await addAttendee(host, eventId, { userId: participant.user.id, role: SystemRole.EventParticipant }).expect(201);
+      await inviteAndAccept(baseUrl, host, participant, eventId, SystemRole.EventParticipant);
       const own = await arrangeListEntry(db.client, eventId, participant.user.id);
 
       const nomination = nominationEnvelope(
@@ -686,7 +682,7 @@ describe('event write authorization', () => {
         members: [{ actor: coHost, role: SystemRole.HouseholdMember }],
       });
       const eventId = await createdEventId(owner, { householdId: household.id });
-      await addAttendee(owner, eventId, { userId: coHost.user.id, role: SystemRole.EventCoHost }).expect(201);
+      await inviteAndAccept(baseUrl, owner, coHost, eventId, SystemRole.EventCoHost);
       await removeAttendee(coHost, eventId, await attendeeRowId(eventId, owner.user.id)).expect(200);
 
       // Control: the owner still edits the household's event.
@@ -712,14 +708,8 @@ describe('event write authorization', () => {
       const attendee = await actors.user();
       const spectatedId = await createdEventId(spectatedHost);
       const participatedId = await createdEventId(participatedHost);
-      await addAttendee(spectatedHost, spectatedId, {
-        userId: attendee.user.id,
-        role: SystemRole.EventSpectator,
-      }).expect(201);
-      await addAttendee(participatedHost, participatedId, {
-        userId: attendee.user.id,
-        role: SystemRole.EventParticipant,
-      }).expect(201);
+      await inviteAndAccept(baseUrl, spectatedHost, attendee, spectatedId, SystemRole.EventSpectator);
+      await inviteAndAccept(baseUrl, participatedHost, attendee, participatedId, SystemRole.EventParticipant);
 
       return { attendee, spectatedHost, spectatedId, participatedHost, participatedId };
     };
@@ -853,7 +843,7 @@ describe('event write authorization', () => {
       const host = await actors.user();
       const delegate = await actors.user();
       const eventId = await createdEventId(host, POLL_WITH_DATE);
-      await addAttendee(host, eventId, { userId: delegate.user.id, role: delegateRole }).expect(201);
+      await inviteAndAccept(baseUrl, host, delegate, eventId, delegateRole);
       const date = await dateOf(eventId);
       expect(date.status).toBe(OccurrenceStatus.Proposed);
 
@@ -878,8 +868,8 @@ describe('event write authorization', () => {
         schedulingMode: EventSchedulingMode.Fixed,
         occurrences: [{ startDate: hoursFromNow(24) }],
       });
-      await addAttendee(host, eventId, { userId: eventOrganizer.user.id, role: SystemRole.EventOrganizer }).expect(201);
-      await addAttendee(host, eventId, { userId: eventModerator.user.id, role: SystemRole.EventModerator }).expect(201);
+      await inviteAndAccept(baseUrl, host, eventOrganizer, eventId, SystemRole.EventOrganizer);
+      await inviteAndAccept(baseUrl, host, eventModerator, eventId, SystemRole.EventModerator);
       const date = await dateOf(eventId);
       expect(date.status).toBe(OccurrenceStatus.Confirmed);
 

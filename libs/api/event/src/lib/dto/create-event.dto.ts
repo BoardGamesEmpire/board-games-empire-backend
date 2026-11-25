@@ -19,8 +19,8 @@ import { CreateEventOccurrenceDto } from '../occurrence/dto/create-event-occurre
 import { CreateEventPolicyDto } from './create-event-policy.dto';
 
 /**
- * How many users one create may invite (#546). Each is checked in the create's
- * transaction before anything is written, so the list was a request-sized
+ * How many users one create may invite (#546). Each is checked, and sent an
+ * invite, in the create's transaction (#742), so the list was a request-sized
  * amount of work with no bound.
  */
 export const MAX_INVITE_USER_IDS = 50;
@@ -145,8 +145,11 @@ export class CreateEventDto {
     maxItems: MAX_INVITE_USER_IDS,
     description:
       'User IDs to invite to the event at creation time. ' +
-      'Each user is added as an EventParticipant with Invited status. ' +
-      "An id that names no person answers 404, and one the server's or the user's invite settings refuse answers 403; either way nothing is written.",
+      'Each user is sent an invite offering the EventParticipant role, as `POST /events/:eventId/invites` sends one; ' +
+      'they become an attendee only by accepting it, and until then they hold no event role and see no attendees. ' +
+      "An id that names no person answers 404, and one the server's or the user's invite settings refuse answers 403. " +
+      'Each invite counts against the daily event invite quota, which answers 402 once used up. ' +
+      'Any refusal leaves nothing written: no event and no invite.',
   })
   // ValidateIf, not IsOptional, which let null through to the service as a
   // TypeError and a 500 (#1275).

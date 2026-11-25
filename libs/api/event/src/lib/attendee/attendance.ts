@@ -453,8 +453,9 @@ export interface UserSeat {
  * that finds the row no longer removed. Either throws on the caller's
  * transaction, so the rollback undoes whatever it wrote before.
  *
- * The direct add (`EventAttendeeService.addAttendee`) and an accepted invite
- * (`EventInviteResponder.accept`, #742) both seat through here.
+ * An accepted invite (`EventInviteResponder.accept`, #742) seats through
+ * here. The direct add places only people without an account, so it never
+ * does.
  */
 export async function seatUserWithin(tx: Prisma.TransactionClient, params: SeatUserParams): Promise<UserSeat> {
   const { at, eventId, invitedByAttendeeId, roleName, status, userId } = params;

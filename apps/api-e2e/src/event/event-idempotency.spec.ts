@@ -10,6 +10,7 @@ import { requireBaseUrl } from '../support/e2e-env';
 import { expectBackendsQueuedBehind, withBarrier } from '../support/lock-barrier';
 import type { TestDatabase } from '../support/test-db';
 import { createTestDatabase } from '../support/test-db';
+import { inviteAndAccept } from './event-join';
 import { createEventClient, EVENTS_PATH } from './event-request';
 import { eventDetailEnvelope, eventEnvelope, eventReplayEnvelope } from './event-wire';
 
@@ -24,7 +25,7 @@ const HOUSEHOLDS_PATH = '/api/households';
  *
  * A replay answers with the original event whatever has changed since: its
  * household deleted, an invitee's block on its creator, the event deleted, or
- * a retry whose payload differs. It adds no attendee and notifies no one again.
+ * a retry whose payload differs. It sends no invite and notifies no one again.
  *
  * Every actor is a plain `User`, never the Owner sentinel, whose `manage:all`
  * would pass every check for reasons that have nothing to do with the key.
@@ -195,8 +196,12 @@ describe('event create idempotency (#252)', () => {
       await expect(
         db.client.event.findUniqueOrThrow({ where: { id: original.id }, select: { title: true } }),
       ).resolves.toEqual({ title: 'Original title' });
+      // The original's one invite, and none from the replay (#742).
       await expect(
-        db.client.eventAttendee.count({ where: { eventId: original.id, userId: latecomer.user.id } }),
+        db.client.invite.count({ where: { eventId: original.id, inviteeId: invitee.user.id } }),
+      ).resolves.toBe(1);
+      await expect(
+        db.client.invite.count({ where: { eventId: original.id, inviteeId: latecomer.user.id } }),
       ).resolves.toBe(0);
 
       // The sentinel: a later invite to both. Once it reaches each of them, so
@@ -272,13 +277,11 @@ describe('event create idempotency (#252)', () => {
       // the create's unscoped include: a retry must not hand back who was
       // removed, or a roster the creator may no longer read.
       const [host, stays, removed] = [await actors.user(), await actors.user(), await actors.user()];
-      const body = { inviteUserIds: [stays.user.id, removed.user.id], clientRequestId: freshKey() };
+      const body = { clientRequestId: freshKey() };
 
       const eventId = eventEnvelope(await createEvent(host, body).expect(201), 'POST /api/events').id;
-      const { id: removedRowId } = await db.client.eventAttendee.findFirstOrThrow({
-        where: { eventId, userId: removed.user.id },
-        select: { id: true },
-      });
+      await inviteAndAccept(baseUrl, host, stays, eventId);
+      const { attendeeId: removedRowId } = await inviteAndAccept(baseUrl, host, removed, eventId);
 
       await request(baseUrl)
         .delete(`${EVENTS_PATH}/${eventId}/attendees/${removedRowId}`)
@@ -294,8 +297,7 @@ describe('event create idempotency (#252)', () => {
         `GET ${EVENTS_PATH}/${eventId}`,
       );
 
-      // Sorted: attendees created together share a `createdAt`, so their ids
-      // decide the order, and the event read is the order to match.
+      // Sorted for the set; the event read is the order to match.
       expect(replay.attendees.map(({ userId }) => userId).sort()).toEqual([host.user.id, stays.user.id].sort());
       expect(replay.attendees.map(({ id }) => id)).toEqual(detail.attendees.map(({ id }) => id));
     });

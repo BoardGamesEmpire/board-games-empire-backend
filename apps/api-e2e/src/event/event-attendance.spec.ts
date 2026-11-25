@@ -8,9 +8,10 @@ import { requireBaseUrl } from '../support/e2e-env';
 import type { TestDatabase } from '../support/test-db';
 import { createTestDatabase } from '../support/test-db';
 import { auditRowsDuring } from './event-audit';
+import { inviteAndAccept } from './event-join';
 import { attendeesPath, BROWSE_PATH, createEventClient, EVENTS_PATH } from './event-request';
 import type { EventAttendanceWire, EventDetailWire, EventReadWire } from './event-wire';
-import { attendeeEnvelope, eventDetailEnvelope, listAttendeesEnvelope, listEventsEnvelope } from './event-wire';
+import { eventDetailEnvelope, listAttendeesEnvelope, listEventsEnvelope } from './event-wire';
 
 /**
  * `attendance` over the real routes (#867): how the acting user attends each
@@ -77,15 +78,9 @@ describe("the acting user's attendance on event reads (#867)", () => {
     return row.id;
   };
 
-  const invite = async (host: AuthenticatedActor, eventId: string, attendee: AuthenticatedActor) =>
-    attendeeEnvelope(
-      await request(baseUrl)
-        .post(attendeesPath(eventId))
-        .set(host.headers)
-        .send({ userId: attendee.user.id })
-        .expect(201),
-      'POST /api/events/:eventId/attendees',
-    ).id;
+  /** Seats `attendee` as a participant who accepted the host's invite, so `Attending` and dated (#742, #1027). */
+  const seatByInvite = async (host: AuthenticatedActor, eventId: string, attendee: AuthenticatedActor) =>
+    (await inviteAndAccept(baseUrl, host, attendee, eventId)).attendeeId;
 
   const rsvp = (actor: AuthenticatedActor, eventId: string, attendeeId: string, status: EventParticipationStatus) =>
     request(baseUrl)
@@ -109,21 +104,22 @@ describe("the acting user's attendance on event reads (#867)", () => {
 
   // Each read after a write shows the write, so no list row is stale. Every
   // answer dates the attendance (#1027).
-  it("follows an invited attendee's RSVP on the list row", async () => {
-    const [host, invited] = await Promise.all([actors.user(), actors.user()]);
+  it("follows an attendee's RSVP on the list row, from the accept that seated them", async () => {
+    const [host, seated] = await Promise.all([actors.user(), actors.user()]);
     const eventId = await createdEventId(host);
-    const attendeeId = await invite(host, eventId, invited);
+    const attendeeId = await seatByInvite(host, eventId, seated);
 
-    expect(await attendanceOnList(invited, eventId)).toEqual<EventAttendanceWire>({
+    // Accepting is an answer, dated (#742).
+    expect(await attendanceOnList(seated, eventId)).toEqual<EventAttendanceWire>({
       attendeeId,
-      status: EventParticipationStatus.Invited,
+      status: EventParticipationStatus.Attending,
       role: SystemRole.EventParticipant,
-      rsvpDate: null,
+      rsvpDate: expect.any(String),
     });
 
-    await rsvp(invited, eventId, attendeeId, EventParticipationStatus.Maybe);
+    await rsvp(seated, eventId, attendeeId, EventParticipationStatus.Maybe);
 
-    const maybe = await attendanceOnList(invited, eventId);
+    const maybe = await attendanceOnList(seated, eventId);
     expect(maybe).toEqual<EventAttendanceWire>({
       attendeeId,
       status: EventParticipationStatus.Maybe,
@@ -131,9 +127,9 @@ describe("the acting user's attendance on event reads (#867)", () => {
       rsvpDate: expect.any(String),
     });
 
-    await rsvp(invited, eventId, attendeeId, EventParticipationStatus.Attending);
+    await rsvp(seated, eventId, attendeeId, EventParticipationStatus.Attending);
 
-    const attending = await attendanceOnList(invited, eventId);
+    const attending = await attendanceOnList(seated, eventId);
     expect(attending).toEqual<EventAttendanceWire>({
       attendeeId,
       status: EventParticipationStatus.Attending,
@@ -145,35 +141,35 @@ describe("the acting user's attendance on event reads (#867)", () => {
   });
 
   it('a resent answer and a notes-only edit leave rsvpDate where it was (#1027)', async () => {
-    const [host, invited] = await Promise.all([actors.user(), actors.user()]);
+    const [host, seated] = await Promise.all([actors.user(), actors.user()]);
     const eventId = await createdEventId(host);
-    const attendeeId = await invite(host, eventId, invited);
-    const dateOnList = async () => (await attendanceOnList(invited, eventId))?.rsvpDate;
+    const attendeeId = await seatByInvite(host, eventId, seated);
+    const dateOnList = async () => (await attendanceOnList(seated, eventId))?.rsvpDate;
 
-    await rsvp(invited, eventId, attendeeId, EventParticipationStatus.Attending);
+    // Accepting answered Attending, and dated it (#742).
     const answered = await dateOnList();
     expect(answered).toEqual(expect.any(String));
 
-    await rsvp(invited, eventId, attendeeId, EventParticipationStatus.Attending);
+    await rsvp(seated, eventId, attendeeId, EventParticipationStatus.Attending);
     expect(await dateOnList()).toBe(answered);
 
     await request(baseUrl)
       .patch(`${attendeesPath(eventId)}/${attendeeId}/status`)
-      .set(invited.headers)
+      .set(seated.headers)
       .send({ status: EventParticipationStatus.Attending, notes: 'bringing snacks' })
       .expect(200);
     expect(await dateOnList()).toBe(answered);
   });
 
   it('a move back to Invited clears rsvpDate (#1027)', async () => {
-    const [host, invited] = await Promise.all([actors.user(), actors.user()]);
+    const [host, seated] = await Promise.all([actors.user(), actors.user()]);
     const eventId = await createdEventId(host);
-    const attendeeId = await invite(host, eventId, invited);
+    const attendeeId = await seatByInvite(host, eventId, seated);
 
-    await rsvp(invited, eventId, attendeeId, EventParticipationStatus.Maybe);
-    await rsvp(invited, eventId, attendeeId, EventParticipationStatus.Invited);
+    await rsvp(seated, eventId, attendeeId, EventParticipationStatus.Maybe);
+    await rsvp(seated, eventId, attendeeId, EventParticipationStatus.Invited);
 
-    expect(await attendanceOnList(invited, eventId)).toEqual<EventAttendanceWire>({
+    expect(await attendanceOnList(seated, eventId)).toEqual<EventAttendanceWire>({
       attendeeId,
       status: EventParticipationStatus.Invited,
       role: SystemRole.EventParticipant,
@@ -182,25 +178,25 @@ describe("the acting user's attendance on event reads (#867)", () => {
   });
 
   it('an RSVP sent again unchanged records no audit entry and leaves the row unwritten, and a notes edit records one (#903)', async () => {
-    const [host, invited] = await Promise.all([actors.user(), actors.user()]);
+    const [host, seated] = await Promise.all([actors.user(), actors.user()]);
     const eventId = await createdEventId(host);
-    const attendeeId = await invite(host, eventId, invited);
-    await rsvp(invited, eventId, attendeeId, EventParticipationStatus.Attending);
+    // Accepting left them Attending (#742).
+    const attendeeId = await seatByInvite(host, eventId, seated);
     const updatedAt = async () =>
       (await db.client.eventAttendee.findUniqueOrThrow({ where: { id: attendeeId }, select: { updatedAt: true } }))
         .updatedAt;
     const answeredAt = await updatedAt();
 
-    const resent = await auditRowsDuring(baseUrl, db.client, invited, () =>
-      rsvp(invited, eventId, attendeeId, EventParticipationStatus.Attending),
+    const resent = await auditRowsDuring(baseUrl, db.client, seated, () =>
+      rsvp(seated, eventId, attendeeId, EventParticipationStatus.Attending),
     );
     expect(resent.auditRows).toBe(0);
     expect(await updatedAt()).toEqual(answeredAt);
 
-    const noted = await auditRowsDuring(baseUrl, db.client, invited, () =>
+    const noted = await auditRowsDuring(baseUrl, db.client, seated, () =>
       request(baseUrl)
         .patch(`${attendeesPath(eventId)}/${attendeeId}/status`)
-        .set(invited.headers)
+        .set(seated.headers)
         .send({ status: EventParticipationStatus.Attending, notes: 'bringing snacks' })
         .expect(200),
     );
@@ -208,42 +204,42 @@ describe("the acting user's attendance on event reads (#867)", () => {
   });
 
   it('gives each attendee their own row of the same event, never the other one', async () => {
-    const [host, invited] = await Promise.all([actors.user(), actors.user()]);
+    const [host, seated] = await Promise.all([actors.user(), actors.user()]);
     const eventId = await createdEventId(host);
-    const invitedRowId = await invite(host, eventId, invited);
+    const seatedRowId = await seatByInvite(host, eventId, seated);
     const hostRowId = await attendeeIdOf(host, eventId, host);
 
     const asHost = await attendanceOnList(host, eventId);
-    const asInvited = await attendanceOnList(invited, eventId);
+    const asSeated = await attendanceOnList(seated, eventId);
 
-    expect(hostRowId).not.toBe(invitedRowId);
+    expect(hostRowId).not.toBe(seatedRowId);
     expect(asHost?.attendeeId).toBe(hostRowId);
-    expect(asInvited?.attendeeId).toBe(invitedRowId);
+    expect(asSeated?.attendeeId).toBe(seatedRowId);
   });
 
   describe('GET /api/events/:id', () => {
     it("gives an attendee their row, and a friend who doesn't attend null", async () => {
-      const [host, invited, friend] = await Promise.all([actors.user(), actors.user(), actors.user()]);
+      const [host, seated, friend] = await Promise.all([actors.user(), actors.user(), actors.user()]);
       await befriend(db.client, host, friend);
       const eventId = await createdEventId(host, { reach: Reach.Friends });
-      const attendeeId = await invite(host, eventId, invited);
+      const attendeeId = await seatByInvite(host, eventId, seated);
 
-      expect((await readDetail(invited, eventId)).attendance).toEqual<EventAttendanceWire>({
+      expect((await readDetail(seated, eventId)).attendance).toEqual<EventAttendanceWire>({
         attendeeId,
-        status: EventParticipationStatus.Invited,
+        status: EventParticipationStatus.Attending,
         role: SystemRole.EventParticipant,
-        rsvpDate: null,
+        rsvpDate: expect.any(String),
       });
 
       expect((await readDetail(friend, eventId)).attendance).toBeNull();
     });
 
-    // A removal keeps the row, so the read has to filter it out. Adding them
-    // again clears `removedAt`, so the same row comes back (#551).
+    // A removal keeps the row, so the read has to filter it out. Accepting a
+    // new invite clears `removedAt`, so the same row comes back (#551, #742).
     it('gives a removed attendee of a Public event null, and their row again once re-added', async () => {
       const [host, attendee] = await Promise.all([actors.user(), actors.user()]);
       const eventId = await createdEventId(host, { reach: Reach.Public });
-      const attendeeId = await invite(host, eventId, attendee);
+      const attendeeId = await seatByInvite(host, eventId, attendee);
       expect((await readDetail(attendee, eventId)).attendance?.attendeeId).toBe(attendeeId);
 
       await request(baseUrl)
@@ -253,7 +249,7 @@ describe("the acting user's attendance on event reads (#867)", () => {
 
       expect((await readDetail(attendee, eventId)).attendance).toBeNull();
 
-      await invite(host, eventId, attendee);
+      await seatByInvite(host, eventId, attendee);
 
       expect((await readDetail(attendee, eventId)).attendance?.attendeeId).toBe(attendeeId);
     });

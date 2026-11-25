@@ -17,9 +17,11 @@ import {
 } from '@bge/database';
 import { uniqueViolationWithoutMeta } from '@bge/database/testing';
 import { t } from '@bge/i18n';
-import type { OutstandingInviteRevocation } from '@bge/invites';
+import type { InviteCreation, OutstandingInviteRevocation } from '@bge/invites';
 import { InviteService } from '@bge/invites';
 import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
+import type { QuotaCheckResult, QuotaSoftOverageEvent } from '@bge/quota';
+import { QuotaExceededException, QuotaService } from '@bge/quota';
 import { DefaultPaginationQueryDto } from '@bge/shared';
 import type { MockAbilityService, MockDatabaseService } from '@bge/testing';
 import {
@@ -45,12 +47,32 @@ import type { CreateEventDto } from './dto/create-event.dto';
 import { ListEventsQueryDto } from './dto/list-events.query.dto';
 import { EventService } from './event.service';
 import { EventCreatedEvent, EventDeletedEvent, EventUpdatedEvent } from './events/event.events';
+import { EventInviteService } from './invite/event-invite.service';
 import { POLICY_VIEW_INCLUDE } from './policy/policy-view';
 import { EVENT_ATTENDANCE_SELECT } from './utils/event-attendance.util';
 import { EVENT_STATUS_DATE_SELECT } from './utils/event-status.util';
 import { upcomingDateWhere, upcomingEventWhere } from './utils/upcoming-events.util';
 
 const COND = { id: 'sentinel-condition' };
+
+/** What the daily cap's `consume` answers when no quota row applies. */
+const UNCONSTRAINED: QuotaCheckResult = {
+  allowed: true,
+  scope: null,
+  currentUsage: null,
+  limit: null,
+  softOverage: false,
+  constraints: [],
+  softOverages: [],
+};
+
+/** What the invites lib hands back for one invite the create sends, its domain events tagged with the invitee. */
+const inviteCreationFor = (inviteeId: string): InviteCreation =>
+  ({
+    invite: { id: `invite-${inviteeId}` },
+    event: { eventName: 'invite.created', subjectId: `invite-${inviteeId}` },
+    expired: [{ eventName: 'invite.expired', subjectId: `expired-${inviteeId}` }],
+  }) as never;
 
 const OWN_RSVP_DATE = new Date('2026-10-30T12:00:00Z');
 
@@ -103,7 +125,8 @@ describe('EventService', () => {
   let abilityService: MockAbilityService;
   let permissions: jest.Mocked<Pick<PermissionsService, 'invalidateUsers'>>;
   let emitter: { emit: jest.Mock };
-  let invites: jest.Mocked<Pick<InviteService, 'revokeOutstandingWithin' | 'emit'>>;
+  let invites: jest.Mocked<Pick<InviteService, 'revokeOutstandingWithin' | 'createWithin' | 'emit'>>;
+  let quotas: jest.Mocked<Pick<QuotaService, 'consume' | 'emitSoftOverages'>>;
   let compose: jest.SpyInstance;
 
   beforeEach(async () => {
@@ -113,12 +136,21 @@ describe('EventService', () => {
     emitter = { emit: jest.fn() };
     invites = {
       revokeOutstandingWithin: jest.fn().mockResolvedValue({ count: 0, events: [] }),
+      createWithin: jest
+        .fn()
+        .mockImplementation((_tx: unknown, { inviteeId }: { inviteeId: string }) =>
+          Promise.resolve(inviteCreationFor(inviteeId)),
+        ),
       emit: jest.fn(),
     };
+    quotas = { consume: jest.fn().mockResolvedValue(UNCONSTRAINED), emitSoftOverages: jest.fn() };
 
     const ctx = await createTestingModuleWithDb({
       providers: [
         EventService,
+        // The REAL invite writer, so the create's invitees meet the checks an
+        // invite route's do (#742).
+        EventInviteService,
         // The REAL composer, over the mocked ability service, so the where
         // clauses asserted below are the merge the list actually runs.
         ScopeComposer,
@@ -126,6 +158,7 @@ describe('EventService', () => {
         { provide: AbilityService, useValue: abilityService },
         { provide: PermissionsService, useValue: permissions },
         { provide: InviteService, useValue: invites },
+        { provide: QuotaService, useValue: quotas },
       ],
     });
 
@@ -138,6 +171,12 @@ describe('EventService', () => {
     // and no friendship.
     db.user.findUnique.mockImplementation(((args: { where: { id: string } }) =>
       Promise.resolve({ id: args.where.id })) as never);
+    // The invite names its invitee as the event's list shows them, and offers
+    // the participant role by its id (#742).
+    db.user.findUniqueOrThrow.mockImplementation(((args: { where: { id: string } }) =>
+      Promise.resolve({ id: args.where.id, username: args.where.id, profile: null })) as never);
+    db.role.findUnique.mockImplementation(((args: { where: { name: string } }) =>
+      Promise.resolve({ id: `role-${args.where.name}` })) as never);
 
     // An event has no dates unless a test gives it some, so its status read
     // finds none (#795).
@@ -1335,23 +1374,34 @@ describe('EventService', () => {
     beforeEach(() => {
       db.$transaction.mockImplementation(async (cb: (tx: MockDatabaseService) => unknown) => cb(db));
       db.event.create.mockResolvedValue(withDates(makeEvent({ id: 'event-1', createdById: 'user-1' })));
+      // The event the create just wrote is live under its own share lock.
+      db.event.count.mockResolvedValue(1);
       abilityService.getActingUserId.mockReturnValue('user-1');
     });
 
-    it('answers 404 for an invitee id that names no person, and writes nothing', async () => {
+    /** That the create failed whole: no invite written, and nothing announced. */
+    const expectNothingSent = () => {
+      expect(invites.createWithin).not.toHaveBeenCalled();
+      expect(invites.emit).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    };
+
+    // The invites are written after the event, in its transaction, so a
+    // refusal rolls the event back with them (#742).
+    it('answers 404 for an invitee id that names no person, and the create fails whole', async () => {
       db.user.findUnique.mockImplementation(((args: { where: { id: string } }) =>
         Promise.resolve(args.where.id === 'ghost' ? null : { id: args.where.id })) as never);
 
       await expect(
-        service.createEvent({ title: 'X', inviteUserIds: ['user-2', 'ghost'] } as CreateEventDto),
+        service.createEvent({ title: 'X', inviteUserIds: ['ghost', 'user-2'] } as CreateEventDto),
       ).rejects.toThrow(NotFoundException);
       expect(db.user.findUnique).toHaveBeenCalledWith(
         expect.objectContaining({ where: { id: 'ghost', ...HUMAN_USER_WHERE } }),
       );
-      expect(db.event.create).not.toHaveBeenCalled();
+      expectNothingSent();
     });
 
-    it("answers 403 for an invitee the server's event policy keeps out, and writes nothing", async () => {
+    it("answers 403 for an invitee the server's event policy keeps out, and the create fails whole", async () => {
       db.systemSetting.findUnique.mockResolvedValue({
         householdInviteePolicy: Reach.Public,
         eventInviteePolicy: Reach.Friends,
@@ -1360,7 +1410,7 @@ describe('EventService', () => {
       await expect(service.createEvent({ title: 'X', inviteUserIds: ['user-2'] } as CreateEventDto)).rejects.toThrow(
         ForbiddenException,
       );
-      expect(db.event.create).not.toHaveBeenCalled();
+      expectNothingSent();
     });
 
     it("lets in an invitee the server's household policy alone would keep out", async () => {
@@ -1371,7 +1421,28 @@ describe('EventService', () => {
 
       await service.createEvent({ title: 'X', inviteUserIds: ['user-2'] } as CreateEventDto);
 
-      expect(db.event.create).toHaveBeenCalled();
+      expect(invites.createWithin).toHaveBeenCalledWith(db, expect.objectContaining({ inviteeId: 'user-2' }));
+    });
+
+    it("reads the invitee's preference for events, not for households", async () => {
+      db.userPreferences.findFirst.mockResolvedValue({
+        allowHouseholdInvitesFrom: Reach.Private,
+        allowEventInvitesFrom: Reach.Public,
+      } as never);
+
+      await service.createEvent({ title: 'X', inviteUserIds: ['user-2'] } as CreateEventDto);
+
+      expect(invites.createWithin).toHaveBeenCalledTimes(1);
+
+      db.userPreferences.findFirst.mockResolvedValue({
+        allowHouseholdInvitesFrom: Reach.Public,
+        allowEventInvitesFrom: Reach.Private,
+      } as never);
+
+      await expect(service.createEvent({ title: 'X', inviteUserIds: ['user-2'] } as CreateEventDto)).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(invites.createWithin).toHaveBeenCalledTimes(1);
     });
 
     it("lets in a friend under the server's Friends policy", async () => {
@@ -1380,7 +1451,7 @@ describe('EventService', () => {
 
       await service.createEvent({ title: 'X', inviteUserIds: ['user-2'] } as CreateEventDto);
 
-      expect(db.event.create).toHaveBeenCalled();
+      expect(invites.createWithin).toHaveBeenCalled();
     });
 
     // The event's own settings and words, not the household's (#496).
@@ -1393,7 +1464,7 @@ describe('EventService', () => {
 
       await service.createEvent({ title: 'X', inviteUserIds: ['user-2'] } as CreateEventDto);
 
-      expect(db.event.create).toHaveBeenCalled();
+      expect(invites.createWithin).toHaveBeenCalled();
     });
 
     it("refuses someone no friend links under the server's FriendsOfFriends event policy, in its own words", async () => {
@@ -1409,7 +1480,7 @@ describe('EventService', () => {
 
       expect(error).toBeInstanceOf(ForbiddenException);
       expect((error as ForbiddenException).message).toContain('errors.event.invitee_friends_of_friends_only');
-      expect(db.event.create).not.toHaveBeenCalled();
+      expectNothingSent();
     });
 
     // The settings PATCH doesn't offer the extended network as a policy
@@ -1428,27 +1499,153 @@ describe('EventService', () => {
 
       expect(error).toBeInstanceOf(ForbiddenException);
       expect((error as ForbiddenException).message).toContain('errors.event.invitee_friends_only');
-      expect(db.event.create).not.toHaveBeenCalled();
+      expectNothingSent();
     });
 
-    it('asks nothing about the creator listed among the invitees', async () => {
+    it('asks nothing about the creator listed among the invitees, and invites them to nothing', async () => {
       await service.createEvent({ title: 'X', inviteUserIds: ['user-1'] } as CreateEventDto);
 
       expect(db.user.findUnique).not.toHaveBeenCalled();
+      expect(invites.createWithin).not.toHaveBeenCalled();
     });
   });
 
-  // The creator's graph was cached by this very request, before the host row
-  // existed; without the eviction they cannot manage the event they just
-  // created until the cache expires. Each invitee gains a role the same way.
-  it("createEvent evicts the creator's and every invitee's cached permission graph", async () => {
-    db.$transaction.mockImplementation(async (cb: (tx: MockDatabaseService) => unknown) => cb(db));
-    db.event.create.mockResolvedValue(withDates(makeEvent({ id: 'event-1', createdById: 'user-1' })));
-    abilityService.getActingUserId.mockReturnValue('user-1');
+  // An invitee has no attendee row and no event role until they accept
+  // (#742): the create sends each of them an invite, as the invite route
+  // would, in the create's own transaction.
+  describe('the invites createEvent sends (#742)', () => {
+    beforeEach(() => {
+      db.$transaction.mockImplementation(async (cb: (tx: MockDatabaseService) => unknown) => cb(db));
+      db.event.create.mockResolvedValue(withDates(makeEvent({ id: 'event-1', title: 'X', createdById: 'user-1' })));
+      db.event.count.mockResolvedValue(1);
+      abilityService.getActingUserId.mockReturnValue('user-1');
+    });
 
-    await service.createEvent({ title: 'X', inviteUserIds: ['user-2', 'user-3', 'user-1'] } as CreateEventDto);
+    it("writes an invite per invitee in the create's transaction, and no attendee row", async () => {
+      await service.createEvent({
+        title: 'X',
+        inviteUserIds: ['user-2', 'user-3', 'user-2', 'user-1'],
+      } as CreateEventDto);
 
-    expect(permissions.invalidateUsers).toHaveBeenCalledWith(['user-1', 'user-2', 'user-3']);
+      // The host is the one attendee the create writes.
+      const attendees = db.event.create.mock.calls[0][0].data.attendees?.create as object[];
+      expect(attendees).toHaveLength(1);
+      expect(attendees[0]).toEqual(expect.objectContaining({ user: { connect: { id: 'user-1' } } }));
+
+      // One invite per person, from the creator, offering the participant
+      // role, on the create's transaction client.
+      expect(invites.createWithin.mock.calls.map(([, input]) => input)).toEqual([
+        expect.objectContaining({
+          type: 'Event',
+          eventId: 'event-1',
+          inviterId: 'user-1',
+          inviteeId: 'user-2',
+          inviteeName: 'user-2',
+          roleId: 'role-EventParticipant',
+          message: null,
+        }),
+        expect.objectContaining({ eventId: 'event-1', inviterId: 'user-1', inviteeId: 'user-3' }),
+      ]);
+      for (const [client] of invites.createWithin.mock.calls) {
+        expect(client).toBe(db);
+      }
+    });
+
+    // The household's share comes first, then the event's, as every invite
+    // write takes it before the invite rows (`shareLiveEvent`).
+    it('takes the new event row as a share after writing it, before the first invite', async () => {
+      // One log across mocks from different factories, whose call counters
+      // are not comparable.
+      const steps: string[] = [];
+      const created = withDates(makeEvent({ id: 'event-1', title: 'X', createdById: 'user-1' }));
+      db.event.create.mockImplementation((() => {
+        steps.push('event');
+
+        return Promise.resolve(created);
+      }) as never);
+      db.$queryRaw.mockImplementation(((query: Prisma.Sql) => {
+        if (/FROM events WHERE id = .* FOR SHARE$/.test(rawQueryText(query))) {
+          steps.push(`share:${query.values.join()}`);
+        }
+
+        return Promise.resolve([]);
+      }) as never);
+      invites.createWithin.mockImplementation((_tx, { inviteeId }) => {
+        steps.push(`invite:${inviteeId}`);
+
+        return Promise.resolve(inviteCreationFor(String(inviteeId)));
+      });
+
+      await service.createEvent({ title: 'X', inviteUserIds: ['user-2'] } as CreateEventDto);
+
+      expect(steps).toEqual(['event', 'share:event-1', 'invite:user-2']);
+    });
+
+    it('takes no share and writes no invite for a create with no invitees', async () => {
+      await service.createEvent({ title: 'X' } as CreateEventDto);
+
+      expect(db.$queryRaw).not.toHaveBeenCalled();
+      expect(invites.createWithin).not.toHaveBeenCalled();
+    });
+
+    it('announces each invite after commit, and warns of the soft caps they went past (#742)', async () => {
+      const steps: string[] = [];
+      db.$transaction.mockImplementation(async (cb: (tx: MockDatabaseService) => unknown) => {
+        const result = await cb(db);
+        steps.push('commit');
+        return result;
+      });
+      invites.emit.mockImplementation(() => void steps.push('emit'));
+      const overage = { eventName: 'quota.soft-overage' } as unknown as QuotaSoftOverageEvent;
+      quotas.consume.mockResolvedValueOnce(UNCONSTRAINED).mockResolvedValueOnce({
+        ...UNCONSTRAINED,
+        softOverage: true,
+        softOverages: [overage],
+      });
+
+      await service.createEvent({ title: 'X', inviteUserIds: ['user-2', 'user-3'] } as CreateEventDto);
+
+      expect(invites.emit).toHaveBeenCalledTimes(1);
+      expect(invites.emit.mock.calls[0][0].map(({ subjectId }) => subjectId)).toEqual([
+        'expired-user-2',
+        'invite-user-2',
+        'expired-user-3',
+        'invite-user-3',
+      ]);
+      expect(quotas.emitSoftOverages).toHaveBeenCalledWith([overage]);
+      expect(steps).toEqual(['commit', 'emit']);
+    });
+
+    // Each invite takes one of the creator's event invites for the day, so a
+    // create with more invitees than the day has left is refused whole.
+    it('charges the daily cap once per invitee, and refuses the whole create past a hard cap', async () => {
+      quotas.consume.mockResolvedValueOnce(UNCONSTRAINED).mockResolvedValueOnce({
+        ...UNCONSTRAINED,
+        allowed: false,
+        scope: 'User',
+        limit: 1n,
+        currentUsage: 1n,
+      } as never);
+
+      await expect(
+        service.createEvent({ title: 'X', inviteUserIds: ['user-2', 'user-3'] } as CreateEventDto),
+      ).rejects.toThrow(QuotaExceededException);
+      expect(quotas.consume).toHaveBeenCalledTimes(2);
+      expect(quotas.consume).toHaveBeenCalledWith('event_invite_daily_count', 1n, { userId: 'user-1' }, db);
+      expect(invites.emit).not.toHaveBeenCalled();
+      expect(quotas.emitSoftOverages).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    // The invitees gain no role until they accept, so only the creator's
+    // graph, cached by this very request before the host row existed, is
+    // stale. Without the eviction they cannot manage the event they just
+    // created until the cache expires.
+    it('evicts only the creator', async () => {
+      await service.createEvent({ title: 'X', inviteUserIds: ['user-2', 'user-3', 'user-1'] } as CreateEventDto);
+
+      expect(permissions.invalidateUsers).toHaveBeenCalledWith(['user-1']);
+    });
   });
 
   it('createEvent sends event.event.created.v1 with ids only, keyed on the event', async () => {
@@ -1470,6 +1667,7 @@ describe('EventService', () => {
   it('createEvent emits an EventCreatedEvent with the created row snapshot', async () => {
     db.$transaction.mockImplementation(async (cb: (tx: MockDatabaseService) => unknown) => cb(db));
     db.event.create.mockResolvedValue(withDates(makeEvent({ id: 'event-1', title: 'X', createdById: 'user-1' })));
+    db.event.count.mockResolvedValue(1);
     abilityService.getActingUserId.mockReturnValue('user-1');
 
     await service.createEvent({ title: 'X', inviteUserIds: ['user-2'] } as CreateEventDto);
@@ -1489,16 +1687,14 @@ describe('EventService', () => {
     db.event.create.mockResolvedValue(withDates(makeEvent({ id: 'event-1', createdById: 'user-1' })));
     abilityService.getActingUserId.mockReturnValue('user-1');
 
-    await service.createEvent({ title: 'X', inviteUserIds: ['user-2'] } as CreateEventDto);
+    await service.createEvent({ title: 'X' } as CreateEventDto);
 
-    // The host has answered: they are Attending. An invited attendee has not.
-    // Typed as one row or a list; createEvent writes a list.
-    const [host, invited] = db.event.create.mock.calls[0][0].data.attendees?.create as object[];
+    // The host has answered by creating it: they are Attending. Typed as one
+    // row or a list; createEvent writes a list.
+    const [host] = db.event.create.mock.calls[0][0].data.attendees?.create as object[];
     expect(host).toEqual(
       expect.objectContaining({ status: EventParticipationStatus.Attending, rsvpDate: expect.any(Date) }),
     );
-    expect(invited).toEqual(expect.objectContaining({ status: EventParticipationStatus.Invited }));
-    expect(invited).not.toHaveProperty('rsvpDate');
   });
 
   describe('what createEvent writes', () => {
@@ -1873,6 +2069,18 @@ describe('EventService', () => {
       await service.createEvent(retry);
 
       expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    // The original sent its invites and announced them once it committed;
+    // the retry's invitees were never invited (#742).
+    it('a replay emits no invite events', async () => {
+      db.event.findUnique.mockResolvedValue(original);
+
+      await service.createEvent(retry);
+
+      expect(invites.createWithin).not.toHaveBeenCalled();
+      expect(invites.emit).not.toHaveBeenCalled();
+      expect(quotas.emitSoftOverages).not.toHaveBeenCalled();
     });
 
     it('logs a create, and not a replay, which made nothing', async () => {

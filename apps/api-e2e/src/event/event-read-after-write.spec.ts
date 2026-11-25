@@ -4,8 +4,9 @@ import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import type { TestDatabase } from '../support/test-db';
 import { createTestDatabase } from '../support/test-db';
+import { inviteAndAccept } from './event-join';
 import { createEventClient, EVENTS_PATH } from './event-request';
-import { attendeeEnvelope, eventEnvelope, listEventsEnvelope } from './event-wire';
+import { eventEnvelope, listEventsEnvelope } from './event-wire';
 
 /**
  * Event reads that follow a write to what they read, and must reflect it
@@ -52,18 +53,11 @@ describe('event reads after a write', () => {
     const invitee = await actors.user();
     const eventId = await createdEventId(host);
 
-    const attendee = attendeeEnvelope(
-      await request(baseUrl)
-        .post(`${EVENTS_PATH}/${eventId}/attendees`)
-        .set(host.headers)
-        .send({ userId: invitee.user.id })
-        .expect(201),
-      'POST /api/events/:eventId/attendees as the host',
-    );
+    const { attendeeId } = await inviteAndAccept(baseUrl, host, invitee, eventId);
 
     await expect(listedIds(invitee, 'GET /api/events before the removal')).resolves.toEqual([eventId]);
 
-    await request(baseUrl).delete(`${EVENTS_PATH}/${eventId}/attendees/${attendee.id}`).set(host.headers).expect(200);
+    await request(baseUrl).delete(`${EVENTS_PATH}/${eventId}/attendees/${attendeeId}`).set(host.headers).expect(200);
 
     await expect(listedIds(invitee, 'GET /api/events after the removal')).resolves.toEqual([]);
   });

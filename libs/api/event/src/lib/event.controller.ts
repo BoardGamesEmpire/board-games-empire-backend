@@ -116,14 +116,30 @@ export class EventController {
     return from(this.eventService.getEventById(id)).pipe(map((event) => ({ event })));
   }
 
-  @ApiOperation({ summary: 'Create an event' })
+  @ApiOperation({
+    summary: 'Create an event',
+    description:
+      'The creator joins as its host. Each of `inviteUserIds` is sent an invite and becomes an attendee only by ' +
+      'accepting it (#742), so the event answers with the host as its one attendee.',
+  })
   @ApiResponse({ status: Http.Created, description: 'Event created successfully' })
   @ApiResponse({
     status: Http.BadRequest,
     description: 'Invalid body, or a Fixed event sent with more than one date (code EVENT_FIXED_MODE_TOO_MANY_DATES)',
   })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
-  @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
+  @ApiResponse({
+    status: Http.PaymentRequired,
+    description: 'The invites would use up the daily event invite quota; nothing is written',
+  })
+  @ApiResponse({
+    status: Http.Forbidden,
+    description: "Insufficient permissions, or an invitee the server's or the user's invite settings refuse",
+  })
+  @ApiResponse({
+    status: Http.NotFound,
+    description: 'Household not found or deleted, or an invitee id that names no person',
+  })
   @CheckPolicies((ability) => ability.can(Action.create, ResourceType.Event))
   @Post()
   createEvent(@Body() createEventDto: CreateEventDto) {

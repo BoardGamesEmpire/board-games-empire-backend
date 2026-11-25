@@ -14,10 +14,10 @@ import { requireBaseUrl } from '../support/e2e-env';
 import type { TestDatabase } from '../support/test-db';
 import { createTestDatabase } from '../support/test-db';
 import { arrangeListEntry } from './event-fixtures';
+import { inviteAndAccept } from './event-join';
 import { createEventClient, EVENTS_PATH } from './event-request';
 import type { ListEventsEnvelope } from './event-wire';
 import {
-  attendeeEnvelope,
   availabilitySummaryEnvelope,
   eventDetailEnvelope,
   eventEnvelope,
@@ -85,18 +85,16 @@ describe('event read scope', () => {
   describe('listing events (#512)', () => {
     it('lists the events a caller is an attendee of, hosts included, whatever their RSVP', async () => {
       const host = await actors.user();
-      const invitee = await actors.user();
+      const attendee = await actors.user();
       const decliner = await actors.user();
+      const invitee = await actors.user();
       const firstId = await createdEventId(host);
       const secondId = await createdEventId(host);
 
-      await addAttendee(host, firstId, { userId: invitee.user.id }).expect(201);
-      const declined = attendeeEnvelope(
-        await addAttendee(host, firstId, { userId: decliner.user.id }).expect(201),
-        'POST /api/events/:eventId/attendees as the host',
-      );
+      await inviteAndAccept(baseUrl, host, attendee, firstId);
+      const declined = await inviteAndAccept(baseUrl, host, decliner, firstId);
       await request(baseUrl)
-        .patch(`${EVENTS_PATH}/${firstId}/attendees/${declined.id}/status`)
+        .patch(`${EVENTS_PATH}/${firstId}/attendees/${declined.attendeeId}/status`)
         .set(decliner.headers)
         .send({ status: EventParticipationStatus.NotAttending })
         .expect(200);
@@ -105,18 +103,28 @@ describe('event read scope', () => {
       expect(idsOf(hostPage)).toEqual([firstId, secondId].sort());
       expect(hostPage.total).toBe(2);
 
-      // An invitation still listed, and a declined event too: the RSVP changes
-      // the row's status and never the event role on it.
-      const invitees = [
-        ['an invitee', invitee],
+      // A declined event still listed: the RSVP changes the row's status and
+      // never the event role on it.
+      const attendees = [
+        ['an attendee', attendee],
         ['an attendee who declined', decliner],
       ] as const;
 
-      for (const [who, actor] of invitees) {
+      for (const [who, actor] of attendees) {
         const page = listEventsEnvelope(await listEvents(actor).expect(200), `GET /api/events as ${who}`);
         expect(idsOf(page)).toEqual([firstId]);
         expect(page.total).toBe(1);
       }
+
+      // Someone invited is no attendee until they accept (#742), so the event
+      // is not theirs to list yet.
+      await request(baseUrl)
+        .post(`${EVENTS_PATH}/${firstId}/invites`)
+        .set(host.headers)
+        .send({ userId: invitee.user.id })
+        .expect(201);
+      const invitedPage = listEventsEnvelope(await listEvents(invitee).expect(200), 'GET /api/events as an invitee');
+      expect(idsOf(invitedPage)).toEqual([]);
     });
 
     it('lists staff only the events they attend, while each still reads a stranger’s event by id', async () => {
@@ -200,14 +208,19 @@ describe('event read scope', () => {
   describe('the availability summary (#512)', () => {
     it("counts nothing on an event the caller can't read, and every attendee and vote for its host", async () => {
       const host = await actors.user();
-      const guest = await actors.user();
+      const invitee = await actors.user();
       const outsider = await actors.user();
       const eventId = await createdEventId(host);
       const outsidersEventId = await createdEventId(outsider);
-      const guestAttendee = attendeeEnvelope(
-        await addAttendee(host, eventId, { userId: guest.user.id }).expect(201),
-        'POST /api/events/:eventId/attendees as the host',
-      );
+      const accepted = { id: (await inviteAndAccept(baseUrl, host, invitee, eventId)).attendeeId };
+
+      // Added by name, with no account: its RSVP stays Invited, which the
+      // summary counts in its own bucket, the one an accepted invite no
+      // longer fills (#742).
+      await addAttendee(host, eventId, {
+        guestName: 'Someone without an account',
+        guestEmail: `e2e-guest-${randomUUID().slice(0, 8)}@example.com`,
+      }).expect(201);
 
       // Proposed, so it is open for availability votes: in the event's
       // default Fixed scheduling mode an occurrence is otherwise created
@@ -222,7 +235,7 @@ describe('event read scope', () => {
       );
       const votes = [
         [host, AvailabilityResponse.Available],
-        [guest, AvailabilityResponse.Unavailable],
+        [invitee, AvailabilityResponse.Unavailable],
       ] as const;
 
       for (const [voter, response] of votes) {
@@ -233,18 +246,20 @@ describe('event read scope', () => {
           .expect(201);
       }
 
-      // Control: the host counts both attendees, and both votes, which come
-      // from a read of their own.
+      // Control: the host counts all three attendees, and both votes, which
+      // come from a read of their own.
       const own = availabilitySummaryEnvelope(
         await readSummary(host, eventId).expect(200),
         'GET /api/events/:eventId/occurrences/summary/availability as the host',
       );
       expect(own.attendees).toEqual({
-        total: 2,
+        total: 3,
         registered: 2,
-        guests: 0,
-        byStatus: { attending: 1, invited: 1, maybe: 0, notAttending: 0 },
+        guests: 1,
+        // Accepting the invite left the second attendee Attending (#742).
+        byStatus: { attending: 2, invited: 1, maybe: 0, notAttending: 0 },
       });
+      // The attendee added by name holds no account to vote from.
       expect(own.eligibleVoters).toBe(2);
       expect(own.occurrences).toEqual([
         expect.objectContaining({
@@ -258,7 +273,7 @@ describe('event read scope', () => {
         }),
       ]);
       expect(own.occurrences[0]?.voters).toContainEqual({
-        attendeeId: guestAttendee.id,
+        attendeeId: accepted.id,
         response: AvailabilityResponse.Unavailable,
         eligible: true,
       });
@@ -559,11 +574,11 @@ describe('event read scope', () => {
       const host = await actors.user();
       const invitee = await actors.user();
       const { eventId, occurrenceId } = await arrangeEvent(host);
-      await addAttendee(host, eventId, { userId: invitee.user.id }).expect(201);
+      await inviteAndAccept(baseUrl, host, invitee, eventId);
 
       const read = eventDetailEnvelope(
         await readEvent(invitee, eventId).expect(200),
-        'GET /api/events/:id as an invitee',
+        'GET /api/events/:id as an attendee who accepted an invite',
       );
       expect(read.occurrences.map((occurrence) => occurrence.id)).toEqual([occurrenceId]);
       expect(read.policy?.eventId).toBe(eventId);

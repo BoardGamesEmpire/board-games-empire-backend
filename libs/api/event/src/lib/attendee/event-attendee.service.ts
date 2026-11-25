@@ -42,13 +42,12 @@ import { OfferedGameService } from '../offered-game/offered-game.service';
 import type { OfferedGame, OfferedGameEntry } from '../offered-game/offered-game.types';
 import { shareLiveEvent } from '../utils/lock-live-event.util';
 import { rsvpDateFor } from '../utils/rsvp-date.util';
-import type { AttendeeRow, UserSeat } from './attendance';
+import type { AttendeeRow } from './attendance';
 import {
   ACTIVE_NOMINATION_STATUSES,
   attendeeAddedEvent,
   emitSuppliedGameChanges,
   lineupStillAhead,
-  seatUserWithin,
   syncSuppliedGames,
 } from './attendance';
 import { AddAttendeeDto } from './dto/add-attendee.dto';
@@ -63,7 +62,6 @@ import {
   GameAddedToListEvent,
   GameRemovedFromListEvent,
 } from './events/attendee.events';
-import { assertInvitable } from './invitable';
 import type { OfferResult } from './offer-outcome';
 import { OfferRefusal, offerRefusalMessage } from './offer-outcome';
 
@@ -175,7 +173,25 @@ export class EventAttendeeService {
     return this.withGamesOf(attendee, new Date());
   }
 
+  /**
+   * Adds a person without an account to the event, by name (#742).
+   *
+   * Someone with an account is invited instead (`POST /events/:eventId/invites`)
+   * and becomes an attendee by accepting, so a `userId` answers 400
+   * ATTENDEE_ACCOUNT_NEEDS_INVITE before anything is read: one request would
+   * otherwise place a user on the event without their consent. The person
+   * added has no account to answer with, so they start `Invited` unless the
+   * request records their answer.
+   */
   async addAttendee(eventId: string, dto: AddAttendeeDto): Promise<AttendeeWithGames> {
+    if (dto.userId !== undefined) {
+      throw new CodedHttpException(
+        Http.BadRequest,
+        'ATTENDEE_ACCOUNT_NEEDS_INVITE',
+        t('errors.attendee.account_needs_invite'),
+      );
+    }
+
     const initiatedAt = new Date();
     const event = await requireEvent(this.db, eventId);
     const invitedByUserId = this.abilityService.getActingUserId();
@@ -194,8 +210,8 @@ export class EventAttendeeService {
       role: { role: { name: roleName } },
     });
 
-    if (!dto.userId && !dto.guestName) {
-      throw new BadRequestException(t('errors.attendee.user_or_guest_required'));
+    if (!dto.guestName) {
+      throw new BadRequestException(t('errors.attendee.name_required'));
     }
 
     const inviter = await this.db.eventAttendee.findUnique({
@@ -203,102 +219,40 @@ export class EventAttendeeService {
       select: { id: true },
     });
 
-    // A user a host removed keeps their row, and the (event, user) key with
-    // it, so adding them again revives that row (#551). One still on the
-    // event answers as the duplicate they are, before the checks below ask
-    // whether they may be placed on it.
-    const existing = dto.userId
-      ? await this.db.eventAttendee.findFirst({
-          where: { eventId, userId: dto.userId },
-          select: { id: true, status: true, invitedById: true, removedAt: true },
-        })
-      : null;
+    const status = dto.status ?? EventParticipationStatus.Invited;
 
-    if (existing && existing.removedAt === null) {
-      throw new ConflictException(t('errors.attendee.already_attendee'));
-    }
+    const attendee = await this.db.$transaction(async (tx) => {
+      await shareLiveEvent(tx, eventId);
 
-    let added: AttendeeRow;
-
-    try {
-      const status = dto.status ?? EventParticipationStatus.Invited;
-      const invitedByAttendeeId = inviter?.id ?? null;
-
-      const { attendee, changes, revived } = await this.db.$transaction(async (tx): Promise<UserSeat> => {
-        await shareLiveEvent(tx, eventId);
-
-        if (dto.userId) {
-          // Whom the caller may place on the event, as the event's create
-          // asks of its invitees (#546).
-          await assertInvitable(tx, invitedByUserId, [dto.userId]);
-
-          // The seat an accepted invite writes too (#742), reviving a
-          // removed user's row (#551).
-          return seatUserWithin(tx, {
-            eventId,
-            userId: dto.userId,
-            roleName,
-            status,
-            invitedByAttendeeId,
-            at: initiatedAt,
-            notes: dto.notes,
-          });
-        }
-
-        const attendee = await tx.eventAttendee.create({
-          data: {
-            guestName: dto.guestName,
-            guestEmail: dto.guestEmail,
-            status,
-            // Added with an answer, the row holds that answer from now; added
-            // as invited, it holds none yet (#1027).
-            rsvpDate: rsvpDateFor(status, initiatedAt),
-            notes: dto.notes,
-            role: { create: { role: { connect: { name: roleName } } } },
-            event: { connect: { id: eventId } },
-            invitedBy: invitedByAttendeeId === null ? undefined : { connect: { id: invitedByAttendeeId } },
-          },
-          include: ATTENDEE_USER_AND_ROLE_INCLUDE,
-        });
-
-        return { attendee, changes: null, revived: null };
+      return tx.eventAttendee.create({
+        data: {
+          guestName: dto.guestName,
+          guestEmail: dto.guestEmail,
+          status,
+          // Added with an answer, the row holds that answer from now; added
+          // as invited, it holds none yet (#1027).
+          rsvpDate: rsvpDateFor(status, initiatedAt),
+          notes: dto.notes,
+          role: { create: { role: { connect: { name: roleName } } } },
+          event: { connect: { id: eventId } },
+          invitedBy: inviter ? { connect: { id: inviter.id } } : undefined,
+        },
+        include: ATTENDEE_USER_AND_ROLE_INCLUDE,
       });
+    });
 
-      this.eventEmitter.emit(AttendeeAddedEvent.eventName, attendeeAddedEvent(revived, attendee, initiatedAt));
+    this.eventEmitter.emit(AttendeeAddedEvent.eventName, attendeeAddedEvent(null, attendee, initiatedAt));
 
-      if (changes) {
-        emitSuppliedGameChanges(
-          this.eventEmitter,
-          eventId,
-          changes,
-          LineupRemovalReason.SupplierLeft,
-          invitedByUserId,
-          initiatedAt,
-        );
-      }
-
-      // The added user's cached graph predates this row, so their role here
-      // would otherwise reach them only when the cache expires.
-      await this.permissions.invalidateUser(attendee.userId);
-      added = attendee;
-    } catch (error) {
-      // A seat a concurrent add took first is already the 409 it is
-      // (`seatUserWithin`).
-      this.logger.error(`Error adding attendee to event ${eventId}`, error);
-
-      throw error;
-    }
-
-    // Outside the try: the add has committed, so a failure here is the
-    // read's, never a duplicate add (#1187).
-    return this.withGamesOf(added, initiatedAt);
+    // After the commit: a failure here is the read's, never a duplicate add
+    // (#1187).
+    return this.withGamesOf(attendee, initiatedAt);
   }
 
   /**
    * Removes an attendee from the event, keeping their row (#551).
    *
    * The row is marked removed rather than deleted: the nominations and votes
-   * it made keep their author, and adding the same user again revives it.
+   * it made keep their author, and accepting a new invite revives it (#742).
    * Nothing else that points at the row is touched, so no key into it can
    * refuse the removal. Their role is deleted, which takes every event grant
    * with it, since event grants render only from that role. The invites they

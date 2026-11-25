@@ -5,10 +5,11 @@ import { gateInvitee } from '@bge/invites';
 import { NotFoundException } from '@nestjs/common';
 
 /**
- * Asserts the inviter may place each user on an event by id (#546), in the
- * caller's transaction, before anything is written. Both ways of doing it
- * ask: the event's create, with its `inviteUserIds`, and the direct add of a
- * user, so a refusal on one cannot be had on the other a request later.
+ * Asserts the inviter may invite each user to an event by id (#546, #742), in
+ * the caller's transaction, before anything is written. Both ways of doing it
+ * ask, through `inviteWithin`: the event's create, with its `inviteUserIds`,
+ * and the invite route, so a refusal on one cannot be had on the other a
+ * request later.
  *
  * 1. The id names a person: an account that is neither the server's service
  *    account nor an anonymous user. Otherwise 404, as an invite by id

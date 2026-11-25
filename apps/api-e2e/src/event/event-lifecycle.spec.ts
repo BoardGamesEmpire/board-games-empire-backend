@@ -8,6 +8,7 @@ import { requireBaseUrl } from '../support/e2e-env';
 import type { TestDatabase } from '../support/test-db';
 import { createTestDatabase } from '../support/test-db';
 import { hoursFromNow } from './event-fixtures';
+import { inviteAndAccept } from './event-join';
 import { createEventClient, EVENTS_PATH } from './event-request';
 import { eventEnvelope, listEventsEnvelope, occurrenceEnvelope } from './event-wire';
 
@@ -60,8 +61,23 @@ describe('event cancel, reopen and archive (#795)', () => {
       `GET /api/events${query}`,
     ).events.map(({ id }) => id);
 
-  const addAttendee = (actor: AuthenticatedActor, eventId: string, userId: string, role: SystemRole) =>
-    request(baseUrl).post(`${EVENTS_PATH}/${eventId}/attendees`).set(actor.headers).send({ userId, role });
+  /**
+   * An event `host` created with `body`, each of `attendees` on it as a
+   * participant who joined by accepting the host's invite, so `Attending`
+   * (#742).
+   */
+  const eventWithAttendees = async (
+    host: AuthenticatedActor,
+    attendees: readonly AuthenticatedActor[],
+    body: Record<string, unknown> = {},
+  ) => {
+    const eventId = await createdEventId(host, body);
+    for (const attendee of attendees) {
+      await inviteAndAccept(baseUrl, host, attendee, eventId);
+    }
+
+    return eventId;
+  };
 
   const attendeeRowId = async (eventId: string, userId: string) =>
     (
@@ -101,8 +117,7 @@ describe('event cancel, reopen and archive (#795)', () => {
     it("cancels the event and its dates with the host's reason, and tells the attendees but not the host", async () => {
       const host = await actors.user();
       const invitee = await actors.user();
-      const eventId = await createdEventId(host, {
-        inviteUserIds: [invitee.user.id],
+      const eventId = await eventWithAttendees(host, [invitee], {
         occurrences: [{ startDate: hoursFromNow(24) }],
       });
 
@@ -120,8 +135,9 @@ describe('event cancel, reopen and archive (#795)', () => {
       ]);
 
       // The sentinel: the invitee's answer tells the host. Once it arrives,
-      // a cancel notification to the host would have too.
-      await rsvp(invitee, eventId);
+      // a cancel notification to the host would have too. Accepting left them
+      // Attending, and an unchanged answer tells nobody (#742, #903).
+      await rsvp(invitee, eventId, 'Maybe');
       const hostList = await unreadOnceHolding(host, NotificationType.EventRsvpReceived, eventId);
       expect(notificationsOf(hostList, NotificationType.EventCancelled, eventId)).toEqual([]);
     });
@@ -129,7 +145,7 @@ describe('event cancel, reopen and archive (#795)', () => {
     it('answers a retry with another reason 200, keeping the first reason and telling nobody again', async () => {
       const host = await actors.user();
       const invitee = await actors.user();
-      const eventId = await createdEventId(host, { inviteUserIds: [invitee.user.id] });
+      const eventId = await eventWithAttendees(host, [invitee]);
 
       await cancel(host, eventId, 'First reason').expect(200);
       await unreadOnceHolding(invitee, NotificationType.EventCancelled, eventId);
@@ -150,7 +166,7 @@ describe('event cancel, reopen and archive (#795)', () => {
         const host = await actors.user();
         const delegate = await actors.user();
         const eventId = await createdEventId(host);
-        await addAttendee(host, eventId, delegate.user.id, role).expect(201);
+        await inviteAndAccept(baseUrl, host, delegate, eventId, role);
 
         await cancel(delegate, eventId).expect(403);
         await transition(delegate, eventId, 'archive').expect(403);
@@ -178,7 +194,7 @@ describe('event cancel, reopen and archive (#795)', () => {
         ],
       });
       const eventId = await createdEventId(member, { householdId: household.id });
-      await addAttendee(member, eventId, moderator.user.id, SystemRole.EventModerator).expect(201);
+      await inviteAndAccept(baseUrl, member, moderator, eventId, SystemRole.EventModerator);
 
       const edit = (actor: AuthenticatedActor, title: string) =>
         request(baseUrl).patch(`${EVENTS_PATH}/${eventId}`).set(actor.headers).send({ title }).expect(200);
@@ -312,8 +328,7 @@ describe('event cancel, reopen and archive (#795)', () => {
     it('works the status out from the dates again, and tells the attendees', async () => {
       const host = await actors.user();
       const invitee = await actors.user();
-      const eventId = await createdEventId(host, {
-        inviteUserIds: [invitee.user.id],
+      const eventId = await eventWithAttendees(host, [invitee], {
         occurrences: [{ startDate: hoursFromNow(24) }],
       });
       await cancel(host, eventId).expect(200);
@@ -444,8 +459,7 @@ describe('event cancel, reopen and archive (#795)', () => {
       const invitee = await actors.user();
       const maybe = await actors.user();
       const notComing = await actors.user();
-      const eventId = await createdEventId(host, {
-        inviteUserIds: [invitee.user.id, maybe.user.id, notComing.user.id],
+      const eventId = await eventWithAttendees(host, [invitee, maybe, notComing], {
         occurrences: [{ label: 'Saturday', startDate: hoursFromNow(24) }],
       });
       await rsvp(maybe, eventId, 'Maybe');
@@ -475,8 +489,7 @@ describe('event cancel, reopen and archive (#795)', () => {
     it('tells the attendees of a date cancelled and removed straight after (#677)', async () => {
       const host = await actors.user();
       const invitee = await actors.user();
-      const eventId = await createdEventId(host, {
-        inviteUserIds: [invitee.user.id],
+      const eventId = await eventWithAttendees(host, [invitee], {
         occurrences: [{ label: 'Saturday', startDate: hoursFromNow(24) }],
       });
       const occurrenceId = await onlyDateOf(eventId);
@@ -499,10 +512,11 @@ describe('event cancel, reopen and archive (#795)', () => {
       const host = await actors.user();
       const coHost = await actors.user();
       const invitee = await actors.user();
-      const eventId = await createdEventId(host, { inviteUserIds: [invitee.user.id] });
-      await addAttendee(host, eventId, coHost.user.id, SystemRole.EventCoHost).expect(201);
+      const eventId = await eventWithAttendees(host, [invitee]);
+      await inviteAndAccept(baseUrl, host, coHost, eventId, SystemRole.EventCoHost);
 
-      await rsvp(invitee, eventId);
+      // Accepting left them Attending, and an unchanged answer tells nobody (#742, #903).
+      await rsvp(invitee, eventId, 'Maybe');
 
       for (const recipient of [host, coHost]) {
         const list = await unreadOnceHolding(recipient, NotificationType.EventRsvpReceived, eventId);
@@ -521,9 +535,10 @@ describe('event cancel, reopen and archive (#795)', () => {
     it("tells an attendee whose RSVP a host changed, with the host's name (#802)", async () => {
       const host = await actors.user();
       const invitee = await actors.user();
-      const eventId = await createdEventId(host, { inviteUserIds: [invitee.user.id] });
+      const eventId = await eventWithAttendees(host, [invitee]);
 
-      await rsvp(host, eventId, 'Attending', invitee);
+      // Accepting left them Attending, so the host's change is to Maybe (#742).
+      await rsvp(host, eventId, 'Maybe', invitee);
 
       // The name as the server resolves it: the display name, else the username.
       const hostRecord = await db.client.user.findUniqueOrThrow({
@@ -534,7 +549,7 @@ describe('event cancel, reopen and archive (#795)', () => {
       expect(notificationsOf(list, NotificationType.EventRsvpChanged, eventId)).toEqual([
         expect.objectContaining({
           payload: expect.objectContaining({
-            status: 'Attending',
+            status: 'Maybe',
             changedByName: hostRecord.profile?.displayName ?? hostRecord.username,
           }),
         }),
@@ -544,7 +559,7 @@ describe('event cancel, reopen and archive (#795)', () => {
     it('tells the attendees of a deleted event, and not the host who deleted it (#802)', async () => {
       const host = await actors.user();
       const invitee = await actors.user();
-      const eventId = await createdEventId(host, { inviteUserIds: [invitee.user.id] });
+      const eventId = await eventWithAttendees(host, [invitee]);
 
       await request(baseUrl).delete(`${EVENTS_PATH}/${eventId}`).set(host.headers).expect(200);
 
@@ -560,7 +575,7 @@ describe('event cancel, reopen and archive (#795)', () => {
     it('tells an attendee a host removed (#802)', async () => {
       const host = await actors.user();
       const invitee = await actors.user();
-      const eventId = await createdEventId(host, { inviteUserIds: [invitee.user.id] });
+      const eventId = await eventWithAttendees(host, [invitee]);
 
       await request(baseUrl)
         .delete(`${EVENTS_PATH}/${eventId}/attendees/${await attendeeRowId(eventId, invitee.user.id)}`)

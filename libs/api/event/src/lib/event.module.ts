@@ -31,8 +31,8 @@ import { EventPolicyService } from './policy/event-policy.service';
   // status: the event's invite routes create and revoke through it, the
   // event's delete revokes its outstanding invites, removing an attendee
   // revokes theirs, and EventInviteResponder answers an invitee (#742).
-  // QuotaModule
-  // supplies QuotaService to the invite create, which gates
+  // QuotaModule supplies QuotaService to the invite create, and to the
+  // event's create, which invites its invitees: each gates
   // `event_invite_daily_count` in its own transaction (#742).
   imports: [DatabaseModule, PermissionsModule, NotificationsServiceModule, InvitesModule, QuotaModule],
   controllers: [

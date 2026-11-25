@@ -6,6 +6,7 @@ import type { Caller } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import type { TestDatabase } from '../support/test-db';
 import { createTestDatabase } from '../support/test-db';
+import { inviteAndAccept } from './event-join';
 import { attendeesPath, BROWSE_PATH, createEventClient, EVENTS_PATH } from './event-request';
 import { eventDetailEnvelope, listEventsEnvelope } from './event-wire';
 
@@ -72,8 +73,9 @@ describe("a deleted household's events (#992)", () => {
     return { householdId: household.id, eventId };
   };
 
-  const invite = (host: AuthenticatedActor, eventId: string, attendee: AuthenticatedActor) =>
-    request(baseUrl).post(attendeesPath(eventId)).set(host.headers).send({ userId: attendee.user.id });
+  /** `POST /api/events/:eventId/invites`: how a person with an account is asked to join (#742). */
+  const invite = (host: AuthenticatedActor, eventId: string, invitee: AuthenticatedActor) =>
+    request(baseUrl).post(`${EVENTS_PATH}/${eventId}/invites`).set(host.headers).send({ userId: invitee.user.id });
 
   const hostAttendeeId = async (host: AuthenticatedActor, eventId: string) => {
     const row = await db.client.eventAttendee.findFirstOrThrow({
@@ -109,7 +111,7 @@ describe("a deleted household's events (#992)", () => {
     const [owner, friend] = await Promise.all([actors.user(), actors.user()]);
     await befriend(db.client, owner, friend);
     const { householdId, eventId } = await householdEvent(owner);
-    await invite(owner, eventId, friend).expect(201);
+    await inviteAndAccept(baseUrl, owner, friend, eventId);
 
     const subResources = [
       `${EVENTS_PATH}/${eventId}/occurrences`,
@@ -135,7 +137,7 @@ describe("a deleted household's events (#992)", () => {
     await listAttendees(friend, eventId).expect(200);
   });
 
-  it("refuses the host's edit and a new attendee while the household is deleted", async () => {
+  it("refuses the host's edit and a new invite while the household is deleted", async () => {
     const [owner, friend] = await Promise.all([actors.user(), actors.user()]);
     await befriend(db.client, owner, friend);
     const { householdId, eventId } = await householdEvent(owner);
@@ -147,8 +149,8 @@ describe("a deleted household's events (#992)", () => {
     await request(baseUrl).patch(`${EVENTS_PATH}/${eventId}`).set(owner.headers).send({ title: 'Gone' }).expect(404);
     await invite(owner, eventId, friend).expect(404);
 
-    const attendees = await db.client.eventAttendee.count({ where: { eventId, userId: friend.user.id } });
-    expect(attendees).toBe(0);
+    expect(await db.client.invite.count({ where: { eventId } })).toBe(0);
+    expect(await db.client.eventAttendee.count({ where: { eventId, userId: friend.user.id } })).toBe(0);
 
     // The refused edit left the title as it was.
     await restoreHousehold(owner, householdId);

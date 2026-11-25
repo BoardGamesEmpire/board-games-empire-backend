@@ -900,6 +900,19 @@ describe('the shipped catalogs', () => {
       expect(holdersOf(slug)).toEqual([SystemRole.HouseholdAdmin, SystemRole.HouseholdOwner]);
     });
 
+    // An invitee holds no role and reads no attendee until they accept
+    // (#742), so neither creating an event with invitees nor inviting to one
+    // reaches anyone else's data. The household create stays `Medium`: it
+    // shows the event to every member of the household.
+    it.each([
+      ['create:event', RiskLevel.Low],
+      ['create:event_invite', RiskLevel.Low],
+      ['create:event_invite:household', RiskLevel.Low],
+      ['create:event:household', RiskLevel.Medium],
+    ])('rate %s %s (#742)', (slug, riskLevel) => {
+      expect(entryOf(slug)?.riskLevel).toBe(riskLevel);
+    });
+
     // A revoke writes the status alone, and whoever may list an event's
     // invites may revoke them: the audience is the list's (#742).
     it.each([

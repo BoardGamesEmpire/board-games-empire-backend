@@ -3,7 +3,8 @@ import type { Actors, AuthenticatedActor, SessionActor } from '@bge/testing-e2e'
 import { arrangeInvite, createActors } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
-import { createEventClient, EVENTS_PATH } from '../event/event-request';
+import { inviteAndAccept } from '../event/event-join';
+import { createEventClient } from '../event/event-request';
 import { requireBaseUrl } from '../support/e2e-env';
 import type { TestDatabase } from '../support/test-db';
 import { createTestDatabase } from '../support/test-db';
@@ -108,11 +109,7 @@ describe('household invites', () => {
       const [owner, host, participant, invitee] = await Promise.all(Array.from({ length: 4 }, () => actors.user()));
       const { household } = await actors.householdWithMembers({ owner });
       const eventId = await createdEventId(host);
-      await request(baseUrl)
-        .post(`${EVENTS_PATH}/${eventId}/attendees`)
-        .set(host.headers)
-        .send({ userId: participant.user.id, role: SystemRole.EventParticipant })
-        .expect(201);
+      await inviteAndAccept(baseUrl, host, participant, eventId, SystemRole.EventParticipant);
 
       await createInvite(participant, household.id, { inviteeId: invitee.user.id }).expect(403);
       expect(await db.client.invite.count({ where: { householdId: household.id } })).toBe(0);

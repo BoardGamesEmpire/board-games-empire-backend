@@ -19,10 +19,11 @@ import { expectErrorEnvelope } from '../support/error-envelope';
 import type { TestDatabase } from '../support/test-db';
 import { createTestDatabase } from '../support/test-db';
 import { arrangeListEntry } from './event-fixtures';
+import type { AssignableAttendeeRole } from './event-join';
+import { inviteAndAccept } from './event-join';
 import { attendeeGamesPath, attendeesPath, createEventClient, EVENTS_PATH } from './event-request';
 import type { ListLineupEnvelope } from './event-wire';
 import {
-  attendeeEnvelope,
   eventGameEnvelope,
   eventReplayEnvelope,
   lineupGameEnvelope,
@@ -411,12 +412,13 @@ describe('/api/events/:eventId/lineup (#799, #769)', () => {
         'DELETE /api/events/:eventId/lineup/:lineupGameId',
       );
 
-    const addAttendee = (host: AuthenticatedActor, eventId: string, attendee: AuthenticatedActor, role: SystemRole) =>
-      request(baseUrl)
-        .post(attendeesPath(eventId))
-        .set(host.headers)
-        .send({ userId: attendee.user.id, role })
-        .expect(201);
+    /** Seats `attendee` in `role`, as accepting the host's invite does (#742). */
+    const addAttendee = (
+      host: AuthenticatedActor,
+      eventId: string,
+      attendee: AuthenticatedActor,
+      role: AssignableAttendeeRole,
+    ) => inviteAndAccept(baseUrl, host, attendee, eventId, role);
 
     const DAY = 24 * 60 * 60 * 1000;
 
@@ -569,15 +571,9 @@ describe('/api/events/:eventId/lineup (#799, #769)', () => {
         eventId,
         dateIds: [, sunday],
       } = await createdWithDates(host, ['Saturday', 'Sunday']);
+      // Accepting the host's invite seats them attending (#742).
       const attendingId = async (attendee: AuthenticatedActor) =>
-        attendeeEnvelope(
-          await request(baseUrl)
-            .post(attendeesPath(eventId))
-            .set(host.headers)
-            .send({ userId: attendee.user.id, status: EventParticipationStatus.Attending })
-            .expect(201),
-          'POST /api/events/:eventId/attendees as the host',
-        ).id;
+        (await inviteAndAccept(baseUrl, host, attendee, eventId)).attendeeId;
       const participantId = await attendingId(participant);
       await attendingId(stayer);
 
