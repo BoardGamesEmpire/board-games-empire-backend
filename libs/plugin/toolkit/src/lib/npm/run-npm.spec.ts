@@ -53,4 +53,30 @@ describe('runNpm (#1093)', () => {
     },
     NPM_TIMEOUT,
   );
+
+  it(
+    'gives an account of the failure when npm fails without a word on stderr',
+    async () => {
+      const projectDir = await mkdtemp(join(root, 'silent-'));
+      await writeFile(
+        join(projectDir, 'package.json'),
+        '{"name":"dice-tools","version":"1.2.3","scripts":{"quiet":"exit 3"}}',
+      );
+
+      const failure = await runNpm(['run', 'quiet', '--silent'], projectDir).catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(NpmCommandError);
+      expect(failure).toMatchObject({ exitCode: 3, stderr: expect.stringContaining('npm run quiet --silent') });
+    },
+    NPM_TIMEOUT,
+  );
+
+  it('rejects with a null exit code and the reason when npm cannot be started at all', async () => {
+    // A working folder that does not exist stops the spawn itself, as a
+    // missing npm does on macOS and Linux (#1093).
+    const failure = await runNpm(['--version'], join(root, 'no-such-folder')).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(NpmCommandError);
+    expect(failure).toMatchObject({ exitCode: null, stderr: expect.stringContaining('ENOENT') });
+  });
 });

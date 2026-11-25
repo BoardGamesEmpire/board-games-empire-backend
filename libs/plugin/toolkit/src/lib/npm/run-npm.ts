@@ -9,7 +9,10 @@ const MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
 /**
  * npm ran and failed with `exitCode`, or never ran to an exit code (it could
  * not be started, its output overran the buffer, a signal stopped it): then
- * `exitCode` is null and `stderr` holds Node's account of why (#1093).
+ * `exitCode` is null and `stderr` holds Node's account of why (#1093). On
+ * Windows npm runs through a shell, so a missing npm is the shell's failure
+ * and arrives with a number. When npm fails without printing anything on
+ * stderr, `stderr` holds Node's account too, so a report never quotes nothing.
  */
 export class NpmCommandError extends Error {
   override readonly name = 'NpmCommandError';
@@ -48,7 +51,7 @@ export const runNpm = (args: readonly string[], cwd: string): Promise<string> =>
         }
 
         const exitCode = typeof error.code === 'number' ? error.code : null;
-        reject(new NpmCommandError(args, exitCode === null ? error.message : stderr, exitCode));
+        reject(new NpmCommandError(args, exitCode === null || stderr.trim() === '' ? error.message : stderr, exitCode));
       },
     );
   });

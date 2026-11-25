@@ -2,6 +2,7 @@ import { isWellFormedBcp47 } from '@boardgamesempire/plugin-manifest';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { valid } from 'semver';
+import { runBuild } from './build/build-command.js';
 import { BGE_VERSION } from './generated/bge-version.js';
 import { message } from './messages.js';
 import type { ArtifactOutcome, ReportItem, ValidationReport } from './report.js';
@@ -42,12 +43,8 @@ export interface CliCommands {
   validate(target: string, options: ValidateOptions): Promise<ValidationReport>;
 }
 
-const notBuiltYet = (command: string): never => {
-  throw new Error(`bge-plugin ${command} is not part of this build yet (#1093).`);
-};
-
 const DEFAULT_COMMANDS: CliCommands = {
-  build: async () => notBuiltYet('build'),
+  build: runBuild,
   validate: runValidate,
 };
 
