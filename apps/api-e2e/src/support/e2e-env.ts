@@ -127,7 +127,7 @@ export interface MailpitEndpoint {
  * `test` (not `development`) is the correct member: the per-environment
  * defaults, such as `DATA_ENCRYPTION_KEY`'s, are keyed on it, and it keeps
  * `env.isDevelopment` false so the suite does not silently exercise
- * development-only branches such as Swagger auto-enablement.
+ * development-only branches.
  *
  * The worker child runs under the same value (see {@link workerEnvOverrides}).
  */

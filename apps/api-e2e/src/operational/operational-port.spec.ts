@@ -81,6 +81,19 @@ describe('the operational port (#1511)', () => {
 
       expect(response.status).toBe(404);
     });
+
+    // better-auth's open-api plugin is always on, for the auth half of the API
+    // document, and its own routes sit under `/api/auth`, which this port
+    // serves. They must answer nothing, or the schema the operational port
+    // keeps to itself would be public.
+    it.each(['/api/auth/open-api/generate-schema', '/api/auth/reference'])(
+      "refuses %s, better-auth's own copy of its schema",
+      async (path) => {
+        const response = await request(baseUrl).get(path);
+
+        expect(response.status).toBe(404);
+      },
+    );
   });
 
   describe('the operational port', () => {
@@ -106,6 +119,35 @@ describe('the operational port (#1511)', () => {
 
       // The whole answer, so a failure shows whose 404 it was.
       expect(answer).toMatchObject({ statusLine: 'HTTP/1.1 200 OK', body: expect.stringContaining('bge_process_cpu') });
+    });
+
+    // Built on this first request, with better-auth's half merged in.
+    it('serves the API document as JSON, with the routes of both halves', async () => {
+      const response = await request(operationalUrl).get('/docs/json');
+
+      expect(response.status).toBe(200);
+      expect(response.headers['content-type']).toMatch(/^application\/json/);
+      expect(response.body.openapi).toMatch(/^3\./);
+      expect(Object.keys(response.body.paths)).toContain('/api/games');
+      expect(Object.keys(response.body.paths).some((path) => path.startsWith('/api/auth/'))).toBe(true);
+    });
+
+    it('serves the API document as YAML', async () => {
+      const response = await request(operationalUrl).get('/docs/yaml');
+
+      expect(response.status).toBe(200);
+      expect(response.headers['content-type']).toMatch(/^text\/yaml/);
+      expect(response.text).toMatch(/^openapi: /m);
+    });
+
+    it.each([
+      ['/docs', /^text\/html/],
+      ['/docs/swagger-ui-init.js', /^application\/javascript/],
+    ])("serves the API document's page at %s", async (path, contentType) => {
+      const response = await request(operationalUrl).get(path);
+
+      expect(response.status).toBe(200);
+      expect(response.headers['content-type']).toMatch(contentType);
     });
 
     it.each(['/api/games', '/socket.io/?EIO=4&transport=polling'])(

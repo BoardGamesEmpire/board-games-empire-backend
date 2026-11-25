@@ -24,7 +24,6 @@ import { Logger, RequestMethod } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
-import type { OpenAPIObject } from '@nestjs/swagger';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import compression from 'compression';
 import helmet from 'helmet';
@@ -37,6 +36,7 @@ import { RedisIoAdapter } from './app/adapters/redis-io.adapter';
 import { AppModule } from './app/app.module';
 import redisConfig, { redisConfigValidationSchema } from './app/configuration/redis.config';
 import { API_REQUEST_TIMEOUT_MS, installRequestBodyRateGuard } from './app/http/request-body-rate-guard';
+import { createAuthSchemaPatch } from './app/lib/api-document';
 import { createAuthClientIpHandler } from './app/lib/auth-client-ip';
 import { createHostCheck } from './app/lib/host-check';
 import type { ServerNames } from './app/lib/host-rule';
@@ -196,49 +196,31 @@ async function bootstrap() {
   // `app.close()` still invokes all `OnApplicationShutdown` providers.
 
   const authInstance = app.get(AUTH_INSTANCE);
-  const swagger = configService.get<boolean>('swagger.enabled');
 
-  Logger.debug(`Swagger enabled: ${swagger}`, LOGGER_CONTEXT);
+  // The API document, on the operational port only: the gate refuses `/docs`
+  // and everything under it on the public port (#1511). Swagger calls the
+  // factory, and the patch that merges better-auth's half in, on the first
+  // request, so nothing is built at boot. Reading better-auth's schema can
+  // wait on a sign-in provider's discovery (DEPLOYMENT.md), which would
+  // otherwise hold up the listen.
+  const swaggerConfig = new DocumentBuilder()
+    .setTitle(configService.getOrThrow('swagger.title'))
+    .setDescription(configService.getOrThrow('swagger.description'))
+    .setVersion(configService.getOrThrow('swagger.version'))
+    .addBearerAuth()
+    .addApiKey({
+      type: 'apiKey',
+      // The header HttpActorMiddleware reads a key from (#1418).
+      name: API_KEY_HEADER,
+      in: 'header',
+    })
+    .build();
 
-  if (swagger) {
-    const swaggerConfig = new DocumentBuilder()
-      .setTitle(configService.getOrThrow('swagger.title'))
-      .setDescription(configService.getOrThrow('swagger.description'))
-      .setVersion(configService.getOrThrow('swagger.version'))
-      .addBearerAuth()
-      .addApiKey({
-        type: 'apiKey',
-        // The header HttpActorMiddleware reads a key from (#1418).
-        name: API_KEY_HEADER,
-        in: 'header',
-      })
-      .build();
-
-    const openAPISchema: OpenAPIObject = await authInstance.api.generateOpenAPISchema();
-    const paths = Object.entries(openAPISchema.paths).reduce<OpenAPIObject['paths']>(
-      (acc, [path, methods]) => ({
-        ...acc,
-        [path.startsWith(`/${globalPrefix}/auth`) ? path : `/${globalPrefix}/auth${path}`]: methods,
-      }),
-      {},
-    );
-
-    const document = SwaggerModule.createDocument(app, swaggerConfig);
-    const merged = {
-      ...document,
-      paths: { ...document.paths, ...paths },
-      components: {
-        ...document.components,
-        schemas: { ...document.components?.schemas, ...openAPISchema.components?.schemas },
-      },
-    };
-    SwaggerModule.setup(globalPrefix, app, merged, {
-      jsonDocumentUrl: `${globalPrefix}/swagger/json`,
-      yamlDocumentUrl: `${globalPrefix}/swagger/yaml`,
-    });
-
-    Logger.debug('Swagger document created and setup completed', LOGGER_CONTEXT);
-  }
+  SwaggerModule.setup('docs', app, () => SwaggerModule.createDocument(app, swaggerConfig), {
+    jsonDocumentUrl: 'docs/json',
+    yamlDocumentUrl: 'docs/yaml',
+    patchDocumentOnRequest: createAuthSchemaPatch(() => authInstance.api.generateOpenAPISchema(), globalPrefix),
+  });
 
   const redisAdapter = new RedisIoAdapter(hostCheck.allowRequest, app);
   await redisAdapter.connectToRedis(configService);

@@ -241,6 +241,9 @@
   "health": {
     "not_ready": "The server isn't ready to answer requests yet. Try again in a moment"
   },
+  "api_document": {
+    "unavailable": "The API document can't be built right now. Try again in a moment"
+  },
   "auth": {
     "impersonated_session": "Impersonated sessions are not supported",
     "no_token": "No token provided",

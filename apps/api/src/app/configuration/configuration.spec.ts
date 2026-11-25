@@ -3,6 +3,7 @@ import { healthConfigValidationSchema } from '@bge/health';
 import { prometheusConfigValidationSchema } from '@bge/metrics';
 import { securityTxtConfigValidationSchema } from '@bge/well-known';
 import { configurationValidationSchema } from './index';
+import { swaggerConfigValidationSchema } from './swagger.config';
 
 /** Validates as `ConfigModule.forRoot` does, reporting every failure rather than the first. */
 const validate = (environment: Record<string, string>) =>
@@ -100,6 +101,29 @@ describe("the api's configuration schema", () => {
     const { error } = validate({ [variable]: '' });
 
     expect(error?.details.map(({ path }) => path.join('.')) ?? []).not.toContain(variable);
+  });
+});
+
+describe("the API document's variables (#1511)", () => {
+  const documentVariables = Object.keys(swaggerConfigValidationSchema);
+
+  // A schema default is written into the environment and beats the config's
+  // (#626): SWAGGER_VERSION's '1.0' beat the config's '1.0.0'.
+  it('leaves them unset, for their config to default', () => {
+    const { value } = validate({});
+
+    expect(documentVariables.filter((variable) => variable in value)).toEqual([]);
+  });
+
+  it.each(documentVariables)('accepts an empty %s, for its config to read as unset', (variable) => {
+    const { error } = validate({ [variable]: '' });
+
+    expect(error?.details.map(({ path }) => path.join('.')) ?? []).not.toContain(variable);
+  });
+
+  // The API document is always served, on the operational port.
+  it('has no switch to turn the API document off', () => {
+    expect(documentVariables).toEqual(['SWAGGER_TITLE', 'SWAGGER_DESCRIPTION', 'SWAGGER_VERSION']);
   });
 });
 

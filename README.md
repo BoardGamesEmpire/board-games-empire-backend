@@ -247,8 +247,8 @@ what changed in the lock (#733):
 ## Frontend
 
 The frontend clients are being developed (so very slowly) [here](https://github.com/BoardGamesEmpire/board-games-empire-client). They currently have no capabilities
-to interact with the backend systems. Use Postman or Insomnia to send test data to endpoints or
-[swagger](http://localhost:33333/api) on your local instance.
+to interact with the backend systems. Use Postman or Insomnia to send test data to endpoints, or the API document's
+page at [localhost:33334/docs](http://localhost:33334/docs) on your local server.
 
 ---
 
