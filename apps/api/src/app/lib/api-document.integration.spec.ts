@@ -4,6 +4,7 @@ import type { INestApplication } from '@nestjs/common';
 import { Controller, Get, Logger } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 import type { OpenAPIObject } from '@nestjs/swagger';
+import { SwaggerModule } from '@nestjs/swagger';
 import { Test } from '@nestjs/testing';
 import { I18nService } from 'nestjs-i18n';
 import { buildApiDocument, setupApiDocument } from './api-document';
@@ -137,4 +138,27 @@ describe('the API document when better-auth cannot give its schema (#1511)', () 
       expect(load).toHaveBeenCalledTimes(2);
     },
   );
+
+  // Swagger builds the api's own half on the first request too, and calls its
+  // factory again on the next one when it throws.
+  it("answers a coded 503 when the api's own half can't be built, then serves it on the next request", async () => {
+    load.mockResolvedValue(AUTH_SCHEMA);
+    jest.spyOn(SwaggerModule, 'createDocument').mockImplementationOnce(() => {
+      throw new Error('a route decorator is malformed');
+    });
+
+    const refused = await fetch(`${url}/docs/json`);
+
+    expect(refused.status).toBe(503);
+    await expect(refused.json()).resolves.toMatchObject({ code: 'API_DOCUMENT_UNAVAILABLE' });
+    expect(Logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('a route decorator is malformed'),
+      expect.any(String),
+      'ApiDocument',
+    );
+
+    const served = await fetch(`${url}/docs/json`);
+
+    expect(served.status).toBe(200);
+  });
 });

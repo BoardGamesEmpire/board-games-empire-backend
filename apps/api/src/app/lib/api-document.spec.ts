@@ -160,6 +160,40 @@ describe('createAuthSchemaPatch (#1511)', () => {
     await expect(patch({}, {}, base)).resolves.toBeDefined();
   });
 
+  // Reading the schema waits on a sign-in provider's discovery, which can hold
+  // for minutes (#1023): the request is refused in time, and the read it
+  // started serves the requests after it.
+  describe('when better-auth takes longer than the time limit', () => {
+    beforeEach(() => jest.useFakeTimers());
+    afterEach(() => jest.useRealTimers());
+
+    it('refuses the waiting request with a coded 503, and serves the read once it finishes', async () => {
+      let answer: (schema: OpenAPIObject) => void = () => undefined;
+      const load = jest.fn(() => new Promise<OpenAPIObject>((resolve) => (answer = resolve)));
+      const patch = createAuthSchemaPatch(load, 'api', 1_000);
+
+      const waiting = patch({}, {}, base).catch((error: unknown) => error);
+      await jest.advanceTimersByTimeAsync(1_000);
+
+      await expect(waiting).resolves.toMatchObject({
+        response: { statusCode: 503, code: 'API_DOCUMENT_UNAVAILABLE' },
+      });
+
+      answer(auth);
+
+      await expect(patch({}, {}, base)).resolves.toEqual(mergeAuthSchema(base, auth, 'api'));
+      expect(load).toHaveBeenCalledTimes(1);
+    });
+
+    it('leaves no timer behind once the read answers in time', async () => {
+      const patch = createAuthSchemaPatch(loader(auth), 'api', 1_000);
+
+      await patch({}, {}, base);
+
+      expect(jest.getTimerCount()).toBe(0);
+    });
+  });
+
   // Nothing else logs it: the error filter answers an HTTP exception without
   // logging its cause, so this is the operator's only trace of why.
   it('logs why the schema could not be read', async () => {

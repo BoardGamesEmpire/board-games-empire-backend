@@ -17,6 +17,15 @@ const LOGGER_CONTEXT = 'ApiDocument';
  */
 export const API_DOCUMENT_PATH = 'docs';
 
+/**
+ * How long a request for the API document waits on better-auth's schema
+ * (#1511). Reading it waits on the hold a sign-in provider's discovery can put
+ * on `/api/auth` (#1023), which can last minutes. Past this, the request is
+ * refused and the read carries on, so a later request gets the document once
+ * the hold ends.
+ */
+export const AUTH_SCHEMA_TIME_LIMIT_MS = 10_000;
+
 const API_DOCUMENT_JSON_PATH = `${API_DOCUMENT_PATH}/json`;
 const API_DOCUMENT_YAML_PATH = `${API_DOCUMENT_PATH}/yaml`;
 
@@ -58,7 +67,17 @@ export function setupApiDocument(
   app: INestApplication,
   { config, globalPrefix, loadAuthSchema }: ApiDocumentSources,
 ): void {
-  SwaggerModule.setup(API_DOCUMENT_PATH, app, () => createBaseDocument(app, config), {
+  // Swagger calls the factory again on the next request when it throws, so a
+  // failed build is refused the way a failed read of better-auth's schema is.
+  const factory = (): OpenAPIObject => {
+    try {
+      return createBaseDocument(app, config);
+    } catch (error) {
+      throw unavailable(error);
+    }
+  };
+
+  SwaggerModule.setup(API_DOCUMENT_PATH, app, factory, {
     jsonDocumentUrl: API_DOCUMENT_JSON_PATH,
     yamlDocumentUrl: API_DOCUMENT_YAML_PATH,
     patchDocumentOnRequest: createAuthSchemaPatch(loadAuthSchema, globalPrefix),
@@ -116,6 +135,8 @@ export function mergeAuthSchema(base: OpenAPIObject, auth: OpenAPIObject, global
  * The merged document is kept, and requests that arrive while it is being
  * built share the one read. A failed read or merge is not kept: each request
  * that waited on it is refused with a coded 503 and the next one tries again.
+ * A request that waits longer than `timeLimitMs` is refused the same way, but
+ * the read carries on, and the requests after it share that read.
  * Swagger's handlers are async, so Express 5 passes the refusal to Nest's
  * error handler, which answers it in the error envelope.
  *
@@ -125,6 +146,7 @@ export function mergeAuthSchema(base: OpenAPIObject, auth: OpenAPIObject, global
 export function createAuthSchemaPatch(
   load: () => Promise<OpenAPIObject>,
   globalPrefix: string,
+  timeLimitMs = AUTH_SCHEMA_TIME_LIMIT_MS,
 ): (req: unknown, res: unknown, base: OpenAPIObject) => Promise<OpenAPIObject> {
   let merged: Promise<OpenAPIObject> | undefined;
 
@@ -137,8 +159,23 @@ export function createAuthSchemaPatch(
         throw unavailable(error);
       });
 
-    return merged;
+    return withinTimeLimit(merged, timeLimitMs);
   };
+}
+
+/** Settles as `work` does, or refuses once `timeLimitMs` passes first. `work` itself runs on. */
+function withinTimeLimit<T>(work: Promise<T>, timeLimitMs: number): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const expired = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(
+      () => reject(unavailable(new Error(`better-auth's schema took longer than ${timeLimitMs} ms to read`))),
+      timeLimitMs,
+    );
+    // A pending document request doesn't keep the process up on shutdown.
+    timer.unref();
+  });
+
+  return Promise.race([work, expired]).finally(() => clearTimeout(timer));
 }
 
 /**
@@ -149,7 +186,7 @@ export function createAuthSchemaPatch(
 function unavailable(cause: unknown): CodedHttpException {
   const reason = cause instanceof Error ? cause.message : String(cause);
   const stack = cause instanceof Error ? (cause.stack ?? reason) : reason;
-  Logger.error(`The API document couldn't be built with better-auth's schema: ${reason}`, stack, LOGGER_CONTEXT);
+  Logger.error(`The API document couldn't be built: ${reason}`, stack, LOGGER_CONTEXT);
 
   return new CodedHttpException(
     Http.ServiceUnavailable,
