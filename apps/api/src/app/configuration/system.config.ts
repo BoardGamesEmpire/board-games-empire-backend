@@ -20,7 +20,9 @@ export default registerAs('system', () =>
         keyTo: 'port',
         key: 'PORT',
         defaultValue: DEFAULT_PORT,
-        mutators: [(value: string) => parseInt(value, 10)],
+        // `Number`, as Joi converts it: `parseInt` reads `1e3` as 1, so the root
+        // schema's collision check would compare a port the listener never binds.
+        mutators: [(value: string) => Number(value)],
       },
       {
         keyTo: 'api_base_url',

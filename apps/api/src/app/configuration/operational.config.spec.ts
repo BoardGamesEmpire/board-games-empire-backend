@@ -26,6 +26,16 @@ describe("the api's operational port config (#1511)", () => {
     expect(read({ OPERATIONAL_PORT: '40000' }).port).toBe(40000);
   });
 
+  // Joi accepts exponent notation and the root schema's collision check reads
+  // its converted value, so the listener must bind that same port (#1511).
+  it.each([
+    ['1e3', 1000],
+    ['40000e-1', 4000],
+  ])('reads an OPERATIONAL_PORT of %p as Joi converts it, %p', (value, port) => {
+    expect(validate({ OPERATIONAL_PORT: value }).value.OPERATIONAL_PORT).toBe(port);
+    expect(read({ OPERATIONAL_PORT: value }).port).toBe(port);
+  });
+
   it('reads OPERATIONAL_SOURCES as a trimmed list that replaces the defaults', () => {
     expect(read({ OPERATIONAL_SOURCES: '10.0.0.0/8, 203.0.113.0/24' }).sources).toEqual([
       '10.0.0.0/8',

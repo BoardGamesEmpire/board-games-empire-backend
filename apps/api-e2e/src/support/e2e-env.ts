@@ -75,6 +75,12 @@ export const API_PORT_VAR = 'PORT';
  */
 export const API_OPERATIONAL_PORT_VAR = 'OPERATIONAL_PORT';
 
+/** The CIDR ranges the API's `operational` config admits to the second port (#1511). */
+export const API_OPERATIONAL_SOURCES_VAR = 'OPERATIONAL_SOURCES';
+
+/** Loopback alone, where every request in the suite comes from; see {@link apiEnvOverrides}. */
+export const LOOPBACK_OPERATIONAL_SOURCES = '127.0.0.0/8,::1/128';
+
 /** The URLs the full health report pings, as `name|url` pairs (`health.config.ts`). */
 export const API_HEALTH_CHECK_URLS_VAR = 'HTTP_HEALTH_CHECK_URLS';
 
@@ -228,8 +234,10 @@ export interface ApiLaunchAddresses {
  * nor read ones an earlier run left.
  *
  * `OPERATIONAL_PORT` is a second free port, which the operational routes
- * answer on (#1511). Its allowed sources keep their default, which admits
- * loopback, where every request in the suite comes from.
+ * answer on (#1511). `OPERATIONAL_SOURCES` is pinned to loopback, where every
+ * request in the suite comes from: naming any range replaces the default list,
+ * so a developer's `.env` that lists only their LAN would have every
+ * operational request refused with 403.
  *
  * `HTTP_HEALTH_CHECK_URLS` names no URL, so the full health report pings
  * nothing: the suite must never reach a third party, and a ping's blip would
@@ -249,6 +257,7 @@ export function apiEnvOverrides({
   return {
     [API_PORT_VAR]: String(port),
     [API_OPERATIONAL_PORT_VAR]: String(operationalPort),
+    [API_OPERATIONAL_SOURCES_VAR]: LOOPBACK_OPERATIONAL_SOURCES,
     [API_HEALTH_CHECK_URLS_VAR]: NO_HEALTH_CHECK_URLS,
     NODE_ENV: API_NODE_ENV,
     BETTER_AUTH_URL: baseUrl,

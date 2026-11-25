@@ -5,6 +5,7 @@ import {
   API_HEALTH_CHECK_URLS_VAR,
   API_NODE_ENV,
   API_OPERATIONAL_PORT_VAR,
+  API_OPERATIONAL_SOURCES_VAR,
   API_PORT_VAR,
   API_THROTTLE_LIMIT,
   API_THROTTLE_TTL_MS,
@@ -18,6 +19,7 @@ import {
   E2E_REDIS_SERVER_VAR,
   E2E_REDIS_URL_VAR,
   fakeProviderEnv,
+  LOOPBACK_OPERATIONAL_SOURCES,
   NO_HEALTH_CHECK_URLS,
   parseRedisUrl,
   REDIS_ENV_DATABASES,
@@ -204,6 +206,15 @@ describe('e2e-env (pure logic)', () => {
 
     it('binds the operational routes to the second port the harness reserved, not the 33334 default (#1511)', () => {
       expect(apiEnvOverrides(addresses)[API_OPERATIONAL_PORT_VAR]).toBe('41235');
+    });
+
+    // Naming any range replaces the default list, so an inherited one without
+    // loopback would refuse the suite's own operational requests (#1511).
+    it('admits loopback, and only loopback, to the operational port (#1511)', () => {
+      const sources = apiEnvOverrides(addresses)[API_OPERATIONAL_SOURCES_VAR];
+
+      expect(sources).toBe(LOOPBACK_OPERATIONAL_SOURCES);
+      expect(splitTrimFilter(sources)).toEqual(['127.0.0.0/8', '::1/128']);
     });
 
     it('pins NODE_ENV to a value system.config.ts accepts', () => {

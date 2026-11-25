@@ -47,6 +47,17 @@ describe("the api's system config", () => {
     expect(withEnvironment({ NODE_ENV: 'test', PORT: '8080' }, systemConfig).port).toBe(8080);
   });
 
+  // Joi accepts exponent notation and the root schema's collision check with
+  // the operational port reads its converted value, so the listener must bind
+  // that same port (#1511).
+  it.each([
+    ['1e3', 1000],
+    ['40000e-1', 4000],
+  ])('reads a PORT of %p as Joi converts it, %p', (value, port) => {
+    expect(validate({ PORT: value }).value.PORT).toBe(port);
+    expect(withEnvironment({ NODE_ENV: 'test', PORT: value }, systemConfig).port).toBe(port);
+  });
+
   it('listens on 33333 when PORT is unset', () => {
     expect(withEnvironment({ NODE_ENV: 'test' }, systemConfig).port).toBe(33333);
   });
