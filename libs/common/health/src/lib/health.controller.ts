@@ -1,6 +1,7 @@
 import { CodedHttpException, t } from '@bge/i18n';
 import { Controller, Get, Req, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import type { SchemaObject } from '@nestjs/swagger';
 import { ApiOkResponse, ApiServiceUnavailableResponse, ApiTags } from '@nestjs/swagger';
 import { HealthCheck, HealthCheckResult, HealthCheckService, HealthIndicatorFunction } from '@nestjs/terminus';
 import { SkipThrottle } from '@nestjs/throttler';
@@ -13,6 +14,49 @@ import { PrismaHealthIndicator } from './indicators/prisma.health-indicator';
 import { QueueRedisHealthIndicator } from './indicators/queue-redis.health-indicator';
 import { StorageHealthIndicator } from './indicators/storage.health-indicator';
 import { isOperationalRequest } from './operational-request';
+
+/** Terminus's report: each dependency's entry, keyed by its name. */
+const REPORT_ENTRIES: SchemaObject = {
+  type: 'object',
+  additionalProperties: {
+    type: 'object',
+    required: ['status'],
+    properties: { status: { type: 'string', enum: ['up', 'down'] }, message: { type: 'string' } },
+  },
+};
+
+/** The full readiness report, which only the operational port answers (#1511). */
+const READINESS_REPORT: SchemaObject = {
+  type: 'object',
+  required: ['status', 'details'],
+  properties: {
+    status: { type: 'string', enum: ['ok', 'error'] },
+    info: REPORT_ENTRIES,
+    error: REPORT_ENTRIES,
+    details: REPORT_ENTRIES,
+  },
+};
+
+/** The public port's 200: its status, and nothing that names a dependency (#1511). */
+const PUBLIC_READY: SchemaObject = {
+  type: 'object',
+  required: ['status'],
+  additionalProperties: false,
+  properties: { status: { type: 'string', enum: ['ok'] } },
+};
+
+/** The public port's 503: the error envelope, coded `NOT_READY` (#1511). */
+const PUBLIC_NOT_READY: SchemaObject = {
+  type: 'object',
+  required: ['statusCode', 'error', 'message', 'code', 'status'],
+  properties: {
+    statusCode: { type: 'integer', enum: [503] },
+    error: { type: 'string', example: 'Service Unavailable' },
+    message: { type: 'string' },
+    code: { type: 'string', enum: ['NOT_READY'] },
+    status: { type: 'string', enum: ['error'] },
+  },
+};
 
 /**
  * Exempt from rate limiting, for the reason the liveness docblock below already
@@ -96,15 +140,19 @@ export class HealthController {
    * operational port accepted gets the whole Terminus report, which is what an
    * operator reads to find which dependency is down.
    */
-  @HealthCheck()
+  // Terminus's own response schemas describe the full report alone, so they
+  // are left out, and each response names both ports' bodies.
+  @HealthCheck({ noCache: true, swaggerDocumentation: false })
   @Get('ready')
   @ApiOkResponse({
     description:
       "All critical dependencies healthy. The public port answers `{ status: 'ok' }`; the operational port answers the full report, one entry per dependency",
+    schema: { oneOf: [PUBLIC_READY, READINESS_REPORT] },
   })
   @ApiServiceUnavailableResponse({
     description:
       "One or more critical dependencies are unhealthy. The public port answers the error envelope with the code `NOT_READY` and `status: 'error'`; the operational port answers the full report with each failing dependency's `message`",
+    schema: { oneOf: [PUBLIC_NOT_READY, READINESS_REPORT] },
   })
   async ready(@Req() req: IncomingMessage): Promise<HealthCheckResult | { status: 'ok' }> {
     const report = this.health.check([

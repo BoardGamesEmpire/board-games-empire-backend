@@ -6,6 +6,7 @@ import type { MockDatabaseService } from '@bge/testing';
 import { createTestingModuleWithDb } from '@bge/testing';
 import { ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import type { HealthCheckResult } from '@nestjs/terminus';
 import { HealthCheckService, TerminusModule } from '@nestjs/terminus';
 import type { TestingModule } from '@nestjs/testing';
@@ -425,6 +426,53 @@ describe('HealthController', () => {
 
       await expect(controller.detail()).resolves.toMatchObject({ info: { github: { status: 'up' } } });
       expect(http.request).toHaveBeenCalledWith('https://github.com', expect.anything());
+    });
+  });
+
+  // The served document describes both ports' answers, not Terminus's full
+  // report alone, so a client reading it knows the public port's body (#1511).
+  describe('readiness in the API document (#1511)', () => {
+    async function readyResponses() {
+      const { module } = await buildController();
+      const app = module.createNestApplication({ logger: false });
+      const document = SwaggerModule.createDocument(app, new DocumentBuilder().build());
+      await app.close();
+
+      return document.paths['/health/ready'].get?.responses ?? {};
+    }
+
+    it("describes the public port's status-only body beside the full report", async () => {
+      const responses = await readyResponses();
+
+      expect(responses['200']).toMatchObject({
+        content: {
+          'application/json': {
+            schema: {
+              oneOf: [
+                { additionalProperties: false, properties: { status: { enum: ['ok'] } } },
+                { required: ['status', 'details'] },
+              ],
+            },
+          },
+        },
+      });
+    });
+
+    it("describes the public port's NOT_READY envelope beside the full report", async () => {
+      const responses = await readyResponses();
+
+      expect(responses['503']).toMatchObject({
+        content: {
+          'application/json': {
+            schema: {
+              oneOf: [
+                { properties: { code: { enum: ['NOT_READY'] }, status: { enum: ['error'] } } },
+                { required: ['status', 'details'] },
+              ],
+            },
+          },
+        },
+      });
     });
   });
 
