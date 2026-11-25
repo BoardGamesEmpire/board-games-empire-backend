@@ -2,6 +2,8 @@ import { AbilityService, PoliciesGuard } from '@bge/permissions';
 import type { MockAbilityService } from '@bge/testing';
 import { createMockAbilityService, createTestingModuleWithDb, MOCK_ACTING_USER_ID } from '@bge/testing';
 import { ForbiddenException } from '@nestjs/common';
+import { HTTP_CODE_METADATA } from '@nestjs/common/constants';
+import { Http } from '@status/codes';
 import { MarkReadDto } from './dto/mark-read.dto';
 import { NotificationsController } from './notifications.controller';
 import { UserNotificationsService } from './user-notifications.service';
@@ -48,6 +50,15 @@ describe('NotificationsController', () => {
     expect(notifications.markRead).toHaveBeenCalledWith(MOCK_ACTING_USER_ID, ['n-1']);
     expect(notifications.markAllRead).toHaveBeenCalledWith(MOCK_ACTING_USER_ID);
   });
+
+  // Neither route creates anything: they mark rows that exist. Nest's default
+  // for a POST is 201.
+  it.each(['markRead', 'markAllRead'] as const)(
+    '%s answers 200: it marks rows that exist and creates none (#584)',
+    (route) => {
+      expect(Reflect.getMetadata(HTTP_CODE_METADATA, NotificationsController.prototype[route])).toBe(Http.Ok);
+    },
+  );
 
   // Each route's subject is the user behind the actor. An actor with no user
   // has no notifications to ask about, and the refusal must not soften into

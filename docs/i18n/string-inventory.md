@@ -241,7 +241,7 @@ Ordered roughly by value/size. Each is an independent unit of work (good for par
 - [x] `libs/api/game-search` — **DONE** (DTO-only). The HTTP `SearchQueryDto` (6). Its WS DTOs are in the
       #503 row below. `ExpansionsQueryDto` (8), for `GET /games/search/expansions` (#1067), whose service
       refuses with `errors.game_search.{data_gateways_forbidden,expansions_target_exactly_one}`.
-- [x] `libs/api/notifications` — **DONE** (DTO-only). `MarkReadDto` (4).
+- [x] `libs/api/notifications` — **DONE** (DTO-only). `MarkReadDto` (3).
 - [x] `libs/api/user` — **DONE** (DTO-only). `UserSearchQueryDto` (2).
 - [x] `libs/common/shared` pagination/search DTOs and the WS `SearchStartDto` / `SearchCancelDto` — **DONE**
       (#503). 17 decorators in `@bge/shared`, and 8 on the WS DTOs, where `gatewayIds` takes
