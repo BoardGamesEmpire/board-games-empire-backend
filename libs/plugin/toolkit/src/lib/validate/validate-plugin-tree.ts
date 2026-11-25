@@ -10,23 +10,38 @@ import {
 } from '@boardgamesempire/plugin-manifest';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { ValidateOptions } from '../cli.js';
+import { isMissingPathError } from '../fs/is-file.js';
 import { CONSENT_COMPARISON_SKIPPED_REASONS, message } from '../messages.js';
+import type { ValidateOptions } from '../options.js';
 import type { ReportItem, ValidationReport } from '../report.js';
+import { reportWithError } from '../report.js';
 import { ToolkitError } from '../toolkit.errors.js';
 import { readAgainstManifest } from './read-against-manifest.js';
 
 const MANIFEST_FILE = 'manifest.json';
 const PACKAGE_JSON_FILE = 'package.json';
 
-/** The plugin manifest as a plain JSON object, or undefined when it is missing, not JSON or not an object. */
-const readRawManifest = async (rootDir: string): Promise<Record<string, unknown> | undefined> => {
-  try {
-    const parsed: unknown = JSON.parse(await readFile(join(rootDir, MANIFEST_FILE), 'utf8'));
+type RawManifest =
+  | { readonly kind: 'missing' }
+  | { readonly kind: 'read'; readonly raw: Record<string, unknown> }
+  | { readonly kind: 'unreadable' };
 
-    return isPlainJsonObject(parsed) ? parsed : undefined;
+/** The plugin manifest as a plain JSON object, or why there is none: no file, or one that is not JSON or not an object. */
+const readRawManifest = async (rootDir: string): Promise<RawManifest> => {
+  let text: string;
+
+  try {
+    text = await readFile(join(rootDir, MANIFEST_FILE), 'utf8');
+  } catch (error) {
+    return { kind: isMissingPathError(error) ? 'missing' : 'unreadable' };
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(text);
+
+    return isPlainJsonObject(parsed) ? { kind: 'read', raw: parsed } : { kind: 'unreadable' };
   } catch {
-    return undefined;
+    return { kind: 'unreadable' };
   }
 };
 
@@ -63,6 +78,16 @@ const comparisonSkipped = (reason: string): ReportItem => ({
   message: `${message('CONSENT_COMPARISON_SKIPPED')} ${reason}`,
 });
 
+export interface ValidatePluginTreeContext {
+  /**
+   * The archive rules already reported `manifest.json` as a missing required
+   * file, so a missing one is not reported a second time as
+   * MANIFEST_UNREADABLE (#1093). A manifest.json that is there but not a JSON
+   * object is still reported.
+   */
+  readonly missingManifestReported?: boolean;
+}
+
 /**
  * Checks an unpacked plugin the way a server checks one at install (#1093),
  * by running the server's own code on it: the plugin manifest validator, the
@@ -72,16 +97,22 @@ const comparisonSkipped = (reason: string): ReportItem => ({
  * the plugin author accepted the import; advisory findings and the
  * validator's warnings are warnings; notes say what was not checked.
  */
-export const validatePluginTree = async (rootDir: string, options: ValidateOptions): Promise<ValidationReport> => {
-  const raw = await readRawManifest(rootDir);
+export const validatePluginTree = async (
+  rootDir: string,
+  options: ValidateOptions,
+  { missingManifestReported = false }: ValidatePluginTreeContext = {},
+): Promise<ValidationReport> => {
+  const manifest = await readRawManifest(rootDir);
 
-  if (raw === undefined) {
-    return {
-      errors: [{ at: MANIFEST_FILE, code: 'MANIFEST_UNREADABLE', message: message('MANIFEST_UNREADABLE') }],
-      notes: [],
-      warnings: [],
-    };
+  if (manifest.kind === 'missing' && missingManifestReported) {
+    return { errors: [], notes: [], warnings: [] };
   }
+
+  if (manifest.kind !== 'read') {
+    return reportWithError({ at: MANIFEST_FILE, code: 'MANIFEST_UNREADABLE', message: message('MANIFEST_UNREADABLE') });
+  }
+
+  const { raw } = manifest;
 
   const errors: ReportItem[] = [];
   const warnings: ReportItem[] = [];
@@ -156,11 +187,14 @@ export const validatePluginTree = async (rootDir: string, options: ValidateOptio
       // earlier version is reported in the same run.
       const previous = await readAgainstManifest(options.against, options);
 
-      if (validated === undefined) {
+      if (previous.kind === 'invalid') {
+        // A warning, not a note: the plugin author asked for the comparison.
+        warnings.push({ at: options.against, ...comparisonSkipped(previous.reason) });
+      } else if (validated === undefined) {
         notes.push(comparisonSkipped(CONSENT_COMPARISON_SKIPPED_REASONS.invalidManifest));
       } else {
         warnings.push(
-          ...compareUnitConsentRequirements(previous, validated).map((warning) => ({
+          ...compareUnitConsentRequirements(previous.manifest, validated).map((warning) => ({
             at: warning.path,
             code: warning.code,
             message: warning.message,

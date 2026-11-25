@@ -36,6 +36,24 @@ export interface ArtifactOutcome {
   readonly sidecarPath: string;
 }
 
+/** What a command ends with: its report and, for a `build` that wrote one, the plugin artifact. */
+export interface BuildOutcome {
+  /** Present only when the plugin artifact was written, so never alongside an error. */
+  readonly artifact?: ArtifactOutcome;
+
+  readonly report: ValidationReport;
+}
+
+/** A report that stopped at one error, with nothing else checked (#1093). */
+export const reportWithError = (item: ReportItem): ValidationReport => ({ errors: [item], notes: [], warnings: [] });
+
+/** The reports' errors, warnings and notes, each list in the order the reports are given. */
+export const mergeReports = (...reports: readonly ValidationReport[]): ValidationReport => ({
+  errors: reports.flatMap((report) => report.errors),
+  notes: reports.flatMap((report) => report.notes),
+  warnings: reports.flatMap((report) => report.warnings),
+});
+
 type Severity = 'error' | 'warning' | 'note';
 
 /**
@@ -82,10 +100,7 @@ export const renderText = (report: ValidationReport): string => {
 export const renderErrorLine = (item: ReportItem): string => `${renderItem('error', item)}\n`;
 
 /** The report as one JSON document; `ok` is true when there is no error. */
-export const renderJson = (outcome: {
-  readonly artifact?: ArtifactOutcome;
-  readonly report: ValidationReport;
-}): string => {
+export const renderJson = (outcome: BuildOutcome): string => {
   const { artifact, report } = outcome;
   const document = {
     ok: report.errors.length === 0,

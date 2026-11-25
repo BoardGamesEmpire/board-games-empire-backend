@@ -1,7 +1,7 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { NpmCommandError, runNpm } from './run-npm.js';
+import { describeNpmFailure, NpmCommandError, runNpm } from './run-npm.js';
 
 // Each case spawns a real npm, offline (#1093).
 const NPM_TIMEOUT = 60_000;
@@ -78,5 +78,30 @@ describe('runNpm (#1093)', () => {
 
     expect(failure).toBeInstanceOf(NpmCommandError);
     expect(failure).toMatchObject({ exitCode: null, stderr: expect.stringContaining('ENOENT') });
+  });
+});
+
+describe('describeNpmFailure (#1093)', () => {
+  const args = ['ci'];
+
+  it("says npm could not be run, with Node's reason, when npm never ran to an exit code", () => {
+    expect(describeNpmFailure(new NpmCommandError(args, 'spawn npm ENOENT', null))).toBe(
+      'npm could not be run: spawn npm ENOENT',
+    );
+  });
+
+  it('quotes what npm said, without blank lines', () => {
+    expect(describeNpmFailure(new NpmCommandError(args, 'npm error code E404\n\nnpm error 404 Not Found\n', 1))).toBe(
+      'npm said:\nnpm error code E404\nnpm error 404 Not Found',
+    );
+  });
+
+  it('quotes only the last 20 lines of a long failure, and says so', () => {
+    const stderr = Array.from({ length: 25 }, (_, i) => `line ${i + 1}`).join('\n');
+
+    const said = describeNpmFailure(new NpmCommandError(args, stderr, 1));
+
+    expect(said.startsWith("npm's last 20 lines:\nline 6\n")).toBe(true);
+    expect(said.endsWith('line 25')).toBe(true);
   });
 });

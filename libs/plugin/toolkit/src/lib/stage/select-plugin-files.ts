@@ -1,7 +1,11 @@
 import { quoteUntrustedText } from '@boardgamesempire/plugin-analysis';
 import { lstat } from 'node:fs/promises';
 import { join, posix } from 'node:path';
-import { NpmCommandError, runNpm } from '../npm/run-npm.js';
+import { z } from 'zod';
+import { isFile } from '../fs/is-file.js';
+import { message } from '../messages.js';
+import { describeNpmFailure, NpmCommandError, runNpm } from '../npm/run-npm.js';
+import type { ReportItem } from '../report.js';
 import { ToolkitError } from '../toolkit.errors.js';
 import { compareBytewise } from './artifact-entries.js';
 
@@ -29,38 +33,29 @@ export interface SelectPluginFilesOptions {
   readonly excludeDir?: string;
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
+/**
+ * The part of `npm pack --dry-run --json`'s output the selection reads: one
+ * entry per packed project, listing its files by path. npm prints more about
+ * each, which is left alone (#1093, #1322).
+ */
+const packListingSchema = z.tuple(
+  [z.looseObject({ files: z.array(z.looseObject({ path: z.string() })) })],
+  z.unknown(),
+);
 
 /** The `files[].path` of npm's dry-run listing, or undefined when it has another shape. */
 const packedPaths = (stdout: string): string[] | undefined => {
-  let parsed: unknown;
+  let json: unknown;
 
   try {
-    parsed = JSON.parse(stdout);
+    json = JSON.parse(stdout);
   } catch {
     return undefined;
   }
 
-  const first: unknown = Array.isArray(parsed) ? parsed[0] : undefined;
-  const files = isRecord(first) ? first['files'] : undefined;
+  const parsed = packListingSchema.safeParse(json);
 
-  if (!Array.isArray(files)) {
-    return undefined;
-  }
-
-  const paths: string[] = [];
-
-  for (const file of files) {
-    const path: unknown = isRecord(file) ? file['path'] : undefined;
-
-    if (typeof path !== 'string') {
-      return undefined;
-    }
-
-    paths.push(path);
-  }
-
-  return paths;
+  return parsed.success ? parsed.data[0].files.map((file) => file.path) : undefined;
 };
 
 /**
@@ -69,33 +64,23 @@ const packedPaths = (stdout: string): string[] | undefined => {
  * package.json is not the problem, so the detail says npm could not be run.
  * Otherwise it points at package.json and quotes what npm said.
  */
-export const npmPackFailure = (error: NpmCommandError): ToolkitError => {
-  const said = error.stderr.trim();
-
-  return new ToolkitError(
+export const npmPackFailure = (error: NpmCommandError): ToolkitError =>
+  new ToolkitError(
     'NPM_PACK_FAILED',
     undefined,
     error.exitCode === null
-      ? `npm could not be run: ${said}`
-      : `Check that the folder holds a valid package.json. npm said:\n${said}`,
+      ? describeNpmFailure(error)
+      : `Check that the folder holds a valid package.json. ${describeNpmFailure(error)}`,
   );
-};
 
 /**
  * npm walks up to the nearest ancestor with a package.json, so a plugin folder
  * without its own would be packed as that ancestor project: its files listed,
- * then staged from the wrong folder (#1093). Refuse before npm runs.
+ * then staged from the wrong folder, or that project's build script run
+ * (#1093). `validate` and `build` both refuse before npm runs, in these words.
  */
-const requireOwnPackageJson = async (projectDir: string): Promise<void> => {
-  let present: boolean;
-
-  try {
-    present = (await lstat(join(projectDir, 'package.json'))).isFile();
-  } catch {
-    present = false;
-  }
-
-  if (!present) {
+export const requireOwnPackageJson = async (projectDir: string): Promise<void> => {
+  if (!(await isFile(join(projectDir, 'package.json')))) {
     throw new ToolkitError(
       'NPM_PACK_FAILED',
       undefined,
@@ -166,6 +151,17 @@ export interface PluginFileSelection {
    */
   readonly leftOut: readonly string[];
 }
+
+/**
+ * A warning for each file the selection left out because its name ends like a
+ * plugin artifact or its checksum (#1093).
+ */
+export const leftOutWarnings = (leftOut: readonly string[]): ReportItem[] =>
+  leftOut.map((entry) => ({
+    at: entry,
+    code: 'PLUGIN_ARTIFACT_LEFT_OUT',
+    message: message('PLUGIN_ARTIFACT_LEFT_OUT', { entry }),
+  }));
 
 /**
  * The project's files a plugin artifact holds, as paths relative to

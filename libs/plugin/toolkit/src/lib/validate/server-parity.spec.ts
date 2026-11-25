@@ -9,7 +9,7 @@ import {
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ValidateOptions } from '../cli.js';
+import type { ValidateOptions } from '../options.js';
 import type { PluginFixtureOptions } from '../testing/plugin-fixture.js';
 import { writePluginFixture } from '../testing/plugin-fixture.js';
 import { runValidate } from './validate-command.js';

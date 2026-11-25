@@ -71,8 +71,8 @@ const HEADERS = {
 
 /**
  * The BGE version this build of \`bge-plugin\` was made from, stamped at build
- * time: the version \`validate\` and \`build\` check a manifest's \`bgeCompat\`
- * range against unless \`--bge-version\` names another (#1093).
+ * time: the version \`validate\` and \`build\` check a plugin manifest's
+ * \`bgeCompat\` range against unless \`--bge-version\` names another (#1093).
  */
 `,
 };

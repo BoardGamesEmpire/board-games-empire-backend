@@ -117,4 +117,12 @@ describe('messages (#1093)', () => {
   it('names a forbidden import the scan found, in the words of a forbidden import', () => {
     expect(message('cjs-require', { specifier: 'pg' })).toMatch(/forbidden import/);
   });
+
+  it('names what the import scan cannot see, as forbidden-specifiers.ts in plugin-manifest states it (#1093)', () => {
+    const text = message('NOT_CHECKED_BEYOND_SCAN');
+
+    expect(text).toContain('fetch');
+    expect(text).toContain('raw socket');
+    expect(text).toContain('eval');
+  });
 });

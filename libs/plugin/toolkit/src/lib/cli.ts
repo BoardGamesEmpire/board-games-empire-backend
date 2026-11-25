@@ -5,36 +5,16 @@ import { valid } from 'semver';
 import { runBuild } from './build/build-command.js';
 import { BGE_VERSION } from './generated/bge-version.js';
 import { message } from './messages.js';
-import type { ArtifactOutcome, ReportItem, ValidationReport } from './report.js';
-import { renderErrorLine, renderJson, renderText } from './report.js';
+import type { BuildOptions, ValidateOptions } from './options.js';
+import { DEFAULT_OUT_DIR } from './options.js';
+import type { BuildOutcome, ReportItem, ValidationReport } from './report.js';
+import { renderErrorLine, renderJson, renderText, reportWithError } from './report.js';
 import { ToolkitError } from './toolkit.errors.js';
 import { runValidate } from './validate/validate-command.js';
 
 export interface CliIo {
   stderr: { write(text: string): unknown };
   stdout: { write(text: string): unknown };
-}
-
-export interface ValidateOptions {
-  /** Forbidden imports the plugin author accepts, as a server admin can when installing. */
-  readonly acceptImports: readonly string[];
-
-  /** An earlier version of the plugin, as its manifest.json or plugin artifact, to compare consent requirements with. */
-  readonly against?: string;
-
-  readonly bgeVersion: string;
-  readonly defaultLocale: string;
-}
-
-export interface BuildOptions extends ValidateOptions {
-  readonly outDir: string;
-}
-
-export interface BuildOutcome {
-  /** Present only when the plugin artifact was written, so never alongside an error. */
-  readonly artifact?: ArtifactOutcome;
-
-  readonly report: ValidationReport;
 }
 
 /** What each command does, injectable so the command line is tested without running npm (#1093). */
@@ -49,7 +29,6 @@ const DEFAULT_COMMANDS: CliCommands = {
 };
 
 const DEFAULT_LOCALE = 'en';
-const DEFAULT_OUT_DIR = 'bge-artifacts';
 
 const OPTIONS = {
   'accept-import': { multiple: true, type: 'string' },
@@ -224,7 +203,7 @@ const wantsJson = (argv: readonly string[]): boolean => {
  */
 const printFailure = (io: CliIo, item: ReportItem, json: boolean, hint = ''): void => {
   if (json) {
-    io.stdout.write(renderJson({ report: { errors: [item], notes: [], warnings: [] } }));
+    io.stdout.write(renderJson({ report: reportWithError(item) }));
   } else {
     io.stderr.write(`${renderErrorLine(item)}${hint}`);
   }
@@ -274,11 +253,10 @@ export const runCli = async (
     return 0;
   }
 
+  // `??` for each command: a spread would let an explicit `undefined` erase a default (#1093).
   const chosen: CliCommands = {
-    build: (projectDir, options) =>
-      commands.build ? commands.build(projectDir, options) : DEFAULT_COMMANDS.build(projectDir, options),
-    validate: (target, options) =>
-      commands.validate ? commands.validate(target, options) : DEFAULT_COMMANDS.validate(target, options),
+    build: commands.build ?? DEFAULT_COMMANDS.build,
+    validate: commands.validate ?? DEFAULT_COMMANDS.validate,
   };
 
   try {
@@ -295,7 +273,7 @@ export const runCli = async (
       return reportUnexpected(io, error, invocation.json);
     }
 
-    const report: ValidationReport = { errors: [error.toReportItem()], notes: [], warnings: [] };
+    const report = reportWithError(error.toReportItem());
 
     io.stdout.write(render({ report }, invocation.json));
 

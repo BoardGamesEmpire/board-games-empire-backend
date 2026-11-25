@@ -21,9 +21,19 @@ const GZIP_OS_UNKNOWN = 0xff;
 
 export interface PackedArtifact {
   readonly sha256: string;
+}
 
-  /** The plugin artifact's size in bytes, compressed, as a server measures it. */
-  readonly size: number;
+export interface PackArtifactOptions {
+  /**
+   * Runs once the bytes are complete, just before they take `outFile`'s name,
+   * and never when the write fails: the build removes an earlier checksum
+   * file here, so a new plugin artifact never sits beside a stale checksum,
+   * and a failed build leaves the earlier pair alone (#1093).
+   */
+  readonly beforeRename?: () => Promise<void>;
+
+  /** The most bytes the plugin artifact may take, compressed: by default, the most a server accepts. */
+  readonly maxBytes?: number;
 }
 
 /**
@@ -99,20 +109,20 @@ const addEntry = async (archive: Pack, entry: ArtifactEntry, mtime: Date): Promi
 
 /**
  * Writes `entries`, in the order given, as a gzip-compressed tar at
- * `outFile`, and returns its SHA-256 and size (#1093). Every header carries
+ * `outFile`, and returns its SHA-256 (#1093). Every header carries
  * `mtimeSeconds`, uid and gid 0, no user or group name, and mode 0644 for a
  * file or 0755 for a folder, so the same entries always give the same bytes.
  *
  * The bytes go to `<outFile>.partial`, hashed as they stream, and are renamed
  * to `outFile` only once complete, so `outFile` is never half written. A
- * plugin artifact larger than `maxBytes`, the most a server accepts, stops the
- * write with ARTIFACT_TOO_LARGE. On any failure the partial file is removed.
+ * plugin artifact larger than `maxBytes` stops the write with
+ * ARTIFACT_TOO_LARGE. On any failure the partial file is removed.
  */
 export const packArtifact = async (
   entries: readonly ArtifactEntry[],
   outFile: string,
   mtimeSeconds: number,
-  maxBytes = PLUGIN_ARCHIVE_MAX_COMPRESSED_BYTES,
+  { beforeRename, maxBytes = PLUGIN_ARCHIVE_MAX_COMPRESSED_BYTES }: PackArtifactOptions = {},
 ): Promise<PackedArtifact> => {
   const partialFile = `${outFile}.partial`;
   const mtime = new Date(mtimeSeconds * 1000);
@@ -153,6 +163,7 @@ export const packArtifact = async (
 
     archive.finalize();
     await writing;
+    await beforeRename?.();
     await rename(partialFile, outFile);
   } catch (error) {
     archive.destroy();
@@ -167,5 +178,5 @@ export const packArtifact = async (
     throw isWriteFailure(writeFailure) ? writeFailure : error;
   }
 
-  return { sha256: hash.digest('hex'), size };
+  return { sha256: hash.digest('hex') };
 };

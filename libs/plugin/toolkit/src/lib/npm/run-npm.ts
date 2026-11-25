@@ -26,6 +26,25 @@ export class NpmCommandError extends Error {
   }
 }
 
+/** How much of npm's output a report quotes: the end, where npm says what failed. */
+const NPM_OUTPUT_LINES = 20;
+
+/**
+ * A failed npm run in a report's words (#1093): "npm could not be run" with
+ * Node's reason when npm never ran to an exit code (so the plugin is not
+ * the problem), else the end of what npm printed on stderr.
+ */
+export const describeNpmFailure = (error: NpmCommandError): string => {
+  const lines = error.stderr.split(/\r?\n/).filter((line) => line.trim() !== '');
+  const end = lines.slice(-NPM_OUTPUT_LINES).join('\n');
+
+  if (error.exitCode === null) {
+    return `npm could not be run: ${end}`;
+  }
+
+  return lines.length > NPM_OUTPUT_LINES ? `npm's last ${NPM_OUTPUT_LINES} lines:\n${end}` : `npm said:\n${end}`;
+};
+
 /**
  * Runs npm with `args` in `cwd` and resolves with what it printed on stdout
  * (#1093). The child inherits this process's environment: npm takes its

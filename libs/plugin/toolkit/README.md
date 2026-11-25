@@ -21,8 +21,9 @@ reports everything the server would refuse, everything worth a warning and
 everything it could not check. `<path>` is one of:
 
 - **A plugin folder.** The plugin is judged by the files its plugin artifact
-  would hold, chosen as `build` chooses them (see below), so build tooling and
-  tests the plugin artifact leaves out aren't screened. The archive rules are
+  would hold, chosen as `build` chooses them (see below) with the default
+  output folder, `bge-artifacts`, so build tooling and tests the plugin
+  artifact leaves out aren't screened. The archive rules are
   checked on the plugin's own files only; the dependencies `build` installs are
   counted when `build` checks the folder it packs. Dependencies are screened
   from `package.json` and `package-lock.json`, as the server screens them.
@@ -39,7 +40,8 @@ permissions no plugin may hold, the scan for forbidden imports and, with
 Builds the plugin in `path` (the current folder when no path is given) and
 writes its plugin artifact and the artifact's checksum file. In order, it:
 
-1. Needs the plugin's own `package.json` and a `package-lock.json`.
+1. Needs the plugin's own `package.json` and a `package-lock.json` from npm 7
+   or later, and checks both before anything runs.
 2. Runs the plugin's own build, `npm run build --if-present`, in the plugin
    folder.
 3. Chooses the plugin's files with `npm pack --dry-run --json --ignore-scripts`,
@@ -51,7 +53,9 @@ writes its plugin artifact and the artifact's checksum file. In order, it:
    if the plugin needs one, rename it.
 4. Copies those files into a temporary folder and installs the plugin's
    production dependencies there with
-   `npm ci --omit=dev --ignore-scripts --install-links --no-bin-links`.
+   `npm ci --omit=dev --ignore-scripts --install-links --no-bin-links`. npm's
+   hidden lockfile, `node_modules/.package-lock.json`, is removed: it records
+   the temporary folder's path, and nothing reads it at runtime.
 5. Writes `SOURCES.md` there, listing every installed dependency with its
    version, license and source.
 6. Runs the server's archive rules and every check `validate` runs on that
@@ -91,13 +95,18 @@ Each line of the text report is `<severity> <code> <where>: <message>`, with
 the severity `error`, `warning` or `note`, and a summary line at the end. The
 code is stable: the server's own archive rule, plugin manifest issue code or
 scan finding kind where the server reaches the same verdict, or one of the
-CLI's own codes. Messages are in English for now (#1514).
+CLI's own codes. Not every server code shows up under its own name: the
+server's `manifest-slug` refusal, for one, shows here as `MANIFEST_UNREADABLE`
+or as a plugin manifest error, since the CLI reads the plugin manifest whole.
+Messages are in English for now (#1514).
 
 ## What `build` needs, and its limits
 
 - **A `package-lock.json`, from npm 7 or later.** `npm ci` installs exactly
   what it records, and `SOURCES.md` is read from it. Without one, `build`
-  stops with `LOCKFILE_MISSING`; run `npm install` to create it.
+  stops with `LOCKFILE_MISSING`; run `npm install` to create it. One from an
+  older npm, or one that is not valid JSON, stops it with
+  `LOCKFILE_UNSUPPORTED`. Both stop it before the plugin's own build runs.
 - **No install scripts run.** No dependency's install script runs, so a
   dependency that needs one, such as a native addon, won't work. One built on
   the plugin author's machine wouldn't run on the server's architecture
@@ -107,12 +116,24 @@ CLI's own codes. Messages are in English for now (#1514).
   such as `file:../dep` leads nowhere, so `build` stops with
   `DEPENDENCY_INSTALL_FAILED`. Name the dependency by an absolute path to a
   `.tgz` made with `npm pack`, such as `file:/home/me/dep/dep-1.0.0.tgz`, then
-  run `npm install` again. A folder named by an absolute path works only when
-  `package-lock.json` records it as a copy rather than a link: run
-  `npm install --install-links` to record it that way.
-- **A `file:` dependency's path is shipped.** npm records its path on the
-  plugin author's machine in `package-lock.json`, which the plugin artifact
-  carries, and `SOURCES.md` repeats it.
+  run `npm install` again. A folder named by an absolute path is unreliable
+  even when it installs: npm records it in `package-lock.json` as a path
+  counted from the plugin's folder (a link, or a copy with
+  `npm install --install-links`), and the install succeeds or fails
+  depending on where the temporary folder sits relative to that path, with an
+  error that does not name the dependency. Pack the folder with `npm pack`
+  instead.
+- **A `file:` dependency's path is shipped.** The plugin artifact carries the
+  plugin's own `package.json`, which keeps the path the plugin author wrote:
+  an absolute path names their folders. Its `package-lock.json` keeps that
+  path too, and records where npm found the dependency as a path counted from
+  the plugin's folder, which still spells out every folder between the two.
+  The build changes neither file, since they are what the plugin author
+  declared. `SOURCES.md` shows such a dependency as `local`, and npm's hidden
+  lockfile is left out. A relative path would name fewer folders, but the
+  build can't install one (see above), so to ship no folder names at all,
+  publish the dependency to a registry, a private one if need be, and name it
+  by version.
 - **The plugin's `.npmrc` is not read by the install.** npm never packs
   `.npmrc`, so the copy has none. Settings the install needs, such as a
   private registry, belong in the user or global npm configuration.
@@ -127,15 +148,18 @@ CLI's own codes. Messages are in English for now (#1514).
 ## The plugin artifact and its checksum file
 
 - **The plugin artifact** is `<slug>-<version>.tgz`: a gzip-compressed tar
-  whose one top-level folder is `<slug>-<version>/`. A server accepts one of
-  at most 100 MiB; a larger one is reported as `ARTIFACT_TOO_LARGE` and not
-  written.
+  whose one top-level folder is `<slug>-<version>/`. One larger than the
+  server's compressed-size cap (100 MiB, `PLUGIN_ARCHIVE_MAX_COMPRESSED_BYTES`
+  in `@boardgamesempire/plugin-manifest`) is reported as `ARTIFACT_TOO_LARGE`
+  and not written.
 - **It is reproducible.** Entries are sorted by path, byte by byte. Every
-  entry's time is `SOURCE_DATE_EPOCH` (whole seconds) when it is set, else 0.
-  The owner is uid and gid 0 with no user or group name, files have mode 0644
-  and folders 0755, and the gzip header records no time or operating system.
-  So the same files, packed with the same Node.js version, give the same
-  bytes and the same checksum, whoever builds them.
+  entry's time is `SOURCE_DATE_EPOCH` when it holds a whole number of seconds
+  from 0 to 2147483647; any other value is ignored, and the time is 0. The
+  owner is uid and gid 0 with no user or group name, files have mode 0644 and
+  folders 0755, and the gzip header records no time or operating system. So
+  the same files give the same bytes and the same checksum when built with
+  the same Node.js and npm versions: npm decides which files are selected and
+  how the dependencies are laid out, and Node.js compresses them.
 - **The checksum file** is `<slug>-<version>.tgz.sha256`. It holds the
   plugin artifact's SHA-256, two spaces, its file name and a newline, the
   format `sha256sum` writes. Check it from the output folder with
@@ -144,18 +168,21 @@ CLI's own codes. Messages are in English for now (#1514).
 
 ## What the CLI cannot check
 
-Every report ends with notes saying what was not checked:
+A report that ran every check ends with notes saying what was not checked. A
+report that stopped early (an unreadable plugin manifest, a refused plugin
+artifact, a usage error) carries only that error.
 
 - **The server's permission catalog** (`NOT_CHECKED_PERMISSION_CATALOG`). A
   server checks, when the plugin is installed, that each core permission the
-  plugin manifest requests exists, that none covers every kind of record, and
-  that each one a household or a user consents to reaches only that
-  household's or user's own data. The CLI has no catalog to check against.
+  plugin manifest requests exists, that none of them covers every kind of
+  data, and that each one requested at household or user consent scope is
+  limited to that household or user. The CLI has no permission catalog to
+  check against.
 - **What the scan cannot see** (`NOT_CHECKED_BEYOND_SCAN`). The scan reads
   the code for forbidden imports without running it, and no list of imports
   is a sandbox: `fetch` is a global that needs no import, a raw socket can
-  carry a hand-written HTTP client, and `eval`-style access defeats every
-  static check. `forbidden-specifiers.ts` in `@boardgamesempire/plugin-manifest`
+  carry a hand-written HTTP client (its import is only a warning), and
+  `eval`-style access defeats every static check. `forbidden-specifiers.ts` in `@boardgamesempire/plugin-manifest`
   states these limits. The scan catches the ordinary ways a plugin reaches
   for the network or the database, not a plugin that hides it.
 
@@ -166,17 +193,12 @@ a plugin still decides.
 
 ```sh
 npm run nx -- build plugin-toolkit
-npm rebuild --ignore-scripts @boardgamesempire/plugin-toolkit
-npx --no-install bge-plugin validate path/to/plugin
-npx --no-install bge-plugin build path/to/plugin
+node libs/plugin/toolkit/dist/bin/bge-plugin.js validate path/to/plugin
+node libs/plugin/toolkit/dist/bin/bge-plugin.js build path/to/plugin
 ```
 
-`npm rebuild` links the `bge-plugin` bin and marks it executable: npm does
-that at install only if `dist/bin/bge-plugin.js` already existed, and the
-compiler writes it without the executable bit. `--no-install` keeps `npx`
-from fetching an unrelated package of the same name from the npm registry.
-`node libs/plugin/toolkit/dist/bin/bge-plugin.js …` runs the same build
-without the link.
+Run these from the repository root after building. An installed copy of the
+package (from npm) provides the `bge-plugin` command itself.
 
 ## Building
 

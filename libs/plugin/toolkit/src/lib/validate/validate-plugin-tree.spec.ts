@@ -3,7 +3,7 @@ import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { mkdtemp, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ValidateOptions } from '../cli.js';
+import type { ValidateOptions } from '../options.js';
 import type { ReportItem, ValidationReport } from '../report.js';
 import { writePluginFixture } from '../testing/plugin-fixture.js';
 import { validatePluginTree } from './validate-plugin-tree.js';
@@ -172,6 +172,23 @@ describe('validatePluginTree (#1093)', () => {
         warnings: [],
       });
     });
+
+    it('reports nothing for a missing manifest.json the archive rules already reported as a required file (#1093)', async () => {
+      const pluginDir = await writePluginFixture(root);
+      await unlink(join(pluginDir, 'manifest.json'));
+
+      const report = await validatePluginTree(pluginDir, OPTIONS, { missingManifestReported: true });
+
+      expect(report).toEqual({ errors: [], notes: [], warnings: [] });
+    });
+
+    it('still reports a manifest.json that is there but not JSON, whatever the archive rules reported (#1093)', async () => {
+      const pluginDir = await writePluginFixture(root, { manifest: '{ "slug": ' });
+
+      const report = await validatePluginTree(pluginDir, OPTIONS, { missingManifestReported: true });
+
+      expect(codes(report.errors)).toEqual(['MANIFEST_UNREADABLE']);
+    });
   });
 
   describe('--against', () => {
@@ -210,6 +227,40 @@ describe('validatePluginTree (#1093)', () => {
 
       expect(report.errors).toEqual([]);
       expect(codes(report.warnings)).toContain('REQUIRED_UNIT_SCOPE_PERMISSION_INTRODUCED');
+    });
+
+    it('falls back to --bge-version when the earlier bgeCompat is not a string (#1093)', async () => {
+      const against = await writeAgainst({ ...buildPluginManifest({ bgeCompat: '>=0.0.0' }), bgeCompat: 5 });
+      const report = await validate({}, { against });
+
+      // The fallback ran (no throw in the version lookup) and the validator
+      // then judged the field itself, so the detail names bgeCompat.
+      expect(report.errors).toEqual([]);
+      expect(report.warnings).toContainEqual({
+        at: against,
+        code: 'CONSENT_COMPARISON_SKIPPED',
+        message: expect.stringContaining('error at bgeCompat'),
+      });
+    });
+
+    // That version is already out, so the plugin author cannot fix it; failing
+    // the run would stop `build` writing a plugin artifact that is fine.
+    it("warns that the comparison was skipped, without failing, when today's validator refuses the earlier version (#1093)", async () => {
+      const against = await writeAgainst({
+        ...buildPluginManifest({ bgeCompat: '>=0.0.0' }),
+        version: 'not-a-version',
+      });
+      const report = await validate({}, { against });
+
+      expect(report.errors).toEqual([]);
+      expect(report.warnings).toEqual([
+        {
+          at: against,
+          code: 'CONSENT_COMPARISON_SKIPPED',
+          message: expect.stringContaining("The earlier version's plugin manifest no longer passes validation"),
+        },
+      ]);
+      expect(codes(report.notes)).not.toContain('CONSENT_COMPARISON_SKIPPED');
     });
 
     it('says the comparison did not run, and why, without --against', async () => {

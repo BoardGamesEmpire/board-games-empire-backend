@@ -94,7 +94,7 @@ describe('packArtifact (#1093)', () => {
     const result = await packArtifact(entries, outFile, MTIME);
 
     const bytes = await readFile(outFile);
-    expect(result).toEqual({ sha256: sha256(bytes), size: bytes.length });
+    expect(result).toEqual({ sha256: sha256(bytes) });
 
     const intoDir = join(root, 'extracted');
     await extractPluginArchive(outFile, intoDir);
@@ -155,11 +155,35 @@ describe('packArtifact (#1093)', () => {
   it('refuses a plugin artifact larger than the limit as ARTIFACT_TOO_LARGE, and leaves no file behind', async () => {
     const outFile = await outFileIn(TOP_LEVEL);
 
-    const failure = await packArtifact(entries, outFile, MTIME, 10).catch((error: unknown) => error);
+    const failure = await packArtifact(entries, outFile, MTIME, { maxBytes: 10 }).catch((error: unknown) => error);
 
     expect(failure).toBeInstanceOf(ToolkitError);
     expect(failure).toMatchObject({ code: 'ARTIFACT_TOO_LARGE' });
     expect(await readdir(dirname(outFile))).toEqual([]);
+  });
+
+  it('runs beforeRename once the bytes are complete, before the plugin artifact takes its name (#1093)', async () => {
+    const outFile = await outFileIn(TOP_LEVEL);
+    const seen: string[][] = [];
+
+    await packArtifact(entries, outFile, MTIME, {
+      beforeRename: async () => {
+        seen.push((await readdir(dirname(outFile))).sort());
+      },
+    });
+
+    expect(seen).toEqual([[`${TOP_LEVEL}.tgz.partial`]]);
+    expect(await readdir(dirname(outFile))).toEqual([`${TOP_LEVEL}.tgz`]);
+  });
+
+  it('never runs beforeRename when the write fails, so an earlier checksum file survives a failed build (#1093)', async () => {
+    const outFile = await outFileIn(TOP_LEVEL);
+    const beforeRename = jest.fn(async () => undefined);
+
+    await expect(packArtifact(entries, outFile, MTIME, { beforeRename, maxBytes: 10 })).rejects.toMatchObject({
+      code: 'ARTIFACT_TOO_LARGE',
+    });
+    expect(beforeRename).not.toHaveBeenCalled();
   });
 
   it('leaves no file behind when a file to pack cannot be read', async () => {

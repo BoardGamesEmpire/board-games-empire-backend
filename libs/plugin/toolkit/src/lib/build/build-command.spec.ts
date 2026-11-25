@@ -8,9 +8,9 @@ import { pipeline } from 'node:stream/promises';
 import { createGunzip } from 'node:zlib';
 import type { Header } from 'tar-stream';
 import { extract } from 'tar-stream';
-import type { BuildOptions, BuildOutcome } from '../cli.js';
 import { runNpm } from '../npm/run-npm.js';
-import type { ReportItem } from '../report.js';
+import type { BuildOptions } from '../options.js';
+import type { BuildOutcome, ReportItem } from '../report.js';
 import type { PluginFixtureOptions } from '../testing/plugin-fixture.js';
 import { writePluginFixture } from '../testing/plugin-fixture.js';
 import { runBuild } from './build-command.js';
@@ -20,6 +20,9 @@ jest.setTimeout(120_000);
 
 /** Every temporary folder the build makes, so each case can check it was removed (#1093). */
 const mockBuildTempDirs: string[] = [];
+
+/** While set, writing a checksum file fails as on a full disk (#1093). */
+let mockFailChecksumWrite = false;
 
 jest.mock('node:fs/promises', () => {
   const actual = jest.requireActual<typeof import('node:fs/promises')>('node:fs/promises');
@@ -35,6 +38,13 @@ jest.mock('node:fs/promises', () => {
       }
 
       return dir;
+    },
+    writeFile: async (...args: Parameters<typeof actual.writeFile>): Promise<void> => {
+      if (mockFailChecksumWrite && String(args[0]).endsWith('.tgz.sha256')) {
+        throw Object.assign(new Error('ENOSPC: no space left on device, write'), { code: 'ENOSPC', syscall: 'write' });
+      }
+
+      return actual.writeFile(...args);
     },
   };
 });
@@ -178,6 +188,17 @@ describe('runBuild (#1093)', () => {
       );
     });
 
+    it("leaves out npm's hidden lockfile, which records the plugin author's temporary folder, and SOURCES.md shows the file: dependency as local (#1093)", async () => {
+      const intoDir = join(await mkdtemp(join(root, 'extracted-')), 'plugin');
+
+      await extractPluginArchive(artifactPath, intoDir);
+
+      expect((await readHeaders(artifactPath)).map((header) => header.name)).not.toContain(
+        `${TOP_LEVEL}/node_modules/.package-lock.json`,
+      );
+      await expect(readFile(join(intoDir, 'SOURCES.md'), 'utf8')).resolves.toContain('| dep | 1.0.0 | MIT | local |');
+    });
+
     it('puts every entry under the one top-level folder, none of them a link, with the mtime SOURCE_DATE_EPOCH gives', async () => {
       const headers = await readHeaders(artifactPath);
 
@@ -220,12 +241,48 @@ describe('runBuild (#1093)', () => {
     });
   });
 
+  it('removes an earlier checksum file before the new plugin artifact lands, so a failed checksum write leaves no stale one beside it (#1093)', async () => {
+    const pluginDir = await writePlugin({ lockfile: true });
+    const outDir = join(pluginDir, 'bge-artifacts');
+    await mkdir(outDir);
+    await writeFile(join(outDir, `${ARTIFACT}.sha256`), `${'0'.repeat(64)}  ${ARTIFACT}\n`);
+    mockFailChecksumWrite = true;
+
+    try {
+      await expect(runBuild(pluginDir, optionsFor(pluginDir))).rejects.toMatchObject({ code: 'ENOSPC' });
+    } finally {
+      mockFailChecksumWrite = false;
+    }
+
+    expect(existsSync(join(outDir, ARTIFACT))).toBe(true);
+    expect(existsSync(join(outDir, `${ARTIFACT}.sha256`))).toBe(false);
+  });
+
   describe('a plugin that cannot be built', () => {
     it('refuses a plugin without package-lock.json as LOCKFILE_MISSING, before running its build', async () => {
       const pluginDir = await writePlugin({ packageJson: { scripts: { build: 'node -e "process.exit(3)"' } } });
 
       await expect(runBuild(pluginDir, optionsFor(pluginDir))).rejects.toMatchObject({ code: 'LOCKFILE_MISSING' });
     });
+
+    it.each([
+      ['from npm 6', `${JSON.stringify({ dependencies: {}, lockfileVersion: 1, name: 'demo-sink' })}\n`, 'npm 7'],
+      ['that is not JSON', '{ "lockfileVersion": ', 'not valid JSON'],
+    ])(
+      "refuses a package-lock.json %s as LOCKFILE_UNSUPPORTED at that file, before running the plugin's build (#1093)",
+      async (_name, lockfile, said) => {
+        const pluginDir = await writePlugin({
+          files: { 'package-lock.json': lockfile },
+          packageJson: { scripts: { build: 'node -e "process.exit(3)"' } },
+        });
+
+        await expect(runBuild(pluginDir, optionsFor(pluginDir))).rejects.toMatchObject({
+          at: 'package-lock.json',
+          code: 'LOCKFILE_UNSUPPORTED',
+          message: expect.stringContaining(said),
+        });
+      },
+    );
 
     it("reports a failing build script as PLUGIN_BUILD_FAILED, with the script's last words", async () => {
       const pluginDir = await writePlugin({

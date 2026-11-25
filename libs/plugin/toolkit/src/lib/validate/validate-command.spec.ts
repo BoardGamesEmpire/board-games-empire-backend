@@ -4,8 +4,8 @@ import { buildPluginManifest, PLUGIN_ARCHIVE_MAX_COMPRESSED_BYTES } from '@board
 import { access, mkdtemp, rm, truncate, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
-import type { ValidateOptions } from '../cli.js';
 import { runCli } from '../cli.js';
+import type { ValidateOptions } from '../options.js';
 import type { ReportItem } from '../report.js';
 import { writePluginFixture } from '../testing/plugin-fixture.js';
 import { runValidate } from './validate-command.js';
@@ -173,6 +173,19 @@ describe('runValidate (#1093)', () => {
     );
 
     it(
+      'reports a folder without manifest.json once, as the missing required file the server would refuse (#1093)',
+      async () => {
+        const pluginDir = await writePluginFixture(root);
+        await rm(join(pluginDir, 'manifest.json'));
+
+        const report = await runValidate(pluginDir, OPTIONS);
+
+        expect(report.errors).toEqual([{ at: 'manifest.json', code: 'required-file', message: expect.any(String) }]);
+      },
+      NPM_TIMEOUT,
+    );
+
+    it(
       'reports a folder without its own package.json as one NPM_PACK_FAILED error, and the command exits 1',
       async () => {
         const pluginDir = await mkdtemp(join(root, 'no-package-json-'));
@@ -320,6 +333,16 @@ describe('runValidate (#1093)', () => {
         { at: previous, code: 'AGAINST_UNREADABLE', message: expect.stringContaining('neither a file nor a folder') },
       ]);
     });
+
+    it('keeps the reason for a failure it did not foresee, such as a folder given as the earlier version (#1093)', async () => {
+      const previous = await mkdtemp(join(root, 'against-folder-'));
+
+      const report = await runValidate(await writeArtifact(PLUGIN_ENTRIES), { ...OPTIONS, against: previous });
+
+      expect(report.errors).toEqual([
+        { at: previous, code: 'AGAINST_UNREADABLE', message: expect.stringContaining('EISDIR') },
+      ]);
+    });
   });
 
   describe('anything else is a usage error', () => {
@@ -332,10 +355,12 @@ describe('runValidate (#1093)', () => {
       expect(codes(report.errors)).toEqual(['USAGE']);
     });
 
-    it('for a path that does not exist', async () => {
+    it('for a path that does not exist, saying there is nothing there (#1093)', async () => {
       const report = await runValidate(join(root, 'no-such-plugin'), OPTIONS);
 
-      expect(codes(report.errors)).toEqual(['USAGE']);
+      expect(report.errors).toEqual([
+        { at: join(root, 'no-such-plugin'), code: 'USAGE', message: expect.stringContaining('no such file or folder') },
+      ]);
     });
   });
 });

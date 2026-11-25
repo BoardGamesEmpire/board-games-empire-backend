@@ -34,14 +34,14 @@ export const TOOLKIT_MESSAGE_CODES = [
   'DEPENDENCY_INSTALL_FAILED',
   'SYMLINK_REFUSED',
   'ARTIFACT_TOO_LARGE',
-  // Beyond the plan's fixed list: a file left out of a plugin artifact breaks
-  // the plugin at runtime, so the plugin author hears about it (#1093).
+  // A file left out of a plugin artifact breaks the plugin at runtime, so the
+  // plugin author hears about it (#1093).
   'PLUGIN_ARTIFACT_LEFT_OUT',
-  // Beyond the plan's fixed list: a scan report the server cut short says so,
-  // so a long list of warnings never reads as the complete one (#1093).
+  // A scan report the server cut short says so, so a long list of warnings
+  // never reads as the complete one (#1093).
   'SCAN_REPORT_TRUNCATED',
-  // Beyond the plan's fixed list: every line the CLI prints carries a stable
-  // code, the line for an error nobody foresaw included (#1093).
+  // Every line the CLI prints carries a stable code, the line for an error
+  // nobody foresaw included (#1093).
   'UNEXPECTED_ERROR',
 ] as const;
 
@@ -78,7 +78,7 @@ const MESSAGES: Readonly<Record<MessageCode, string>> = {
   NOT_CHECKED_PERMISSION_CATALOG:
     "Some checks need a server's permission catalog, so they were not made here: that each core permission the plugin manifest requests exists, that none of them covers every kind of data, and that each one requested at household or user consent scope is limited to that household or user. A server makes these checks when the plugin is installed.",
   NOT_CHECKED_BEYOND_SCAN:
-    'The scan reads the code for forbidden imports without running it, so it cannot see everything the code does. A clean report is not a security guarantee.',
+    'The scan reads the code for forbidden imports without running it, so it cannot see a network call through the global fetch, which needs no import, an HTTP client written over a raw socket, whose import is only a warning, or code built at runtime with eval. A clean report is not a security guarantee.',
   LOCKFILE_MISSING:
     'The plugin has no package-lock.json. Run npm install to create one: the build installs exactly the dependency versions it records.',
   LOCKFILE_UNSUPPORTED:
@@ -118,7 +118,7 @@ const MESSAGES: Readonly<Record<MessageCode, string>> = {
 
 /**
  * Why the consent comparison did not run, appended to CONSENT_COMPARISON_SKIPPED
- * (#1093). A sentence of the toolkit's own, not a `{placeholder}`: `message()`
+ * (#1093). A sentence of the CLI's own, not a `{placeholder}`: `message()`
  * quotes every value it fills in, as text from the plugin, and these are not.
  */
 export const CONSENT_COMPARISON_SKIPPED_REASONS = {

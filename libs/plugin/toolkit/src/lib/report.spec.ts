@@ -1,5 +1,5 @@
 import type { ValidationReport } from './report.js';
-import { renderJson, renderText } from './report.js';
+import { mergeReports, renderJson, renderText, reportWithError } from './report.js';
 
 const report: ValidationReport = {
   errors: [
@@ -73,5 +73,29 @@ describe('renderJson (#1093)', () => {
     const parsed: unknown = JSON.parse(renderJson({ artifact, report: { ...report, errors: [] } }));
 
     expect(parsed).toEqual({ artifact, errors: [], notes: report.notes, ok: true, warnings: report.warnings });
+  });
+});
+
+describe('mergeReports (#1093)', () => {
+  it('keeps each list in the order the reports are given', () => {
+    const archive: ValidationReport = {
+      errors: [{ at: 'manifest.json', code: 'required-file', message: 'No manifest.json.' }],
+      notes: [],
+      warnings: [{ at: 'old.tgz', code: 'PLUGIN_ARTIFACT_LEFT_OUT', message: 'Left out.' }],
+    };
+
+    expect(mergeReports(archive, report)).toEqual({
+      errors: [...archive.errors, ...report.errors],
+      notes: report.notes,
+      warnings: [...archive.warnings, ...report.warnings],
+    });
+  });
+});
+
+describe('reportWithError (#1093)', () => {
+  it('is a report that stopped at one error, with no warnings or notes', () => {
+    const item = { code: 'ARTIFACT_TOO_LARGE', message: 'Too large.' } as const;
+
+    expect(reportWithError(item)).toEqual({ errors: [item], notes: [], warnings: [] });
   });
 });

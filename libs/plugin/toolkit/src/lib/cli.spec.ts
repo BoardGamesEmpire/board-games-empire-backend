@@ -1,8 +1,9 @@
 import { join, resolve } from 'node:path';
-import type { BuildOptions, BuildOutcome, CliCommands, ValidateOptions } from './cli.js';
+import type { CliCommands } from './cli.js';
 import { runCli } from './cli.js';
 import { BGE_VERSION } from './generated/bge-version.js';
-import type { ValidationReport } from './report.js';
+import type { BuildOptions, ValidateOptions } from './options.js';
+import type { BuildOutcome, ValidationReport } from './report.js';
 import { ToolkitError } from './toolkit.errors.js';
 
 const clean: ValidationReport = {
@@ -204,6 +205,23 @@ describe('runCli (#1093)', () => {
       await expect(cli.run('validate', 'p', '--json=1')).resolves.toBe(2);
       expect(JSON.parse(cli.stdout())).toMatchObject({ errors: [{ code: 'USAGE' }], ok: false });
       expect(cli.stderr()).toBe('');
+    });
+  });
+
+  describe('commands', () => {
+    it('keeps a default command when the caller passes undefined for it (#1093)', async () => {
+      const io = { stderr: { write: jest.fn() }, stdout: { write: jest.fn() } };
+      const validate = jest.fn<Promise<ValidationReport>, [string, ValidateOptions]>(async () => clean);
+
+      // build stays the real one: a missing folder is a reported failure, not a TypeError.
+      await expect(
+        runCli(['build', join(process.cwd(), 'no-such-plugin-folder')], io, { build: undefined, validate }),
+      ).resolves.toBeGreaterThan(0);
+      const written = [...io.stderr.write.mock.calls, ...io.stdout.write.mock.calls].join('');
+
+      expect(written).toMatch(/no-such-plugin-folder|package.json|LOCKFILE|error/i);
+      expect(written).not.toContain('is not a function');
+      expect(validate).not.toHaveBeenCalled();
     });
   });
 

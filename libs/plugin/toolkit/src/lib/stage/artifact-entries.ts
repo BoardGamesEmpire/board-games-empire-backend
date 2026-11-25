@@ -87,7 +87,12 @@ export const listArtifactEntries = async (rootDir: string, topLevel: string): Pr
   ];
 };
 
-const refusalItem = (refusal: PluginArchiveRefusal): ReportItem =>
+/**
+ * A refusal under the server's archive rules as a report error, at the entry
+ * it names: the checker's verdict and the extractor's PluginArchiveRefusedError
+ * both carry the rule and the entry (#1093).
+ */
+export const archiveRefusalItem = (refusal: Pick<PluginArchiveRefusal, 'entry' | 'rule'>): ReportItem =>
   refusal.entry === undefined
     ? { code: refusal.rule, message: message(refusal.rule) }
     : { at: refusal.entry, code: refusal.rule, message: message(refusal.rule, { entry: refusal.entry }) };
@@ -104,11 +109,11 @@ export const checkArtifactEntries = (entries: readonly ArtifactEntry[]): readonl
     const verdict = checker.check({ name: archiveName, size, type });
 
     if (!verdict.ok) {
-      return [refusalItem(verdict)];
+      return [archiveRefusalItem(verdict)];
     }
   }
 
   const finished = checker.finish();
 
-  return finished.ok ? [] : [refusalItem(finished)];
+  return finished.ok ? [] : [archiveRefusalItem(finished)];
 };
