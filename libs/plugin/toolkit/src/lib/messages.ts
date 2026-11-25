@@ -33,6 +33,9 @@ export const TOOLKIT_MESSAGE_CODES = [
   'NPM_PACK_FAILED',
   'DEPENDENCY_INSTALL_FAILED',
   'SYMLINK_REFUSED',
+  // A token written into a dependency's URL would ship to every server that
+  // installs the plugin (#1093).
+  'URL_CREDENTIALS_REFUSED',
   'ARTIFACT_TOO_LARGE',
   // A file left out of a plugin artifact breaks the plugin at runtime, so the
   // plugin author hears about it (#1093).
@@ -88,6 +91,8 @@ const MESSAGES: Readonly<Record<MessageCode, string>> = {
   DEPENDENCY_INSTALL_FAILED: "npm could not install the plugin's dependencies from package-lock.json (npm ci).",
   SYMLINK_REFUSED:
     'The plugin holds a symbolic link or another special file, which a plugin artifact may not contain. Replace it with the file or folder it stands for.',
+  URL_CREDENTIALS_REFUSED:
+    'This file holds a URL with a user name or password in it, at {field}, and the file ships in the plugin artifact. Take the credentials out of every URL in the file and give them to npm another way, such as an auth token in the .npmrc in your home folder, or a git credential helper, then run npm install again.',
   ARTIFACT_TOO_LARGE: `The plugin artifact is larger than the ${mebibytes(PLUGIN_ARCHIVE_MAX_COMPRESSED_BYTES)} a server accepts.`,
   PLUGIN_ARTIFACT_LEFT_OUT:
     '{entry} is left out of the plugin artifact because its name ends like a plugin artifact or its checksum. If the plugin needs this file, rename it.',

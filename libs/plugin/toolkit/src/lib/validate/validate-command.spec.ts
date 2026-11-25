@@ -133,6 +133,37 @@ describe('runValidate (#1093)', () => {
     );
 
     it(
+      'fails a package-lock.json holding a URL with a password, as build would refuse it (#1093)',
+      async () => {
+        const pluginDir = await writePluginFixture(root, {
+          files: {
+            'package-lock.json': JSON.stringify({
+              lockfileVersion: 3,
+              packages: {
+                '': { name: 'demo-sink', version: '1.2.0' },
+                'node_modules/dep': {
+                  resolved: 'http://alice:s3cr3t@registry.example/dep-1.0.0.tgz',
+                  version: '1.0.0',
+                },
+              },
+            }),
+          },
+        });
+
+        const report = await runValidate(pluginDir, OPTIONS);
+
+        expect(report.errors).toEqual([
+          {
+            at: 'package-lock.json',
+            code: 'URL_CREDENTIALS_REFUSED',
+            message: expect.stringContaining('"packages > node_modules/dep > resolved"'),
+          },
+        ]);
+      },
+      NPM_TIMEOUT,
+    );
+
+    it(
       'warns about a file left out because its name ends like a plugin artifact, with no error',
       async () => {
         const pluginDir = await writePluginFixture(root, {

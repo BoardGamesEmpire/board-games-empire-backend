@@ -5,6 +5,7 @@ import type { ArtifactEntry } from '../stage/artifact-entries.js';
 import { checkArtifactEntries, listArtifactEntries } from '../stage/artifact-entries.js';
 import { readArtifactName } from '../stage/artifact-name.js';
 import { leftOutWarnings } from '../stage/select-plugin-files.js';
+import { urlCredentialErrors } from '../stage/url-credentials.js';
 import { validatePluginTree } from './validate-plugin-tree.js';
 
 export interface StagedPluginCheck {
@@ -21,8 +22,10 @@ export interface StagedPluginCheck {
  * Judges a temporary copy of a plugin as the plugin artifact it would become
  * (#1093): its entries go through the server's archive rules, then the folder
  * through the checks a server runs at install. `leftOut` (the files the
- * selection dropped) become warnings. `validate` and `build` both judge a
- * plugin folder this way, so they reach the same report.
+ * selection dropped) become warnings. A package.json or package-lock.json
+ * holding a URL with credentials in it is an error the server has no rule
+ * for: the plugin artifact would ship the token. `validate` and `build` both
+ * judge a plugin folder this way, so they reach the same report.
  */
 export const checkStagedPlugin = async (
   stageDir: string,
@@ -37,7 +40,11 @@ export const checkStagedPlugin = async (
   );
 
   const report = mergeReports(
-    { errors: archiveErrors, notes: [], warnings: leftOutWarnings(leftOut) },
+    {
+      errors: [...archiveErrors, ...(await urlCredentialErrors(stageDir))],
+      notes: [],
+      warnings: leftOutWarnings(leftOut),
+    },
     await validatePluginTree(stageDir, options, { missingManifestReported }),
   );
 

@@ -1,4 +1,5 @@
 import { compareBytewise } from '../stage/artifact-entries.js';
+import { hasCredentials } from '../stage/url-credentials.js';
 import type { Lockfile } from './lockfile.js';
 
 const NODE_MODULES = 'node_modules/';
@@ -28,7 +29,9 @@ const REMOTE_SOURCE = /^(?:git\+)?(?:https?|ssh):\/\/|^git:\/\//i;
 /**
  * The URL without any user name or password in it, except the `git` user a
  * git-over-ssh URL names: a token written into a dependency's URL must not
- * ship in the plugin artifact (#1093).
+ * ship in the plugin artifact (#1093). The build already refuses a plugin
+ * whose package.json or package-lock.json holds such a URL, so this only
+ * keeps SOURCES.md safe on its own terms.
  */
 const withoutCredentials = (resolved: string): string => {
   let url: URL;
@@ -39,7 +42,7 @@ const withoutCredentials = (resolved: string): string => {
     return LOCAL_SOURCE;
   }
 
-  if (url.password === '' && (url.username === '' || url.username === 'git')) {
+  if (!hasCredentials(url)) {
     return resolved;
   }
 

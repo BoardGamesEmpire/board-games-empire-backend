@@ -239,6 +239,22 @@ describe('runBuild (#1093)', () => {
       ]);
       expect(existsSync(join(pluginDir, 'bge-artifacts'))).toBe(false);
     });
+
+    it('refuses a package.json holding a URL with a password, since it would ship in the plugin artifact, and never prints the password (#1093)', async () => {
+      const pluginDir = await writePlugin({
+        lockfile: true,
+        packageJson: { repository: { type: 'git', url: 'https://alice:s3cr3t@git.example/demo-sink.git' } },
+      });
+
+      const outcome = await runBuild(pluginDir, optionsFor(pluginDir));
+
+      expect(outcome.artifact).toBeUndefined();
+      expect(outcome.report.errors).toEqual([
+        { at: 'package.json', code: 'URL_CREDENTIALS_REFUSED', message: expect.stringContaining('"repository > url"') },
+      ]);
+      expect(JSON.stringify(outcome.report)).not.toContain('s3cr3t');
+      expect(existsSync(join(pluginDir, 'bge-artifacts'))).toBe(false);
+    });
   });
 
   it('removes an earlier checksum file before the new plugin artifact lands, so a failed checksum write leaves no stale one beside it (#1093)', async () => {

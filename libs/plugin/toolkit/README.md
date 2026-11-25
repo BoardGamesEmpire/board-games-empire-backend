@@ -137,6 +137,15 @@ Messages are in English for now (#1514).
 - **The plugin's `.npmrc` is not read by the install.** npm never packs
   `.npmrc`, so the copy has none. Settings the install needs, such as a
   private registry, belong in the user or global npm configuration.
+- **No credentials in a URL.** `package.json` and `package-lock.json` ship
+  in the plugin artifact as written, and npm copies a dependency's URL into
+  `package-lock.json` whole, user name and password included. So a URL with
+  a user name or password in either file, other than the `git` user of a
+  git-over-ssh URL, stops `build` and fails `validate` of a plugin folder
+  with `URL_CREDENTIALS_REFUSED`, naming the file and where in it the first
+  such URL is, never the URL itself. Give npm the credentials another way,
+  such as an auth token in the `.npmrc` in your home folder or a git
+  credential helper, then run `npm install` again.
 - **Symbolic links.** npm leaves a plugin author's symbolic links out of its
   selection, as `npm publish` would. Only a linked `manifest.json` or
   `package-lock.json`, or a link under `node_modules` after the install,

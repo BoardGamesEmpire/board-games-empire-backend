@@ -37,7 +37,13 @@ const keysOf = <K extends string>(record: Record<K, true>): K[] =>
   Object.keys(record).filter((key): key is K => key in record);
 
 /** Every placeholder name a message may use, so a filled message has none left. */
-const ALL_PARAMS = { detail: 'disk full', entry: 'package/x', permission: 'manage:plugin', specifier: 'axios' };
+const ALL_PARAMS = {
+  detail: 'disk full',
+  entry: 'package/x',
+  field: 'dependencies > dep',
+  permission: 'manage:plugin',
+  specifier: 'axios',
+};
 
 const PLACEHOLDER = /\{[a-zA-Z]+\}/;
 
@@ -60,6 +66,7 @@ describe('messages (#1093)', () => {
         'NPM_PACK_FAILED',
         'DEPENDENCY_INSTALL_FAILED',
         'SYMLINK_REFUSED',
+        'URL_CREDENTIALS_REFUSED',
         'ARTIFACT_TOO_LARGE',
         'PLUGIN_ARTIFACT_LEFT_OUT',
         'SCAN_REPORT_TRUNCATED',
