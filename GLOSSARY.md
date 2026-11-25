@@ -14,6 +14,10 @@ _Avoid_: instance, installation, deployment, site, system, global
 The part of a server a single process runs: api, worker, gateway worker or coordinator.
 _Avoid_: role on its own, deployment role, service
 
+**Operational port**:
+The api's second port, for an operator's tools: it serves the full health report, the metrics and the API document, which the public port refuses, and answers only the addresses the operator allows.
+_Avoid_: admin port, management port, internal port
+
 **Deployment profile**:
 A ready-made way to run a whole server: split, with each process role in its own container, or, planned, all-in-one.
 _Avoid_: profile on its own (a user's profile), topology, combined deployment

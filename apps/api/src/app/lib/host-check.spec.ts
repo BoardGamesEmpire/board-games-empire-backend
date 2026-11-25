@@ -131,6 +131,24 @@ describe('createHostCheck (#977)', () => {
       expect(message).not.toContain('x'.repeat(254));
     });
 
+    // The operator acts on these two lines, so their wording is pinned here;
+    // the cap and the hourly reset are refusal-log.spec.ts's (#977, #1511).
+    it('logs a refused name, and the cap, in the exact words an operator reads', () => {
+      const check = checkFor();
+
+      for (let i = 0; i <= 100; i += 1) {
+        handle(check, request(`evil-${i}.example`));
+      }
+
+      expect(warn).toHaveBeenCalledTimes(101);
+      expect(warn.mock.calls[0][0]).toBe(
+        "Refused a request for 'evil-0.example'. If this server answers there, add it to TRUSTED_ORIGINS",
+      );
+      expect(warn.mock.calls[100][0]).toBe(
+        'Refused requests for 100 different names. Others are not logged for up to an hour',
+      );
+    });
+
     it('shares one log between the handler and allowRequest', () => {
       const check = checkFor();
 

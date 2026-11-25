@@ -36,7 +36,7 @@ The BGE image carries the web client's build (#598). It is copied from the clien
 
 The api serves the client from its own origin. A browser pointed at the api's URL (`BGE_PUBLIC_URL` in the split profile) loads the app, and the app's sign-in cookies work without a proxy in front.
 
-- **The server's paths stay the server's:** `/api` and everything under it, and likewise `/socket.io`, `/health`, `/metrics` and `/.well-known`. Socket.IO answers under `/socket.io/` before any of the api's routes see it.
+- **The server's paths stay the server's:** `/api` and everything under it, and likewise `/socket.io`, `/health`, `/metrics`, `/docs` and `/.well-known`. Socket.IO answers under `/socket.io/` before any of the api's routes see it. `/health` itself, `/metrics` and `/docs` belong to the [operational port](#the-operational-port), so on the public port they answer 404.
 - **Paths in the build** are served from it.
 - **Paths the build lacks:** a browser loading a page gets the app's `index.html`, and the app routes from there. Everything else gets a 404, so a missing script or asset is never answered with a page.
 - **Caching:** every file is sent with `Cache-Control: no-cache` and an ETag taken from its content. Flutter names its files the same in every release, so browsers ask about each file on every load, and the api answers 304 for any file the new build didn't change.
@@ -71,18 +71,18 @@ GHCR creates a package private. Once an org owner has made these public, after t
 
 `BGE_ROLES` names the role a container runs: exactly one, for now. Running several roles in one process is #200. An unset, empty or unknown value, or more than one role, stops the container at once with a message naming the accepted roles.
 
-| Role            | App                        | Listens on                      | Ready when                             | Volumes            |
-| --------------- | -------------------------- | ------------------------------- | -------------------------------------- | ------------------ |
-| `api`           | `apps/api`                 | HTTP on `PORT` (default 33333)  | `GET /health/ready` answers 200        | media, plugins     |
-| `worker`        | `apps/worker`              | nothing                         | no probe: it logs `Bootstrap complete` | media              |
-| `gateway-fetch` | `apps/gateway-worker`      | nothing                         | no probe: it logs `Bootstrap complete` |                    |
-| `coordinator`   | `apps/gateway-coordinator` | gRPC on `COORDINATOR_GRPC_PORT` | a TCP connection to that port succeeds | plugins, read-only |
+| Role            | App                        | Listens on                                                                                                              | Ready when                             | Volumes            |
+| --------------- | -------------------------- | ----------------------------------------------------------------------------------------------------------------------- | -------------------------------------- | ------------------ |
+| `api`           | `apps/api`                 | HTTP on `PORT` (default 33333), and the [operational port](#the-operational-port) on `OPERATIONAL_PORT` (default 33334) | `GET /health/ready` answers 200        | media, plugins     |
+| `worker`        | `apps/worker`              | nothing                                                                                                                 | no probe: it logs `Bootstrap complete` | media              |
+| `gateway-fetch` | `apps/gateway-worker`      | nothing                                                                                                                 | no probe: it logs `Bootstrap complete` |                    |
+| `coordinator`   | `apps/gateway-coordinator` | gRPC on `COORDINATOR_GRPC_PORT`                                                                                         | a TCP connection to that port succeeds | plugins, read-only |
 
 The DataGateway images listen on gRPC too, each on its `*_GATEWAY_GRPC_PORT`, and are ready on the same TCP check.
 
 What "ready" means here, role by role:
 
-- **The api** answers `/health/ready` once it has booted. That checks Postgres, the api's cache and queue Redis connections, and its storage. `/health/live` answers whenever the server is up. A first boot migrates and seeds before anything listens, so give the api a startup probe that allows minutes ([BOOTSTRAP.md](BOOTSTRAP.md), "First boot takes longer").
+- **The api** answers `/health/ready` once it has booted. That checks Postgres, the api's cache and queue Redis connections, and its storage. `/health/live` answers whenever the server is up. Both answer on the public port and on the operational port, so a probe that can reach only the public port still works. The full health report, `/health`, answers on the operational port only ([The operational port](#the-operational-port)). A first boot migrates and seeds before anything listens, so give the api a startup probe that allows minutes ([BOOTSTRAP.md](BOOTSTRAP.md), "First boot takes longer").
 - **The coordinator and the DataGateways** serve no standard gRPC health service (`grpc.health.v1.Health`) yet, so a Kubernetes `grpc` probe fails against them. Probe the port over TCP (`tcpSocket`). The coordinator opens its port once its bootstrap is done; the DataGateways have no database and open theirs at start.
 - **`worker` and `gateway-fetch`** listen on nothing, so there is nothing to probe. Their `Bootstrap complete` log line is the evidence they came up. A role that fails exits, and the restart policy brings it back.
 
@@ -230,7 +230,7 @@ Only the hostname is compared, ignoring case, so ports don't matter. `TRUSTED_OR
 
 **Request body size:** allow a request body a little over 100 MiB on the api's routes. A plugin artifact posted by upload is up to 100 MiB (#1094), and a media upload is up to 50 MiB. nginx's `client_max_body_size` defaults to 1 MiB, so with it left alone an upload answers 413 from the proxy before the api sees it; set `client_max_body_size 101m;`. The extra is deliberate: an upload travels in a multipart body slightly larger than the file, so a limit of exactly 100 MiB can refuse a plugin artifact at its size limit. The api has limits of its own: a request may take up to an hour (`requestTimeout`), and a body that sends less than 64 KiB in a minute while the api is reading it is cut off, so a proxy that buffers a slow upload before it forwards it should not time out first.
 
-**Internal callers:** Compose healthchecks and Kubernetes probes that use an IP address keep working. A scraper that targets a service name, such as `api:33333`, adds that name to `TRUSTED_ORIGINS` or targets an IP address.
+**Internal callers:** Compose healthchecks and Kubernetes probes that use an IP address keep working. A scraper that targets a service name, such as `api:33334` on the [operational port](#the-operational-port), adds that name to `TRUSTED_ORIGINS` or targets an IP address.
 
 **Under Compose:** `TRUSTED_ORIGINS` defaults to `BGE_PUBLIC_URL`. To add a name, set `TRUSTED_ORIGINS` in your `.env`. The api still answers at `BGE_PUBLIC_URL` and trusts it for sign-in, so that value needn't be repeated.
 
@@ -242,6 +242,56 @@ Only the hostname is compared, ignoring case, so ports don't matter. `TRUSTED_OR
 - **Authentik** changes nothing as a sign-in provider, or as forward auth behind one of the proxies above. Its proxy provider sends the configured upstream as `Host`, so prefer forward auth. Otherwise add the upstream name to `TRUSTED_ORIGINS`, which leaves rejecting unknown names to the outpost.
 - **Authelia** sits beside the proxy and never between the proxy and the api, so only the proxy's rule above applies. Its own nginx `proxy.conf` already sets `Host $host`. As a sign-in provider it changes nothing.
 - **Keycloak** is a sign-in provider only: the browser goes to Keycloak and returns to `BETTER_AUTH_URL`, so it changes nothing here. Its own `--proxy-headers` and `--hostname` settings concern its own proxy, not this check.
+
+## The operational port
+
+The api listens on a second port, `OPERATIONAL_PORT` (default 33334), for an operator's tools (#1511). It must differ from `PORT`; the api refuses to start when the two are the same. The operational port answers:
+
+- `/metrics`, the Prometheus metrics, in the Prometheus text format;
+- `/health`, the full health report;
+- the API document: its page at `/docs`, as JSON at `/docs/json` and as YAML at `/docs/yaml`;
+- `/health/live` and `/health/ready`, the probes, which the public port answers too.
+
+Every other path answers 404 with the code `ROUTE_NOT_FOUND`, as an unknown route does. The public port answers 404 in the same way to `/health` itself, `/metrics` and `/docs`, so no one can read them through the public port.
+
+**Who may reach it:** `OPERATIONAL_SOURCES` lists the addresses allowed, as comma-separated CIDR ranges. Naming any replaces the default, which is loopback, the private ranges, unique-local IPv6 and link-local addresses: `127.0.0.0/8, ::1/128, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, fc00::/7, 169.254.0.0/16, fe80::/10`. An IPv4 address that reaches the api as IPv6 (`::ffff:10.0.0.5`) counts as the IPv4 address. A connection from anywhere else gets a 403 with the code `OPERATIONAL_SOURCE_NOT_ALLOWED` on every path, and the api logs the address. An entry that isn't a CIDR range stops the api at start, naming the entry.
+
+The check reads only the address the connection comes from. It never reads `X-Forwarded-For` or any other forwarded header, because the client writes those and could name an allowed address. So a proxy in front of this port makes every request come from the proxy's address: don't route the operational port through your public reverse proxy. The [Host check](#behind-a-reverse-proxy) applies on this port too, so a scraper that targets a service name adds that name to `TRUSTED_ORIGINS` or targets an IP address.
+
+The api listens on this port on every interface, as it does on the public port. What keeps it private is the list above and not publishing it.
+
+**Under Compose:** the split profile doesn't publish the operational port. Another container on the Compose network reaches it at `api:33334` (add `api` to `TRUSTED_ORIGINS`, for the Host check). To scrape it from the host, add it to the api's `ports`, on loopback only:
+
+```yaml
+services:
+  api:
+    ports:
+      - 127.0.0.1:33334:33334
+```
+
+Don't publish it on every interface. Docker can hand the api a connection from its own bridge address instead of the client's, and that address is in a private range, which the default list allows.
+
+**Under Kubernetes:** probe the public port, or the operational port, where the readiness answer carries each dependency's detail. A Prometheus that scrapes pods reaches each pod's IP at 33334, and pod and node addresses are usually in a private range. If yours aren't, as on a cluster that uses `100.64.0.0/10`, set `OPERATIONAL_SOURCES` to include them. Don't add the operational port to a Service that an Ingress or a load balancer exposes.
+
+```yaml
+containers:
+  - name: api
+    ports:
+      - name: http
+        containerPort: 33333
+      - name: operational
+        containerPort: 33334
+    livenessProbe:
+      httpGet:
+        path: /health/live
+        port: http
+    readinessProbe:
+      httpGet:
+        path: /health/ready
+        port: http
+```
+
+**Behind a cloud load balancer:** a Google Cloud load balancer checks a backend from Google's own public addresses (such as `35.191.0.0/16` and `130.211.0.0/22`), on the port it sends traffic to. Point its health check at `/health/ready` on the public port.
 
 ## Storage
 
@@ -280,7 +330,7 @@ The IGDB gateway is `igdb-gateway` on port 50054.
 
 ## Shutdown
 
-On `SIGTERM` each role closes its application, flushes its telemetry, and exits. A role registers those handlers once its bootstrap is done. The role's process is PID 1 in its container, and PID 1 ignores a signal it has no handler for, so a container stopped before then stops only at the kill timeout. The split profile sets `init: true`, which puts an init process in front of the role and lets the signal end it at once. In Kubernetes, the pod's grace period applies.
+On `SIGTERM` each role closes its application, flushes its telemetry, and exits. The api closes its operational port first, then its public port. A connection held open between requests, such as a scraper's keep-alive connection, is closed and not waited for. A role registers those handlers once its bootstrap is done. The role's process is PID 1 in its container, and PID 1 ignores a signal it has no handler for, so a container stopped before then stops only at the kill timeout. The split profile sets `init: true`, which puts an init process in front of the role and lets the signal end it at once. In Kubernetes, the pod's grace period applies.
 
 ## Upgrades and rollback
 

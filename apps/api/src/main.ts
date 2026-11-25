@@ -15,6 +15,7 @@ import {
   MAX_AUTH_REQUEST_BODY_BYTES,
 } from '@bge/auth';
 import { createPrismaCliMigrator, runBootstrap } from '@bge/bootstrap';
+import { markOperationalRequest } from '@bge/health';
 import type { I18nTranslations } from '@bge/i18n';
 import { nestLoggerFromPino } from '@bge/logger';
 import { permissionGraphFlushPatterns } from '@bge/permissions';
@@ -29,6 +30,8 @@ import compression from 'compression';
 import helmet from 'helmet';
 import { I18nService, I18nValidationPipe } from 'nestjs-i18n';
 import { Logger as PinoLogger } from 'nestjs-pino';
+import type { Server } from 'node:http';
+import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { RedisIoAdapter } from './app/adapters/redis-io.adapter';
 import { AppModule } from './app/app.module';
@@ -38,6 +41,8 @@ import { createAuthClientIpHandler } from './app/lib/auth-client-ip';
 import { createHostCheck } from './app/lib/host-check';
 import type { ServerNames } from './app/lib/host-rule';
 import { allowsEveryHost, createHostRule } from './app/lib/host-rule';
+import { createOperationalGate, OPERATIONAL_PATHS } from './app/lib/operational-gate';
+import { createSourceRule } from './app/lib/operational-sources';
 import { PATHS_WITHOUT_QUERY } from './app/lib/paths-without-query';
 
 // The paths name feature-lib routes, imported above, so they reach the SDK
@@ -82,10 +87,10 @@ async function bootstrap() {
 
   const globalPrefix = 'api';
   // The routes that sit outside the global prefix. The bundled web client
-  // never answers under these or under the prefix itself.
+  // never answers under these or under the prefix itself, so it can't answer
+  // the operational routes on the public port either (#1511).
   const unprefixedRoutes = [
-    { path: 'metrics', method: RequestMethod.GET },
-    { path: 'health', method: RequestMethod.GET },
+    ...OPERATIONAL_PATHS,
     { path: 'health/*path', method: RequestMethod.GET },
     { path: '.well-known/*path', method: RequestMethod.GET },
     { path: '.well-known/*path', method: RequestMethod.OPTIONS },
@@ -118,6 +123,10 @@ async function bootstrap() {
   // check's here, and `/api/auth/*`'s below.
   const render = fallbackLocaleRenderer(app.get<I18nService<I18nTranslations>>(I18nService));
   const hostCheck = createHostCheck({ rule: createHostRule(serverNames), render });
+  const operationalGate = createOperationalGate({
+    sourceRule: createSourceRule(configService.getOrThrow<string[]>('operational.sources')),
+    render,
+  });
 
   if (allowsEveryHost(serverNames)) {
     Logger.warn(
@@ -150,6 +159,11 @@ async function bootstrap() {
     // whole Express app. It reads the Host header and not `req.hostname`, which
     // `trust proxy` above takes from X-Forwarded-Host (#977).
     .use(hostCheck.handler)
+    // Keeps each listener to its own routes, and the operational port to the
+    // addresses allowed to reach it (#1511). Mounted without a path, so it reads
+    // the whole request target, and after the Host check, which stays the first
+    // answer on both listeners.
+    .use(operationalGate)
     .use(compression())
     .setGlobalPrefix(globalPrefix, { exclude: unprefixedRoutes })
     .enableCors({
@@ -257,11 +271,69 @@ async function bootstrap() {
   httpServer.requestTimeout = API_REQUEST_TIMEOUT_MS;
   installRequestBodyRateGuard(httpServer);
 
-  registerShutdownHandlers(app, otel, bootstrapLogger);
+  // The second listener, for `/health`, `/metrics` and the API document
+  // (#1511). It hands each request to the same Express app, marked, so the
+  // gate and the health controller can tell which port it came in on.
+  // Socket.IO stays on the public server alone.
+  //
+  // Nothing is uploaded here, so it keeps Node's request timeout (5 minutes)
+  // rather than the public server's hour, and Node's 60-second
+  // `headersTimeout`. The rate guard still cuts off a trickled body.
+  const operationalServer = createServer((req, res) => {
+    markOperationalRequest(req);
+    server(req, res);
+  });
+  installRequestBodyRateGuard(operationalServer);
+
+  // Closes the operational listener first, then the app and the public one.
+  // Node closes idle keep-alive connections on close, so a scraper holding
+  // one doesn't keep the process up.
+  registerShutdownHandlers(
+    {
+      close: async () => {
+        await closeServer(operationalServer).catch((error: unknown) =>
+          bootstrapLogger.error({ err: error }, 'closing the operational port failed'),
+        );
+        await app.close();
+      },
+    },
+    otel,
+    bootstrapLogger,
+  );
 
   const port = configService.get<number>('system.port', 33333);
   await app.listen(port);
   Logger.log(`🚀 Application is running on: http://localhost:${port}/${globalPrefix}`, LOGGER_CONTEXT);
+
+  // After `app.listen`, which is where Nest registers its routes. Bound on
+  // every interface, as the public port is: the allowed sources decide who
+  // may use it. A failure (EADDRINUSE) rejects, and the catch below exits.
+  const operationalPort = configService.getOrThrow<number>('operational.port');
+  await listen(operationalServer, operationalPort);
+  Logger.log(`Operational routes on port ${operationalPort}`, LOGGER_CONTEXT);
+}
+
+/** `server.listen`, resolved once it is listening and rejected with a bind error. */
+function listen(server: Server, port: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(port, () => {
+      server.off('error', reject);
+      resolve();
+    });
+  });
+}
+
+/** `server.close`, resolved at once for a server that never started listening. */
+function closeServer(server: Server): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (!server.listening) {
+      resolve();
+      return;
+    }
+
+    server.close((error) => (error ? reject(error) : resolve()));
+  });
 }
 
 bootstrap().catch((error) => {

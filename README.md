@@ -107,14 +107,14 @@ npm start
 
 This runs `nf start`, which launches all processes defined in `Procfile` concurrently:
 
-| Process          | Default port | Description                                      |
-| ---------------- | ------------ | ------------------------------------------------ |
-| `api`            | 33333        | Main REST + WebSocket API                        |
-| `coordinator`    | 50052        | Gateway coordinator (gRPC)                       |
-| `worker`         |              | Worker service (Queue consumer)                  |
-| `gateway-worker` |              | Gateway worker (DataGateway fetches for imports) |
-| `bgg-gateway`    | 50053        | BoardGameGeek DataGateway (gRPC)                 |
-| `igdb-gateway`   | 50054        | IGDB DataGateway (gRPC)                          |
+| Process          | Default port | Description                                                                    |
+| ---------------- | ------------ | ------------------------------------------------------------------------------ |
+| `api`            | 33333, 33334 | Main REST + WebSocket API; `/health`, `/metrics` and the API document on 33334 |
+| `coordinator`    | 50052        | Gateway coordinator (gRPC)                                                     |
+| `worker`         |              | Worker service (Queue consumer)                                                |
+| `gateway-worker` |              | Gateway worker (DataGateway fetches for imports)                               |
+| `bgg-gateway`    | 50053        | BoardGameGeek DataGateway (gRPC)                                               |
+| `igdb-gateway`   | 50054        | IGDB DataGateway (gRPC)                                                        |
 
 To run a single service in isolation:
 

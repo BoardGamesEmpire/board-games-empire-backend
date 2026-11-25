@@ -98,6 +98,12 @@ services:
     # Loopback only, unless BGE_BIND_ADDRESS names another address: the first
     # account to sign up becomes the owner, and the default keeps a new
     # deployment off the network.
+    #
+    # The operational port, 33334, which serves /health, /metrics and the API
+    # document, is deliberately not published (#1511). To scrape it from this
+    # host, add `- 127.0.0.1:33334:33334`, on loopback only: Docker can hand
+    # the api a connection from its own bridge address, which the default
+    # OPERATIONAL_SOURCES allow. See docs/DEPLOYMENT.md, "The operational port".
     ports:
       - ${BGE_BIND_ADDRESS:-127.0.0.1}:${BGE_PORT:-33333}:33333
     volumes:

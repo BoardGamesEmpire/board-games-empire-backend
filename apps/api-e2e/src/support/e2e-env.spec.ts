@@ -1,8 +1,10 @@
-import { environments } from '@bge/env';
+import { environments, splitTrimFilter } from '@bge/env';
 import type { RedisEndpoint } from './e2e-env';
 import {
   API_CONFIGURED_SERVER_NAME,
+  API_HEALTH_CHECK_URLS_VAR,
   API_NODE_ENV,
+  API_OPERATIONAL_PORT_VAR,
   API_PORT_VAR,
   API_THROTTLE_LIMIT,
   API_THROTTLE_TTL_MS,
@@ -11,10 +13,12 @@ import {
   E2E_BASE_URL_VAR,
   E2E_DATABASE_URL_VAR,
   E2E_MAILPIT_VAR,
+  E2E_OPERATIONAL_URL_VAR,
   E2E_OWNS_REDIS_VAR,
   E2E_REDIS_SERVER_VAR,
   E2E_REDIS_URL_VAR,
   fakeProviderEnv,
+  NO_HEALTH_CHECK_URLS,
   parseRedisUrl,
   REDIS_ENV_DATABASES,
   REDIS_ENV_PREFIXES,
@@ -22,6 +26,7 @@ import {
   redisOwnershipOverride,
   requireBaseUrl,
   requireMailpit,
+  requireOperationalUrl,
   schemaFromDatabaseUrl,
   workerEnvOverrides,
 } from './e2e-env';
@@ -179,11 +184,25 @@ describe('e2e-env (pure logic)', () => {
     const PLUGINS_ROOT = '/tmp/bge-e2e-plugins-test';
 
     it('gives the API the plugins root the harness made, not its default inside the checkout (#1094)', () => {
-      expect(apiEnvOverrides(baseUrl, 41234, PLUGINS_ROOT).PLUGINS_ROOT).toBe(PLUGINS_ROOT);
+      expect(apiEnvOverrides(baseUrl, 41234, 41235, PLUGINS_ROOT).PLUGINS_ROOT).toBe(PLUGINS_ROOT);
     });
 
     it('binds the API to the port the harness reserved', () => {
-      expect(apiEnvOverrides(baseUrl, 41234, PLUGINS_ROOT)[API_PORT_VAR]).toBe('41234');
+      expect(apiEnvOverrides(baseUrl, 41234, 41235, PLUGINS_ROOT)[API_PORT_VAR]).toBe('41234');
+    });
+
+    it('names no URL for the full health report to ping, with a value that is set (#1511)', () => {
+      const value = apiEnvOverrides(baseUrl, 41234, 41235, PLUGINS_ROOT)[API_HEALTH_CHECK_URLS_VAR];
+
+      // Empty would read as unset, and the .env or the default would fill it.
+      expect(value).toBe(NO_HEALTH_CHECK_URLS);
+      expect(value.trim()).not.toBe('');
+      // What health.config.ts makes of it: no URL at all.
+      expect(splitTrimFilter(value)).toEqual([]);
+    });
+
+    it('binds the operational routes to the second port the harness reserved, not the 33334 default (#1511)', () => {
+      expect(apiEnvOverrides(baseUrl, 41234, 41235, PLUGINS_ROOT)[API_OPERATIONAL_PORT_VAR]).toBe('41235');
     });
 
     it('pins NODE_ENV to a value system.config.ts accepts', () => {
@@ -191,24 +210,24 @@ describe('e2e-env (pure logic)', () => {
       // validation and surfaces only as a readiness timeout. Pinning here makes
       // the child's boot contract independent of whatever the runner, Jest, or
       // a developer's shell happens to hold.
-      expect(apiEnvOverrides(baseUrl, 41234, PLUGINS_ROOT).NODE_ENV).toBe(API_NODE_ENV);
+      expect(apiEnvOverrides(baseUrl, 41234, 41235, PLUGINS_ROOT).NODE_ENV).toBe(API_NODE_ENV);
       expect(environments).toContain(API_NODE_ENV);
     });
 
     it('points BetterAuth at the ephemeral origin rather than the .env default', () => {
       // .env.example hard-codes port 33333; inheriting it leaves BetterAuth
       // minting absolute URLs for a server that is not the one under test.
-      expect(apiEnvOverrides(baseUrl, 41234, PLUGINS_ROOT).BETTER_AUTH_URL).toBe(baseUrl);
+      expect(apiEnvOverrides(baseUrl, 41234, 41235, PLUGINS_ROOT).BETTER_AUTH_URL).toBe(baseUrl);
     });
 
     it('trusts both loopback spellings of the ephemeral origin', () => {
-      const origins = apiEnvOverrides(baseUrl, 41234, PLUGINS_ROOT).TRUSTED_ORIGINS.split(',');
+      const origins = apiEnvOverrides(baseUrl, 41234, 41235, PLUGINS_ROOT).TRUSTED_ORIGINS.split(',');
 
       expect(origins).toEqual(expect.arrayContaining(['http://127.0.0.1:41234', 'http://localhost:41234']));
     });
 
     it('names one server name that is neither loopback nor an IP, for the Host check to admit (#977)', () => {
-      const origins = apiEnvOverrides(baseUrl, 41234, PLUGINS_ROOT).TRUSTED_ORIGINS.split(',');
+      const origins = apiEnvOverrides(baseUrl, 41234, 41235, PLUGINS_ROOT).TRUSTED_ORIGINS.split(',');
 
       expect(origins).toContain(`https://${API_CONFIGURED_SERVER_NAME}`);
     });
@@ -221,31 +240,32 @@ describe('e2e-env (pure logic)', () => {
       // would reject specs partway through a run on any route the suite
       // exercises more than 20 times; this pin is what keeps it from going red
       // with 429s unrelated to the behavior under test.
-      expect(apiEnvOverrides(baseUrl, 41234, PLUGINS_ROOT).THROTTLE_LIMIT).toBe(String(API_THROTTLE_LIMIT));
+      expect(apiEnvOverrides(baseUrl, 41234, 41235, PLUGINS_ROOT).THROTTLE_LIMIT).toBe(String(API_THROTTLE_LIMIT));
       expect(API_THROTTLE_LIMIT).toBeGreaterThan(1_000);
       // The window is pinned alongside it: an inherited `.env` value is the one
       // remaining way local and CI runs could disagree about rate limiting.
-      expect(apiEnvOverrides(baseUrl, 41234, PLUGINS_ROOT).THROTTLE_TTL_MS).toBe(String(API_THROTTLE_TTL_MS));
+      expect(apiEnvOverrides(baseUrl, 41234, 41235, PLUGINS_ROOT).THROTTLE_TTL_MS).toBe(String(API_THROTTLE_TTL_MS));
     });
 
     it("arms the origin check whatever a developer's .env says", () => {
       // The cookie-origin refusals over WebSocket (#511) pass only while it is armed.
-      expect(apiEnvOverrides(baseUrl, 41234, PLUGINS_ROOT).DISABLE_ORIGIN_CHECK).toBe('false');
+      expect(apiEnvOverrides(baseUrl, 41234, 41235, PLUGINS_ROOT).DISABLE_ORIGIN_CHECK).toBe('false');
     });
 
     it('emits every override as a string, since process env carries no other type', () => {
       // A numeric value here reaches `spawn`'s env object as a number and is
       // stringified inconsistently across platforms; Joi would then validate
       // something the child never saw.
-      for (const value of Object.values(apiEnvOverrides(baseUrl, 41234, PLUGINS_ROOT))) {
+      for (const value of Object.values(apiEnvOverrides(baseUrl, 41234, 41235, PLUGINS_ROOT))) {
         expect(typeof value).toBe('string');
       }
     });
 
     it('re-derives every value from the port it is given', () => {
-      const overrides = apiEnvOverrides('http://127.0.0.1:55555', 55555, PLUGINS_ROOT);
+      const overrides = apiEnvOverrides('http://127.0.0.1:55555', 55555, 55556, PLUGINS_ROOT);
 
       expect(overrides[API_PORT_VAR]).toBe('55555');
+      expect(overrides[API_OPERATIONAL_PORT_VAR]).toBe('55556');
       expect(overrides.BETTER_AUTH_URL).toBe('http://127.0.0.1:55555');
       expect(overrides.TRUSTED_ORIGINS).toContain('http://localhost:55555');
     });
@@ -314,6 +334,21 @@ describe('e2e-env (pure logic)', () => {
     it('fails loudly when globalSetup never ran', () => {
       expect(() => requireBaseUrl({})).toThrow(new RegExp(E2E_BASE_URL_VAR));
       expect(() => requireBaseUrl({ [E2E_BASE_URL_VAR]: '   ' })).toThrow(new RegExp(E2E_BASE_URL_VAR));
+    });
+  });
+
+  describe('requireOperationalUrl', () => {
+    it('returns the operational URL published by globalSetup (#1511)', () => {
+      expect(requireOperationalUrl({ [E2E_OPERATIONAL_URL_VAR]: 'http://127.0.0.1:41235' })).toBe(
+        'http://127.0.0.1:41235',
+      );
+    });
+
+    it('fails loudly when globalSetup never published it', () => {
+      expect(() => requireOperationalUrl({})).toThrow(new RegExp(E2E_OPERATIONAL_URL_VAR));
+      expect(() => requireOperationalUrl({ [E2E_OPERATIONAL_URL_VAR]: '   ' })).toThrow(
+        new RegExp(E2E_OPERATIONAL_URL_VAR),
+      );
     });
   });
 

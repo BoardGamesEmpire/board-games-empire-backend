@@ -1,8 +1,8 @@
 import type { IncomingMessage, OutgoingHttpHeaders } from 'node:http';
 import { request as httpRequest } from 'node:http';
-import { connect as netConnect } from 'node:net';
 import request from 'supertest';
 import { API_CONFIGURED_SERVER_NAME, requireBaseUrl } from '../support/e2e-env';
+import { rawExchange } from '../support/raw-exchange';
 
 const REFUSED_CODE = 'HOST_NOT_ALLOWED';
 const FOREIGN_NAME = 'evil.example';
@@ -39,22 +39,6 @@ describe('the inbound Host check (#977)', () => {
       req.on('upgrade', () => reject(new Error('the websocket handshake was accepted')));
       req.on('error', reject);
       req.end();
-    });
-  }
-
-  /**
-   * A request written byte for byte, for the Host headers `node:http` won't
-   * send: none at all, or one with no value. Answers the whole response.
-   */
-  function rawExchange(raw: string): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const socket = netConnect({ host: hostname, port: Number(port) }, () => socket.write(raw));
-      let received = '';
-
-      socket.setEncoding('utf8');
-      socket.on('data', (chunk: string) => (received += chunk));
-      socket.on('end', () => resolve(received));
-      socket.on('error', reject);
     });
   }
 
@@ -114,7 +98,7 @@ describe('the inbound Host check (#977)', () => {
     // Node passes `Host:` with no value on as '', unlike a missing Host, which
     // it answers with its own 400 on HTTP/1.1. The check must refuse it itself.
     it('refuses a request whose Host is empty', async () => {
-      const answer = await rawExchange('GET /health/live HTTP/1.1\r\nHost:\r\nConnection: close\r\n\r\n');
+      const answer = await rawExchange(baseUrl, 'GET /health/live HTTP/1.1\r\nHost:\r\nConnection: close\r\n\r\n');
       const [head, body] = answer.split('\r\n\r\n');
 
       expect(head.split('\r\n')[0]).toContain('421');
@@ -147,7 +131,7 @@ describe('the inbound Host check (#977)', () => {
     });
 
     it('answers an HTTP/1.0 request with no Host', async () => {
-      const answer = await rawExchange('GET /health/live HTTP/1.0\r\n\r\n');
+      const answer = await rawExchange(baseUrl, 'GET /health/live HTTP/1.0\r\n\r\n');
 
       expect(answer.split('\r\n')[0]).toContain('200');
     });
