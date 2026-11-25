@@ -5,7 +5,7 @@ import { createActors } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import type { Caller } from '../support/api-key';
-import { mintApiKey } from '../support/api-key';
+import { mintApiKey, mintApiKeyWithArrangedScopes } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import type { TestDatabase } from '../support/test-db';
 import { createTestDatabase } from '../support/test-db';
@@ -665,7 +665,7 @@ describe('installed-plugin inventory (#354)', () => {
 
       /** A staff member's key, which reads a household it is no member of. */
       const staffKeyOf = (owner: SessionActor) =>
-        mintApiKey(baseUrl, db.client, owner, [
+        mintApiKeyWithArrangedScopes(baseUrl, db.client, owner, [
           { slugs: ['read:public_content'], resourceType: ResourceType.HouseholdPlugin },
           { slugs: ['read:plugin:installed'], resourceType: ResourceType.Plugin },
         ]);

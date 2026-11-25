@@ -11,7 +11,7 @@ import {
 import type { Actors, SessionActor } from '@bge/testing-e2e';
 import { createActors } from '@bge/testing-e2e';
 import request from 'supertest';
-import { mintApiKey } from '../support/api-key';
+import { mintApiKeyWithArrangedScopes } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import type { TestDatabase } from '../support/test-db';
 import { createTestDatabase } from '../support/test-db';
@@ -379,7 +379,7 @@ describe('DataGateway review', () => {
     const links = (gatewayId: string) => `${GATEWAYS}/${gatewayId}/language-links`;
 
     const updatesOnly = (gatewayId: string) =>
-      mintApiKey(baseUrl, db.client, admin, [
+      mintApiKeyWithArrangedScopes(baseUrl, db.client, admin, [
         { slugs: ['read:data_gateway'], resourceType: ResourceType.DataGateway },
         { slugs: ['update:data_gateway'], resourceType: ResourceType.DataGateway, resourceId: gatewayId },
       ]);

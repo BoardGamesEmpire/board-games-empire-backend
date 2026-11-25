@@ -5,7 +5,7 @@ import { createActors } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import type { Caller } from '../support/api-key';
-import { mintApiKey } from '../support/api-key';
+import { mintApiKey, mintApiKeyWithArrangedScopes } from '../support/api-key';
 import { deferredRequest } from '../support/deferred-request';
 import { requireBaseUrl } from '../support/e2e-env';
 import type { TestDatabase } from '../support/test-db';
@@ -116,13 +116,19 @@ describe('server plugin writes through a key scoped to one plugin (#978)', () =>
     return statuses;
   };
 
-  /** `manage:plugin`, pinned to `scoped` when it is given. */
+  /**
+   * `manage:plugin`, pinned to `scoped` when it is given. The route refuses a
+   * pinned `manage:plugin` (#1366), so only a pinned key's scopes are arranged
+   * (#1418).
+   */
   const manageKey = (owner: SessionActor, scoped?: Plugin) =>
-    mintApiKey(baseUrl, db.client, owner, {
-      slugs: ['manage:plugin'],
-      resourceType: ResourceType.Plugin,
-      resourceId: scoped?.id,
-    });
+    scoped === undefined
+      ? mintApiKey(baseUrl, db.client, owner, { slugs: ['manage:plugin'], resourceType: ResourceType.Plugin })
+      : mintApiKeyWithArrangedScopes(baseUrl, db.client, owner, {
+          slugs: ['manage:plugin'],
+          resourceType: ResourceType.Plugin,
+          resourceId: scoped.id,
+        });
 
   /** What a write could change: the plugin's row and its grants. */
   const stateOf = async (plugin: Plugin) => ({

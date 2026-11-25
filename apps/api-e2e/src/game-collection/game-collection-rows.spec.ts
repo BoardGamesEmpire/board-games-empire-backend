@@ -8,7 +8,7 @@ import request from 'supertest';
 import { gameLinks } from '../game/game-wire';
 import { arrangeList, arrangePlatformGame as arrangeSiblingPlatformGame, findWishlist } from '../list/list-fixtures';
 import type { Caller } from '../support/api-key';
-import { mintApiKey } from '../support/api-key';
+import { mintApiKey, mintApiKeyWithArrangedScopes } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import { tabletopPlatform } from '../support/seeded-platforms';
 import type { TestDatabase } from '../support/test-db';
@@ -323,7 +323,7 @@ describe('collection rows (#1070)', () => {
     const collectionRead = { slugs: ['read:game_collection:public'], resourceType: ResourceType.GameCollection };
     const listRead = { slugs: ['read:list'], resourceType: ResourceType.List };
     const unpinned = await mintApiKey(baseUrl, db.client, viewer, [collectionRead, listRead]);
-    const pinned = await mintApiKey(baseUrl, db.client, viewer, [
+    const pinned = await mintApiKeyWithArrangedScopes(baseUrl, db.client, viewer, [
       collectionRead,
       { ...listRead, resourceId: custom.id },
     ]);

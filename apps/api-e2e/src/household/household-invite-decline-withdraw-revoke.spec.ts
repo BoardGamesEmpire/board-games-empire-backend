@@ -4,7 +4,7 @@ import { arrangeInvite, createActors } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import type { Caller } from '../support/api-key';
-import { mintApiKey } from '../support/api-key';
+import { mintApiKey, mintApiKeyWithArrangedScopes } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import type { TestDatabase } from '../support/test-db';
 import { createTestDatabase } from '../support/test-db';
@@ -77,9 +77,19 @@ describe('declining, withdrawing and revoking a household invite', () => {
   const verify = (actor: SessionActor) =>
     db.client.user.update({ where: { id: actor.user.id }, data: { emailVerified: true } });
 
-  /** A key its owner minted, scoped to the given grants on `Invite`, or on the one invite `resourceId` names. */
+  /**
+   * A key its owner minted, scoped to the given grants on `Invite`, or on the
+   * one invite `resourceId` names. The route refuses an Invite pin, so only a
+   * pinned key's scopes are arranged (#1418).
+   */
   const inviteKey = (owner: SessionActor, slugs: readonly string[], resourceId?: string) =>
-    mintApiKey(baseUrl, db.client, owner, { slugs, resourceType: ResourceType.Invite, resourceId });
+    resourceId === undefined
+      ? mintApiKey(baseUrl, db.client, owner, { slugs, resourceType: ResourceType.Invite })
+      : mintApiKeyWithArrangedScopes(baseUrl, db.client, owner, {
+          slugs,
+          resourceType: ResourceType.Invite,
+          resourceId,
+        });
 
   /** The message a refusal carries, so a surprise reads as a diff rather than as a bare status. */
   const messageOf = (response: { body: unknown }) => (response.body as { message?: unknown } | null)?.message;

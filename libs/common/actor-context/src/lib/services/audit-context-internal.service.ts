@@ -6,6 +6,7 @@ import {
   ACTOR_CLS_KEY,
   CORRELATION_ID_CLS_KEY,
   LOCALE_CLS_KEY,
+  SESSION_SIGNED_IN_AT_CLS_KEY,
   SOURCE_CLS_KEY,
 } from './audit-context.service';
 
@@ -21,6 +22,12 @@ export interface ActorContextInit {
    * via {@link AuditContextInternalService.setLocale} instead.
    */
   readonly locale?: string;
+
+  /**
+   * When the actor's session was signed in. Set only by the HTTP seam, and
+   * only for a signed-in user; every other seam leaves it out (#1418).
+   */
+  readonly sessionSignedInAt?: Date;
 
   readonly source: EventSource;
 }
@@ -55,11 +62,15 @@ export class AuditContextInternalService {
     // the computed-key severing below (on the copy, never the live store).
     const existingStore: Record<string | symbol, unknown> = { ...(this.cls.get() ?? {}) };
     delete existingStore[ABILITIES_CLS_KEY];
+    // A sign-in time belongs to the request's own user: a nested scope with a
+    // new actor must not inherit it (#1418).
+    delete existingStore[SESSION_SIGNED_IN_AT_CLS_KEY];
     const store = {
       ...existingStore,
       [ACTOR_CLS_KEY]: init.actor,
       [CORRELATION_ID_CLS_KEY]: init.correlationId,
       [SOURCE_CLS_KEY]: init.source,
+      ...(init.sessionSignedInAt !== undefined && { [SESSION_SIGNED_IN_AT_CLS_KEY]: init.sessionSignedInAt }),
       // Only override an inherited locale when this seam carries one — a
       // nested scope (e.g. SystemActorScope inside a request) keeps the
       // request's resolved locale.
@@ -84,6 +95,8 @@ export class AuditContextInternalService {
     this.cls.set(ACTOR_CLS_KEY, init.actor);
     this.cls.set(CORRELATION_ID_CLS_KEY, init.correlationId);
     this.cls.set(SOURCE_CLS_KEY, init.source);
+    // Always written, so a populate without one clears an earlier value.
+    this.cls.set(SESSION_SIGNED_IN_AT_CLS_KEY, init.sessionSignedInAt);
 
     if (init.locale !== undefined) {
       this.cls.set(LOCALE_CLS_KEY, init.locale);

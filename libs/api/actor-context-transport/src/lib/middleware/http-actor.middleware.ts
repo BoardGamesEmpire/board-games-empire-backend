@@ -12,6 +12,13 @@ import type { AnonymousUserSession } from '../interfaces';
 
 export const API_KEY_HEADER = 'x-api-key' as const;
 
+interface ResolvedActor {
+  readonly actor: Actor | null;
+
+  /** The session's `createdAt`, for a signed-in user only (#1418). */
+  readonly sessionSignedInAt?: Date;
+}
+
 /**
  * Populates CLS actor + correlation context for HTTP requests.
  *
@@ -79,10 +86,11 @@ export class HttpActorMiddleware implements NestMiddleware {
 
   async use(req: Request, _res: Response, next: NextFunction): Promise<void> {
     try {
-      const actor = await this.resolveActor(req);
+      const { actor, sessionSignedInAt } = await this.resolveActor(req);
 
       this.auditContext.populate({
         actor,
+        ...(sessionSignedInAt && { sessionSignedInAt }),
         correlationId: resolveCorrelationId({
           traceparent: req.headers[TRACEPARENT_HEADER],
           correlationId: req.headers[CORRELATION_ID_HEADER],
@@ -98,14 +106,14 @@ export class HttpActorMiddleware implements NestMiddleware {
     }
   }
 
-  private async resolveActor(req: Request): Promise<Actor | null> {
+  private async resolveActor(req: Request): Promise<ResolvedActor> {
     const apiKey = firstValue(req.headers[API_KEY_HEADER]);
     if (apiKey) {
       if (this.authService.hasSessionCredential(req.headers)) {
         this.logger.warn(`Request carries both '${API_KEY_HEADER}' and a session credential; preferring API key`);
       }
 
-      return this.actorFromApiKey(apiKey);
+      return { actor: await this.actorFromApiKey(apiKey) };
     }
 
     return this.actorFromSession(req);
@@ -137,15 +145,15 @@ export class HttpActorMiddleware implements NestMiddleware {
     };
   }
 
-  private async actorFromSession(req: Request): Promise<Actor | null> {
+  private async actorFromSession(req: Request): Promise<ResolvedActor> {
     if (!this.authService.hasSessionCredential(req.headers)) {
-      return null;
+      return { actor: null };
     }
 
     const session = await this.authService.getSessionFromHeaders(req.headers);
 
     if (!session) {
-      return null;
+      return { actor: null };
     }
 
     // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- better-auth's inference over this instance's plugin list leaves out the anonymous plugin's isAnonymous (#1321)
@@ -166,10 +174,17 @@ export class HttpActorMiddleware implements NestMiddleware {
 
     this.logger.debug(`Resolved session for user ${user.id} (anonymous: ${user.isAnonymous})`);
     if (user.isAnonymous) {
-      return { kind: 'anonymous', userId: user.id };
+      return { actor: { kind: 'anonymous', userId: user.id } };
     }
 
-    return { kind: 'user', userId: user.id };
+    // Only a signed-in user carries a sign-in time: an anonymous session has
+    // no sign-in to be recent, and an API key never read a session (#1418).
+    const signedInAt = new Date(session.session.createdAt);
+
+    return {
+      actor: { kind: 'user', userId: user.id },
+      ...(!Number.isNaN(signedInAt.getTime()) && { sessionSignedInAt: signedInAt }),
+    };
   }
 }
 

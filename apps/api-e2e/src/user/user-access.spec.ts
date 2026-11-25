@@ -2,7 +2,7 @@ import { AuthType, ResourceType } from '@bge/database';
 import type { Actors } from '@bge/testing-e2e';
 import { createActors } from '@bge/testing-e2e';
 import request from 'supertest';
-import { mintApiKey } from '../support/api-key';
+import { mintApiKey, mintApiKeyWithArrangedScopes } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import type { TestDatabase } from '../support/test-db';
 import { createTestDatabase } from '../support/test-db';
@@ -163,7 +163,7 @@ describe('user access (#757)', () => {
     // checking another of the three would agree with them all. This key holds
     // create, update on one DataGateway and no delete, so the three routes must
     // disagree here (#757).
-    const key = await mintApiKey(baseUrl, db.client, admin, [
+    const key = await mintApiKeyWithArrangedScopes(baseUrl, db.client, admin, [
       { slugs: ['create:data_gateway'], resourceType: ResourceType.DataGateway },
       { slugs: ['read:data_gateway'], resourceType: ResourceType.DataGateway },
       { slugs: ['update:data_gateway'], resourceType: ResourceType.DataGateway, resourceId: pinned.id },

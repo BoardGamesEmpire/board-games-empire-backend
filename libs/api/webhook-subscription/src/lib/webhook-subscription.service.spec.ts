@@ -81,6 +81,22 @@ describe('WebhookSubscriptionService', () => {
   const allowAll = createPrismaAbility([{ action: Action.manage, subject: 'all' }]) as AppAbility;
   const denyAll = createPrismaAbility([]) as AppAbility;
 
+  /**
+   * The rule every creator holds, as `manage:webhook_subscription:own`
+   * renders: create checks the row it writes against it (#1418).
+   */
+  const manageOwnSubscriptions = {
+    action: Action.manage,
+    subject: ResourceType.WebhookSubscription,
+    conditions: { createdById: ACTING_USER_ID },
+  };
+
+  /**
+   * May create a subscription but reads no event, so a create is refused by
+   * the event-type check, not by the check on the row it writes (#1418).
+   */
+  const readsNoEvents = createPrismaAbility([manageOwnSubscriptions]) as AppAbility;
+
   /** Sets the abilities the service will read from `getCurrentAbilities()`. */
   const primeAbilities = (...abilities: AppAbility[]) => ability.getCurrentAbilities.mockReturnValue(abilities);
 
@@ -262,8 +278,12 @@ describe('WebhookSubscriptionService', () => {
     });
 
     it('rejects when the caller cannot read the subject (CASL-at-create)', async () => {
-      primeAbilities(denyAll);
-      await expect(service.create(baseDto())).rejects.toThrow(ForbiddenException);
+      primeAbilities(readsNoEvents);
+
+      const refusal = service.create(baseDto());
+
+      await expect(refusal).rejects.toThrow(ForbiddenException);
+      await expect(refusal).rejects.toThrow(/forbidden_subject_access/);
       expect(db.webhookSubscription.create).not.toHaveBeenCalled();
       expect(encryption.encrypt).not.toHaveBeenCalled();
     });
@@ -275,8 +295,49 @@ describe('WebhookSubscriptionService', () => {
     });
 
     it('requires every ability in the intersection to permit the subject', async () => {
-      primeAbilities(allowAll, denyAll);
-      await expect(service.create(baseDto())).rejects.toThrow(ForbiddenException);
+      primeAbilities(allowAll, readsNoEvents);
+
+      const refusal = service.create(baseDto());
+
+      await expect(refusal).rejects.toThrow(ForbiddenException);
+      await expect(refusal).rejects.toThrow(/forbidden_subject_access/);
+      expect(db.webhookSubscription.create).not.toHaveBeenCalled();
+    });
+
+    describe('the row it is about to write (#1418)', () => {
+      /** Reads every event and manages the webhook subscriptions `manage` matches, as a key's scope renders them. */
+      const managing = (manage: Record<string, unknown>) =>
+        createPrismaAbility([
+          { action: Action.read, subject: ResourceType.Event },
+          { action: Action.manage, subject: ResourceType.WebhookSubscription, conditions: manage },
+        ]) as AppAbility;
+
+      const owner = managing({ createdById: ACTING_USER_ID });
+
+      it('refuses a key whose manage scope is pinned to one subscription, since the new row matches no pin (#1418)', async () => {
+        primeAbilities(owner, managing({ AND: [{ createdById: ACTING_USER_ID }, { id: 'sub-1' }] }));
+
+        const refusal = service.create(baseDto());
+
+        await expect(refusal).rejects.toThrow(ForbiddenException);
+        await expect(refusal).rejects.toThrow(/forbidden_create/);
+        expect(db.webhookSubscription.create).not.toHaveBeenCalled();
+      });
+
+      it('creates for a key whose manage scope names no subscription (#1418)', async () => {
+        primeAbilities(owner, managing({ createdById: ACTING_USER_ID }));
+        db.webhookSubscription.create.mockResolvedValue(makeWebhookSub());
+
+        await expect(service.create(baseDto())).resolves.toBeDefined();
+        expect(db.webhookSubscription.create).toHaveBeenCalledTimes(1);
+      });
+
+      it("refuses an ability that manages only another user's subscriptions (#1418)", async () => {
+        primeAbilities(managing({ createdById: 'user-2' }));
+
+        await expect(service.create(baseDto())).rejects.toThrow(/forbidden_create/);
+        expect(db.webhookSubscription.create).not.toHaveBeenCalled();
+      });
     });
 
     it('rejects an event type that does not belong to the declared resource', async () => {
@@ -293,7 +354,10 @@ describe('WebhookSubscriptionService', () => {
     });
 
     it('checks the scoped instance against every ability at once, as dispatch does (#723)', async () => {
-      const readEvents = createPrismaAbility([{ action: Action.read, subject: ResourceType.Event }]) as AppAbility;
+      const readEvents = createPrismaAbility([
+        { action: Action.read, subject: ResourceType.Event },
+        manageOwnSubscriptions,
+      ]) as AppAbility;
       primeAbilities(allowAll, readEvents);
       db.webhookSubscription.create.mockResolvedValue(makeWebhookSub());
 
@@ -334,6 +398,7 @@ describe('WebhookSubscriptionService', () => {
       const eventsAndReadHousehold = createPrismaAbility([
         { action: Action.manage, subject: ResourceType.Event },
         { action: Action.read, subject: ResourceType.Household },
+        manageOwnSubscriptions,
       ]) as AppAbility;
       primeAbilities(eventsAndReadHousehold);
       db.household.count.mockResolvedValue(1);

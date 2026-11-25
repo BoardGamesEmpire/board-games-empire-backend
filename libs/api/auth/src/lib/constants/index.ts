@@ -60,7 +60,8 @@ export const DISPLAY_NAME_MAX_LENGTH = 64;
 
 /**
  * How recently a session must have signed in, in seconds, for better-auth's
- * fresh-session checks and for starting a link to a sign-in provider: one day
- * (`session.freshAge`, #913).
+ * fresh-session checks, for starting a link to a sign-in provider (#913), and
+ * for giving an API key a Critical permission (#1418): one day
+ * (`session.freshAge`).
  */
 export const SESSION_FRESH_AGE_SECONDS = 86_400;

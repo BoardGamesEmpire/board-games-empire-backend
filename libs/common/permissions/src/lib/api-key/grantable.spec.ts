@@ -10,7 +10,13 @@ import type {
   UserPermissionWithPermission,
   UserWithRoles,
 } from '../interfaces';
-import { acceptsPin, API_KEY_PINNABLE_TYPES, grantablePermissions, mayKeyHold } from './grantable';
+import {
+  acceptsPin,
+  API_KEY_MANAGE_PINNABLE_TYPES,
+  API_KEY_PINNABLE_TYPES,
+  grantablePermissions,
+  mayKeyHold,
+} from './grantable';
 
 // Which permissions an API key may hold: its owner holds it now, it renders in
 // at least one context where the owner holds it, and it is an allow (#1417).
@@ -48,6 +54,24 @@ describe('acceptsPin (#1417)', () => {
     });
 
     expect(acceptsPin(createWebhookSubscription)).toBe(false);
+  });
+
+  // manage covers create, and the plugin artifact upload checks only the type,
+  // so a pinned manage:plugin would let a key upload (#1418).
+  it('refuses a pin on manage:plugin, which covers the plugin artifact upload (#1418)', () => {
+    expect(acceptsPin({ action: Action.manage, subject: ResourceType.Plugin })).toBe(false);
+  });
+
+  it('accepts a pin on manage:webhook_subscription:own, whose create route checks the row (#1418)', () => {
+    expect(acceptsPin({ action: Action.manage, subject: ResourceType.WebhookSubscription })).toBe(true);
+  });
+
+  it('still accepts a pin on read:plugin (#1418)', () => {
+    expect(acceptsPin({ action: Action.read, subject: ResourceType.Plugin })).toBe(true);
+  });
+
+  it('pins manage to webhook subscriptions only (#1418)', () => {
+    expect([...API_KEY_MANAGE_PINNABLE_TYPES]).toEqual(['WebhookSubscription']);
   });
 });
 
@@ -172,33 +196,37 @@ describe('grantablePermissions and mayKeyHold (#1417)', () => {
     expect(grantablePermissions(owner)).toEqual([]);
   });
 
-  // An Admin-like owner holds `read:public_content` (subject 'all') through a
-  // server role; a direct permission never carries an 'all' permission (#1417).
-  it("offers a permission on 'all' held through a server role, not through a direct permission", () => {
+  // A permission on 'all' reaches every type, and a key scope pinned or not
+  // would carry that reach to routes no pin check guards, so a key never holds
+  // one (#1418).
+  it('leaves manage:all out of the grantable list and mayKeyHold (#1418)', () => {
+    const manageAll = catalogPermission('manage:all');
+    const serverOwner = makeOwner({ roles: [makeRole('Owner', [manageAll])] });
+
+    expect(grantablePermissions(serverOwner).map(({ slug }) => slug)).not.toContain('manage:all');
+    expect(mayKeyHold(serverOwner, manageAll.id)).toBe(false);
+  });
+
+  it('leaves read:public_content out of the grantable list and mayKeyHold (#1418)', () => {
     const readPublicContent = makePermission({
       id: 'perm-read-public-content',
       slug: 'read:public_content',
       action: Action.read,
       subject: 'all',
     });
-    const viaRole = makeOwner({ roles: [makeRole('Admin', [readPublicContent])] });
-    const viaGrant = makeOwner({ permissions: [makeGrant(readPublicContent)] });
+    const admin = makeOwner({ roles: [makeRole('Admin', [readPublicContent])] });
 
-    expect(grantablePermissions(viaRole)).toEqual([
-      { id: readPublicContent.id, slug: 'read:public_content', riskLevel: RiskLevel.Low, pinnable: false },
-    ]);
-    expect(mayKeyHold(viaRole, readPublicContent.id)).toBe(true);
-    expect(grantablePermissions(viaGrant)).toEqual([]);
-    expect(mayKeyHold(viaGrant, readPublicContent.id)).toBe(false);
+    expect(grantablePermissions(admin)).toEqual([]);
+    expect(mayKeyHold(admin, readPublicContent.id)).toBe(false);
   });
 
   // Risk adds friction at create and excludes nothing.
   it('offers a Critical permission with its riskLevel', () => {
-    const manageAll = catalogPermission('manage:all');
-    const serverOwner = makeOwner({ roles: [makeRole('Owner', [manageAll])] });
+    const manageSafeHttpPolicy = catalogPermission('manage:safe_http_policy');
+    const serverOwner = makeOwner({ roles: [makeRole('Owner', [manageSafeHttpPolicy])] });
 
     expect(grantablePermissions(serverOwner)).toEqual([
-      { id: manageAll.id, slug: 'manage:all', riskLevel: RiskLevel.Critical, pinnable: false },
+      { id: manageSafeHttpPolicy.id, slug: 'manage:safe_http_policy', riskLevel: RiskLevel.Critical, pinnable: false },
     ]);
   });
 

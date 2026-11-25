@@ -100,17 +100,25 @@ describe('GET /api/api-keys/grantable (#1417)', () => {
     expect(new Set(slugs).size).toBe(slugs.length);
   });
 
-  it("an admin's list holds read:public_content", async () => {
+  // A permission on `all` reaches every type, so a key never holds one (#1418).
+  it("an admin's list leaves out read:public_content, a permission on all (#1418)", async () => {
     const admin = await actors.admin();
 
-    expect(entry(await grantableFor(admin.headers), 'read:public_content')).toBeDefined();
+    expect(entry(await grantableFor(admin.headers), 'read:public_content')).toBeUndefined();
+  });
+
+  // The Owner role holds only manage:all, so its list has nothing to offer.
+  it("the owner's list leaves out manage:all, a permission on all (#1418)", async () => {
+    const owner = await actors.owner();
+
+    expect(entry(await grantableFor(owner.headers), 'manage:all')).toBeUndefined();
   });
 
   // A Critical permission is offered; it adds friction at create, never exclusion.
-  it("the owner's list holds manage:all with riskLevel Critical", async () => {
-    const owner = await actors.owner();
+  it("an admin's list holds manage:safe_http_policy with riskLevel Critical (#1418)", async () => {
+    const admin = await actors.admin();
 
-    expect(entry(await grantableFor(owner.headers), 'manage:all')).toEqual(
+    expect(entry(await grantableFor(admin.headers), 'manage:safe_http_policy')).toEqual(
       expect.objectContaining({ riskLevel: RiskLevel.Critical, pinnable: false }),
     );
   });

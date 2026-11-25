@@ -1,8 +1,9 @@
 import { ResourceType } from '@bge/database';
 import type { Actors } from '@bge/testing-e2e';
 import { createActors } from '@bge/testing-e2e';
+import { WebhookEventType } from '@bge/webhooks';
 import request from 'supertest';
-import type { Caller } from '../support/api-key';
+import type { ApiKeyScope, Caller } from '../support/api-key';
 import { mintApiKey } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import type { TestDatabase } from '../support/test-db';
@@ -21,7 +22,9 @@ import { listSubscriptionsEnvelope, subscriptionEnvelope } from './webhook-wire'
  * but manage only one could change any of them.
  *
  * The subscriptions are arranged directly: creating one checks event-type
- * grants, which are not under test.
+ * grants, which are not under test. The create cases give their keys the
+ * event-type grant, so the only thing they turn on is the key's `manage`
+ * scope (#1418).
  */
 describe('webhook subscription scope for API keys', () => {
   const baseUrl = requireBaseUrl(process.env);
@@ -46,6 +49,16 @@ describe('webhook subscription scope for API keys', () => {
 
   const moveSubscription = (caller: Caller, id: string, url: string) =>
     request(baseUrl).patch(`${SUBSCRIPTIONS_PATH}/${id}`).set(caller.headers).send({ url });
+
+  const createSubscription = (caller: Caller) =>
+    request(baseUrl)
+      .post(SUBSCRIPTIONS_PATH)
+      .set(caller.headers)
+      .send({
+        url: 'https://hooks.example.com/created',
+        resourceType: ResourceType.Event,
+        eventTypes: [WebhookEventType.EventCreated],
+      });
 
   const subscription = async (createdById: string, url: string) =>
     (
@@ -118,5 +131,52 @@ describe('webhook subscription scope for API keys', () => {
       'PATCH /api/webhooks/subscriptions/:id with the key',
     );
     expect(moved.url).toBe('https://hooks.example.com/moved');
+  });
+
+  describe('creating a subscription (#1418)', () => {
+    /** Lets a key receive the event type the create asks for, so the create turns on its `manage` scope alone. */
+    const readPublicEvents: ApiKeyScope = { slugs: ['read:event:public'], resourceType: ResourceType.Event };
+
+    it('refuses to create a subscription for a key whose manage scope is pinned to one subscription (#1418)', async () => {
+      const { owner, scoped } = await arrange();
+      const key = await mintApiKey(baseUrl, db.client, owner, [
+        readPublicEvents,
+        { slugs: ['read:webhook_subscription:own'], resourceType: ResourceType.WebhookSubscription },
+        {
+          slugs: ['manage:webhook_subscription:own'],
+          resourceType: ResourceType.WebhookSubscription,
+          resourceId: scoped,
+        },
+      ]);
+
+      // The pin names a row that exists, never the one a create would write.
+      const refused = await createSubscription(key).expect(403);
+      expect(refused.body.message).toBe("You don't have permission to create webhook subscriptions");
+
+      expect(await db.client.webhookSubscription.count({ where: { createdById: owner.user.id } })).toBe(2);
+    });
+
+    it('creates a subscription for a key whose manage scope names no subscription (#1418)', async () => {
+      const { owner } = await arrange();
+      const key = await mintApiKey(baseUrl, db.client, owner, [
+        readPublicEvents,
+        { slugs: ['manage:webhook_subscription:own'], resourceType: ResourceType.WebhookSubscription },
+      ]);
+
+      const created = subscriptionEnvelope(
+        await createSubscription(key).expect(201),
+        'POST /api/webhooks/subscriptions with an unpinned key',
+      );
+      expect(created.createdById).toBe(owner.user.id);
+    });
+
+    it("creates a subscription for its owner's session (#1418)", async () => {
+      const { owner } = await arrange();
+
+      subscriptionEnvelope(
+        await createSubscription(owner).expect(201),
+        'POST /api/webhooks/subscriptions as their owner',
+      );
+    });
   });
 });

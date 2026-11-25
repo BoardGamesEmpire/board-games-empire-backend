@@ -9,6 +9,7 @@ import {
   ACTOR_CLS_KEY,
   AuditContextService,
   CORRELATION_ID_CLS_KEY,
+  SESSION_SIGNED_IN_AT_CLS_KEY,
   SOURCE_CLS_KEY,
 } from './audit-context.service';
 
@@ -143,6 +144,26 @@ describe('AuditContextInternalService', () => {
       expect(observed.inherited).toBeUndefined();
       expect(observed.outerAfterNested).toBe(outerAbilities);
     });
+
+    it('does not carry an inherited sign-in time into a nested scope with a new actor (#1418)', () => {
+      const signedInAt = new Date('2026-11-01T00:00:00Z');
+
+      const nested = internal.runWith(
+        { actor: { kind: 'user', userId: 'u1' }, correlationId: 'c', source: 'http', sessionSignedInAt: signedInAt },
+        () => {
+          const inside = context.getSessionSignedInAt();
+          const inner = internal.runWith(
+            { actor: { kind: 'user', userId: 'u1' }, correlationId: 'c2', source: 'http' },
+            () => cls.get(SESSION_SIGNED_IN_AT_CLS_KEY),
+          );
+
+          return { inside, inner };
+        },
+      );
+
+      expect(nested.inside).toEqual(signedInAt);
+      expect(nested.inner).toBeUndefined();
+    });
   });
 
   describe('populate', () => {
@@ -179,6 +200,28 @@ describe('AuditContextInternalService', () => {
         expect(cls.get(ACTOR_CLS_KEY)).toEqual(init.actor);
         expect(cls.get(CORRELATION_ID_CLS_KEY)).toBe('corr-x');
         expect(cls.get(SOURCE_CLS_KEY)).toBe('http');
+      });
+    });
+
+    it('records the sign-in time of a signed-in user, and clears it on a later populate without one (#1418)', async () => {
+      const signedInAt = new Date('2026-11-01T00:00:00Z');
+
+      await cls.run(() => {
+        internal.populate({
+          actor: { kind: 'user', userId: 'u1' },
+          correlationId: 'c',
+          source: 'http',
+          sessionSignedInAt: signedInAt,
+        });
+        expect(cls.get(SESSION_SIGNED_IN_AT_CLS_KEY)).toEqual(signedInAt);
+        expect(context.getSessionSignedInAt()).toEqual(signedInAt);
+
+        internal.populate({
+          actor: { kind: 'apiKey', apiKeyId: 'k1', userId: 'u1' },
+          correlationId: 'c',
+          source: 'http',
+        });
+        expect(context.getSessionSignedInAt()).toBeNull();
       });
     });
   });

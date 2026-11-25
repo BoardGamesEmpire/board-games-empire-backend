@@ -14,7 +14,7 @@ import { createActors } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import type { Caller } from '../support/api-key';
-import { mintApiKey } from '../support/api-key';
+import { mintApiKey, mintApiKeyWithArrangedScopes } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import type { TestDatabase } from '../support/test-db';
 import { createTestDatabase } from '../support/test-db';
@@ -255,8 +255,13 @@ describe('event write authorization', () => {
   // any update permission on Event, so a key scoped to only one of those,
   // whose owner hosts the event, edited the whole event (#1295).
   describe('editing an event through an API key (#1295)', () => {
+    // Arranged: the route refuses an Event pin (#1418).
     const keyFor = (owner: SessionActor, eventId: string, slug: string) =>
-      mintApiKey(baseUrl, db.client, owner, { slugs: [slug], resourceType: ResourceType.Event, resourceId: eventId });
+      mintApiKeyWithArrangedScopes(baseUrl, db.client, owner, {
+        slugs: [slug],
+        resourceType: ResourceType.Event,
+        resourceId: eventId,
+      });
 
     const storedTitle = async (eventId: string) =>
       (await db.client.event.findUniqueOrThrow({ where: { id: eventId }, select: { title: true } })).title;

@@ -6,6 +6,7 @@ import { registerShutdownHandlers } from '@bge/otel';
 import { bootstrapLogger, otel } from './app/lib/logger';
 
 // Imports below this line are instrumented by the OTel auto-instrumentations.
+import { API_KEY_HEADER } from '@bge/actor-context-transport';
 import {
   AUTH_INSTANCE,
   AUTH_REQUEST_HANDLER,
@@ -193,7 +194,8 @@ async function bootstrap() {
       .addBearerAuth()
       .addApiKey({
         type: 'apiKey',
-        name: 'x-access-token',
+        // The header HttpActorMiddleware reads a key from (#1418).
+        name: API_KEY_HEADER,
         in: 'header',
       })
       .build();

@@ -29,7 +29,7 @@ const serviceWith = (advanced: { disableCSRFCheck?: boolean; disableOriginCheck:
   );
 
 /** better-auth's API stubbed, for the methods that only hand a request on to it. */
-const serviceOver = (api: Partial<Record<'getSession' | 'verifyApiKey', jest.Mock>>) =>
+const serviceOver = (api: Partial<Record<'createApiKey' | 'getSession' | 'verifyApiKey', jest.Mock>>) =>
   new AuthService({ api } as unknown as ReturnType<typeof authFactory>);
 
 describe('AuthService', () => {
@@ -210,6 +210,61 @@ describe('AuthService', () => {
       const verifyApiKey = jest.fn().mockResolvedValue(result);
 
       await expect(serviceOver({ verifyApiKey }).verifyApiKey('the-key')).resolves.toBeNull();
+    });
+  });
+
+  describe('createApiKey', () => {
+    const EXPIRES_AT = new Date('2027-02-21T00:00:00.000Z');
+
+    /** What better-auth answers a server-side create with: the stored row, plus the secret once. */
+    const created = (overrides: Record<string, unknown> = {}) => ({
+      id: 'key-1',
+      key: 'the-secret',
+      start: 'the-se',
+      name: 'CI',
+      referenceId: 'user-1',
+      enabled: true,
+      expiresAt: EXPIRES_AT,
+      createdAt: new Date('2026-11-23T00:00:00.000Z'),
+      updatedAt: new Date('2026-11-23T00:00:00.000Z'),
+      ...overrides,
+    });
+
+    // With no headers, better-auth takes the owner from `body.userId`; with
+    // headers it would take the signed-in user's session instead (#1418).
+    it('creates the key server-side: the owner in the body, no headers (#1418)', async () => {
+      const createApiKey = jest.fn().mockResolvedValue(created());
+
+      await serviceOver({ createApiKey }).createApiKey({ userId: 'user-1', name: 'CI', expiresInSeconds: 86_400 });
+
+      expect(createApiKey).toHaveBeenCalledWith({ body: { userId: 'user-1', name: 'CI', expiresIn: 86_400 } });
+      expect(createApiKey.mock.calls[0][0]).not.toHaveProperty('headers');
+    });
+
+    it('answers the id, the secret once, its start and its expiry (#1418)', async () => {
+      const createApiKey = jest.fn().mockResolvedValue(created());
+
+      await expect(
+        serviceOver({ createApiKey }).createApiKey({ userId: 'user-1', name: 'CI', expiresInSeconds: 86_400 }),
+      ).resolves.toEqual({ id: 'key-1', key: 'the-secret', start: 'the-se', expiresAt: EXPIRES_AT });
+    });
+
+    it('answers a null start as null (#1418)', async () => {
+      const createApiKey = jest.fn().mockResolvedValue(created({ start: null }));
+
+      await expect(
+        serviceOver({ createApiKey }).createApiKey({ userId: 'user-1', name: 'CI', expiresInSeconds: 86_400 }),
+      ).resolves.toMatchObject({ start: null });
+    });
+
+    // Every key is given an expiry, so a key better-auth stored without one
+    // would never expire: refused loudly rather than answered (#1418).
+    it('throws when better-auth stored the key without an expiry (#1418)', async () => {
+      const createApiKey = jest.fn().mockResolvedValue(created({ expiresAt: null }));
+
+      await expect(
+        serviceOver({ createApiKey }).createApiKey({ userId: 'user-1', name: 'CI', expiresInSeconds: 86_400 }),
+      ).rejects.toThrow('key-1');
     });
   });
 

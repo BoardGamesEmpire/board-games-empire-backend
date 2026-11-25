@@ -7,7 +7,7 @@ import { WebhookEventType } from '@bge/webhooks';
 import request from 'supertest';
 import { createMemberClient } from '../household/household-request';
 import type { ApiKeyScope, Caller } from '../support/api-key';
-import { mintApiKey } from '../support/api-key';
+import { mintApiKey, mintApiKeyWithArrangedScopes } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import { isolateQueue } from '../support/queue-isolation';
 import { waitForStableJobCount } from '../support/queues';
@@ -201,7 +201,7 @@ describe('webhook subscriptions made through an API key (#723)', () => {
       const reached = await household();
       const unreached = await household();
 
-      const key = await mintApiKey(
+      const key = await mintApiKeyWithArrangedScopes(
         baseUrl,
         db.client,
         keyOwner,

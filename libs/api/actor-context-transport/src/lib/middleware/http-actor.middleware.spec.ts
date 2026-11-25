@@ -163,6 +163,55 @@ describe('HttpActorMiddleware', () => {
         userId: 'user-bearer',
       });
     });
+
+    describe('the session sign-in time (#1418)', () => {
+      const createdAt = new Date('2026-11-01T00:00:00Z');
+
+      const sessionCreatedAt = (value: unknown, user: Record<string, unknown> = { id: 'user-1', isAnonymous: false }) =>
+        ({
+          user,
+          session: { id: 'sess-1', userId: 'user-1', createdAt: value },
+        }) as unknown as Awaited<ReturnType<AuthService['getSessionFromHeaders']>>;
+
+      it('records the session’s createdAt for a signed-in user (#1418)', async () => {
+        authMock.getSessionFromHeaders.mockResolvedValue(sessionCreatedAt(createdAt));
+        const populate = jest.spyOn(module.get(AuditContextInternalService), 'populate');
+
+        await run(buildRequest({ cookie: 'bge_auth_session_token=abc123' }));
+
+        expect(populate).toHaveBeenCalledWith(expect.objectContaining({ sessionSignedInAt: createdAt }));
+      });
+
+      it('reads an ISO-string createdAt as a date (#1418)', async () => {
+        authMock.getSessionFromHeaders.mockResolvedValue(sessionCreatedAt(createdAt.toISOString()));
+        const populate = jest.spyOn(module.get(AuditContextInternalService), 'populate');
+
+        await run(buildRequest({ cookie: 'bge_auth_session_token=abc123' }));
+
+        expect(populate).toHaveBeenCalledWith(expect.objectContaining({ sessionSignedInAt: createdAt }));
+      });
+
+      it('records none for an anonymous user (#1418)', async () => {
+        authMock.getSessionFromHeaders.mockResolvedValue(
+          sessionCreatedAt(createdAt, { id: 'anon-1', isAnonymous: true }),
+        );
+        const populate = jest.spyOn(module.get(AuditContextInternalService), 'populate');
+
+        await run(buildRequest({ cookie: 'bge_auth_session_token=abc123' }));
+
+        expect(populate.mock.calls[0]?.[0].sessionSignedInAt).toBeUndefined();
+      });
+
+      it('records none when the session carries no usable createdAt (#1418)', async () => {
+        authMock.getSessionFromHeaders.mockResolvedValue(sessionCreatedAt(undefined));
+        const populate = jest.spyOn(module.get(AuditContextInternalService), 'populate');
+
+        const captured = await run(buildRequest({ cookie: 'bge_auth_session_token=abc123' }));
+
+        expect(captured.actor).toEqual({ kind: 'user', userId: 'user-1' });
+        expect(populate.mock.calls[0]?.[0].sessionSignedInAt).toBeUndefined();
+      });
+    });
   });
 
   describe('impersonated sessions', () => {
@@ -251,6 +300,16 @@ describe('HttpActorMiddleware', () => {
       });
       expect(captured.nextArg).toBeUndefined();
       expect(authMock.verifyApiKey).toHaveBeenCalledWith('secret');
+      expect(authMock.getSessionFromHeaders).not.toHaveBeenCalled();
+    });
+
+    it('records no sign-in time for an API key (#1418)', async () => {
+      authMock.verifyApiKey.mockResolvedValue({ id: 'key-1', userId: 'user-9' });
+      const populate = jest.spyOn(module.get(AuditContextInternalService), 'populate');
+
+      await run(buildRequest({ [API_KEY_HEADER]: 'secret' }));
+
+      expect(populate.mock.calls[0]?.[0].sessionSignedInAt).toBeUndefined();
       expect(authMock.getSessionFromHeaders).not.toHaveBeenCalled();
     });
 

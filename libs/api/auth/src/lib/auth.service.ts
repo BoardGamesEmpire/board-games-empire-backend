@@ -20,6 +20,30 @@ export interface ResolvedApiKey {
   readonly userId: string;
 }
 
+/** What {@link AuthService.createApiKey} creates a key with. */
+export interface CreateApiKeyInput {
+  /** How long the key lasts, in seconds, as better-auth takes it. */
+  readonly expiresInSeconds: number;
+
+  readonly name: string;
+
+  /** The key's owner. */
+  readonly userId: string;
+}
+
+/**
+ * A key {@link AuthService.createApiKey} created. `key` is the secret, which is
+ * stored only as a hash: this is the one time it can be read.
+ */
+export interface CreatedApiKey {
+  readonly expiresAt: Date;
+  readonly id: string;
+  readonly key: string;
+
+  /** The secret's first characters, which better-auth keeps so a user can tell keys apart. */
+  readonly start: string | null;
+}
+
 /**
  * A user as better-auth returns one with a session: its own fields, plus
  * those its plugins add, such as the admin plugin's `banned` and
@@ -150,6 +174,37 @@ export class AuthService {
       id: result.key.id,
       userId: result.key.referenceId,
     } satisfies ResolvedApiKey;
+  }
+
+  /**
+   * Creates an API key for `userId` through better-auth's `apiKey` plugin,
+   * which generates the secret and stores its hash (#1418).
+   *
+   * The call is server-side: it passes no headers, so better-auth takes the
+   * owner from `body.userId` rather than from a session, and the API key
+   * route block, which closes that route to HTTP clients, lets it through.
+   * `ApiKeyService` checks who may create the key.
+   *
+   * Every key is created with an expiry, so a key better-auth stored without
+   * one would never expire. That would be a fault in better-auth, not in the
+   * request, so it throws instead of answering the key.
+   */
+  async createApiKey({ userId, name, expiresInSeconds }: CreateApiKeyInput): Promise<CreatedApiKey> {
+    const created = await this.auth.api.createApiKey({ body: { userId, name, expiresIn: expiresInSeconds } });
+
+    // Unreachable with the current plugin options: `expiresIn` is always sent
+    // and `defaultExpiresIn` is null. If it ever fired, the key row better-auth
+    // wrote would stay behind, since `ApiKeyService` gets no id to delete (#1418).
+    if (created.expiresAt === null) {
+      throw new Error(`better-auth stored API key ${created.id} without an expiry, though one was given (#1418)`);
+    }
+
+    return {
+      expiresAt: created.expiresAt,
+      id: created.id,
+      key: created.key,
+      start: created.start,
+    } satisfies CreatedApiKey;
   }
 
   /**

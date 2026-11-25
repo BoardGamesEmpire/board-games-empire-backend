@@ -102,6 +102,7 @@ export function createMockDatabaseService(): MockDatabaseService {
     // --- Model delegates ---
     account: mockDelegate(),
     apikey: mockDelegate(),
+    apiKeyScope: mockDelegate(),
     auditLog: mockDelegate(),
     category: mockDelegate(),
     categoryGatewayLink: mockDelegate(),
