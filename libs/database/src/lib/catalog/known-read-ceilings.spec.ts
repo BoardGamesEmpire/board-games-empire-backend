@@ -224,8 +224,16 @@ const KNOWN_READ_CEILINGS: PinnedReadCeilings = {
     HouseholdAdmin: { 'read:household_ban': 'binds householdId, user.id' },
   },
   Invite: {
-    HouseholdOwner: { 'read:household_invite': 'binds householdId, user.id' },
-    HouseholdAdmin: { 'read:household_invite': 'binds householdId, user.id' },
+    HouseholdOwner: {
+      'read:household_invite': 'binds householdId, user.id',
+      'read:event_invite:household': 'binds householdId',
+    },
+    HouseholdAdmin: {
+      'read:household_invite': 'binds householdId, user.id',
+      'read:event_invite:household': 'binds householdId',
+    },
+    EventHost: { 'read:event_invite': 'binds eventId, user.id' },
+    EventCoHost: { 'read:event_invite': 'binds eventId, user.id' },
   },
   Event: {
     Admin: { 'read:event': 'every row' },
@@ -235,6 +243,7 @@ const KNOWN_READ_CEILINGS: PinnedReadCeilings = {
       'read:event:friends-of-friends': 'binds user.id',
       'read:event:extended-network': 'binds user.id',
       'read:event:public': 'fixed filter',
+      'read:event:invitee': 'binds user.id',
     },
     HouseholdOwner: { 'read:event:participant:household': 'binds householdId' },
     HouseholdAdmin: { 'read:event:participant:household': 'binds householdId' },
@@ -332,6 +341,7 @@ const KNOWN_READ_CEILINGS: PinnedReadCeilings = {
       'read:event_occurrence:friends-of-friends': 'binds user.id',
       'read:event_occurrence:extended-network': 'binds user.id',
       'read:event_occurrence:public': 'fixed filter',
+      'read:event_occurrence:invitee': 'binds user.id',
     },
     HouseholdOwner: { 'read:event_occurrence:household': 'binds householdId' },
     HouseholdAdmin: { 'read:event_occurrence:household': 'binds householdId' },
@@ -351,6 +361,7 @@ const KNOWN_READ_CEILINGS: PinnedReadCeilings = {
       'read:event_policy:friends-of-friends': 'binds user.id',
       'read:event_policy:extended-network': 'binds user.id',
       'read:event_policy:public': 'fixed filter',
+      'read:event_policy:invitee': 'binds user.id',
     },
     HouseholdOwner: { 'read:event_policy:household': 'binds householdId' },
     HouseholdAdmin: { 'read:event_policy:household': 'binds householdId' },

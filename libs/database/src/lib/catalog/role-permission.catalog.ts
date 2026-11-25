@@ -147,6 +147,10 @@ const HOUSEHOLD_OWNER: readonly PermissionSlug[] = [
   'read:event_game_nomination:household',
   'read:event_game_vote:household',
   'read:event_game:household',
+  // The household roles that invite to the household's events list those
+  // invites and revoke one someone else sent, attending or not (#742).
+  'read:event_invite:household',
+  'update:event_invite:revoke:household',
   'read:event_occurrence:household',
   'read:event_policy:household',
   // The Event row itself. Without it an owner updates a household event and
@@ -243,6 +247,11 @@ const EVENT_HOST: readonly PermissionSlug[] = [
   // Policy
   'read:event_policy',
   'update:event_policy',
+
+  // Invites: the host and co-host list the event's invites, and revoke one
+  // someone else sent (#742).
+  'read:event_invite',
+  'update:event_invite:revoke',
 ];
 
 const EVENT_HOST_ONLY: readonly PermissionSlug[] = ['delete:event'];
@@ -346,6 +355,11 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     'read:event:public',
     'read:event_occurrence:public',
     'read:event_policy:public',
+    // An event the user holds an open invite to, with its dates and policy,
+    // and none of its attendees (#742).
+    'read:event:invitee',
+    'read:event_occurrence:invitee',
+    'read:event_policy:invitee',
 
     // feedback
     'create:feedback_report',

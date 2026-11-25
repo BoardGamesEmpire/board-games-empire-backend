@@ -130,6 +130,48 @@ const attendingRoleInEvent = {
   role: { is: { role: { is: { name: { in: ['EventParticipant', 'EventGuest', 'EventSpectator'] } } } } },
 } satisfies Prisma.EventAttendeeWhereInput;
 
+// An invite to the event the grant was rendered for, an event the acting user
+// hosts or co-hosts: whose invites the host's list and revoke reach (#742).
+// The role clause is read off the event's roster, as `create:event_invite`'s
+// is, so a host demoted while a request of theirs is in flight is refused.
+// One fragment keeps the list and the revoke on one audience. Typed and
+// module-private for the reasons `acceptedFriendOfActingUser` gives.
+const inviteToEventActingUserHosts = {
+  eventId: '{{ eventId }}',
+  event: {
+    is: {
+      attendees: {
+        some: {
+          userId: '{{ user.id }}',
+          role: { is: { role: { is: { name: { in: ['EventHost', 'EventCoHost'] } } } } },
+        },
+      },
+    },
+  },
+} satisfies Prisma.InviteWhereInput;
+
+// An invite to one of the household's events, bound as
+// `create:event_invite:household` is (#742). The `:household` variants follow
+// the actor's household role as their ability was built and read no household
+// roster, as every `:household` event grant (`create:event_invite:household`,
+// `manage:event_attendee:household`) does, so "asked again under the event's
+// lock" never means the household role is checked again. They are rated as
+// `read:event_invite` and `update:event_invite:revoke` are. Typed and
+// module-private for the reasons `acceptedFriendOfActingUser` gives.
+const inviteToHouseholdEvent = {
+  event: { is: { householdId: '{{ householdId }}' } },
+} satisfies Prisma.InviteWhereInput;
+
+// An event the acting user holds an open invite to: `Pending`, and not
+// withheld from them (#742). An invite that is accepted, declined, withdrawn,
+// revoked or swept as expired no longer matches. An expired invite the hourly
+// sweep hasn't reached yet still reads `Pending`, so it opens the event for up
+// to an hour past its expiry. Typed and module-private for the reasons
+// `acceptedFriendOfActingUser` gives.
+const openInviteToActingUser = {
+  invites: { some: { inviteeId: '{{ user.id }}', status: 'Pending', withheld: false } },
+} satisfies Prisma.EventWhereInput;
+
 // The Event columns `PATCH /events/:id` writes, which the edit grants are
 // bound to (#795). Leaving out the cancel columns and `archivedAt` is what
 // keeps those grants from passing the cancel and archive routes, whose checks
@@ -998,6 +1040,16 @@ export const PERMISSION_CATALOG = [
     riskLevel: RiskLevel.Medium,
     reason: 'View the occurrences of public events',
   }),
+  // Bound and rated as `read:event:invitee` is. Without it an invitee reads
+  // an event with no dates (#742).
+  permission({
+    action: Action.read,
+    subject: ResourceType.EventOccurrence,
+    conditions: { event: { is: openInviteToActingUser } },
+    slug: 'read:event_occurrence:invitee',
+    riskLevel: RiskLevel.Low,
+    reason: 'View the occurrences of an event you are invited to',
+  }),
   permission({
     action: Action.create,
     subject: ResourceType.EventOccurrence,
@@ -1434,6 +1486,15 @@ export const PERMISSION_CATALOG = [
     slug: 'read:event_policy:public',
     riskLevel: RiskLevel.Medium,
     reason: 'View the policy configuration of public events',
+  }),
+  // Bound and rated as `read:event:invitee` is (#742).
+  permission({
+    action: Action.read,
+    subject: ResourceType.EventPolicy,
+    conditions: { event: { is: openInviteToActingUser } },
+    slug: 'read:event_policy:invitee',
+    riskLevel: RiskLevel.Low,
+    reason: 'View the policy configuration of an event you are invited to',
   }),
   permission({
     action: Action.update,
@@ -2391,6 +2452,91 @@ export const PERMISSION_CATALOG = [
     slug: 'create:event_invite:household',
     riskLevel: RiskLevel.Medium,
     reason: "Invite to your household's events",
+  }),
+  // The event's invites, listed for its host and co-host (#742). Whoever
+  // invites, an `EventParticipant` included, finds their own invites at
+  // `GET /invites/sent`, which reads them as their inviter rather than through
+  // this, and an invitee reads theirs in their inbox. Without a `read` grant
+  // the list's ceiling is empty for everyone below staff, as the household
+  // invite list's would be (#162). `Low`, as `read:household_invite` is.
+  permission({
+    action: Action.read,
+    subject: ResourceType.Invite,
+    conditions: inviteToEventActingUserHosts,
+    slug: 'read:event_invite',
+    riskLevel: RiskLevel.Low,
+    reason: 'View the invites to an event you host or co-host',
+  }),
+  // The household variant, held by the household roles that hold
+  // `create:event_invite:household`: a household's owners and admins list the
+  // invites to its events whether or not they attend them, as they edit and
+  // cancel those events (#168, #742).
+  permission({
+    action: Action.read,
+    subject: ResourceType.Invite,
+    conditions: inviteToHouseholdEvent,
+    slug: 'read:event_invite:household',
+    riskLevel: RiskLevel.Low,
+    reason: "View the invites to your household's events",
+  }),
+  // Revoking cancels an invite someone else sent to the event (#742). The
+  // audience is the list's, and the revoke is asked of an instance carrying
+  // the event's live roster with its role names (`inviteToEventActingUserHosts`
+  // says why), so a host or co-host demoted or removed before the check is
+  // refused. A type-only check passes any event's host, and the service asks
+  // again about THIS event's roster under the event's lock, as the household
+  // revoke does.
+  //
+  // An inviter takes their own invite back by withdrawing it, which needs no
+  // grant. The invites lib refuses a revoke by the invite's own inviter, so
+  // holding this never lets an inviter revoke rather than withdraw.
+  //
+  // Bound to `status`, the one column a revoke means to change, so a later
+  // check for editing an invite's role or message does not pass on it.
+  // `Medium`, as `update:household_invite:revoke` is.
+  permission({
+    action: Action.update,
+    subject: ResourceType.Invite,
+    fields: ['status'],
+    conditions: inviteToEventActingUserHosts,
+    slug: 'update:event_invite:revoke',
+    riskLevel: RiskLevel.Medium,
+    reason: 'Revoke an invite someone else sent to an event you host or co-host',
+  }),
+  // The household variant, held as `read:event_invite:household` is (#742).
+  // It follows the actor's household role as their ability was built and reads
+  // no household roster, so the lock's second ask does not re-check that role.
+  // It is rated as `update:event_invite:revoke` is.
+  permission({
+    action: Action.update,
+    subject: ResourceType.Invite,
+    fields: ['status'],
+    conditions: inviteToHouseholdEvent,
+    slug: 'update:event_invite:revoke:household',
+    riskLevel: RiskLevel.Medium,
+    reason: "Revoke an invite someone else sent to your household's events",
+  }),
+  // An invitee reads the event they are invited to, so the client shows the
+  // invite on its own event screen, with the event's dates and policy through
+  // `read:event_occurrence:invitee` and `read:event_policy:invitee` (#742).
+  // Every signed-in user holds it, conditioned on an open invite to them.
+  //
+  // It shows no attendees. The event read filters its attendee embed through
+  // the reader's attendee read (`getEventById` in
+  // `libs/api/event/src/lib/event.service.ts`), and an invitee holds none, as
+  // a public reader doesn't (#495). They appear, and see who else attends,
+  // once they accept.
+  //
+  // An expired invite the hourly sweep hasn't reached yet still reads as
+  // open, so the event stays readable for up to an hour past the invite's
+  // expiry. `Low`: it shows the invitee only the event they are invited to.
+  permission({
+    action: Action.read,
+    subject: ResourceType.Event,
+    conditions: openInviteToActingUser,
+    slug: 'read:event:invitee',
+    riskLevel: RiskLevel.Low,
+    reason: 'View an event you are invited to',
   }),
   permission({
     action: Action.manage,

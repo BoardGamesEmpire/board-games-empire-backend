@@ -519,6 +519,33 @@ describe('the shipped catalogs', () => {
       expect(ROLE_PERMISSION_CATALOG[SystemRole.AnonymousUser]).not.toContain(slug);
     });
 
+    // An invitee reads the event they are invited to, with its dates and its
+    // policy, so the client shows the invite on its own event screen (#742).
+    // Open means `Pending` and not withheld: an accepted invitee reads the
+    // event as an attendee, and a withheld invite isn't the invitee's to see.
+    // Pinned exactly, as the public reads are: a lost clause hands an event to
+    // everyone ever invited to it.
+    const openInviteOfActingUser = {
+      invites: { some: { inviteeId: '{{ user.id }}', status: 'Pending', withheld: false } },
+    };
+
+    it.each([
+      ['read:event:invitee', openInviteOfActingUser],
+      ['read:event_occurrence:invitee', { event: { is: openInviteOfActingUser } }],
+      ['read:event_policy:invitee', { event: { is: openInviteOfActingUser } }],
+    ])(
+      'let a signed-in user, and no anonymous user, read through %s while their invite is open (#742)',
+      (slug, conditions) => {
+        const entry = PERMISSION_CATALOG.find((candidate) => candidate.slug === slug);
+
+        expect(entry?.action).toBe(Action.read);
+        expect(entry?.conditions).toStrictEqual(conditions);
+        expect(entry?.riskLevel).toBe(RiskLevel.Low);
+        expect(ROLE_PERMISSION_CATALOG[SystemRole.User]).toContain(slug);
+        expect(ROLE_PERMISSION_CATALOG[SystemRole.AnonymousUser]).not.toContain(slug);
+      },
+    );
+
     // The ladder's order is written in the rules, not in the enum, which
     // Prisma declares alphabetically. So a rung added to `Reach` fails here
     // until someone decides whether it admits a friend.
@@ -844,6 +871,48 @@ describe('the shipped catalogs', () => {
       const coHost = ROLE_PERMISSION_CATALOG[SystemRole.EventCoHost];
 
       expect(host.filter((slug) => !coHost.includes(slug))).toEqual(['delete:event']);
+    });
+
+    // Who lists and revokes an event's invites (#742): the host and co-host
+    // through the grants bound to the event, and through the household
+    // variants the household roles that invite to the household's events.
+    // Revoking rates `Medium`, as the household revoke does.
+    const holdersOf = (slug: string) =>
+      Object.values(SystemRole)
+        .filter((role) => ROLE_PERMISSION_CATALOG[role].some((held) => held === slug))
+        .sort();
+    const entryOf = (slug: string) => PERMISSION_CATALOG.find((entry) => entry.slug === slug);
+
+    it.each([
+      ['read:event_invite', RiskLevel.Low],
+      ['update:event_invite:revoke', RiskLevel.Medium],
+    ])("give %s to the event's host and co-host alone (#742)", (slug, riskLevel) => {
+      expect(entryOf(slug)?.riskLevel).toBe(riskLevel);
+      expect(holdersOf(slug)).toEqual([SystemRole.EventCoHost, SystemRole.EventHost]);
+    });
+
+    it.each([
+      ['read:event_invite:household', RiskLevel.Low],
+      ['update:event_invite:revoke:household', RiskLevel.Medium],
+    ])("give %s to the household roles that invite to the household's events (#742)", (slug, riskLevel) => {
+      expect(entryOf(slug)?.riskLevel).toBe(riskLevel);
+      expect(holdersOf(slug)).toEqual(holdersOf('create:event_invite:household'));
+      expect(holdersOf(slug)).toEqual([SystemRole.HouseholdAdmin, SystemRole.HouseholdOwner]);
+    });
+
+    // A revoke writes the status alone, and whoever may list an event's
+    // invites may revoke them: the audience is the list's (#742).
+    it.each([
+      ['update:event_invite:revoke', 'read:event_invite'],
+      ['update:event_invite:revoke:household', 'read:event_invite:household'],
+    ])('bind %s to the status, for the audience of %s (#742)', (revoke, read) => {
+      expect(entryOf(revoke)).toMatchObject({
+        action: Action.update,
+        subject: ResourceType.Invite,
+        fields: ['status'],
+      });
+      expect(entryOf(revoke)?.conditions).toStrictEqual(entryOf(read)?.conditions);
+      expect(entryOf(read)).toMatchObject({ action: Action.read, subject: ResourceType.Invite });
     });
 
     // The direct add is a host-level write under every addition mode, so a
