@@ -1,4 +1,5 @@
 import type { InviteType, Prisma } from '@bge/database';
+import type { ContextualInviteType } from '../constants/invite.constants';
 import type {
   InviteAcceptedEvent,
   InviteApprovedEvent,
@@ -110,9 +111,6 @@ export interface WithdrawInviteParams {
  * neither; that variant arrives with the first route that needs it.
  */
 export type InviteContextScope = { readonly householdId: string } | { readonly eventId: string };
-
-/** The invite types whose rows name a context. */
-export type ContextualInviteType = typeof InviteType.Household | typeof InviteType.Event;
 
 /** The context an invite of `Type` belongs to, as the scope a context transition binds to. */
 export type InviteScopeOf<Type extends ContextualInviteType> = Type extends typeof InviteType.Household

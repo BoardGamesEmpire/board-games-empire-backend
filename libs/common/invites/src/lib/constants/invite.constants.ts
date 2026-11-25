@@ -1,4 +1,4 @@
-import { InviteStatus } from '@bge/database';
+import { InviteStatus, InviteType } from '@bge/database';
 
 /**
  * The statuses an invite can still move out of. Everything else is terminal:
@@ -19,6 +19,25 @@ import { InviteStatus } from '@bge/database';
 export const OUTSTANDING_INVITE_STATUSES = [InviteStatus.AwaitingApproval, InviteStatus.Pending] as const;
 
 export type OutstandingInviteStatus = (typeof OUTSTANDING_INVITE_STATUSES)[number];
+
+/**
+ * The invite types whose rows name a context, and so the kinds a party route
+ * serves and its `?type=` takes (#742). A `System` or `Campaign` invite names
+ * neither and has no party route. The one list: `ContextualInviteType` derives
+ * from it, and every check that a row is one of these kinds goes through
+ * {@link isContextualInviteType}.
+ */
+export const CONTEXTUAL_INVITE_TYPES = [InviteType.Household, InviteType.Event] as const;
+
+/** The invite types whose rows name a context. */
+export type ContextualInviteType = (typeof CONTEXTUAL_INVITE_TYPES)[number];
+
+/** Whether an invite of `type` names a context, so a party route serves it (#742). */
+export function isContextualInviteType(type: InviteType): type is ContextualInviteType {
+  const contextual: readonly InviteType[] = CONTEXTUAL_INVITE_TYPES;
+
+  return contextual.includes(type);
+}
 
 /** How long an invite stays open when its creator names no `expiresAt`. */
 export const DEFAULT_INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1_000;
