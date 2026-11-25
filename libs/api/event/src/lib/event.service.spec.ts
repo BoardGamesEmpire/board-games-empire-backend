@@ -17,6 +17,8 @@ import {
 } from '@bge/database';
 import { uniqueViolationWithoutMeta } from '@bge/database/testing';
 import { t } from '@bge/i18n';
+import type { OutstandingInviteRevocation } from '@bge/invites';
+import { InviteService } from '@bge/invites';
 import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
 import { DefaultPaginationQueryDto } from '@bge/shared';
 import type { MockAbilityService, MockDatabaseService } from '@bge/testing';
@@ -101,6 +103,7 @@ describe('EventService', () => {
   let abilityService: MockAbilityService;
   let permissions: jest.Mocked<Pick<PermissionsService, 'invalidateUsers'>>;
   let emitter: { emit: jest.Mock };
+  let invites: jest.Mocked<Pick<InviteService, 'revokeOutstandingWithin' | 'emit'>>;
   let compose: jest.SpyInstance;
 
   beforeEach(async () => {
@@ -108,6 +111,10 @@ describe('EventService', () => {
     abilityService.getCurrentResourceConditions.mockReturnValue([COND]);
     permissions = { invalidateUsers: jest.fn().mockResolvedValue(undefined) };
     emitter = { emit: jest.fn() };
+    invites = {
+      revokeOutstandingWithin: jest.fn().mockResolvedValue({ count: 0, events: [] }),
+      emit: jest.fn(),
+    };
 
     const ctx = await createTestingModuleWithDb({
       providers: [
@@ -118,6 +125,7 @@ describe('EventService', () => {
         { provide: EventEmitter2, useValue: emitter },
         { provide: AbilityService, useValue: abilityService },
         { provide: PermissionsService, useValue: permissions },
+        { provide: InviteService, useValue: invites },
       ],
     });
 
@@ -1200,6 +1208,34 @@ describe('EventService', () => {
         occurrenceId: 'event-1',
         data: { eventId: 'event-1', householdId: null },
       });
+    });
+
+    // An open invite to a deleted event would admit its invitee to nothing, so
+    // the delete revokes them in its own transaction, after the event's lock:
+    // the lock order is the event's row, then invites. The invitees hear of it
+    // only once the delete has committed (#742).
+    it('deleteEvent revokes outstanding invites and emits after commit (#742)', async () => {
+      const revoked = [{ eventName: 'invite.revoked' }, { eventName: 'invite.revoked' }] as never;
+      invites.revokeOutstandingWithin.mockImplementation(((client: unknown) => {
+        expect(client).toBe(tx);
+        expect(tx.$queryRaw).toHaveBeenCalled();
+        expect(invites.emit).not.toHaveBeenCalled();
+
+        return Promise.resolve({ count: 2, events: revoked } satisfies OutstandingInviteRevocation);
+      }) as never);
+
+      await service.deleteEvent('event-1');
+
+      expect(invites.revokeOutstandingWithin).toHaveBeenCalledWith(tx, { eventId: 'event-1' });
+      expect(invites.emit).toHaveBeenCalledWith(revoked);
+    });
+
+    it('deleteEvent revokes no invite when the delete is refused (#742)', async () => {
+      tx.event.update.mockRejectedValue(dependentRecordNotFound());
+
+      await expect(service.deleteEvent('event-1')).rejects.toThrow(ForbiddenException);
+
+      expect(invites.emit).not.toHaveBeenCalled();
     });
 
     // The dates ride on the delete's own update, inside the transaction that

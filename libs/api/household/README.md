@@ -48,6 +48,9 @@ The server decides what each request may do, and this table is what it grants. A
 | See the attendees of household events                                                       | Yes             | Yes             | Yes          | No              | Household role |
 | Edit any household event                                                                    | Yes             | Yes             | No           | No              | Household role |
 | Cancel or reopen any household event                                                        | Yes             | Yes             | No           | No              | Household role |
+| Invite to a household event, offering any role but host                                     | Yes             | Yes             | No           | No              | Household role |
+| List the invites to a household event                                                       | Yes             | Yes             | No           | No              | Household role |
+| Revoke an invite someone else sent to a household event                                     | Yes             | Yes             | No           | No              | Household role |
 | Archive a household event they don't host                                                   | No              | No              | No           | No              | Household role |
 | Cancel an occurrence of any household event                                                 | Yes             | Yes             | No           | No              | Household role |
 | Delete an occurrence of a household event they don't host                                   | No              | No              | No           | No              | Household role |

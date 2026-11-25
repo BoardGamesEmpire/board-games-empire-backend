@@ -46,7 +46,9 @@
     "cancelled": "Event cancelled",
     "reopened": "Event reopened",
     "archived": "Event archived",
-    "unarchived": "Event unarchived"
+    "unarchived": "Event unarchived",
+    "invite_sent": "Invite sent",
+    "invite_revoked": "Invite revoked"
   },
   "event_policy": {
     "updated": "Event policy updated"

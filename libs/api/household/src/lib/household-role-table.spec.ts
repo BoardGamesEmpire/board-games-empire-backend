@@ -163,6 +163,20 @@ const othersShare = (actor: HouseholdRoleName, state: { approvedAt?: Date | null
 const householdEvent = () => subject(ResourceType.Event, { id: EVENT, householdId: HOUSEHOLD, createdById: ACTOR });
 /** A row belonging to one of `hh-1`'s events, such as an occurrence or an attendee. */
 const ofHouseholdEvent = (type: ResourceType) => subject(type, { eventId: EVENT, event: { householdId: HOUSEHOLD } });
+/**
+ * An invite to one of `hh-1`'s events, as the event's invite routes ask about
+ * it (#742): the event's household and its roster, on which the actor holds
+ * no event role.
+ */
+const householdEventInvite = (named: { id?: string } = {}) =>
+  subject(ResourceType.Invite, { ...named, eventId: EVENT, event: { householdId: HOUSEHOLD, attendees: [] } });
+/** The attendee row an invite offering `role` would write once accepted, as the direct add asks about it (#742). */
+const householdEventAttendee = (role: SystemRole) =>
+  subject(ResourceType.EventAttendee, {
+    eventId: EVENT,
+    event: { householdId: HOUSEHOLD },
+    role: { role: { name: role } },
+  });
 /** One of `hh-1`'s plays. */
 const householdPlay = () => subject(ResourceType.GamePlaySession, { id: 'play-1', householdId: HOUSEHOLD });
 
@@ -440,6 +454,33 @@ const HOUSEHOLD_ROLE_TABLE: readonly TableRow[] = [
     grantedBy: 'Household role',
     cells: { HouseholdOwner: 'Yes', HouseholdAdmin: 'Yes', HouseholdMember: 'No', HouseholdGuest: 'No' },
     ask: (ability) => yesNo(ability.can(Action.update, householdEvent(), 'cancelledAt')),
+  },
+  {
+    action: 'Invite to a household event, offering any role but host',
+    grantedBy: 'Household role',
+    cells: { HouseholdOwner: 'Yes', HouseholdAdmin: 'Yes', HouseholdMember: 'No', HouseholdGuest: 'No' },
+    // Offering a role other than participant also asks the direct add's grant
+    // for that role (#742).
+    ask: (ability) =>
+      same(
+        yesNo(ability.can(Action.create, householdEventInvite())),
+        yesNo(
+          ability.can(Action.create, householdEventInvite()) &&
+            ability.can(Action.create, householdEventAttendee(SystemRole.EventCoHost)),
+        ),
+      ),
+  },
+  {
+    action: 'List the invites to a household event',
+    grantedBy: 'Household role',
+    cells: { HouseholdOwner: 'Yes', HouseholdAdmin: 'Yes', HouseholdMember: 'No', HouseholdGuest: 'No' },
+    ask: (ability) => yesNo(ability.can(Action.read, householdEventInvite())),
+  },
+  {
+    action: 'Revoke an invite someone else sent to a household event',
+    grantedBy: 'Household role',
+    cells: { HouseholdOwner: 'Yes', HouseholdAdmin: 'Yes', HouseholdMember: 'No', HouseholdGuest: 'No' },
+    ask: (ability) => yesNo(ability.can(Action.update, householdEventInvite({ id: 'invite-1' }), 'status')),
   },
   {
     action: "Archive a household event they don't host",

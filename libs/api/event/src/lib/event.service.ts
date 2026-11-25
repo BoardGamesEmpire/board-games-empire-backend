@@ -17,6 +17,7 @@ import {
 } from '@bge/database';
 import { lockExistingHousehold } from '@bge/household';
 import { CodedHttpException, t } from '@bge/i18n';
+import { InviteService } from '@bge/invites';
 import {
   AbilityService,
   PermissionsService,
@@ -77,6 +78,7 @@ export class EventService {
     private readonly abilityService: AbilityService,
     private readonly permissions: PermissionsService,
     private readonly scopeComposer: ScopeComposer,
+    private readonly invites: InviteService,
   ) {}
 
   /**
@@ -775,10 +777,19 @@ export class EventService {
       // one that didn't. A delete that loses a race to another finds the row
       // deleted under the lock and answers 404, as a request arriving after the
       // first delete would (#731).
-      const { occurrences: dates, ...event } = await this.db.$transaction(async (tx) => {
+      //
+      // The event's outstanding invites are revoked in the same transaction,
+      // after the event's lock, which is the lock order the invites lib sets:
+      // the context row, then invites (#742). An invite create takes the row
+      // FOR SHARE first, so none is inserted after the revoke on an event
+      // being deleted, and an accept queued behind the delete finds it gone.
+      const {
+        deleted: { occurrences: dates, ...event },
+        revoked,
+      } = await this.db.$transaction(async (tx) => {
         await lockLiveEvent(tx, id);
 
-        return tx.event.update({
+        const deleted = await tx.event.update({
           where: {
             id,
             ...liveEventWhere(),
@@ -791,7 +802,13 @@ export class EventService {
           },
           include: { occurrences: { select: EVENT_STATUS_DATE_SELECT } },
         });
+
+        return { deleted, revoked: await this.invites.revokeOutstandingWithin(tx, { eventId: id }) };
       });
+
+      // Each invitee hears their invite was revoked only once the delete has
+      // committed (#742).
+      this.invites.emit(revoked.events);
 
       this.eventEmitter.emit(
         EventDeletedEvent.eventName,

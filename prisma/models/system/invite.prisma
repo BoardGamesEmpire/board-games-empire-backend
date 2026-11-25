@@ -81,5 +81,7 @@ model Invite {
   @@index([inviterId, createdAt])
   @@index([householdId, createdAt])
   @@index([householdId, approvedAt])
+  // An event's newest-first invite list (#742) reads its invites backward.
+  @@index([eventId, createdAt])
   @@map("invites")
 }

@@ -80,7 +80,9 @@
     "invitee_refused": "You cannot place this user on an event",
     "archived": "This event is archived. Unarchive it first.",
     "cancelled": "This event is cancelled. Reopen it first.",
-    "not_archivable": "Only a cancelled event, or one whose dates have all passed, can be archived."
+    "not_archivable": "Only a cancelled event, or one whose dates have all passed, can be archived.",
+    "member_invites_off": "This event's policy doesn't let participants invite. Ask the host or a co-host to send the invite.",
+    "role_not_provisioned": "Event role '{role}' is not provisioned on this server"
   },
   "event_policy": {
     "threshold_value_required": "A vote threshold of a set percentage or a fixed number of votes needs that percentage or number, and the event, or one of its dates, would be left without it. Enter the percentage or number, or choose another vote threshold.",
