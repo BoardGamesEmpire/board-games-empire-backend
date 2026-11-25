@@ -255,6 +255,38 @@ describe('runBuild (#1093)', () => {
       expect(JSON.stringify(outcome.report)).not.toContain('s3cr3t');
       expect(existsSync(join(pluginDir, 'bge-artifacts'))).toBe(false);
     });
+
+    it('refuses a package-lock.json holding a URL with a password before npm ci reads it, so npm never fetches with it (#1093)', async () => {
+      // The host does not resolve: had npm ci run, the build would fail as DEPENDENCY_INSTALL_FAILED.
+      const resolved = 'https://alice:s3cr3t@registry.invalid/dep/-/dep-1.0.0.tgz';
+      const pluginDir = await writePlugin({ packageJson: { dependencies: { dep: '1.0.0' } } });
+      await writeFile(
+        join(pluginDir, 'package-lock.json'),
+        JSON.stringify({
+          lockfileVersion: 3,
+          name: 'demo-sink',
+          packages: {
+            '': { dependencies: { dep: '1.0.0' }, name: 'demo-sink', version: '1.2.0' },
+            'node_modules/dep': { license: 'MIT', resolved, version: '1.0.0' },
+          },
+          requires: true,
+          version: '1.2.0',
+        }),
+      );
+
+      const outcome = await runBuild(pluginDir, optionsFor(pluginDir));
+
+      expect(outcome.artifact).toBeUndefined();
+      expect(outcome.report.errors).toEqual([
+        {
+          at: 'package-lock.json',
+          code: 'URL_CREDENTIALS_REFUSED',
+          message: expect.stringContaining('"packages > node_modules/dep > resolved"'),
+        },
+      ]);
+      expect(JSON.stringify(outcome.report)).not.toContain('s3cr3t');
+      expect(existsSync(join(pluginDir, 'bge-artifacts'))).toBe(false);
+    });
   });
 
   it('removes an earlier checksum file before the new plugin artifact lands, so a failed checksum write leaves no stale one beside it (#1093)', async () => {

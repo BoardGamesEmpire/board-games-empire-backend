@@ -8,8 +8,9 @@ import type { BuildOptions } from '../options.js';
 import type { ArtifactOutcome, BuildOutcome } from '../report.js';
 import type { ArtifactEntry } from '../stage/artifact-entries.js';
 import type { SelectPluginFilesOptions } from '../stage/select-plugin-files.js';
-import { requireOwnPackageJson, selectPluginFiles } from '../stage/select-plugin-files.js';
+import { leftOutWarnings, requireOwnPackageJson, selectPluginFiles } from '../stage/select-plugin-files.js';
 import { stagePluginFiles } from '../stage/stage-plugin-files.js';
+import { urlCredentialErrors } from '../stage/url-credentials.js';
 import { ToolkitError } from '../toolkit.errors.js';
 import { checkStagedPlugin } from '../validate/check-staged-plugin.js';
 import { installDependencies } from './install-dependencies.js';
@@ -123,13 +124,14 @@ const writeArtifact = async (
  * reads into `outDir`.
  *
  * The plugin's own build runs first. Then npm's selection of its files is
- * copied into a temporary folder, its production dependencies are installed
- * there as package-lock.json records them, and SOURCES.md lists them. That
- * copy goes through the server's archive rules and the same checks
- * `validate` runs. Any error returns the report with no plugin artifact, and
- * nothing is written to `outDir`. A plugin that cannot be built at all (no
- * package-lock.json, a failing build script, an install npm refuses) is a
- * ToolkitError.
+ * copied into a temporary folder; a URL with credentials in its package.json
+ * or package-lock.json stops the build there, before npm reads either. Its
+ * production dependencies are installed there as package-lock.json records
+ * them, and SOURCES.md lists them. That copy goes through the server's
+ * archive rules and the same checks `validate` runs. Any error returns the
+ * report with no plugin artifact, and nothing is written to `outDir`. A
+ * plugin that cannot be built at all (no package-lock.json, a failing build
+ * script, an install npm refuses) is a ToolkitError.
  *
  * The same files give the same bytes: entries are sorted and carry
  * `SOURCE_DATE_EPOCH` (or 0) as their time, so a plugin artifact can be
@@ -147,6 +149,15 @@ export const runBuild = async (projectDir: string, options: BuildOptions): Promi
 
     await mkdir(stageDir);
     await stagePluginFiles(projectDir, files, stageDir);
+
+    // Before npm ci, which would fetch with a password a URL holds, or fail
+    // on a stale one before this refusal is reported (#1093).
+    const credentialErrors = await urlCredentialErrors(stageDir);
+
+    if (credentialErrors.length > 0) {
+      return { report: { errors: credentialErrors, notes: [], warnings: leftOutWarnings(leftOut) } };
+    }
+
     await installDependencies(stageDir);
     await writeSourcesMarkdown(stageDir);
 

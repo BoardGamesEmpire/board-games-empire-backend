@@ -2,15 +2,17 @@ import { extractPluginArchive, PluginArchiveRefusedError } from '@boardgamesempi
 import type { PluginManifestValidationResult } from '@boardgamesempire/plugin-manifest';
 import {
   isPlainJsonObject,
+  PLUGIN_ARCHIVE_MAX_COMPRESSED_BYTES,
   PluginManifestValidationError,
   validatePluginManifest,
 } from '@boardgamesempire/plugin-manifest';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { minVersion } from 'semver';
 import { z } from 'zod';
 import { isMissingPathError } from '../fs/is-file.js';
 import { withTempDir } from '../fs/with-temp-dir.js';
+import { message } from '../messages.js';
 import type { ValidateOptions } from '../options.js';
 import { archiveRefusalItem } from '../stage/artifact-entries.js';
 import { ToolkitError } from '../toolkit.errors.js';
@@ -21,15 +23,24 @@ const bgeCompatSchema = z.object({ bgeCompat: z.string() });
 /** Thrown inside this module with the reason, then reported once as AGAINST_UNREADABLE. */
 class AgainstReason extends Error {}
 
-const readManifestText = (path: string): Promise<string> =>
-  path.endsWith('.tgz')
-    ? withTempDir(async (workDir) => {
-        const intoDir = join(workDir, 'plugin');
-        await extractPluginArchive(path, intoDir);
+const readManifestText = async (path: string): Promise<string> => {
+  if (!path.endsWith('.tgz')) {
+    return readFile(path, 'utf8');
+  }
 
-        return readFile(join(intoDir, 'manifest.json'), 'utf8');
-      })
-    : readFile(path, 'utf8');
+  // A server refuses a plugin artifact over the cap before reading a byte, so
+  // no server installed this one; the extractor caps only what it unpacks (#1093).
+  if ((await stat(path)).size > PLUGIN_ARCHIVE_MAX_COMPRESSED_BYTES) {
+    throw new AgainstReason(message('ARTIFACT_TOO_LARGE'));
+  }
+
+  return withTempDir(async (workDir) => {
+    const intoDir = join(workDir, 'plugin');
+    await extractPluginArchive(path, intoDir);
+
+    return readFile(join(intoDir, 'manifest.json'), 'utf8');
+  });
+};
 
 /**
  * The lowest version the earlier plugin manifest's `bgeCompat` range admits,

@@ -365,6 +365,19 @@ describe('runValidate (#1093)', () => {
       ]);
     });
 
+    it('reports one larger than a server accepts as AGAINST_UNREADABLE by its size alone, before reading it (#1093)', async () => {
+      // Sparse, as above: zero bytes are not gzip, so had anything read the file, this would be not-gzip.
+      const previous = join(await mkdtemp(join(root, 'against-huge-')), 'huge.tgz');
+      await writeFile(previous, '');
+      await truncate(previous, PLUGIN_ARCHIVE_MAX_COMPRESSED_BYTES + 1);
+
+      const report = await runValidate(await writeArtifact(PLUGIN_ENTRIES), { ...OPTIONS, against: previous });
+
+      expect(report.errors).toEqual([
+        { at: previous, code: 'AGAINST_UNREADABLE', message: expect.stringContaining('a server accepts') },
+      ]);
+    });
+
     it('keeps the reason for a failure it did not foresee, such as a folder given as the earlier version (#1093)', async () => {
       const previous = await mkdtemp(join(root, 'against-folder-'));
 

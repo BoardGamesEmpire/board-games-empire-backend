@@ -141,7 +141,8 @@ Messages are in English for now (#1514).
   in the plugin artifact as written, and npm copies a dependency's URL into
   `package-lock.json` whole, user name and password included. So a URL with
   a user name or password in either file, other than the `git` user of a
-  git-over-ssh URL, stops `build` and fails `validate` of a plugin folder
+  git-over-ssh URL, stops `build` before npm installs anything, and fails
+  `validate` of a plugin folder
   with `URL_CREDENTIALS_REFUSED`, naming the file and where in it the first
   such URL is, never the URL itself. Give npm the credentials another way,
   such as an auth token in the `.npmrc` in your home folder or a git
