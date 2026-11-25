@@ -94,6 +94,11 @@ export class EventGameNominationController {
   @ApiParam({ name: 'eventId', type: String })
   @ApiParam({ name: 'nominationId', type: String })
   @ApiResponse({ status: Http.Ok, description: 'Nomination withdrawn' })
+  @ApiResponse({
+    status: Http.BadRequest,
+    description: 'The nomination has already been decided or withdrawn (code NOMINATION_NOT_WITHDRAWABLE)',
+  })
+  @ApiResponse({ status: Http.NotFound, description: 'Nomination not found' })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.EventGameNomination))
   @Patch(':nominationId/withdraw')
   withdraw(@Param('eventId') eventId: string, @Param('nominationId') nominationId: string) {
@@ -111,6 +116,11 @@ export class EventGameNominationController {
   @ApiOperation({ summary: 'Cast or update your vote on a nomination' })
   @ApiParam({ name: 'nominationId', type: String })
   @ApiResponse({ status: Http.Ok, description: 'Vote recorded' })
+  @ApiResponse({
+    status: Http.BadRequest,
+    description: 'The nomination is not open for votes (code NOMINATION_NOT_OPEN), or the vote could not be saved',
+  })
+  @ApiResponse({ status: Http.NotFound, description: 'Nomination not found' })
   @CheckPolicies((ability) => ability.can(Action.create, ResourceType.EventGameVote))
   @Post(':nominationId/votes')
   castVote(@Param('eventId') eventId: string, @Param('nominationId') nominationId: string, @Body() dto: CastVoteDto) {
@@ -124,6 +134,12 @@ export class EventGameNominationController {
   @ApiParam({ name: 'eventId', type: String })
   @ApiParam({ name: 'nominationId', type: String })
   @ApiResponse({ status: Http.Ok, description: 'Nomination resolved' })
+  @ApiResponse({
+    status: Http.BadRequest,
+    description:
+      'The nomination is not open for votes (code NOMINATION_NOT_RESOLVABLE), or its supplier is offering a different game',
+  })
+  @ApiResponse({ status: Http.NotFound, description: 'Nomination not found' })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.EventGameNomination))
   @Post(':nominationId/resolve')
   resolve(@Param('eventId') eventId: string, @Param('nominationId') nominationId: string) {
@@ -140,6 +156,12 @@ export class EventGameNominationController {
   @ApiOperation({ summary: 'Host approves a nomination (HostApproval mode)' })
   @ApiParam({ name: 'nominationId', type: String })
   @ApiResponse({ status: Http.Ok, description: 'Nomination approved' })
+  @ApiResponse({
+    status: Http.BadRequest,
+    description:
+      "The nomination is not waiting for the host's approval (code NOMINATION_NOT_AWAITING_APPROVAL), or its supplier is offering a different game",
+  })
+  @ApiResponse({ status: Http.NotFound, description: 'Nomination not found' })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.EventGameNomination))
   @Post(':nominationId/approve')
   hostApprove(@Param('eventId') eventId: string, @Param('nominationId') nominationId: string) {
@@ -154,6 +176,12 @@ export class EventGameNominationController {
   @ApiOperation({ summary: 'Host rejects a nomination (HostApproval mode)' })
   @ApiParam({ name: 'nominationId', type: String })
   @ApiResponse({ status: Http.Ok, description: 'Nomination rejected' })
+  @ApiResponse({
+    status: Http.BadRequest,
+    description:
+      "The nomination is not waiting for the host's approval (code NOMINATION_NOT_AWAITING_APPROVAL), or its supplier is offering a different game",
+  })
+  @ApiResponse({ status: Http.NotFound, description: 'Nomination not found' })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.EventGameNomination))
   @Post(':nominationId/reject')
   hostReject(@Param('eventId') eventId: string, @Param('nominationId') nominationId: string) {
@@ -167,7 +195,10 @@ export class EventGameNominationController {
 
   @ApiOperation({ summary: 'Directly add a game to the event lineup (Direct/HostOnly mode)' })
   @ApiResponse({ status: Http.Created, description: 'Game added to event' })
-  @ApiResponse({ status: Http.Forbidden, description: 'Mode does not permit direct add' })
+  @ApiResponse({
+    status: Http.Forbidden,
+    description: "The event's games are chosen by nomination, not added directly (code GAME_ADDITION_NOT_DIRECT)",
+  })
   @ApiResponse({ status: Http.Conflict, description: 'The attendee offering the game is not attending' })
   @CheckPolicies((ability) => ability.can(Action.create, ResourceType.EventGame))
   @Post('direct-add')

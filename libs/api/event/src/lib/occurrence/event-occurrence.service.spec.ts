@@ -1530,7 +1530,36 @@ describe('EventOccurrenceService', () => {
         id: 'occ-1',
         status: OccurrenceStatus.Confirmed,
       } as EventOccurrence);
-      await expect(service.confirmOccurrence('event-1', 'occ-1')).rejects.toThrow(BadRequestException);
+      const rejection: unknown = await service.confirmOccurrence('event-1', 'occ-1').catch((e: unknown) => e);
+
+      expect(rejection).toBeInstanceOf(CodedHttpException);
+      expect((rejection as CodedHttpException).getResponse()).toMatchObject({
+        code: 'OCCURRENCE_TRANSITION_NOT_ALLOWED',
+        state: OccurrenceStatus.Confirmed,
+      });
+    });
+
+    // The message names where the date is in a whole sentence, never the enum's
+    // name, and the status and target travel as fields (#1114).
+    it('refuses to cancel a Proposed date with OCCURRENCE_TRANSITION_NOT_ALLOWED (#1114)', async () => {
+      db.eventOccurrence.findUnique.mockResolvedValue({
+        id: 'occ-1',
+        status: OccurrenceStatus.Proposed,
+        startDate: null,
+        endDate: null,
+      } as never);
+
+      const rejection: unknown = await service.cancelOccurrence('event-1', 'occ-1').catch((e: unknown) => e);
+
+      expect(rejection).toBeInstanceOf(CodedHttpException);
+      expect((rejection as CodedHttpException).getStatus()).toBe(400);
+      expect((rejection as CodedHttpException).getResponse()).toMatchObject({
+        code: 'OCCURRENCE_TRANSITION_NOT_ALLOWED',
+        state: OccurrenceStatus.Proposed,
+        to: OccurrenceStatus.Cancelled,
+        message: t('errors.occurrence.state.proposed'),
+      });
+      expect(db.eventOccurrence.update).not.toHaveBeenCalled();
     });
 
     // A cancel holds the event's row and turns its Confirmed dates Cancelled.
@@ -1609,7 +1638,12 @@ describe('EventOccurrenceService', () => {
 
         const rejection: unknown = await run().catch((e: unknown) => e);
 
-        expect(rejection).toBeInstanceOf(BadRequestException);
+        expect(rejection).toBeInstanceOf(CodedHttpException);
+        expect((rejection as CodedHttpException).getStatus()).toBe(400);
+        expect((rejection as CodedHttpException).getResponse()).toMatchObject({
+          code: 'OCCURRENCE_TRANSITION_NOT_ALLOWED',
+          state: moved,
+        });
         expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
           db.eventOccurrence.findUnique.mock.invocationCallOrder[1],
         );
@@ -1746,6 +1780,28 @@ describe('EventOccurrenceService', () => {
       );
     });
 
+    it('refuses availability on a Confirmed date with OCCURRENCE_NOT_PROPOSED (#1114)', async () => {
+      db.eventOccurrence.findUnique.mockResolvedValue({
+        id: 'occ-1',
+        status: OccurrenceStatus.Confirmed,
+        startDate: null,
+        endDate: null,
+      } as never);
+
+      const rejection: unknown = await service
+        .submitAvailability('event-1', 'occ-1', { response: AvailabilityResponse.Available })
+        .catch((e: unknown) => e);
+
+      expect(rejection).toBeInstanceOf(CodedHttpException);
+      expect((rejection as CodedHttpException).getStatus()).toBe(400);
+      expect((rejection as CodedHttpException).getResponse()).toMatchObject({
+        code: 'OCCURRENCE_NOT_PROPOSED',
+        state: OccurrenceStatus.Confirmed,
+        message: t('errors.occurrence.state.confirmed'),
+      });
+      expect(db.eventAvailabilityVote.upsert).not.toHaveBeenCalled();
+    });
+
     describe('a passed Proposed date (#1005)', () => {
       const HOUR = 60 * 60 * 1000;
 
@@ -1819,7 +1875,7 @@ describe('EventOccurrenceService', () => {
 
         await expect(
           service.submitAvailability('event-1', 'occ-1', { response: AvailabilityResponse.Available }),
-        ).rejects.toThrow(BadRequestException);
+        ).rejects.toThrow(CodedHttpException);
         expect(db.eventAvailabilityVote.upsert).not.toHaveBeenCalled();
       });
 

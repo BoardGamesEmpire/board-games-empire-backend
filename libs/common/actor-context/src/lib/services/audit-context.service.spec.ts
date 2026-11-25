@@ -1,3 +1,4 @@
+import type { I18nPath } from '@bge/i18n-core';
 import { t } from '@bge/i18n-core';
 import { ForbiddenException } from '@nestjs/common';
 import type { TestingModule } from '@nestjs/testing';
@@ -107,8 +108,9 @@ describe('AuditContextService', () => {
     // The plugin carries a user trigger on purpose: acting on a user's behalf
     // does not make the user its subject until polymorphic attribution exists.
     // A plugin acting inside a request carries the refusal to an HTTP response,
-    // so it names a catalog key, with the refused kind, for the edge to translate.
-    it.each<[string, Actor]>([
+    // so it names a catalog key for the edge to translate: a whole sentence per
+    // refused kind rather than the raw kind interpolated into one (#1114).
+    it.each<[string, Actor, I18nPath]>([
       [
         'plugin',
         {
@@ -117,10 +119,15 @@ describe('AuditContextService', () => {
           unit: SERVER_PLUGIN_UNIT,
           trigger: { kind: 'user', userId: 'user-1' },
         },
+        'errors.actor_context.not_user_attributable.plugin',
       ],
-      ['system', { kind: 'system', reason: 'migration' }],
-      ['external', { kind: 'external', system: 'gateway', identifier: 'gateway-bgg' }],
-    ])('refuses a %s actor with a 403 rather than answering with an id', async (kind, actor) => {
+      ['system', { kind: 'system', reason: 'migration' }, 'errors.actor_context.not_user_attributable.system'],
+      [
+        'external',
+        { kind: 'external', system: 'gateway', identifier: 'gateway-bgg' },
+        'errors.actor_context.not_user_attributable.external',
+      ],
+    ])('refuses a %s actor with a 403 naming its kind in a sentence of its own (#1114)', async (_kind, actor, key) => {
       await cls.run(() => {
         cls.set(ACTOR_CLS_KEY, actor);
         let error: unknown;
@@ -131,9 +138,8 @@ describe('AuditContextService', () => {
         }
 
         expect(error).toBeInstanceOf(ForbiddenException);
-        expect((error as ForbiddenException).getResponse()).toEqual(
-          t('errors.actor_context.not_user_attributable', { kind }),
-        );
+        expect((error as ForbiddenException).getStatus()).toBe(403);
+        expect((error as ForbiddenException).getResponse()).toEqual(t(key));
       });
     });
 

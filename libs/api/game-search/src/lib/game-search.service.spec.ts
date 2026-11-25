@@ -25,7 +25,7 @@ const localOnly = (overrides: Partial<SearchQueryDto> = {}): SearchQueryDto =>
   plainToInstance(SearchQueryDto, { query: 'brass', includeExternal: false, ...overrides });
 
 const userlessActor = () => {
-  throw new ForbiddenException(t('errors.actor_context.not_user_attributable', { kind: 'plugin' }));
+  throw new ForbiddenException(t('errors.actor_context.not_user_attributable.plugin'));
 };
 
 /** One primed ability that answers whether its actor may ask the DataGateways (#1076). */

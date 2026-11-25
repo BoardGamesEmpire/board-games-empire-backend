@@ -303,7 +303,7 @@ describe('GameImportStatusService', () => {
     // behind it, and the refusal must not soften into an empty page.
     it('refuses an actor kind with no user behind it, with a message about reading', async () => {
       ability.getActingUserId.mockImplementation(() => {
-        throw new ForbiddenException(t('errors.actor_context.not_user_attributable', { kind: 'plugin' }));
+        throw new ForbiddenException(t('errors.actor_context.not_user_attributable.plugin'));
       });
 
       const rejection: unknown = await service.listBatchesForUser(paginationQuery()).catch((error: unknown) => error);

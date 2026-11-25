@@ -11,6 +11,7 @@ import {
   ResourceType,
   SystemRole,
 } from '@bge/database';
+import { CodedHttpException } from '@bge/i18n';
 import type {
   InviteAcceptance,
   InviteDeclination,
@@ -507,12 +508,18 @@ describe('PartyInviteService', () => {
         }) as never);
         invites.emit.mockImplementation(() => expect(committed).toBe(true));
 
-        await expect(service.accept({ token: 'live-accept-credential' })).rejects.toMatchObject({
-          status: 409,
-          response: expect.objectContaining({
-            key: 'errors.invite.not_outstanding',
-            args: { id: 'invite-1', status: InviteStatus.Revoked },
-          }),
+        const refusal = await service.accept({ token: 'live-accept-credential' }).catch((error: unknown) => error);
+
+        // Nothing beyond the envelope and the `state`: no invite id, so the
+        // invitee learns nothing of why (#1114).
+        expect(refusal).toBeInstanceOf(CodedHttpException);
+        expect((refusal as CodedHttpException).getStatus()).toBe(409);
+        expect(Object.keys((refusal as CodedHttpException).getResponse() as object).sort()).toEqual(
+          ['code', 'error', 'message', 'state', 'statusCode'].sort(),
+        );
+        expect((refusal as CodedHttpException).getResponse()).toMatchObject({
+          code: 'INVITE_NOT_OUTSTANDING',
+          state: InviteStatus.Revoked,
         });
 
         // By the id the read found, bound to the household, with the invitee as

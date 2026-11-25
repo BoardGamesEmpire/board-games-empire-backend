@@ -151,7 +151,7 @@ describe('HouseholdGamePoolService', () => {
   // soften into an empty sample, which would read as "no household".
   it('refuses an actor kind with no user behind it rather than answering an empty sample', async () => {
     abilityService.getActingUserId.mockImplementation(() => {
-      throw new ForbiddenException(t('errors.actor_context.not_user_attributable', { kind: 'plugin' }));
+      throw new ForbiddenException(t('errors.actor_context.not_user_attributable.plugin'));
     });
 
     const rejection: unknown = await sampleOf().catch((error: unknown) => error);

@@ -1,7 +1,8 @@
+import type { I18nPath } from '@bge/i18n-core';
 import { t } from '@bge/i18n-core';
 import { ForbiddenException, Injectable } from '@nestjs/common';
 import { ClsService } from 'nestjs-cls';
-import type { Actor, EventSource } from '../types';
+import type { Actor, ActorKind, EventSource } from '../types';
 
 /**
  * CLS storage keys. Exported for tests + the internal populator only;
@@ -32,6 +33,18 @@ export const SESSION_SIGNED_IN_AT_CLS_KEY = 'actor-context:sessionSignedInAt' as
  * lib to learn the key (the dependency points the other way).
  */
 export const ABILITIES_CLS_KEY = 'permissions:abilities' as const;
+
+/**
+ * The refusal's message per actor kind with no backing user: a whole sentence
+ * for each, rather than the raw kind interpolated into one frame (#1114). It
+ * stays a plain `ForbiddenException` with no code, because `@bge/i18n` (which
+ * owns `CodedHttpException`) imports this lib.
+ */
+const NOT_USER_ATTRIBUTABLE_MESSAGE = {
+  plugin: 'errors.actor_context.not_user_attributable.plugin',
+  external: 'errors.actor_context.not_user_attributable.external',
+  system: 'errors.actor_context.not_user_attributable.system',
+} as const satisfies Record<Exclude<ActorKind, 'user' | 'anonymous' | 'apiKey'>, I18nPath>;
 
 /**
  * Public, read-only accessor for actor + correlation context. Consumers
@@ -73,7 +86,7 @@ export class AuditContextService {
         return actor.userId;
       default:
         // system | external | plugin — no backing user yet (polymorphic attribution deferred to #59)
-        throw new ForbiddenException(t('errors.actor_context.not_user_attributable', { kind: actor.kind }));
+        throw new ForbiddenException(t(NOT_USER_ATTRIBUTABLE_MESSAGE[actor.kind]));
     }
   }
 

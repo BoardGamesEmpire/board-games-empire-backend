@@ -85,14 +85,14 @@ describe('household invite accept races', () => {
     (await db.client.invite.findUniqueOrThrow({ where: { id }, select: { status: true } })).status;
 
   /**
-   * Sends the request at once and settles it to its status and message. Not
+   * Sends the request at once and settles it to its status and body. Not
    * awaited by the caller until the barrier lets go, and handled here, so a
    * failure before then is not an unhandled rejection.
    */
   const send = (pending: request.Test) => {
     const settled = pending.then((response) => ({
       status: response.status,
-      message: (response.body as { message?: unknown } | null)?.message ?? null,
+      body: (response.body ?? null) as Record<string, unknown> | null,
     }));
     settled.catch(() => undefined);
 
@@ -132,7 +132,12 @@ describe('household invite accept races', () => {
       const [joined, refused] = (await Promise.all(racing)).sort((left, right) => left.status - right.status);
 
       expect(joined).toMatchObject({ status: 200 });
-      expect(refused).toEqual({ status: 409, message: expect.stringContaining(InviteStatus.Accepted) });
+      // The code and the `state` field say it was accepted; the message is a
+      // sentence, not the enum's name (#1114).
+      expect(refused).toMatchObject({
+        status: 409,
+        body: { code: 'INVITE_NOT_OUTSTANDING', state: InviteStatus.Accepted },
+      });
     });
 
     expect(await memberships(household.id, invitee.user.id)).toBe(1);
@@ -165,7 +170,7 @@ describe('household invite accept races', () => {
       const [joined, refused] = (await Promise.all(racing)).sort((left, right) => left.status - right.status);
 
       expect(joined).toMatchObject({ status: 200 });
-      expect(refused).toEqual({ status: 409, message: expect.stringContaining(household.id) });
+      expect(refused).toMatchObject({ status: 409, body: { message: expect.stringContaining(household.id) } });
     });
 
     expect(await memberships(household.id, invitee.user.id)).toBe(1);

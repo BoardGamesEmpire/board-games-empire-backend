@@ -1470,7 +1470,7 @@ describe('HouseholdService', () => {
     // their ceiling admitted. #395 revisits it.
     it('refuses an actor kind with no user behind it rather than answering an empty page', async () => {
       abilityService.getActingUserId.mockImplementation(() => {
-        throw new ForbiddenException(t('errors.actor_context.not_user_attributable', { kind: 'plugin' }));
+        throw new ForbiddenException(t('errors.actor_context.not_user_attributable.plugin'));
       });
 
       await expect(read(service)).rejects.toThrow(ForbiddenException);
@@ -1487,7 +1487,7 @@ describe('HouseholdService', () => {
     // one passed through.
     it('does not answer a read with a message about writes', async () => {
       abilityService.getActingUserId.mockImplementation(() => {
-        throw new ForbiddenException(t('errors.actor_context.not_user_attributable', { kind: 'plugin' }));
+        throw new ForbiddenException(t('errors.actor_context.not_user_attributable.plugin'));
       });
 
       const rejection: unknown = await read(service).catch((error: unknown) => error);
@@ -1673,7 +1673,7 @@ describe('HouseholdService', () => {
     // PROVISIONAL, as for the household list (#395).
     it('refuses an actor kind with no user behind it before reading anything', async () => {
       abilityService.getActingUserId.mockImplementation(() => {
-        throw new ForbiddenException(t('errors.actor_context.not_user_attributable', { kind: 'plugin' }));
+        throw new ForbiddenException(t('errors.actor_context.not_user_attributable.plugin'));
       });
 
       await expect(read(service)).rejects.toThrow(ForbiddenException);

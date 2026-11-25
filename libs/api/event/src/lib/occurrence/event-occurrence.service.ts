@@ -50,6 +50,7 @@ import {
 } from './events/occurrence.events';
 import type { AvailabilitySummary, AvailabilitySummaryEntry } from './interfaces';
 import { countLiveDates } from './live-dates.util';
+import { occurrenceNotProposed, occurrenceTransitionRefused } from './occurrence-refusals';
 
 @Injectable()
 export class EventOccurrenceService {
@@ -1047,7 +1048,7 @@ type OccurrenceVoteState = Pick<EventOccurrence, 'status' | 'startDate' | 'endDa
  */
 function assertTakesVotes(date: OccurrenceVoteState, now: Date): void {
   if (date.status !== OccurrenceStatus.Proposed) {
-    throw new BadRequestException(t('errors.occurrence.availability_proposed_only', { status: date.status }));
+    throw occurrenceNotProposed(date.status);
   }
 
   assertDateNotPassed(date, now, 'vote_date_passed');
@@ -1061,12 +1062,8 @@ function assertTransitionAllowed<TOccurrence extends { status: OccurrenceStatus 
   assert(occurrence, new NotFoundException(t('errors.occurrence.not_found', { occurrenceId, eventId })));
   assert(
     allowedFrom.includes(occurrence.status),
-    new BadRequestException(
-      t('errors.occurrence.invalid_transition', {
-        from: occurrence.status,
-        to: newStatus,
-        allowed: allowedFrom.join(', '),
-      }),
-    ),
+    // The status and the target are fields, not words in the message, and the
+    // list of statuses it could start from stays out of it (#1114).
+    occurrenceTransitionRefused(occurrence.status, newStatus),
   );
 }

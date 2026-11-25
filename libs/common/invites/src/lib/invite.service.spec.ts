@@ -907,7 +907,7 @@ describe('InviteService', () => {
         }),
       ).rejects.toMatchObject({
         status: 409,
-        response: expect.objectContaining({ key: 'errors.invite.not_outstanding', args: { id: 'inv-1', status } }),
+        response: expect.objectContaining({ code: 'INVITE_NOT_OUTSTANDING', state: status }),
       });
       expect(tx.invite.updateManyAndReturn).not.toHaveBeenCalled();
     });
@@ -1011,10 +1011,7 @@ describe('InviteService', () => {
         }),
       ).rejects.toMatchObject({
         status: 409,
-        response: expect.objectContaining({
-          key: 'errors.invite.not_outstanding',
-          args: { id: 'inv-1', status: InviteStatus.Accepted },
-        }),
+        response: expect.objectContaining({ code: 'INVITE_NOT_OUTSTANDING', state: InviteStatus.Accepted }),
       });
       // The re-read is by id alone; the party was established by the first read.
       expect(tx.invite.findFirst).toHaveBeenNthCalledWith(2, { where: { id: 'inv-1' }, select: TRANSITION_SELECT });
@@ -1131,7 +1128,10 @@ describe('InviteService', () => {
           actingUserId: INVITEE_ID,
           type: InviteType.Household,
         }),
-      ).rejects.toThrow(ConflictException);
+      ).rejects.toMatchObject({
+        status: 409,
+        response: expect.objectContaining({ code: 'INVITE_NOT_OUTSTANDING', state: status }),
+      });
     });
 
     it('410s an expired invite', async () => {
@@ -1234,7 +1234,10 @@ describe('InviteService', () => {
 
       await expect(
         service.withdrawWithin(asTx(tx), { inviteId: 'inv-1', actingUserId: INVITER_ID, type: InviteType.Household }),
-      ).rejects.toThrow(ConflictException);
+      ).rejects.toMatchObject({
+        status: 409,
+        response: expect.objectContaining({ code: 'INVITE_NOT_OUTSTANDING', state: status }),
+      });
     });
 
     it('410s an expired invite', async () => {
@@ -1325,9 +1328,12 @@ describe('InviteService', () => {
     it.each(TERMINAL)('409s a settled invite (%s)', async (status) => {
       tx.invite.findFirst.mockResolvedValue(rowWithToken({ status }) as never);
 
-      await expect(service.revokeWithin(asTx(tx), { inviteId: 'inv-1', revokerId: REVOKER_ID, scope })).rejects.toThrow(
-        ConflictException,
-      );
+      await expect(
+        service.revokeWithin(asTx(tx), { inviteId: 'inv-1', revokerId: REVOKER_ID, scope }),
+      ).rejects.toMatchObject({
+        status: 409,
+        response: expect.objectContaining({ code: 'INVITE_NOT_OUTSTANDING', state: status }),
+      });
     });
 
     it('410s an expired invite rather than revoking it', async () => {

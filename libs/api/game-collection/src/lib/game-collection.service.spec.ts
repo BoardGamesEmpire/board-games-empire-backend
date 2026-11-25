@@ -238,7 +238,7 @@ describe('GameCollectionService', () => {
     // its message, which is now the read's own rather than one about writes.
     it('refuses an actor kind with no user behind it, with a message about reading', async () => {
       abilityService.getActingUserId.mockImplementation(() => {
-        throw new ForbiddenException(t('errors.actor_context.not_user_attributable', { kind: 'plugin' }));
+        throw new ForbiddenException(t('errors.actor_context.not_user_attributable.plugin'));
       });
 
       const rejection: unknown = await service.listOwn(paginationQuery({ limit: 20 })).catch((error: unknown) => error);
@@ -411,7 +411,7 @@ describe('GameCollectionService', () => {
       db.gameCollection.findMany.mockResolvedValue([]);
       db.gameCollection.count.mockResolvedValue(0);
       abilityService.getActingUserId.mockImplementation(() => {
-        throw new ForbiddenException(t('errors.actor_context.not_user_attributable', { kind: 'plugin' }));
+        throw new ForbiddenException(t('errors.actor_context.not_user_attributable.plugin'));
       });
 
       await expect(service.listForUser('user-2', paginationQuery({ limit: 20 }))).resolves.toEqual({
@@ -483,7 +483,7 @@ describe('GameCollectionService', () => {
 
       // No acting user: a plugin, system or external actor.
       abilityService.getActingUserId.mockImplementation(() => {
-        throw new ForbiddenException(t('errors.actor_context.not_user_attributable', { kind: 'plugin' }));
+        throw new ForbiddenException(t('errors.actor_context.not_user_attributable.plugin'));
       });
       const noUser = await service.listForUser('user-2', paginationQuery({ limit: 20 }));
       expect(noUser.rows.map((row) => row.onWishlist)).toEqual([null]);

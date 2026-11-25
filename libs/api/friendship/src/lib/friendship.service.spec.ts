@@ -500,7 +500,7 @@ describe('FriendshipService', () => {
       ['listIncomingRequests', (q: ReturnType<typeof paginationQuery>) => service.listIncomingRequests(q)],
     ])('%s refuses an actor kind with no user behind it, with a message about reading', async (_name, read) => {
       abilityService.getActingUserId.mockImplementation(() => {
-        throw new ForbiddenException(t('errors.actor_context.not_user_attributable', { kind: 'plugin' }));
+        throw new ForbiddenException(t('errors.actor_context.not_user_attributable.plugin'));
       });
 
       const rejection: unknown = await read(paginationQuery({ limit: 10 })).catch((error: unknown) => error);
