@@ -28,7 +28,22 @@ export * from './lib/install/install.errors';
 export * from './lib/install/manifest-enum.maps';
 export * from './lib/install/plugin-installer.service';
 export * from './lib/install/plugin-static-analysis.service';
-export * from './lib/install/static-analysis.types';
+// The result shapes moved with the scan into the framework-free library (#1093);
+// they stay importable from here so consumers of this barrel change nothing.
+export {
+  MAX_ADVISORY_FINDINGS,
+  MAX_GATING_EXAMPLES_PER_SPECIFIER,
+  gatingFindings,
+  isGatingFinding,
+} from '@boardgamesempire/plugin-analysis';
+export type {
+  StaticAnalysisFinding,
+  StaticAnalysisFindingKind,
+  StaticAnalysisOptions,
+  StaticAnalysisReport,
+  StaticAnalysisScanScope,
+  StaticAnalysisSeverity,
+} from '@boardgamesempire/plugin-analysis';
 export * from './lib/inventory/inventory.errors';
 export * from './lib/inventory/plugin-inventory.service';
 export * from './lib/lifecycle/lifecycle.errors';

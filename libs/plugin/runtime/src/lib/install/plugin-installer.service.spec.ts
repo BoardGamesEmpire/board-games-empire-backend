@@ -19,6 +19,7 @@ import {
 } from '@bge/database';
 import type { MockDatabaseService } from '@bge/testing';
 import { createMockDatabaseService, UNIT_BOUND_RULES } from '@bge/testing';
+import type { StaticAnalysisFinding, StaticAnalysisReport } from '@boardgamesempire/plugin-analysis';
 import type { PluginArtifactDirectory, PluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
 import { buildPluginArtifactSha256 as sha } from '@boardgamesempire/plugin-contract';
 import type { PluginManifest } from '@boardgamesempire/plugin-manifest';
@@ -51,7 +52,6 @@ import { DEFAULT_PLUGIN_EXECUTION_MODE } from './manifest-enum.maps';
 import type { PluginInstallInput } from './plugin-installer.service';
 import { PluginInstallerService } from './plugin-installer.service';
 import type { PluginStaticAnalysisService } from './plugin-static-analysis.service';
-import type { StaticAnalysisFinding, StaticAnalysisReport } from './static-analysis.types';
 
 describe('PluginInstallerService', () => {
   const options = buildPluginModuleOptions();

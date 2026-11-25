@@ -1,6 +1,7 @@
 import type { Permission } from '@bge/database';
 import { CONSENT_UNIT_BINDING_REFUSAL, PERMISSION_CATALOG, RiskLevel } from '@bge/database';
 import { UNIT_BOUND_RULES, UNIT_ID_OFF_ID_COLUMN_RULES } from '@bge/testing';
+import type { StaticAnalysisFinding } from '@boardgamesempire/plugin-analysis';
 import { buildPluginManifest, validatePluginManifest } from '@boardgamesempire/plugin-manifest';
 import {
   collectUnboundedUnitConsentViolations,
@@ -9,7 +10,6 @@ import {
   criticalConfirmationExpectation,
   resolveForbiddenSpecifierAcknowledgement,
 } from './consent-gates';
-import type { StaticAnalysisFinding } from './static-analysis.types';
 
 /**
  * The extracted consent-gate helpers shared by install (C2) and update

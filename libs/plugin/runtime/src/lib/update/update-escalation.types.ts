@@ -5,7 +5,7 @@ import type { PluginConsentScopeValue } from '@boardgamesempire/plugin-manifest'
  * Escalation vocabulary for the update comparison (#59 Phase C3).
  * Types only — `plugin.events.ts` carries these on the update-pending
  * payload, and the comparator produces them — so the shapes live in a
- * dependency-light file the same way `static-analysis.types.ts` does.
+ * dependency-light file the same way plugin-analysis's `static-analysis.types.ts` does.
  */
 
 export type UpdateEscalation =

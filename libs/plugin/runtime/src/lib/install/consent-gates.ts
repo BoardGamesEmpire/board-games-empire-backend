@@ -1,12 +1,12 @@
 import type { Permission } from '@bge/database';
 import { bindsConsentUnit, CONSENT_UNIT_BINDING_REFUSAL, PluginGrantScope, RiskLevel } from '@bge/database';
+import type { StaticAnalysisFinding } from '@boardgamesempire/plugin-analysis';
 import type {
   ForbiddenPermissionViolation,
   NormalizedPermissionRequest,
   PluginManifestValidationResult,
 } from '@boardgamesempire/plugin-manifest';
 import { CONSENT_SCOPE_TO_GRANT_SCOPE } from '../grants/consent-scope.map';
-import type { StaticAnalysisFinding } from './static-analysis.types';
 
 /**
  * The consent-gate rules the installer (#59 C2) and the update service

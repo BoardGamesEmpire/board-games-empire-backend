@@ -10,6 +10,8 @@ import {
   RiskLevel,
   SERVER_SCOPE_SENTINEL,
 } from '@bge/database';
+import type { StaticAnalysisReport } from '@boardgamesempire/plugin-analysis';
+import { gatingFindings } from '@boardgamesempire/plugin-analysis';
 import type { PluginArtifactDirectory } from '@boardgamesempire/plugin-contract';
 import { parsePluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
 import type {
@@ -63,8 +65,6 @@ import {
   pluginDataGatewayName,
 } from '../install/plugin-data-gateway-row';
 import { PluginStaticAnalysisService } from '../install/plugin-static-analysis.service';
-import type { StaticAnalysisReport } from '../install/static-analysis.types';
-import { gatingFindings } from '../install/static-analysis.types';
 import { PluginDirectoryLayoutError } from '../loader/loader.errors';
 import { PluginDirectoryResolverService } from '../loader/plugin-directory-resolver.service';
 import type { PluginModuleOptions } from '../plugin-module.options';

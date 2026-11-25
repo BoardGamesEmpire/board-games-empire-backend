@@ -8,7 +8,7 @@ import type { ConsentUngrantableCause } from '../grants/consent-grantability';
  * Consent-classification vocabulary shared by the classifier, feature-state
  * derivation, and the consent presentation (#60). Types plus the two scope
  * predicates — the same dependency-light shape as
- * `static-analysis.types.ts`/`update-escalation.types.ts`.
+ * `update-escalation.types.ts` and plugin-analysis's `static-analysis.types.ts`.
  */
 
 /**

@@ -1,15 +1,14 @@
-import type { PluginArtifactDirectory } from '@boardgamesempire/plugin-contract';
-import { buildPluginArtifactSha256 as sha } from '@boardgamesempire/plugin-contract';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PluginInstallStaticAnalysisError, PluginStaticAnalysisUnavailableError } from './install.errors';
-import { PARSER_CAPABILITY_PROBES } from './parser-capabilities';
-import { PluginStaticAnalysisService } from './plugin-static-analysis.service';
+import { PARSER_CAPABILITY_PROBES } from './parser-capabilities.js';
+import type { PluginCodeRoot } from './plugin-static-analyzer.js';
+import { PluginStaticAnalyzer } from './plugin-static-analyzer.js';
+import { PluginStaticAnalysisUnavailableError } from './static-analysis.errors.js';
 
 /**
  * Isolated from the main analyzer spec on purpose: that suite runs the REAL
- * parsers because the service's value is what they actually surface, while
+ * parsers because the analyzer's value is what they actually surface, while
  * this one substitutes the parser to exercise the environments the
  * capability probe exists to refuse (#219) — a build that honours neither
  * module option key, and a stale major that honours the keys but chokes on
@@ -44,14 +43,12 @@ jest.mock('meriyah', () => ({
   },
 }));
 
-describe('PluginStaticAnalysisService parser guard', () => {
+describe('PluginStaticAnalyzer parser guard', () => {
   let rootDir: string;
 
-  const directory = (): PluginArtifactDirectory => ({
+  const codeRoot = (): PluginCodeRoot => ({
     slug: 'demo-sink',
-    sha256: sha('a'),
     rootDir,
-    manifestPath: join(rootDir, 'manifest.json'),
     packageJsonPath: join(rootDir, 'package.json'),
   });
 
@@ -82,16 +79,16 @@ describe('PluginStaticAnalysisService parser guard', () => {
     });
 
     it('refuses to analyze rather than produce a partial-coverage report that reads as complete', async () => {
-      const service = new PluginStaticAnalysisService();
+      const analyzer = new PluginStaticAnalyzer();
 
-      await expect(service.analyze(directory(), { deepScan: false })).rejects.toBeInstanceOf(
+      await expect(analyzer.analyze(codeRoot(), { deepScan: false })).rejects.toBeInstanceOf(
         PluginStaticAnalysisUnavailableError,
       );
     });
 
     it('reports EVERY probe as failed and an unknown version when the build exports none', async () => {
-      const failure = await new PluginStaticAnalysisService()
-        .analyze(directory(), { deepScan: false })
+      const failure = await new PluginStaticAnalyzer()
+        .analyze(codeRoot(), { deepScan: false })
         .catch((err: unknown) => err);
 
       expect(failure).toBeInstanceOf(PluginStaticAnalysisUnavailableError);
@@ -104,22 +101,23 @@ describe('PluginStaticAnalysisService parser guard', () => {
     });
 
     it('throws on EVERY attempt — a broken environment is not cached as checked', async () => {
-      const service = new PluginStaticAnalysisService();
+      const analyzer = new PluginStaticAnalyzer();
 
-      await service.analyze(directory(), { deepScan: false }).catch(() => undefined);
+      await analyzer.analyze(codeRoot(), { deepScan: false }).catch(() => undefined);
 
-      await expect(service.analyze(directory(), { deepScan: false })).rejects.toBeInstanceOf(
+      await expect(analyzer.analyze(codeRoot(), { deepScan: false })).rejects.toBeInstanceOf(
         PluginStaticAnalysisUnavailableError,
       );
     });
 
-    it('is an environment error, distinct from the findings-gate rejection C4 maps separately', async () => {
-      const failure = await new PluginStaticAnalysisService()
-        .analyze(directory(), { deepScan: false })
+    it('says in plain words that a partial-coverage scan would have read as complete (#1093)', async () => {
+      const failure = await new PluginStaticAnalyzer()
+        .analyze(codeRoot(), { deepScan: false })
         .catch((err: unknown) => err);
 
-      expect(failure).not.toBeInstanceOf(PluginInstallStaticAnalysisError);
-      expect((failure as Error).message).toContain('partial coverage');
+      expect((failure as Error).message).toContain(
+        'so screening would run at partial coverage while reporting a complete scan',
+      );
     });
   });
 
@@ -136,8 +134,8 @@ describe('PluginStaticAnalysisService parser guard', () => {
     });
 
     it('is refused: passing the legacy floor is not capability for a full scan', async () => {
-      const failure = await new PluginStaticAnalysisService()
-        .analyze(directory(), { deepScan: false })
+      const failure = await new PluginStaticAnalyzer()
+        .analyze(codeRoot(), { deepScan: false })
         .catch((err: unknown) => err);
 
       expect(failure).toBeInstanceOf(PluginStaticAnalysisUnavailableError);
@@ -152,8 +150,8 @@ describe('PluginStaticAnalysisService parser guard', () => {
     });
 
     it('names the resolved version so the operator knows which build they actually got', async () => {
-      const failure = await new PluginStaticAnalysisService()
-        .analyze(directory(), { deepScan: false })
+      const failure = await new PluginStaticAnalyzer()
+        .analyze(codeRoot(), { deepScan: false })
         .catch((err: unknown) => err);
 
       expect((failure as PluginStaticAnalysisUnavailableError).parserVersion).toBe('1.9.15');
@@ -168,7 +166,7 @@ describe('PluginStaticAnalysisService parser guard', () => {
     });
 
     it('proceeds and still surfaces findings — the guard gates broken parsers, not healthy ones', async () => {
-      const report = await new PluginStaticAnalysisService().analyze(directory(), { deepScan: false });
+      const report = await new PluginStaticAnalyzer().analyze(codeRoot(), { deepScan: false });
 
       expect(report.findings).toEqual(
         expect.arrayContaining([expect.objectContaining({ specifier: 'axios', severity: 'forbidden' })]),
