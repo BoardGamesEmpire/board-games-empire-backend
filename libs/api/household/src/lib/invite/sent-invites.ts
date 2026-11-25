@@ -19,7 +19,7 @@ import {
  *
  * Into a household the inviter is not a member of, only the invites they
  * can still withdraw are listed, outstanding and unexpired, whatever the
- * filter asks: a server owner may invite into any household without a seat
+ * filter asks: the Owner may invite into any household without a seat
  * in it. A former member has nothing left to withdraw there, since leaving
  * or being removed revoked it (#747), and a settled invite there would go on
  * telling them who joined. An invite into a deleted household is never

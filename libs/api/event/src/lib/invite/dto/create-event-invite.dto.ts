@@ -9,7 +9,7 @@ import { ASSIGNABLE_ATTENDEE_ROLES } from '../../attendee/dto/add-attendee.dto';
 export const EVENT_INVITE_MAX_MESSAGE_LENGTH = 1_000;
 
 /**
- * `POST /events/:eventId/invites` (#742): invite someone with an account to
+ * `POST /events/:eventId/invites` (#742): invite a registered user to
  * the event, by user id, offering an event role. Inviting someone without an
  * account, by address, is #488's. There is no `expiresAt`: every invite gets
  * the invites lib's default window, and the global pipe refuses a field this

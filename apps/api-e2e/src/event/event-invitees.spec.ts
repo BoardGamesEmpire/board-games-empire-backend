@@ -208,23 +208,38 @@ describe('inviting a user to an event (#546, #742)', () => {
     expect(read.attendance).toBeNull();
   });
 
-  // Everyone with an account is invited instead (#742).
-  it('refuses a userId on the direct add with 400 ATTENDEE_ACCOUNT_NEEDS_INVITE, and adds no one (#742)', async () => {
+  // Every registered user is invited instead (#742).
+  it('refuses a userId on the direct add with 400 ATTENDEE_USER_NEEDS_INVITE, and adds no one (#742)', async () => {
     const [host, user] = await Promise.all([actors.user(), actors.user()]);
     const eventId = await createdEventId(host);
     const before = await attendeeCount(eventId);
 
     expectErrorEnvelope(await addAttendee(host, eventId, { userId: user.user.id }), {
       status: 400,
-      code: 'ATTENDEE_ACCOUNT_NEEDS_INVITE',
+      code: 'ATTENDEE_USER_NEEDS_INVITE',
     });
     expectErrorEnvelope(await addAttendee(host, eventId, { userId: user.user.id, guestName: 'Pat' }), {
       status: 400,
-      code: 'ATTENDEE_ACCOUNT_NEEDS_INVITE',
+      code: 'ATTENDEE_USER_NEEDS_INVITE',
     });
 
     expect(await attendeeCount(eventId)).toBe(before);
     expect(await inviteCount(eventId)).toBe(0);
+  });
+
+  // A client that writes an unset field as null or '' names nobody, so the
+  // body adds a person by name through the global pipe (#742).
+  it.each([null, ''])('adds a person by name when userId is %p (#742)', async (userId) => {
+    const host = await actors.user();
+    const eventId = await createdEventId(host);
+    const before = await attendeeCount(eventId);
+
+    expect((await addAttendee(host, eventId, { userId, guestName: 'Pat', guestEmail: 'pat@example.com' })).status).toBe(
+      201,
+    );
+    expectErrorEnvelope(await addAttendee(host, eventId, { userId }), { status: 400, code: null });
+
+    expect(await attendeeCount(eventId)).toBe(before + 1);
   });
 
   describe("the invitee's settings", () => {

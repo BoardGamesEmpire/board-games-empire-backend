@@ -1,9 +1,10 @@
-import { EventParticipationStatus, Reach } from '@bge/database';
+import { EventParticipationStatus, InviteStatus, Reach } from '@bge/database';
 import type { Actors, AuthenticatedActor, SessionActor } from '@bge/testing-e2e';
 import { befriend, createActors } from '@bge/testing-e2e';
 import request from 'supertest';
 import type { Caller } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
+import { expectErrorEnvelope } from '../support/error-envelope';
 import type { TestDatabase } from '../support/test-db';
 import { createTestDatabase } from '../support/test-db';
 import { createEventInviteClient, inviteAndAccept } from './event-join';
@@ -154,6 +155,32 @@ describe("a deleted household's events (#992)", () => {
     await restoreHousehold(owner, householdId);
     const event = eventDetailEnvelope(await readEvent(owner, eventId).expect(200), 'GET /api/events/:id');
     expect(event.title).toBe('Live');
+  });
+
+  // The household's events go with it, so the delete revokes their open
+  // invites as an event's own delete does, rather than leaving them for the
+  // sweep to call expired (#742). A restore leaves them revoked, as it leaves
+  // the household's own.
+  it('revokes the open invites to its events, leaves an event outside it alone, and a restore keeps them revoked', async () => {
+    const [owner, friend] = await Promise.all([actors.user(), actors.user()]);
+    await befriend(db.client, owner, friend);
+    const { householdId, eventId } = await householdEvent(owner);
+    const loneId = await createdEventId(owner, { reach: Reach.Public, ...dated() });
+    const { sentInvite, accept } = createEventInviteClient(baseUrl);
+    const toTheEvent = await sentInvite(owner, eventId, { userId: friend.user.id });
+    const toTheLoneEvent = await sentInvite(owner, loneId, { userId: friend.user.id });
+
+    await deleteHousehold(owner, householdId);
+
+    const statusOf = async (id: string) =>
+      (await db.client.invite.findUniqueOrThrow({ where: { id }, select: { status: true } })).status;
+    expect(await statusOf(toTheEvent.id)).toBe(InviteStatus.Revoked);
+    expect(await statusOf(toTheLoneEvent.id)).toBe(InviteStatus.Pending);
+
+    await restoreHousehold(owner, householdId);
+
+    expect(await statusOf(toTheEvent.id)).toBe(InviteStatus.Revoked);
+    expectErrorEnvelope(await accept(friend, toTheEvent.id), { status: 409, code: 'INVITE_NOT_OUTSTANDING' });
   });
 
   // Staff read every event, so this pins that the clause isn't a catalog

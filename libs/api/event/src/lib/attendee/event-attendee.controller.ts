@@ -100,7 +100,7 @@ export class EventAttendeeController {
   @ApiOperation({
     summary: 'Add a person without an account to an event, by name',
     description:
-      'Someone with an account is invited instead, with `POST /events/:eventId/invites`, and becomes an attendee ' +
+      'A registered user is invited instead, with `POST /events/:eventId/invites`, and becomes an attendee ' +
       'by accepting (#742). A body naming a `userId` is refused.',
   })
   @ApiParam({ name: 'eventId', type: String })
@@ -108,8 +108,8 @@ export class EventAttendeeController {
   @ApiResponse({
     status: Http.BadRequest,
     description:
-      'An invalid field, a missing name, or a `userId` (code `ATTENDEE_ACCOUNT_NEEDS_INVITE`): someone with an ' +
-      'account is invited instead',
+      'An invalid field, a missing name, or a `userId` (code `ATTENDEE_USER_NEEDS_INVITE`): a registered ' +
+      'user is invited instead',
   })
   @ApiResponse({
     status: Http.Forbidden,

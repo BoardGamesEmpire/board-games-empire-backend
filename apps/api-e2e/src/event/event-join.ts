@@ -87,7 +87,7 @@ export function createEventInviteClient(baseUrl: string): EventInviteClient {
 }
 
 /**
- * Makes `invitee` an attendee of the event the way a person with an account
+ * Makes `invitee` an attendee of the event the way a registered user
  * joins one (#742): `inviter` invites them, offering `role`, and they accept.
  * Accepting writes their attendee row `Attending`, in the offered role, and
  * evicts their cached graph, so the role reaches their next request.

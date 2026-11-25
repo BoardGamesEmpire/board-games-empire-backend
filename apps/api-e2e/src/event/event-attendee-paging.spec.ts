@@ -73,7 +73,7 @@ describe('GET /api/events/:eventId/attendees pages (#373)', () => {
       await db.client.eventAttendee.create({
         data: {
           createdAt,
-          // What an accepted invite writes: an account holder is Attending,
+          // What an accepted invite writes: a registered user is Attending,
           // dated, never left at the schema's Invited (#742).
           status: EventParticipationStatus.Attending,
           rsvpDate: createdAt,

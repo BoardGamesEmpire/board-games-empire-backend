@@ -69,7 +69,9 @@ describe('HouseholdService', () => {
   let db: MockDatabaseService;
   let abilityService: jest.Mocked<Pick<AbilityService, 'getCurrentResourceConditions' | 'getActingUserId'>>;
   let permissions: jest.Mocked<Pick<PermissionsService, 'invalidateUser' | 'invalidateUsers'>>;
-  let invites: jest.Mocked<Pick<InviteService, 'revokeOutstandingWithin' | 'emit'>>;
+  let invites: jest.Mocked<
+    Pick<InviteService, 'revokeOutstandingWithin' | 'revokeOutstandingToHouseholdEventsWithin' | 'emit'>
+  >;
   let events: jest.Mocked<Pick<EventEmitter2, 'emit'>>;
   let compose: jest.SpyInstance;
 
@@ -84,6 +86,7 @@ describe('HouseholdService', () => {
     };
     invites = {
       revokeOutstandingWithin: jest.fn().mockResolvedValue({ count: 0, events: [] }),
+      revokeOutstandingToHouseholdEventsWithin: jest.fn().mockResolvedValue({ count: 0, events: [] }),
       emit: jest.fn(),
     };
     events = { emit: jest.fn().mockReturnValue(true) };
@@ -956,12 +959,14 @@ describe('HouseholdService', () => {
     });
   });
 
-  it('deleteHousehold soft-deletes under the delete policy, revokes outstanding invites, and evicts member caches', async () => {
+  it('deleteHousehold soft-deletes under the delete policy, revokes outstanding invites to it and its events, and evicts member caches (#742)', async () => {
     db.household.count.mockResolvedValue(1);
     unwrapTransaction(db);
     db.household.update.mockResolvedValue({ id: 'hh-1' } as Household);
     const revoked = [{ subjectId: 'inv-1' }, { subjectId: 'inv-2' }] as unknown as InviteRevokedEvent[];
     invites.revokeOutstandingWithin.mockResolvedValue({ count: 2, events: revoked });
+    const revokedToEvents = [{ subjectId: 'inv-3' }] as unknown as InviteRevokedEvent[];
+    invites.revokeOutstandingToHouseholdEventsWithin.mockResolvedValue({ count: 1, events: revokedToEvents });
     db.householdMember.findMany.mockResolvedValue([{ userId: 'user-1' }, { userId: 'user-2' }] as never);
 
     await service.deleteHousehold('hh-1');
@@ -981,12 +986,14 @@ describe('HouseholdService', () => {
     // inside the same transaction. `unwrapTransaction` hands the
     // service `db` as its transaction client, so that is what the lib must see.
     expect(invites.revokeOutstandingWithin).toHaveBeenCalledWith(db, { householdId: 'hh-1' });
+    // So are invites to its events, which go with it (#742).
+    expect(invites.revokeOutstandingToHouseholdEventsWithin).toHaveBeenCalledWith(db, 'hh-1');
     expect(db.invite.updateMany).not.toHaveBeenCalled();
     // Every member's cached ability graph is evicted (household left their surface).
     expect(permissions.invalidateUsers).toHaveBeenCalledWith(['user-1', 'user-2']);
     // The revocations are announced after the commit and the eviction, never
     // from inside the transaction.
-    expect(invites.emit).toHaveBeenCalledWith(revoked);
+    expect(invites.emit).toHaveBeenCalledWith([...revoked, ...revokedToEvents]);
     expect(invites.emit.mock.invocationCallOrder[0]).toBeGreaterThan(
       permissions.invalidateUsers.mock.invocationCallOrder[0],
     );

@@ -2554,7 +2554,7 @@ export const PERMISSION_CATALOG = [
   //
   // The pair rates apart, by the decision at #544's reconcile (#533). The
   // add is `Low`: it places only a person without an account, by name.
-  // Everyone with an account is invited instead, and appears once they
+  // Every registered user is invited instead, and appears once they
   // accept (#742). An invite offering one of these roles is asked about this
   // grant too, for the row the accept will write. The removal is `Medium`: it
   // deletes another user's attendee row, and their role and game list for

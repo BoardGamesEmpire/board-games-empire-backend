@@ -305,7 +305,7 @@ describe('event write authorization', () => {
   });
 
   // The direct add places a person without an account, by name, in a role
-  // the actor may give out (#539). Everyone with an account is invited
+  // the actor may give out (#539). Every registered user is invited
   // instead and joins by accepting (#742), so delegates and co-hosts are
   // seated that way here.
   describe('adding an attendee (#539)', () => {
@@ -341,8 +341,8 @@ describe('event write authorization', () => {
       // Control: the attacker holds the attendee grant, on their own event.
       await addAttendee(attacker, ownId, byName()).expect(201);
 
-      // The self-add as co-host is the escalation #539 reported; a person
-      // with an account now joins only through an invite, so it is asked of
+      // The self-add as co-host is the escalation #539 reported; a registered
+      // user now joins only through an invite, so it is asked of
       // the invite route. The by-name adds show the binding refuses every
       // add, not only a managing one.
       const before = await attendeeCount(targetId);

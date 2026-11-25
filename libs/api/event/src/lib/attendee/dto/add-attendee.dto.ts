@@ -27,20 +27,29 @@ export type AssignableAttendeeRole = (typeof ASSIGNABLE_ATTENDEE_ROLES)[number];
 
 /**
  * Whether the body names a user. One that does is refused by the service with
- * its own code, ATTENDEE_ACCOUNT_NEEDS_INVITE (#742), so the name and email
+ * its own code, ATTENDEE_USER_NEEDS_INVITE (#742), so the name and email
  * checks stand aside for it rather than answer with a missing name.
+ *
+ * `null` and `''` name nobody, as an absent field doesn't: `@IsOptional` lets
+ * `null` through, and a client that writes an unset field as `null` or `''`
+ * is adding a person by name (#742). The DTO and the service ask this one
+ * question, so the two can't disagree about a body.
  */
-const namesNoUser = (o: AddAttendeeDto) => o.userId === undefined;
+export function namesUser(dto: Pick<AddAttendeeDto, 'userId'>): boolean {
+  return typeof dto.userId === 'string' && dto.userId !== '';
+}
+
+const namesNoUser = (o: AddAttendeeDto) => !namesUser(o);
 
 /**
  * A person added to the event directly, by name: someone without an account
- * (#742). Everyone with an account is invited instead
+ * (#742). Every registered user is invited instead
  * (`POST /events/:eventId/invites`) and becomes an attendee by accepting.
  */
 export class AddAttendeeDto {
   @ApiPropertyOptional({
     description:
-      'Refused with 400, code `ATTENDEE_ACCOUNT_NEEDS_INVITE`: someone with an account is invited instead, ' +
+      'Refused with 400, code `ATTENDEE_USER_NEEDS_INVITE`: a registered user is invited instead, ' +
       'with `POST /events/:eventId/invites`, and becomes an attendee by accepting.',
   })
   @IsString({ message: i18nValidationMessage('validation.isString') })

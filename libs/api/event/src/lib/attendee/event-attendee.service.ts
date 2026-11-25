@@ -50,7 +50,7 @@ import {
   lineupStillAhead,
   syncSuppliedGames,
 } from './attendance';
-import { AddAttendeeDto } from './dto/add-attendee.dto';
+import { AddAttendeeDto, namesUser } from './dto/add-attendee.dto';
 import { AddGameToListDto } from './dto/add-game-to-list.dto';
 import type { OfferGameItemDto } from './dto/offer-games.dto';
 import { OfferGamesDto } from './dto/offer-games.dto';
@@ -176,19 +176,19 @@ export class EventAttendeeService {
   /**
    * Adds a person without an account to the event, by name (#742).
    *
-   * Someone with an account is invited instead (`POST /events/:eventId/invites`)
+   * A registered user is invited instead (`POST /events/:eventId/invites`)
    * and becomes an attendee by accepting, so a `userId` answers 400
-   * ATTENDEE_ACCOUNT_NEEDS_INVITE before anything is read: one request would
+   * ATTENDEE_USER_NEEDS_INVITE before anything is read: one request would
    * otherwise place a user on the event without their consent. The person
    * added has no account to answer with, so they start `Invited` unless the
    * request records their answer.
    */
   async addAttendee(eventId: string, dto: AddAttendeeDto): Promise<AttendeeWithGames> {
-    if (dto.userId !== undefined) {
+    if (namesUser(dto)) {
       throw new CodedHttpException(
         Http.BadRequest,
-        'ATTENDEE_ACCOUNT_NEEDS_INVITE',
-        t('errors.attendee.account_needs_invite'),
+        'ATTENDEE_USER_NEEDS_INVITE',
+        t('errors.attendee.user_needs_invite'),
       );
     }
 

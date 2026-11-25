@@ -1,7 +1,7 @@
 import { SystemRole } from '@bge/database';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
-import { AddAttendeeDto } from './add-attendee.dto';
+import { AddAttendeeDto, namesUser } from './add-attendee.dto';
 
 type PlainPayload = Record<string, unknown>;
 
@@ -41,11 +41,19 @@ describe('AddAttendeeDto', () => {
     ]);
   });
 
-  // Someone with an account is invited instead (#742). A `userId` passes
+  // A registered user is invited instead (#742). A `userId` passes
   // validation alone, so the service answers it with its own code,
-  // ATTENDEE_ACCOUNT_NEEDS_INVITE, rather than with a missing name.
+  // ATTENDEE_USER_NEEDS_INVITE, rather than with a missing name.
   it('lets a userId through, for the service to refuse with its own code (#742)', async () => {
     await expect(propertiesWithErrors({ userId: 'user-2' })).resolves.toEqual([]);
+  });
+
+  // A client that writes an unset field as null or '' names nobody: the body
+  // is a person added by name, so the name and address are still asked for
+  // (#742).
+  it.each([null, ''])('treats a userId of %p as naming nobody (#742)', async (userId) => {
+    await expect(propertiesWithErrors({ ...VALID_PAYLOAD, userId })).resolves.toEqual([]);
+    await expect(propertiesWithErrors({ userId })).resolves.toEqual(['guestName', 'guestEmail']);
   });
 
   it.each(ASSIGNABLE)('accepts the event role %s', async (role) => {
@@ -61,4 +69,15 @@ describe('AddAttendeeDto', () => {
       await expect(propertiesWithErrors({ ...VALID_PAYLOAD, role })).resolves.toEqual(['role']);
     },
   );
+});
+
+describe('namesUser', () => {
+  it.each([
+    [{ userId: 'user-2' }, true],
+    [{}, false],
+    [{ userId: null }, false],
+    [{ userId: '' }, false],
+  ])('%p names a user: %p (#742)', (body, expected) => {
+    expect(namesUser(body as Pick<AddAttendeeDto, 'userId'>)).toBe(expected);
+  });
 });

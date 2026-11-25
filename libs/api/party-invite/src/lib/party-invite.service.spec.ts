@@ -256,7 +256,7 @@ describe('PartyInviteService', () => {
 
     /**
      * Where the inviter is not a household member, only what they can still
-     * withdraw: a server owner's invites, since leaving revoked a former
+     * withdraw: the Owner's invites, since leaving revoked a former
      * household member's (#747).
      */
     const withdrawableOrStillMember = {

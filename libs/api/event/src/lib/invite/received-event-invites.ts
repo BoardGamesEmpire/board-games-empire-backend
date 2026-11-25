@@ -12,10 +12,9 @@ import { NOT_REMOVED } from '../constants/not-removed.constant';
  * out.
  *
  * Live as every event read judges it (`liveEventWhere`): not deleted, and not
- * in a deleted household (#992). An event's delete revokes its invites, but a
- * household's delete revokes only the household's own, so an invite to one of
- * its events stays `Pending` until it expires; its accept answers 404, and
- * the inbox doesn't offer it.
+ * in a deleted household (#992). Both deletes revoke the invites to the
+ * events they take (#742), so the filter only matters for a delete and an
+ * invite create that raced; its accept answers 404 either way.
  *
  * An invite to an event they already attend stays outstanding (an accept of
  * it is refused), so it is hidden rather than offered. A removed attendee's

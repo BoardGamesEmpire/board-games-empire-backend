@@ -434,9 +434,9 @@ export interface UserSeat {
 }
 
 /**
- * Seats a user with an account on the event, on the caller's transaction:
+ * Seats a registered user on the event, on the caller's transaction:
  * the attendee row, in `roleName`, `Attending`, with its RSVP dated `at`
- * (#1027). Accepting an invite is the only way a user with an account joins,
+ * (#1027). Accepting an invite is the only way a registered user joins,
  * and accepting means attending, so there is no other status to seat with,
  * and no notes (#742). The caller holds the event's lock (`shareLiveEvent`)
  * and has settled whether the user may be seated.

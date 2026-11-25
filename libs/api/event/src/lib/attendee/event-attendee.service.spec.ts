@@ -39,6 +39,7 @@ import { makeOfferedGameEntry } from '../offered-game/offered-game.fixture';
 import { OFFERED_GAME_ORDER, OFFERED_GAME_SELECT } from '../offered-game/offered-game.select';
 import { OfferedGameService } from '../offered-game/offered-game.service';
 import { lineupStillAhead } from './attendance';
+import type { AddAttendeeDto } from './dto/add-attendee.dto';
 import { EventAttendeeService } from './event-attendee.service';
 import {
   AttendeeAddedEvent,
@@ -948,7 +949,7 @@ describe('EventAttendeeService', () => {
     });
   });
 
-  // Everyone with an account is invited instead, and becomes an attendee by
+  // Every registered user is invited instead, and becomes an attendee by
   // accepting (#742). The direct add keeps placing a person without one, by
   // name.
   describe('the direct add, for people without an account (#742)', () => {
@@ -961,17 +962,13 @@ describe('EventAttendeeService', () => {
       );
     });
 
-    it('the direct add refuses a userId with ATTENDEE_ACCOUNT_NEEDS_INVITE', async () => {
+    it('the direct add refuses a userId with ATTENDEE_USER_NEEDS_INVITE', async () => {
       const attempt = service.addAttendee('event-1', { userId: 'user-2', guestName: 'Pat' });
 
       await expect(attempt).rejects.toThrow(
-        new CodedHttpException(
-          Http.BadRequest,
-          'ATTENDEE_ACCOUNT_NEEDS_INVITE',
-          t('errors.attendee.account_needs_invite'),
-        ),
+        new CodedHttpException(Http.BadRequest, 'ATTENDEE_USER_NEEDS_INVITE', t('errors.attendee.user_needs_invite')),
       );
-      await expect(attempt).rejects.toMatchObject({ code: 'ATTENDEE_ACCOUNT_NEEDS_INVITE', status: Http.BadRequest });
+      await expect(attempt).rejects.toMatchObject({ code: 'ATTENDEE_USER_NEEDS_INVITE', status: Http.BadRequest });
       // Refused for its shape, before anything is read about the event or the user.
       expect(db.event.findUnique).not.toHaveBeenCalled();
       expect(db.user.findUnique).not.toHaveBeenCalled();
@@ -982,9 +979,19 @@ describe('EventAttendeeService', () => {
 
     it("refuses the caller's own userId the same way", async () => {
       await expect(service.addAttendee('event-1', { userId: 'user-actor' })).rejects.toMatchObject({
-        code: 'ATTENDEE_ACCOUNT_NEEDS_INVITE',
+        code: 'ATTENDEE_USER_NEEDS_INVITE',
       });
       expect(db.eventAttendee.create).not.toHaveBeenCalled();
+    });
+
+    // A client that writes an unset field as null or '' names nobody, so the
+    // body adds a person by name rather than meeting the invite refusal (#742).
+    it.each([null, ''])('adds by name when userId is %p', async (userId) => {
+      await service.addAttendee('event-1', { userId, guestName: 'Pat' } as unknown as AddAttendeeDto);
+
+      expect(db.eventAttendee.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ guestName: 'Pat' }) }),
+      );
     });
 
     it('requires a name, with 400', async () => {

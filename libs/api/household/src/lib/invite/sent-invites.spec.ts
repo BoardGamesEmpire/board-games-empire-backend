@@ -6,7 +6,7 @@ const NOW = new Date('2026-10-15T12:00:00Z');
 
 /**
  * Where the inviter is not a household member, only what they can still
- * withdraw: a server owner's invites, since leaving revoked a former household
+ * withdraw: the Owner's invites, since leaving revoked a former household
  * member's (#747).
  */
 const withdrawableOrStillMember = {

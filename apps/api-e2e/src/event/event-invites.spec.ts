@@ -37,7 +37,7 @@ const INVITE_NOT_OUTSTANDING = 'INVITE_NOT_OUTSTANDING';
  * Actors and rosters are arranged before any of them sends a request: the API
  * caches each user's ability on first use, and this process cannot evict it
  * (#256). Attendees are seated in the database, so these tests do not depend
- * on how the direct add treats a user with an account.
+ * on how the direct add treats a registered user.
  */
 describe('event invites (#742)', () => {
   const baseUrl = requireBaseUrl(process.env);
