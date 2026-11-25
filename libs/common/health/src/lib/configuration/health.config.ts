@@ -12,7 +12,8 @@ export default registerAs('health', () =>
     {
       keyTo: 'httpHealthCheckUrls',
       key: 'HTTP_HEALTH_CHECK_URLS',
-      defaultValue: 'google|https://www.google.com,github|https://www.github.com',
+      // Empty: a fresh server sends nothing to a third party unasked (#1509).
+      defaultValue: '',
       mutators: (value) => splitTrimFilter(value),
     },
     {
