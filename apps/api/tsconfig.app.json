@@ -74,6 +74,9 @@
       "path": "../../libs/api/permission-catalog/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/api/party-invite/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/common/secure-http/tsconfig.lib.json"
     },
     {

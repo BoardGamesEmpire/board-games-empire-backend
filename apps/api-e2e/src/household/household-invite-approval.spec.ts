@@ -1,4 +1,12 @@
-import { InviteStatus, MemberInvitePolicy, MemberSharePolicy, Reach, ResourceType, SystemRole } from '@bge/database';
+import {
+  InviteStatus,
+  InviteType,
+  MemberInvitePolicy,
+  MemberSharePolicy,
+  Reach,
+  ResourceType,
+  SystemRole,
+} from '@bge/database';
 import type { Actors, SessionActor } from '@bge/testing-e2e';
 import { arrangeInvite, createActors } from '@bge/testing-e2e';
 import request from 'supertest';
@@ -624,6 +632,35 @@ describe('member invites, their approval, and the invites a user has sent', () =
 
       await expect(sent(member)).resolves.toEqual([]);
       await expect(sent(member, InviteStatus.Revoked)).resolves.toEqual([]);
+    });
+
+    it('keeps one kind with ?type=, and refuses a kind no party route serves (#742)', async () => {
+      const { householdId, member, invitee, other } = await household(MemberInvitePolicy.Direct);
+      await createdInvite(member, householdId, { inviteeId: invitee.user.id });
+      await createdInvite(member, householdId, { inviteeId: other.user.id });
+      const sentOfType = (type: string) =>
+        request(baseUrl).get('/api/invites/sent').query({ type }).set(member.headers);
+
+      const unfiltered = await sent(member);
+      expect(unfiltered).toHaveLength(2);
+
+      const households = sentInvitesEnvelope(
+        await sentOfType(InviteType.Household).expect(200),
+        'GET /api/invites/sent?type=Household',
+      );
+      expect(households.invites.map(({ id }) => id)).toEqual(unfiltered.map(({ id }) => id));
+      expect(households.pagination).toMatchObject({ total: 2 });
+
+      // They sent no event invite, so the page is empty rather than refused.
+      const events = sentInvitesEnvelope(
+        await sentOfType(InviteType.Event).expect(200),
+        'GET /api/invites/sent?type=Event',
+      );
+      expect(events.invites).toEqual([]);
+      expect(events.pagination).toMatchObject({ total: 0 });
+
+      // No party route serves a System invite, so asking for one is a mistake.
+      await sentOfType(InviteType.System).expect(400);
     });
 
     it('refuses an API key, which cannot withdraw what it would list', async () => {
