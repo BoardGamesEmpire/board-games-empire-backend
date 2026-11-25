@@ -30,6 +30,7 @@ import { Logger as PinoLogger } from 'nestjs-pino';
 import type { Server } from 'node:http';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
+import { ApiExpressAdapter } from './app/adapters/api-express.adapter';
 import { RedisIoAdapter } from './app/adapters/redis-io.adapter';
 import { AppModule } from './app/app.module';
 import redisConfig, { redisConfigValidationSchema } from './app/configuration/redis.config';
@@ -75,7 +76,9 @@ async function bootstrap() {
     },
   });
 
-  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+  // ApiExpressAdapter answers every request no route matches, as Nest 11 did
+  // (#634).
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, new ApiExpressAdapter(), {
     bodyParser: false,
     // Buffer module-init logs until `useLogger` is called below, so they
     // flow through nestjs-pino (and therefore through the OTel pipeline)
