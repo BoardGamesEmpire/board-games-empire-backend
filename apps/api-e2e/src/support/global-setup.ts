@@ -135,7 +135,7 @@ async function launchApi(env: NodeJS.ProcessEnv, pluginsRoot: string): Promise<L
     return {
       label: 'API',
       bundle: API_BUNDLE,
-      env: { ...env, ...apiEnvOverrides(baseUrl, port, operationalPort, pluginsRoot) },
+      env: { ...env, ...apiEnvOverrides({ baseUrl, operationalPort, pluginsRoot, port }) },
       verbose,
       isReady: async () =>
         (await answersOk(`${baseUrl}/health/ready`)) && (await answersOk(`${operationalUrl}/health/live`)),

@@ -22,8 +22,10 @@ const CIDR_SHAPE = /^[^/]+\/\d{1,3}$/;
 
 /**
  * The operational port and the networks that may reach it (#1511). Both
- * defaults live here and not in the Joi schema: a Joi default is written into
- * the environment ahead of the config and overrides it (#626).
+ * defaults are applied here and not in the Joi schema: a Joi default is written
+ * into the environment ahead of the config and overrides it (#626). The port's
+ * is defined below; the sources' is `DEFAULT_OPERATIONAL_SOURCES`, beside the
+ * rule that reads them (`lib/operational-sources.ts`).
  */
 export default registerAs('operational', () =>
   env.provideMany<OperationalConfig>([

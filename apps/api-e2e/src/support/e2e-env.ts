@@ -178,6 +178,21 @@ export const API_THROTTLE_TTL_MS = 60_000;
  */
 export const API_CONFIGURED_SERVER_NAME = 'bge-e2e.test';
 
+/** Where the harness is about to launch the API child; see {@link apiEnvOverrides}. */
+export interface ApiLaunchAddresses {
+  /** The public origin, `http://127.0.0.1:<port>`. */
+  readonly baseUrl: string;
+
+  /** The second port, for the operational routes (#1511). */
+  readonly operationalPort: number;
+
+  /** The directory the harness made for the API's plugins (#1094). */
+  readonly pluginsRoot: string;
+
+  /** The public port. */
+  readonly port: number;
+}
+
 /**
  * Environment the API child gets on top of the inherited process env, given
  * the ephemeral origin it is about to bind.
@@ -219,16 +234,16 @@ export const API_CONFIGURED_SERVER_NAME = 'bge-e2e.test';
  * `HTTP_HEALTH_CHECK_URLS` names no URL, so the full health report pings
  * nothing: the suite must never reach a third party, and a ping's blip would
  * turn it red (#1511). It is `','` and not `''`, because `@bge/env` reads an
- * empty value as unset, and a developer's `.env` or the config's default
- * (google.com and github.com) would fill it. The config splits on commas and
- * drops empty entries, so `','` is the empty list.
+ * empty value as unset, and any default or a developer's `.env` would fill it.
+ * The config splits on commas and drops empty entries, so `','` is the empty
+ * list.
  */
-export function apiEnvOverrides(
-  baseUrl: string,
-  port: number,
-  operationalPort: number,
-  pluginsRoot: string,
-): Record<string, string> {
+export function apiEnvOverrides({
+  baseUrl,
+  operationalPort,
+  pluginsRoot,
+  port,
+}: ApiLaunchAddresses): Record<string, string> {
   const trustedOrigins = [baseUrl, baseUrl.replace('127.0.0.1', 'localhost'), `https://${API_CONFIGURED_SERVER_NAME}`];
 
   return {
@@ -499,26 +514,23 @@ export function redisOwnershipOverride(mode: Provisioning['mode']): Record<strin
 
 /** The launched API's base URL, or a loud failure if globalSetup never ran. */
 export function requireBaseUrl(env: Readonly<Record<string, string | undefined>>): string {
-  const baseUrl = env[E2E_BASE_URL_VAR]?.trim();
-
-  if (!baseUrl) {
-    throw new Error(`${E2E_BASE_URL_VAR} is not set — did the e2e globalSetup run (and pass its readiness probe)?`);
-  }
-
-  return baseUrl;
+  return requireLaunchedUrl(env, E2E_BASE_URL_VAR);
 }
 
 /** The launched API's operational URL (#1511), or a loud failure if globalSetup never published it. */
 export function requireOperationalUrl(env: Readonly<Record<string, string | undefined>>): string {
-  const operationalUrl = env[E2E_OPERATIONAL_URL_VAR]?.trim();
+  return requireLaunchedUrl(env, E2E_OPERATIONAL_URL_VAR);
+}
 
-  if (!operationalUrl) {
-    throw new Error(
-      `${E2E_OPERATIONAL_URL_VAR} is not set — did the e2e globalSetup run (and pass its readiness probe)?`,
-    );
+/** A URL `global-setup` publishes once the API passes its readiness probe, or a loud failure. */
+function requireLaunchedUrl(env: Readonly<Record<string, string | undefined>>, name: string): string {
+  const url = env[name]?.trim();
+
+  if (!url) {
+    throw new Error(`${name} is not set — did the e2e globalSetup run (and pass its readiness probe)?`);
   }
 
-  return operationalUrl;
+  return url;
 }
 
 /** The Mailpit endpoint `global-setup` published, or a loud failure if it never did. */

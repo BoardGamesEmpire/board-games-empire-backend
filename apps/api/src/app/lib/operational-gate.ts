@@ -1,10 +1,11 @@
 import { isOperationalRequest } from '@bge/health';
 import type { I18nPath } from '@bge/i18n';
-import { errorEnvelope } from '@bge/i18n';
+import { errorEnvelope, ROUTE_NOT_FOUND } from '@bge/i18n';
 import { Logger, RequestMethod } from '@nestjs/common';
 import { Http } from '@status/codes';
 import type { Request } from 'express';
 import type { ServerResponse } from 'node:http';
+import { API_DOCUMENT_PATH } from './api-document';
 import { createRefusalLog } from './refusal-log';
 
 /** A route as `setGlobalPrefix`'s `exclude` takes one: Nest's `RouteInfo`, which its root doesn't export. */
@@ -18,13 +19,14 @@ export interface OperationalRoute {
  *
  * main.ts spreads these into the routes the global prefix skips, and the gate
  * reads its "operational only" class from the same list, so the two can't name
- * different routes. A `/*path` entry covers everything below its stem.
+ * different routes. A `/*path` entry covers everything below its stem. The API
+ * document's entries name its mount, so the document can't move without them.
  */
 export const OPERATIONAL_PATHS: readonly OperationalRoute[] = [
   { path: 'health', method: RequestMethod.GET },
   { path: 'metrics', method: RequestMethod.GET },
-  { path: 'docs', method: RequestMethod.GET },
-  { path: 'docs/*path', method: RequestMethod.GET },
+  { path: API_DOCUMENT_PATH, method: RequestMethod.GET },
+  { path: `${API_DOCUMENT_PATH}/*path`, method: RequestMethod.GET },
 ];
 
 /** The probes both ports answer: a platform's load balancer can only reach the public one (#1511). */
@@ -44,11 +46,8 @@ interface Refusal {
   readonly status: number;
 }
 
-const ROUTE_NOT_FOUND: Refusal = {
-  code: 'ROUTE_NOT_FOUND',
-  key: 'errors.request.route_not_found',
-  status: Http.NotFound,
-};
+// The exception filter's own code and key, so this 404 matches an unmatched route's exactly.
+const NOT_ON_THIS_PORT: Refusal = { ...ROUTE_NOT_FOUND, status: Http.NotFound };
 
 const SOURCE_NOT_ALLOWED: Refusal = {
   code: 'OPERATIONAL_SOURCE_NOT_ALLOWED',
@@ -142,7 +141,7 @@ export function createOperationalGate({
     const routes = routesFor(req);
 
     if (routes !== 'either' && routes !== (operational ? 'operational' : 'public')) {
-      refuse(res, ROUTE_NOT_FOUND);
+      refuse(res, NOT_ON_THIS_PORT);
       return;
     }
 

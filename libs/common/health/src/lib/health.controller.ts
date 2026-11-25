@@ -70,7 +70,7 @@ export class HealthController {
    * to restart the pod, which is the right response for a hung process but
    * the wrong response for a transient DB blip.
    *
-   * No setting turns it off: a liveness probe that can be silenced is
+   * Nothing in the configuration turns it off: a liveness probe that can be silenced is
    * indistinguishable from no probe.
    */
   @Get('live')

@@ -3,7 +3,6 @@ import { registerAs } from '@nestjs/config';
 import Joi from 'joi';
 
 export interface SwaggerConfig {
-  basePath: string;
   description: string;
   title: string;
   version: string;

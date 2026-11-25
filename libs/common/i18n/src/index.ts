@@ -30,7 +30,7 @@ export {
   type ErrorCode,
   type ErrorEnvelope,
 } from './lib/error-envelope';
-export { I18nExceptionFilter } from './lib/i18n-exception.filter';
+export { I18nExceptionFilter, ROUTE_NOT_FOUND } from './lib/i18n-exception.filter';
 export { I18nResponseInterceptor } from './lib/i18n-response.interceptor';
 export { I18nConfigModule } from './lib/i18n.module';
 export { LocaleResolutionService, type LocaleResolutionInput } from './lib/locale-resolution.service';

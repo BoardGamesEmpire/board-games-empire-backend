@@ -82,7 +82,7 @@ The DataGateway images listen on gRPC too, each on its `*_GATEWAY_GRPC_PORT`, an
 
 What "ready" means here, role by role:
 
-- **The api** answers `/health/ready` once it has booted. That checks Postgres, the api's cache and queue Redis connections, and its storage. `/health/live` answers whenever the server is up. Both answer on the public port and on the operational port, so a probe that can reach only the public port still works. On the public port, `/health/ready` answers its status only: `{ "status": "ok" }` with a 200, or a 503 with the code `NOT_READY` and `"status": "error"`, and never the name of a dependency that is down. On the operational port it answers the full report, with an entry for each dependency and the message of each one that is down, so an operator can see which one failed. The full health report, `/health`, answers on the operational port only ([The operational port](#the-operational-port)). No setting turns these probes off. A first boot migrates and seeds before anything listens, so give the api a startup probe that allows minutes ([BOOTSTRAP.md](BOOTSTRAP.md), "First boot takes longer").
+- **The api** answers `/health/ready` once it has booted. That checks Postgres, the api's cache and queue Redis connections, and its storage. `/health/live` answers whenever the server is up. Both answer on the public port and on the operational port, so a probe that can reach only the public port still works. On the public port, `/health/ready` answers its status only: `{ "status": "ok" }` with a 200, or a 503 with the code `NOT_READY` and `"status": "error"`, and never the name of a dependency that is down. On the operational port it answers the full report, with an entry for each dependency and the message of each one that is down, so an operator can see which one failed. The full health report, `/health`, answers on the operational port only ([The operational port](#the-operational-port)). Nothing in the configuration turns these probes off. A first boot migrates and seeds before anything listens, so give the api a startup probe that allows minutes ([BOOTSTRAP.md](BOOTSTRAP.md), "First boot takes longer").
 - **The coordinator and the DataGateways** serve no standard gRPC health service (`grpc.health.v1.Health`) yet, so a Kubernetes `grpc` probe fails against them. Probe the port over TCP (`tcpSocket`). The coordinator opens its port once its bootstrap is done; the DataGateways have no database and open theirs at start.
 - **`worker` and `gateway-fetch`** listen on nothing, so there is nothing to probe. Their `Bootstrap complete` log line is the evidence they came up. A role that fails exits, and the restart policy brings it back.
 
@@ -259,6 +259,17 @@ Every other path answers 404 with the code `ROUTE_NOT_FOUND`, as an unknown rout
 The check reads only the address the connection comes from. It never reads `X-Forwarded-For` or any other forwarded header, because the client writes those and could name an allowed address. So a proxy in front of this port makes every request come from the proxy's address: don't route the operational port through your public reverse proxy. The [Host check](#behind-a-reverse-proxy) applies on this port too, so a scraper that targets a service name adds that name to `TRUSTED_ORIGINS` or targets an IP address.
 
 The api listens on this port on every interface, as it does on the public port. What keeps it private is the list above and not publishing it.
+
+**Scraping the metrics:** point a Prometheus scrape job at the operational port. Prometheus reads `/metrics` by default, over plain HTTP:
+
+```yaml
+scrape_configs:
+  - job_name: bge-api
+    static_configs:
+      - targets: ['10.0.0.5:33334']
+```
+
+Replace `10.0.0.5` with the api's address as Prometheus reaches it. Prometheus must reach it from an address in `OPERATIONAL_SOURCES`, and a target written as a name rather than an IP address must be in `TRUSTED_ORIGINS`, for the Host check.
 
 **Under Compose:** the split profile doesn't publish the operational port. Another container on the Compose network reaches it at `api:33334` (add `api` to `TRUSTED_ORIGINS`, for the Host check). To scrape it from the host, add it to the api's `ports`, on loopback only:
 

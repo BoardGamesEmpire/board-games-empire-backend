@@ -342,7 +342,10 @@ describe('HealthController', () => {
         }
       });
 
-      it('keeps the Terminus refusal as the logged cause, off the response', async () => {
+      // The failing dependency reaches the operator elsewhere: Terminus's
+      // HealthCheckService logs each failed check itself, and the operational
+      // port's `/health/ready` answers the full report (#1511).
+      it('carries the Terminus refusal as the cause of the public refusal', async () => {
         const { controller, db } = await buildController();
         db.$queryRaw.mockRejectedValue(new Error('connection refused'));
 

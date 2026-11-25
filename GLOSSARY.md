@@ -15,7 +15,7 @@ The part of a server a single process runs: api, worker, gateway worker or coord
 _Avoid_: role on its own, deployment role, service
 
 **Operational port**:
-The api's second port, for an operator's tools: it serves the full health report, the metrics and the API document, which the public port refuses, and answers only the addresses the operator allows.
+The api's second port, for an operator's tools: it serves the full health report, the metrics and the API document, which the public port refuses, and answers only its allowed sources, the networks a connection may come from, which the operator lists as CIDR ranges in `OPERATIONAL_SOURCES` (private networks by default).
 _Avoid_: admin port, management port, internal port
 
 **Deployment profile**:

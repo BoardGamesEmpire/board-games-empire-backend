@@ -1,5 +1,5 @@
 import { AuditContextService } from '@bge/actor-context';
-import type { I18nTranslations } from '@bge/i18n-core';
+import type { I18nPath, I18nTranslations } from '@bge/i18n-core';
 import { t } from '@bge/i18n-core';
 import { ArgumentsHost, Catch, HttpException } from '@nestjs/common';
 import { BaseExceptionFilter } from '@nestjs/core';
@@ -115,13 +115,23 @@ function clsLocale(auditContext: AuditContextService): string | undefined {
   }
 }
 
+/**
+ * The code and catalog key of the 404 for a request no route matched (#634).
+ * Exported for the api's operational gate, whose 404 for a route its port
+ * doesn't serve must match this one exactly (#1511).
+ */
+export const ROUTE_NOT_FOUND = {
+  code: 'ROUTE_NOT_FOUND',
+  key: 'errors.request.route_not_found',
+} as const satisfies { readonly code: string; readonly key: I18nPath };
+
 /** The coded 404 for a request no route matched, or `undefined` for any other exception (#634). */
 function routeNotFound(exception: HttpException, request: EdgeRequest): CodedHttpException | undefined {
   if (exception.getStatus() !== Http.NotFound || request.route !== undefined || hasCode(exception.getResponse())) {
     return undefined;
   }
 
-  return new CodedHttpException(Http.NotFound, 'ROUTE_NOT_FOUND', t('errors.request.route_not_found'), {
+  return new CodedHttpException(Http.NotFound, ROUTE_NOT_FOUND.code, t(ROUTE_NOT_FOUND.key), {
     cause: exception,
   });
 }

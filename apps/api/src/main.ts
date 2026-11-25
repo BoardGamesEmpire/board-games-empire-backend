@@ -6,7 +6,6 @@ import { registerShutdownHandlers } from '@bge/otel';
 import { bootstrapLogger, otel } from './app/lib/logger';
 
 // Imports below this line are instrumented by the OTel auto-instrumentations.
-import { API_KEY_HEADER } from '@bge/actor-context-transport';
 import {
   AUTH_INSTANCE,
   AUTH_REQUEST_HANDLER,
@@ -24,9 +23,7 @@ import { Logger, RequestMethod } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
-import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import compression from 'compression';
-import helmet from 'helmet';
 import { I18nService, I18nValidationPipe } from 'nestjs-i18n';
 import { Logger as PinoLogger } from 'nestjs-pino';
 import type { Server } from 'node:http';
@@ -35,8 +32,9 @@ import { join } from 'node:path';
 import { RedisIoAdapter } from './app/adapters/redis-io.adapter';
 import { AppModule } from './app/app.module';
 import redisConfig, { redisConfigValidationSchema } from './app/configuration/redis.config';
+import type { SwaggerConfig } from './app/configuration/swagger.config';
 import { API_REQUEST_TIMEOUT_MS, installRequestBodyRateGuard } from './app/http/request-body-rate-guard';
-import { createAuthSchemaPatch } from './app/lib/api-document';
+import { setupApiDocument } from './app/lib/api-document';
 import { createAuthClientIpHandler } from './app/lib/auth-client-ip';
 import { createHostCheck } from './app/lib/host-check';
 import type { ServerNames } from './app/lib/host-rule';
@@ -44,6 +42,7 @@ import { allowsEveryHost, createHostRule } from './app/lib/host-rule';
 import { createOperationalGate, OPERATIONAL_PATHS } from './app/lib/operational-gate';
 import { createSourceRule } from './app/lib/operational-sources';
 import { PATHS_WITHOUT_QUERY } from './app/lib/paths-without-query';
+import { createSecurityHeaders } from './app/lib/security-headers';
 
 // The paths name feature-lib routes, imported above, so they reach the SDK
 // only now; no request is served before the app listens (#935).
@@ -154,7 +153,9 @@ async function bootstrap() {
         },
       }),
     )
-    .use(helmet())
+    // helmet's headers, without the https upgrade on the operational port, which
+    // is plain HTTP (#1511).
+    .use(createSecurityHeaders())
     // Ahead of the web client and the better-auth mount below, so it covers the
     // whole Express app. It reads the Host header and not `req.hostname`, which
     // `trust proxy` above takes from X-Forwarded-Host (#977).
@@ -197,29 +198,12 @@ async function bootstrap() {
 
   const authInstance = app.get(AUTH_INSTANCE);
 
-  // The API document, on the operational port only: the gate refuses `/docs`
-  // and everything under it on the public port (#1511). Swagger calls the
-  // factory, and the patch that merges better-auth's half in, on the first
-  // request, so nothing is built at boot. Reading better-auth's schema can
-  // wait on a sign-in provider's discovery (DEPLOYMENT.md), which would
-  // otherwise hold up the listen.
-  const swaggerConfig = new DocumentBuilder()
-    .setTitle(configService.getOrThrow('swagger.title'))
-    .setDescription(configService.getOrThrow('swagger.description'))
-    .setVersion(configService.getOrThrow('swagger.version'))
-    .addBearerAuth()
-    .addApiKey({
-      type: 'apiKey',
-      // The header HttpActorMiddleware reads a key from (#1418).
-      name: API_KEY_HEADER,
-      in: 'header',
-    })
-    .build();
-
-  SwaggerModule.setup('docs', app, () => SwaggerModule.createDocument(app, swaggerConfig), {
-    jsonDocumentUrl: 'docs/json',
-    yamlDocumentUrl: 'docs/yaml',
-    patchDocumentOnRequest: createAuthSchemaPatch(() => authInstance.api.generateOpenAPISchema(), globalPrefix),
+  // The API document, on the operational port only: the gate refuses it on the
+  // public port. It is built on the first request for it, not at boot (#1511).
+  setupApiDocument(app, {
+    config: configService.getOrThrow<SwaggerConfig>('swagger'),
+    globalPrefix,
+    loadAuthSchema: () => authInstance.api.generateOpenAPISchema(),
   });
 
   const redisAdapter = new RedisIoAdapter(hostCheck.allowRequest, app);
@@ -283,7 +267,7 @@ async function bootstrap() {
     bootstrapLogger,
   );
 
-  const port = configService.get<number>('system.port', 33333);
+  const port = configService.getOrThrow<number>('system.port');
   await app.listen(port);
   Logger.log(`🚀 Application is running on: http://localhost:${port}/${globalPrefix}`, LOGGER_CONTEXT);
 

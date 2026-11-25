@@ -16,9 +16,13 @@ const METRICS_BY_FRAGMENT = '/metrics#x';
 /**
  * Bare Express routes these to `/metrics` too, but the shipped api routes them
  * nowhere: on the operational port, where the gate lets them through, Nest
- * answers its own 404. So no positive control exists for them here, and on the
- * public port they pin only that the metrics are never served.
- * `operational-gate.spec.ts` pins that the gate itself refuses them (#1511).
+ * answers its own 404. That is by accident. `app.module.ts` applies
+ * `ClsMiddleware` and the others with `forRoutes('*')`, which Nest mounts as a
+ * path-mounted Express `use`, and the router's prefix trimming for that mount
+ * garbles `req.url` for a target with userinfo, so no route matches it after.
+ * The gate is the real defence: `operational-gate.spec.ts` pins that it
+ * refuses them itself. So no positive control exists for them here, and on
+ * the public port they pin only that the metrics are never served (#1511).
  */
 const METRICS_BY_AUTHORITY = ['//x@y/metrics#z', '/\\u@h/metrics#x'];
 
@@ -63,8 +67,10 @@ describe('the operational port (#1511)', () => {
       },
     );
 
-    // The operational port's answer to the same target, below, is the positive
-    // control: Nest's own unmatched-route 404 carries this code too.
+    // For METRICS_BY_FRAGMENT, the operational port's answer to the same
+    // target, below, is the positive control: it serves the metrics, so this
+    // 404 is the gate's. The METRICS_BY_AUTHORITY targets have none (see their
+    // docblock), and Nest's own unmatched-route 404 carries this code too.
     it.each([METRICS_BY_FRAGMENT, ...METRICS_BY_AUTHORITY])(
       'refuses %s, which Express would route to the metrics',
       async (target) => {
@@ -75,6 +81,14 @@ describe('the operational port (#1511)', () => {
         expect(JSON.parse(answer.body)).toMatchObject({ statusCode: 404, code: 'ROUTE_NOT_FOUND' });
       },
     );
+
+    // helmet's defaults, as before the operational port existed.
+    it('asks the browser to upgrade insecure requests, and sends HSTS', async () => {
+      const response = await request(baseUrl).get('/health/live');
+
+      expect(response.headers['content-security-policy']).toContain('upgrade-insecure-requests');
+      expect(response.headers['strict-transport-security']).toEqual(expect.any(String));
+    });
 
     it('no longer serves the API document under the global prefix', async () => {
       const response = await request(baseUrl).get('/api/swagger/json');
@@ -148,6 +162,17 @@ describe('the operational port (#1511)', () => {
 
       expect(response.status).toBe(200);
       expect(response.headers['content-type']).toMatch(contentType);
+    });
+
+    // The port is plain HTTP. An upgrade would send the page's script and style
+    // to an https:// that nothing serves, and the page would render blank.
+    it("serves the API document's page without asking the browser to upgrade to https", async () => {
+      const response = await request(operationalUrl).get('/docs');
+
+      expect(response.status).toBe(200);
+      expect(response.headers['content-security-policy']).toContain("default-src 'self'");
+      expect(response.headers['content-security-policy']).not.toContain('upgrade-insecure-requests');
+      expect(response.headers).not.toHaveProperty('strict-transport-security');
     });
 
     it.each(['/api/games', '/socket.io/?EIO=4&transport=polling'])(

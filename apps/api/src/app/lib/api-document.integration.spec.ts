@@ -1,19 +1,68 @@
 import { AuditContextService } from '@bge/actor-context';
 import { I18nExceptionFilter, LocaleResolutionService } from '@bge/i18n';
 import type { INestApplication } from '@nestjs/common';
-import { Logger } from '@nestjs/common';
+import { Controller, Get, Logger } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 import type { OpenAPIObject } from '@nestjs/swagger';
-import { SwaggerModule } from '@nestjs/swagger';
 import { Test } from '@nestjs/testing';
 import { I18nService } from 'nestjs-i18n';
-import { createAuthSchemaPatch } from './api-document';
+import { buildApiDocument, setupApiDocument } from './api-document';
 
 const AUTH_SCHEMA: OpenAPIObject = {
   openapi: '3.1.1',
   info: { title: 'Better Auth', version: '1' },
   paths: { '/sign-in/email': { post: { responses: {} } } },
 };
+
+const HEADER = { title: 'Board Games Empire API', description: 'The api', version: '1.2.3' };
+
+@Controller('games')
+class GamesController {
+  @Get()
+  list(): string[] {
+    return [];
+  }
+}
+
+/**
+ * The whole API document, built by the one function #635's CI export calls
+ * (#1511): the api's routes from a Nest app that never listens, with
+ * better-auth's merged in under its mount.
+ */
+describe('buildApiDocument (#1511)', () => {
+  let app: INestApplication;
+
+  beforeEach(async () => {
+    const moduleRef = await Test.createTestingModule({ controllers: [GamesController] }).compile();
+    app = moduleRef.createNestApplication({ logger: false });
+    app.setGlobalPrefix('api');
+  });
+
+  afterEach(() => app.close());
+
+  it("builds the api's half and better-auth's into one document, without serving it", async () => {
+    const loadAuthSchema = jest.fn(async () => AUTH_SCHEMA);
+
+    const document = await buildApiDocument(app, { config: HEADER, loadAuthSchema, globalPrefix: 'api' });
+
+    expect(document.info).toMatchObject(HEADER);
+    expect(Object.keys(document.paths).sort()).toEqual(['/api/auth/sign-in/email', '/api/games']);
+    expect(loadAuthSchema).toHaveBeenCalledTimes(1);
+  });
+
+  it('describes the two ways a client authenticates: a bearer token and an x-api-key header (#1418)', async () => {
+    const document = await buildApiDocument(app, {
+      config: HEADER,
+      loadAuthSchema: async () => AUTH_SCHEMA,
+      globalPrefix: 'api',
+    });
+
+    expect(Object.values(document.components?.securitySchemes ?? {})).toEqual([
+      expect.objectContaining({ type: 'http', scheme: 'bearer' }),
+      { type: 'apiKey', name: 'x-api-key', in: 'header' },
+    ]);
+  });
+});
 
 /**
  * A failed read of better-auth's schema, over the wire (#1511). Swagger's
@@ -42,16 +91,7 @@ describe('the API document when better-auth cannot give its schema (#1511)', () 
     }).compile();
 
     app = moduleRef.createNestApplication({ logger: false });
-    SwaggerModule.setup(
-      'docs',
-      app,
-      () => SwaggerModule.createDocument(app, { openapi: '3.0.0', info: { title: 'api', version: '1' } }),
-      {
-        jsonDocumentUrl: 'docs/json',
-        yamlDocumentUrl: 'docs/yaml',
-        patchDocumentOnRequest: createAuthSchemaPatch(load, 'api'),
-      },
-    );
+    setupApiDocument(app, { config: HEADER, loadAuthSchema: load, globalPrefix: 'api' });
     await app.listen(0);
     url = await app.getUrl();
   });
