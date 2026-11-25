@@ -1,32 +1,14 @@
-import type { PluginArchiveRule } from '@boardgamesempire/plugin-manifest';
+export { PluginArchiveRefusedError } from '@boardgamesempire/plugin-analysis';
 
 /**
  * Untrusted text (an archive's entry name, a checksum a client sent): quote it
- * and cut it so it cannot forge lines in a message.
+ * and cut it so it cannot forge lines in a message. Kept in step with the
+ * copy in `@boardgamesempire/plugin-analysis`' archive.errors.ts (#1093).
  */
 const printable = (entry: string): string => {
   const quoted = JSON.stringify(entry);
   return quoted.length > 200 ? `${quoted.slice(0, 200)}...` : quoted;
 };
-
-/**
- * A plugin artifact archive broke one of the archive rules (#1094). `name` is
- * the stable code a client can match on; the message is plain English.
- */
-export class PluginArchiveRefusedError extends Error {
-  override readonly name = 'PluginArchiveRefusedError';
-
-  constructor(
-    readonly rule: PluginArchiveRule,
-    readonly entry?: string,
-  ) {
-    super(
-      entry === undefined
-        ? `The plugin artifact breaks the archive rule '${rule}'.`
-        : `The plugin artifact breaks the archive rule '${rule}' at ${printable(entry)}.`,
-    );
-  }
-}
 
 /**
  * The plugin artifact's bytes do not have the checksum the server admin

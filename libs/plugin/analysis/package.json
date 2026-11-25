@@ -22,6 +22,7 @@
     "@boardgamesempire/plugin-manifest": "^0.0.1",
     "es-module-lexer": "^2.3.2",
     "meriyah": "^7.4.2",
+    "tar-stream": "^3.2.2",
     "tslib": "^2.3.0"
   }
 }

@@ -31,6 +31,8 @@ import {
 } from '@bge/secure-http';
 import type { MockDatabaseService } from '@bge/testing';
 import { createMockDatabaseService } from '@bge/testing';
+import type { PluginTarballEntry } from '@boardgamesempire/plugin-analysis';
+import { buildPluginTarball } from '@boardgamesempire/plugin-analysis';
 import type { PluginArtifactDirectory } from '@boardgamesempire/plugin-contract';
 import { PLUGIN_ARCHIVE_MAX_COMPRESSED_BYTES } from '@boardgamesempire/plugin-manifest';
 import { Logger } from '@nestjs/common';
@@ -50,8 +52,6 @@ import {
 } from '../artifacts.errors';
 import type { PluginArtifactStore, RecordReceivedArtifactInput } from '../store/plugin-artifact.store';
 import { PLUGIN_ARTIFACT_TTL_MS } from '../store/plugin-artifact.store';
-import type { PluginTarballEntry } from '../testing/plugin-tarball';
-import { buildPluginTarball } from '../testing/plugin-tarball';
 import { allocateIncoming } from '../workspace/incoming';
 import type { PluginArtifactReceipt } from './plugin-artifact.receiver';
 import {

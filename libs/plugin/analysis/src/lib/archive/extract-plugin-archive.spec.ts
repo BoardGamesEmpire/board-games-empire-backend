@@ -1,25 +1,23 @@
-import { PLUGIN_ARCHIVE_MAX_ENTRIES, PLUGIN_ARCHIVE_MAX_MANIFEST_BYTES } from '@boardgamesempire/plugin-manifest';
+import { PLUGIN_ARCHIVE_MAX_ENTRIES } from '@boardgamesempire/plugin-manifest';
 import * as fs from 'node:fs';
 import * as fsPromises from 'node:fs/promises';
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Writable } from 'node:stream';
 import { gunzipSync, gzipSync } from 'node:zlib';
-import { PluginArchiveRefusedError } from '../artifacts.errors';
-import type { PluginTarballEntry } from '../testing/plugin-tarball';
-import { buildPluginTarball } from '../testing/plugin-tarball';
-import { allocateIncoming } from '../workspace/incoming';
+import type { PluginTarballEntry } from '../testing/plugin-tarball.js';
+import { buildPluginTarball } from '../testing/plugin-tarball.js';
+import { PluginArchiveRefusedError } from './archive.errors.js';
 import {
   boundedDecompressedLimit,
   extractPluginArchive,
   PLUGIN_ARCHIVE_MAX_DECOMPRESSED_BYTES,
-} from './extract-plugin-archive';
-import { readArtifactSlug } from './read-artifact-slug';
+} from './extract-plugin-archive.js';
 
 jest.mock('node:fs/promises', () => {
   const actual = jest.requireActual('node:fs/promises');
-  return { ...actual, mkdir: jest.fn(actual.mkdir), readFile: jest.fn(actual.readFile) };
+  return { ...actual, mkdir: jest.fn(actual.mkdir) };
 });
 
 jest.mock('node:fs', () => {
@@ -434,94 +432,4 @@ describe('extractPluginArchive (#1094)', () => {
     expect((await refusal()).rule).toBe('entry-count');
     expect(await exists(intoDir)).toBe(false);
   }, 120_000);
-
-  it('reads the slug from an extracted manifest (#1094)', async () => {
-    await write(VALID);
-    await extractPluginArchive(archivePath, intoDir);
-
-    expect(await readArtifactSlug(intoDir)).toBe('demo-sink');
-  });
-
-  it.each([
-    ['not JSON', 'nope'],
-    ['not an object', '[]'],
-    ['no slug', '{}'],
-    ['a slug that is not a string', '{"slug": 5}'],
-    ['a slug that fails the pattern', '{"slug": "../evil"}'],
-  ])('refuses %s as manifest-slug (#1094)', async (_label, manifest) => {
-    await mkdir(intoDir, { recursive: true });
-    await writeFile(join(intoDir, 'manifest.json'), manifest);
-
-    await expect(readArtifactSlug(intoDir)).rejects.toMatchObject({ rule: 'manifest-slug' });
-  });
-
-  it('reads a manifest of exactly the manifest cap and refuses one a byte over as manifest-size, the checker rule (#1094)', async () => {
-    const manifestOf = (bytes: number): string => {
-      const empty = JSON.stringify({ slug: 'demo-sink', pad: '' });
-      return JSON.stringify({ slug: 'demo-sink', pad: 'x'.repeat(bytes - empty.length) });
-    };
-
-    await mkdir(intoDir, { recursive: true });
-
-    await writeFile(join(intoDir, 'manifest.json'), manifestOf(PLUGIN_ARCHIVE_MAX_MANIFEST_BYTES));
-    await expect(readArtifactSlug(intoDir)).resolves.toBe('demo-sink');
-
-    await writeFile(join(intoDir, 'manifest.json'), manifestOf(PLUGIN_ARCHIVE_MAX_MANIFEST_BYTES + 1));
-    await expect(readArtifactSlug(intoDir)).rejects.toMatchObject({ rule: 'manifest-size', entry: 'manifest.json' });
-  });
-
-  it('refuses a missing manifest as manifest-slug (#1094)', async () => {
-    await mkdir(intoDir, { recursive: true });
-
-    await expect(readArtifactSlug(intoDir)).rejects.toMatchObject({ rule: 'manifest-slug' });
-  });
-
-  it('refuses a manifest.json that is a directory as manifest-slug (#1094)', async () => {
-    await mkdir(join(intoDir, 'manifest.json'), { recursive: true });
-
-    await expect(readArtifactSlug(intoDir)).rejects.toMatchObject({ rule: 'manifest-slug' });
-  });
-
-  // A disk fault is the server's, not the archive's: it must not reach the
-  // uploader as a refusal of their manifest.
-  it.each(['EACCES', 'EIO'])('lets %s reading the manifest propagate as it is (#1094)', async (code) => {
-    await mkdir(intoDir, { recursive: true });
-    await writeFile(join(intoDir, 'manifest.json'), JSON.stringify({ slug: 'demo-sink' }));
-    const failure = Object.assign(new Error(code), { code, syscall: 'open' });
-    (fsPromises.readFile as unknown as jest.Mock).mockRejectedValueOnce(failure);
-
-    await expect(readArtifactSlug(intoDir)).rejects.toBe(failure);
-  });
-
-  it('refuses a .incoming that is a symbolic link (#1094)', async () => {
-    // The sweep never follows a link, so scratch written through one would
-    // never be cleared, and it may lie outside the plugins root.
-    const root = join(dir, 'plugins');
-    const elsewhere = join(dir, 'elsewhere');
-    await mkdir(root);
-    await mkdir(elsewhere);
-    await symlink(elsewhere, join(root, '.incoming'));
-
-    await expect(allocateIncoming(root)).rejects.toThrow('symbolic link');
-  });
-
-  it('allocates paths under .incoming without creating them, and cleans up (#1094)', async () => {
-    const root = join(dir, 'plugins');
-
-    const incoming = await allocateIncoming(root);
-
-    expect(incoming.archivePath).toBe(join(root, '.incoming', `${incoming.id}.tgz`));
-    expect(incoming.extractDir).toBe(join(root, '.incoming', incoming.id));
-    expect(await exists(join(root, '.incoming'))).toBe(true);
-    expect(await exists(incoming.archivePath)).toBe(false);
-    expect(await exists(incoming.extractDir)).toBe(false);
-
-    await writeFile(incoming.archivePath, 'x');
-    await mkdir(incoming.extractDir);
-    await incoming.cleanup();
-    await incoming.cleanup();
-
-    expect(await exists(incoming.archivePath)).toBe(false);
-    expect(await exists(incoming.extractDir)).toBe(false);
-  });
 });

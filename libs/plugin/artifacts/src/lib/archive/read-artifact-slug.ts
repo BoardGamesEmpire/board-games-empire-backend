@@ -1,8 +1,8 @@
+import { PluginArchiveRefusedError } from '@boardgamesempire/plugin-analysis';
 import { PLUGIN_MANIFEST_FILENAME } from '@boardgamesempire/plugin-contract';
 import { PLUGIN_ARCHIVE_MAX_MANIFEST_BYTES, PLUGIN_SLUG_PATTERN } from '@boardgamesempire/plugin-manifest';
 import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import { PluginArchiveRefusedError } from '../artifacts.errors';
 
 /** Failures that mean the archive put no readable file at `manifest.json`. */
 const NO_MANIFEST_CODES: ReadonlySet<string> = new Set(['ENOENT', 'ENOTDIR', 'EISDIR']);

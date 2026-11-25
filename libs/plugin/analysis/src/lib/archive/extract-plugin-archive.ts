@@ -10,8 +10,8 @@ import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { createGunzip } from 'node:zlib';
 import { extract as createTarExtract } from 'tar-stream';
-import { PluginArchiveRefusedError } from '../artifacts.errors';
-import { isGzipMagic } from './gzip-magic';
+import { PluginArchiveRefusedError } from './archive.errors.js';
+import { isGzipMagic } from './gzip-magic.js';
 
 export interface PluginArchiveExtraction {
   readonly entryCount: number;
