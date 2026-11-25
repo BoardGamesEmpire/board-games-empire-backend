@@ -73,7 +73,6 @@ const OPERATIONAL_SPELLINGS = [
   '/metrics/',
   '/METRICS',
   '/metrics?x=1',
-  '/%6detrics',
   '/docs',
   '/docs/',
   '/docs/json',
@@ -83,8 +82,15 @@ const OPERATIONAL_SPELLINGS = [
   '/docs/yaml',
   '/docs/swagger-ui.css',
   '/docs/swagger-ui%2Ecss',
-  '/docs%2Fjson',
 ];
+
+/**
+ * Percent-encoded spellings of an operational route, which Express 5 routes
+ * nowhere: its router decodes nothing before matching. The public port refuses
+ * them as the route they spell, and the operational port answers 404 rather
+ * than passing them to the web client's page (#1511).
+ */
+const ENCODED_OPERATIONAL_SPELLINGS = ['/%6detrics', '/%68ealth', '/%64ocs/json', '/docs%2Fjson'];
 
 /**
  * Request targets Express 5 routes to an operational route although a cut at
@@ -217,6 +223,10 @@ describe('createOperationalGate (#1511)', () => {
       expectRefused(handle(request(url)), 404, ROUTE_NOT_FOUND);
     });
 
+    it.each(ENCODED_OPERATIONAL_SPELLINGS)('answers %s with 404 ROUTE_NOT_FOUND, as the route it spells', (url) => {
+      expectRefused(handle(request(url)), 404, ROUTE_NOT_FOUND);
+    });
+
     // Passing these on leaves the 404 to Nest.
     it.each(ROUTED_NOWHERE_OPERATIONAL)('passes %s on, which Express routes to no operational route', (url) => {
       expectPassed(handle(request(url)));
@@ -261,6 +271,13 @@ describe('createOperationalGate (#1511)', () => {
     it.each(ROUTED_NOWHERE_OPERATIONAL)('answers %s with 404 ROUTE_NOT_FOUND', (url) => {
       expectRefused(handle(operational(url)), 404, ROUTE_NOT_FOUND);
     });
+
+    it.each(ENCODED_OPERATIONAL_SPELLINGS)(
+      'answers %s with 404 ROUTE_NOT_FOUND, which Express routes nowhere',
+      (url) => {
+        expectRefused(handle(operational(url)), 404, ROUTE_NOT_FOUND);
+      },
+    );
 
     it('answers a malformed escape with 404 ROUTE_NOT_FOUND, without throwing', () => {
       expectRefused(handle(operational('/%E0%A4%A')), 404, ROUTE_NOT_FOUND);

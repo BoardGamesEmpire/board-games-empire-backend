@@ -138,7 +138,11 @@ export function createOperationalGate({
       }
     }
 
-    const routes = routesFor(req);
+    // The public port decodes before it classifies, so an encoded spelling of
+    // an operational route is refused there. The operational port passes only
+    // what Express itself routes to an operational route, so an encoded
+    // spelling can't reach the web client's page there.
+    const routes = routesFor(canonicalPath(req, { decode: !operational }));
 
     if (routes !== 'either' && routes !== (operational ? 'operational' : 'public')) {
       refuse(res, NOT_ON_THIS_PORT);
@@ -149,9 +153,7 @@ export function createOperationalGate({
   };
 }
 
-function routesFor(req: Request): PortRoutes {
-  const path = canonicalPath(req);
-
+function routesFor(path: string | undefined): PortRoutes {
   if (path === undefined) {
     return 'public';
   }
@@ -180,13 +182,17 @@ function routesFor(req: Request): PortRoutes {
  *
  * Express matches routes case-insensitively and allows one trailing slash, so
  * `/METRICS` and `/metrics/` reach `/metrics`, and the gate has to see them as
- * that route. A percent-encoded spelling (`/%6detrics`) is decoded too; Express
- * routes it nowhere, so counting it as the route it spells only moves its 404
- * earlier. A malformed escape is kept as sent, and Express answers 404 for it.
+ * that route. With `decode`, a percent-encoded spelling (`/%6detrics`) is
+ * decoded too: Express routes it nowhere, so on the public port counting it as
+ * the route it spells only moves its 404 earlier. Without it, the spelling stays
+ * as sent, so the operational port, which serves only its own routes, answers
+ * 404 for it rather than passing it to a handler that would serve it, such as
+ * the web client's page. A malformed escape is kept as sent, and Express
+ * answers 404 for it.
  * When `req.path` throws or is empty, the router can't route the request
  * either, and answers 404.
  */
-function canonicalPath(req: Request): string | undefined {
+function canonicalPath(req: Request, { decode }: { readonly decode: boolean }): string | undefined {
   let routed: unknown;
 
   try {
@@ -199,7 +205,7 @@ function canonicalPath(req: Request): string | undefined {
     return undefined;
   }
 
-  const path = decodeOrKeep(routed).toLowerCase();
+  const path = (decode ? decodeOrKeep(routed) : routed).toLowerCase();
 
   return path.length > 1 && path.endsWith('/') ? path.slice(0, -1) : path;
 }
