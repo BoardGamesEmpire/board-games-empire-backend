@@ -4,14 +4,13 @@ import { DatabaseService, isPrismaDependentRecordNotFoundError } from '@bge/data
 import type { PluginArtifactSha256, PluginFactory } from '@boardgamesempire/plugin-contract';
 import { parsePluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
 import type { PluginManifest } from '@boardgamesempire/plugin-manifest';
-import { validatePluginManifest } from '@boardgamesempire/plugin-manifest';
+import { isPlainJsonObject, validatePluginManifest } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { readFile } from 'node:fs/promises';
 import { PluginConfigService } from '../config/plugin-config.service';
 import { PluginContextFactory } from '../context/plugin-context.factory';
 import { PluginDisabledEvent, PluginLoadFailedEvent } from '../events/plugin.events';
-import { isPlainJsonObject } from '../is-plain-json-object';
 import type { PluginModuleOptions } from '../plugin-module.options';
 import { MODULE_OPTIONS_TOKEN } from '../plugin-module.options';
 import type { PluginPackageDescriptor } from './entrypoint-resolver';

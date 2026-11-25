@@ -1,6 +1,6 @@
 import type { Prisma } from '@bge/database';
 import type { PluginManifestValidationResult } from '@boardgamesempire/plugin-manifest';
-import { isPlainJsonObject } from '../is-plain-json-object';
+import { isPlainJsonObject } from '@boardgamesempire/plugin-manifest';
 import type { PluginConfigSchemaService } from './plugin-config-schema.service';
 
 type ActiveManifest = PluginManifestValidationResult['manifest'];

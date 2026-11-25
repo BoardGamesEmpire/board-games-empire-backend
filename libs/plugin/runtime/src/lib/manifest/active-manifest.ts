@@ -1,12 +1,12 @@
 import type { PluginActiveManifest, PluginConfigVerdict, PluginRequestedPermission } from '@bge/database';
 import { PluginScope } from '@bge/database';
 import type { PluginConsentScopeValue, PluginManifestValidationResult } from '@boardgamesempire/plugin-manifest';
+import { isPlainJsonObject } from '@boardgamesempire/plugin-manifest';
 import type { PluginConfigIssue } from '../config/config-schema.errors';
 import { PluginConfigSchemaUnusableError } from '../config/config-schema.errors';
 import type { PluginConfigSchemaService, PluginConfigValidationInput } from '../config/plugin-config-schema.service';
 import { CONSENT_SCOPE_TO_GRANT_SCOPE } from '../grants/consent-scope.map';
 import { MANIFEST_SCOPE_TO_PRISMA } from '../install/manifest-enum.maps';
-import { isPlainJsonObject } from '../is-plain-json-object';
 
 /**
  * What the active config schema says about one document (#1151): the

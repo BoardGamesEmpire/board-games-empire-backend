@@ -23,7 +23,6 @@ export * from './lib/features/feature-state.errors';
 export * from './lib/features/plugin-feature-state.service';
 export * from './lib/grants/consent-grantability';
 export * from './lib/grants/consent-scope.map';
-export * from './lib/grants/plugin-admin-permissions';
 export * from './lib/grants/plugin-grant-authority.service';
 export * from './lib/install/install.errors';
 export * from './lib/install/manifest-enum.maps';

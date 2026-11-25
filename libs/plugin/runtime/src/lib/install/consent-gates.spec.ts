@@ -3,7 +3,6 @@ import { CONSENT_UNIT_BINDING_REFUSAL, PERMISSION_CATALOG, RiskLevel } from '@bg
 import { UNIT_BOUND_RULES, UNIT_ID_OFF_ID_COLUMN_RULES } from '@bge/testing';
 import { buildPluginManifest, validatePluginManifest } from '@boardgamesempire/plugin-manifest';
 import {
-  collectForbiddenPermissionViolations,
   collectUnboundedUnitConsentViolations,
   collectWildcardSubjectViolations,
   compareExactReentry,
@@ -20,53 +19,6 @@ import type { StaticAnalysisFinding } from './static-analysis.types';
 describe('consent-gates', () => {
   const validate = (manifest: unknown) =>
     validatePluginManifest(manifest, { bgeVersion: '0.3.0', defaultLocale: 'en' });
-
-  describe('collectForbiddenPermissionViolations', () => {
-    it('accepts the clean fixture', () => {
-      expect(collectForbiddenPermissionViolations(validate(buildPluginManifest()))).toEqual([]);
-    });
-
-    it('flags plugin-administration authority requested as a core check', () => {
-      const validated = validate(
-        buildPluginManifest({
-          permissions: {
-            declares: [],
-            checks: [
-              {
-                slug: 'manage:plugin',
-                required: true,
-                reason: { en: 'Administers the plugin subsystem.' },
-                consentScope: 'server',
-              },
-            ],
-          },
-        }),
-      );
-
-      expect(collectForbiddenPermissionViolations(validated)).toEqual([
-        expect.objectContaining({
-          permissionSlug: 'manage:plugin',
-          detail: expect.stringContaining('self-escalation'),
-        }),
-      ]);
-    });
-
-    it('flags a declared bare slug that mimics the administration vocabulary', () => {
-      const validated = validate(buildPluginManifest({ permissions: { declares: ['manage:plugin'], checks: [] } }));
-
-      expect(collectForbiddenPermissionViolations(validated)).toEqual([
-        expect.objectContaining({ detail: expect.stringContaining('mimics the plugin-administration vocabulary') }),
-      ]);
-    });
-
-    it("flags a declared slug claiming the 'all' subject", () => {
-      const validated = validate(buildPluginManifest({ permissions: { declares: ['manage:all'], checks: [] } }));
-
-      expect(collectForbiddenPermissionViolations(validated)).toEqual([
-        expect.objectContaining({ detail: expect.stringContaining("'all' subject") }),
-      ]);
-    });
-  });
 
   describe('collectWildcardSubjectViolations', () => {
     it('flags a core check whose Permission row carries the wildcard subject', () => {

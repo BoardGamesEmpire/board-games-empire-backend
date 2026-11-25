@@ -48,6 +48,7 @@ export enum ManifestErrorCode {
 /** Non-fatal author guidance surfaced by `bge-plugin validate` (#84). */
 export enum ManifestWarningCode {
   REQUIRED_UNIT_SCOPE_PERMISSION = 'REQUIRED_UNIT_SCOPE_PERMISSION',
+  REQUIRED_UNIT_SCOPE_PERMISSION_INTRODUCED = 'REQUIRED_UNIT_SCOPE_PERMISSION_INTRODUCED',
 }
 
 export interface ManifestIssue {

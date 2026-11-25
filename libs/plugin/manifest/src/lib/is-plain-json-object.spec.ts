@@ -1,4 +1,4 @@
-import { isPlainJsonObject } from './is-plain-json-object';
+import { isPlainJsonObject } from './is-plain-json-object.js';
 
 describe('isPlainJsonObject (#393)', () => {
   it.each([

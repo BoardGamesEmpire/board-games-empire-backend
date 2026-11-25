@@ -363,8 +363,8 @@ export const validatePluginManifest = (
         code: ManifestWarningCode.REQUIRED_UNIT_SCOPE_PERMISSION,
         path,
         message:
-          `'${check.slug}' is required at '${consentScope}' consent scope: introducing or promoting such a permission ` +
-          'is a per-unit breaking change (semver-major) and will auto-disable the plugin for non-consenting units (#59)',
+          `'${check.slug}' is required at '${consentScope}' consent scope: introducing it, or making it required, is an escalation ` +
+          'that sends each household or user that has not consented to review pending, so it belongs in a major release (#59)',
       });
     }
   });

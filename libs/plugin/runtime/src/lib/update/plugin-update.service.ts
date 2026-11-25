@@ -18,6 +18,7 @@ import type {
   PluginManifestValidationResult,
 } from '@boardgamesempire/plugin-manifest';
 import {
+  collectForbiddenPermissionViolations,
   PluginManifestValidationError,
   resolveLocalizedString,
   validatePluginManifest,
@@ -48,7 +49,6 @@ import {
 } from '../events/plugin.events';
 import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
 import {
-  collectForbiddenPermissionViolations,
   collectUnboundedUnitConsentViolations,
   collectWildcardSubjectViolations,
   compareExactReentry,

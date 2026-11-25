@@ -1,12 +1,15 @@
 import type { PluginArtifactDirectory } from '@boardgamesempire/plugin-contract';
-import { classifyImportSpecifier, resolveAliasedPackageName } from '@boardgamesempire/plugin-manifest';
+import {
+  classifyImportSpecifier,
+  isPlainJsonObject,
+  resolveAliasedPackageName,
+} from '@boardgamesempire/plugin-manifest';
 import { Injectable, Logger } from '@nestjs/common';
 import { init, parse as parseEsm } from 'es-module-lexer';
 import type { ESTree } from 'meriyah';
 import { parse as parseAst } from 'meriyah';
 import { readdir, readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
-import { isPlainJsonObject } from '../is-plain-json-object';
 import { PluginStaticAnalysisUnavailableError } from './install.errors';
 import {
   MODULE_PARSE_OPTIONS,
