@@ -1,22 +1,19 @@
 import { major } from 'semver';
 import type { PluginConsentScopeValue } from './constants.js';
+import { isRequiredAtUnitConsentScope } from './constants.js';
 import type { ManifestWarning } from './errors.js';
 import { ManifestWarningCode } from './errors.js';
-import type { NormalizedPermissionRequest, PluginManifestValidationResult } from './manifest.types.js';
-
-const UNIT_SCOPES: readonly PluginConsentScopeValue[] = ['household', 'user'];
-
-const isRequiredAtUnitScope = (check: NormalizedPermissionRequest): boolean =>
-  check.required && UNIT_SCOPES.includes(check.consentScope);
+import type { PluginManifestValidationResult } from './manifest.types.js';
 
 /**
  * Compares two manifests' consent requirements the way a server does when an
- * update arrives (#1093): a required check at household or user scope that the
- * previous manifest did not already require at that same scope is an
- * escalation, because each household or user that has not consented to it goes
- * to review pending (#59). Checks are keyed by canonical slug, so a renamed own
- * permission counts as new. Removed checks, new optional checks and new
- * required server-scope checks never warn.
+ * update arrives (#1093): a requested permission that is required at household
+ * or user scope, and that the previous manifest did not already require at that
+ * same scope, is an escalation, because each household or user that has not
+ * consented to it goes to review pending (#59). Requested permissions are keyed
+ * by canonical slug, so a renamed declared permission counts as new. Removed
+ * requested permissions, new optional ones and new required server-scope ones
+ * never warn. The message names the slug the plugin author wrote.
  *
  * The message says whether `next` bumped the major version, so a plugin author
  * sees at once whether the version already signals the escalation.
@@ -37,7 +34,10 @@ export const compareUnitConsentRequirements = (
   const warnings: ManifestWarning[] = [];
 
   next.permissionChecks.forEach((check, index) => {
-    if (!isRequiredAtUnitScope(check) || previousRequiredScopes.get(check.canonicalSlug) === check.consentScope) {
+    if (
+      !isRequiredAtUnitConsentScope(check.required, check.consentScope) ||
+      previousRequiredScopes.get(check.canonicalSlug) === check.consentScope
+    ) {
       return;
     }
 
@@ -45,7 +45,7 @@ export const compareUnitConsentRequirements = (
       code: ManifestWarningCode.REQUIRED_UNIT_SCOPE_PERMISSION_INTRODUCED,
       path: `permissions.checks[${index}]`,
       message:
-        `'${check.canonicalSlug}' is newly required at '${check.consentScope}' consent scope. This is an escalation: ` +
+        `'${check.slug}' is newly required at '${check.consentScope}' consent scope. This is an escalation: ` +
         'each household or user that has not consented to it goes to review pending, and the plugin runs for them ' +
         'without it until they consent. ' +
         (majorBumped

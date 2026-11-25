@@ -6,3 +6,4 @@ export * from './lib/plugin-static-analyzer.js';
 export * from './lib/static-analysis.errors.js';
 export * from './lib/static-analysis.types.js';
 export * from './lib/testing/plugin-tarball.js';
+export * from './lib/untrusted-text.js';

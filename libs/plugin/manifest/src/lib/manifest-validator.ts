@@ -4,6 +4,7 @@ import {
   DEFAULT_MIN_REASON_LENGTH,
   EVENT_NAME_PATTERN,
   IDENTIFIER_PATTERN,
+  isRequiredAtUnitConsentScope,
   LOW_EFFORT_REASON_PATTERN,
   OWN_TABLE_SUFFIX_PATTERN,
   pluginEmitPrefix,
@@ -358,7 +359,7 @@ export const validatePluginManifest = (
       }
     }
 
-    if (check.required && consentScope !== 'server') {
+    if (isRequiredAtUnitConsentScope(check.required, consentScope)) {
       warnings.push({
         code: ManifestWarningCode.REQUIRED_UNIT_SCOPE_PERMISSION,
         path,

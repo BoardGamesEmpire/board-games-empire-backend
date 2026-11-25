@@ -1,14 +1,6 @@
-export { PluginArchiveRefusedError } from '@boardgamesempire/plugin-analysis';
+import { quoteUntrustedText } from '@boardgamesempire/plugin-analysis';
 
-/**
- * Untrusted text (an archive's entry name, a checksum a client sent): quote it
- * and cut it so it cannot forge lines in a message. Kept in step with the
- * copy in `@boardgamesempire/plugin-analysis`' archive.errors.ts (#1093).
- */
-const printable = (entry: string): string => {
-  const quoted = JSON.stringify(entry);
-  return quoted.length > 200 ? `${quoted.slice(0, 200)}...` : quoted;
-};
+export { PluginArchiveRefusedError } from '@boardgamesempire/plugin-analysis';
 
 /**
  * The plugin artifact's bytes do not have the checksum the server admin
@@ -25,7 +17,7 @@ export class PluginArtifactChecksumMismatchError extends Error {
   ) {
     super(
       actualSha256 === null
-        ? `The expected checksum ${printable(expectedSha256)} is not a SHA-256 checksum: it must be 64 hexadecimal characters.`
+        ? `The expected checksum ${quoteUntrustedText(expectedSha256)} is not a SHA-256 checksum: it must be 64 hexadecimal characters.`
         : `The plugin artifact's checksum is ${actualSha256}, not the expected ${expectedSha256}.`,
     );
   }
@@ -106,7 +98,7 @@ export class PluginArtifactNotFoundError extends Error {
   override readonly name = 'PluginArtifactNotFoundError';
 
   constructor(readonly sha256: string) {
-    super(`No plugin artifact with the checksum ${printable(sha256)} is waiting on this server.`);
+    super(`No plugin artifact with the checksum ${quoteUntrustedText(sha256)} is waiting on this server.`);
   }
 }
 

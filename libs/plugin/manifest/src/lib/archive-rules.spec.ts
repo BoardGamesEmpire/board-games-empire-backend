@@ -189,6 +189,23 @@ describe('plugin archive rules (#1094)', () => {
       });
     });
 
+    it('accepts the entries that reach path 50,000 and refuses the one that is one over (#1166)', () => {
+      const checker = createPluginArchiveChecker();
+      // 24,999 directories each holding a file create 49,998 paths.
+      for (let i = 0; i < PLUGIN_ARCHIVE_MAX_ENTRIES / 2 - 1; i++) {
+        expect(checker.check(file(`package/d${i}/f`, 0)).ok).toBe(true);
+      }
+
+      // Each file in an existing directory creates one more path.
+      expect(checker.check(file('package/d0/g', 0)).ok).toBe(true);
+      expect(checker.check(file('package/d0/h', 0)).ok).toBe(true);
+      expect(checker.check(file('package/d0/i', 0))).toEqual({
+        ok: false,
+        rule: 'entry-count',
+        entry: 'package/d0/i',
+      });
+    });
+
     it('counts a directory both listed and implied once (#1166)', () => {
       const checker = createPluginArchiveChecker();
       expect(checker.check(dir('package/d0/')).ok).toBe(true);

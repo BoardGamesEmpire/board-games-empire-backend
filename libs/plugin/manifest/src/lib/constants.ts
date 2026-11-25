@@ -64,6 +64,16 @@ export type PluginScopeValue = (typeof PLUGIN_SCOPES)[number];
 export const PLUGIN_CONSENT_SCOPES = ['server', 'household', 'user'] as const;
 export type PluginConsentScopeValue = (typeof PLUGIN_CONSENT_SCOPES)[number];
 
+/**
+ * Whether a requested permission is required at household or user consent
+ * scope: introducing one, or making one required, is an escalation that sends
+ * each household or user that has not consented to review pending (#59). The
+ * manifest validator warns on it, and the update comparison (#1093) finds the
+ * same escalation between two manifests.
+ */
+export const isRequiredAtUnitConsentScope = (required: boolean, consentScope: PluginConsentScopeValue): boolean =>
+  required && consentScope !== 'server';
+
 export const PLUGIN_EXECUTION_MODES = ['in-process', 'worker'] as const;
 export type PluginExecutionModeValue = (typeof PLUGIN_EXECUTION_MODES)[number];
 

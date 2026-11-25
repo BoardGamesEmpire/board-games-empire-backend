@@ -1,14 +1,5 @@
 import type { PluginArchiveRule } from '@boardgamesempire/plugin-manifest';
-
-/**
- * Untrusted text (an archive's entry name, a checksum a client sent): quote it
- * and cut it so it cannot forge lines in a message. Kept in step with the
- * copy in `@bge/plugin-artifacts`' artifacts.errors.ts (#1093).
- */
-const printable = (entry: string): string => {
-  const quoted = JSON.stringify(entry);
-  return quoted.length > 200 ? `${quoted.slice(0, 200)}...` : quoted;
-};
+import { quoteUntrustedText } from '../untrusted-text.js';
 
 /**
  * A plugin artifact archive broke one of the archive rules (#1094). `name` is
@@ -24,7 +15,7 @@ export class PluginArchiveRefusedError extends Error {
     super(
       entry === undefined
         ? `The plugin artifact breaks the archive rule '${rule}'.`
-        : `The plugin artifact breaks the archive rule '${rule}' at ${printable(entry)}.`,
+        : `The plugin artifact breaks the archive rule '${rule}' at ${quoteUntrustedText(entry)}.`,
     );
   }
 }

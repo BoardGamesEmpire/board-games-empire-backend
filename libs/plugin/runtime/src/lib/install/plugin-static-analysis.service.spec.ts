@@ -52,7 +52,7 @@ describe('PluginStaticAnalysisService', () => {
     await rm(rootDir, { recursive: true, force: true });
   });
 
-  it("returns the analyzer's report for a plugin directory: one gating cjs-require finding", async () => {
+  it("returns the analyzer's report for a plugin directory: one gating cjs-require finding (#1093)", async () => {
     const report = await new PluginStaticAnalysisService().analyze(directory(), { deepScan: false });
 
     expect(report.findings).toEqual([
@@ -62,7 +62,7 @@ describe('PluginStaticAnalysisService', () => {
     expect(report.truncated).toBe(false);
   });
 
-  it('surfaces an unusable parser as the unavailable error, not the findings-gate rejection C4 maps separately', async () => {
+  it('surfaces an unusable parser as the unavailable error, not the findings-gate rejection the installer raises (#1093)', async () => {
     parseImplementation = () => {
       throw new Error('module parsing unsupported in this build');
     };

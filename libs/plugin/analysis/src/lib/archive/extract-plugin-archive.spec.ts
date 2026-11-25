@@ -1,4 +1,9 @@
-import { PLUGIN_ARCHIVE_MAX_ENTRIES } from '@boardgamesempire/plugin-manifest';
+import {
+  PLUGIN_ARCHIVE_MAX_ENTRIES,
+  PLUGIN_ARCHIVE_MAX_EXTRACTED_BYTES,
+  PLUGIN_ARCHIVE_MAX_PATH_BYTES,
+  PLUGIN_ARCHIVE_MAX_SEGMENT_BYTES,
+} from '@boardgamesempire/plugin-manifest';
 import * as fs from 'node:fs';
 import * as fsPromises from 'node:fs/promises';
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
@@ -286,15 +291,32 @@ describe('extractPluginArchive (#1094)', () => {
     expect(await exists(intoDir)).toBe(false);
   });
 
-  // The checker's name caps (#1166) refuse this 300-byte segment before it
-  // reaches the disk. The extractor's own ENAMETOOLONG mapping stays for paths
-  // the disk refuses below those caps (a shorter limit, say).
-  it('refuses a name the filesystem cannot hold as unsafe-path (#1094, #1166)', async () => {
+  it('refuses a name over the caps as unsafe-path, refused by the archive rules before extraction (#1166)', async () => {
     await write([...VALID, { name: `package/${'n'.repeat(300)}`, content: 'x' }]);
 
     const err = await refusal();
 
     expect(err.rule).toBe('unsafe-path');
+    expect(await exists(intoDir)).toBe(false);
+  });
+
+  // The extractor's own ENAMETOOLONG mapping stays for a name the disk refuses
+  // below the caps (a filesystem with a shorter limit, say).
+  it('refuses a name the disk cannot hold below the caps as unsafe-path (#1166)', async () => {
+    await write(VALID);
+    (fs.createWriteStream as unknown as jest.Mock).mockImplementationOnce(
+      () =>
+        new Writable({
+          write(_chunk, _encoding, callback) {
+            callback(Object.assign(new Error('name too long'), { code: 'ENAMETOOLONG', syscall: 'open' }));
+          },
+        }),
+    );
+
+    const err = await refusal();
+
+    expect(err.rule).toBe('unsafe-path');
+    expect(err.entry).toBe('package/manifest.json');
     expect(await exists(intoDir)).toBe(false);
   });
 
@@ -406,6 +428,29 @@ describe('extractPluginArchive (#1094)', () => {
     ['undefined', undefined],
   ])('never lets %s raise the decompression bound above the production one (#1094)', (_label, bound) => {
     expect(boundedDecompressedLimit(bound)).toBe(PLUGIN_ARCHIVE_MAX_DECOMPRESSED_BYTES);
+  });
+
+  // An artifact that passes every archive rule must fit the bound, or the
+  // server refuses as extracted-size one that `bge-plugin build` wrote. The
+  // longest name the rules allow needs pax records, so its framing is more
+  // than a header block and padding (#1166).
+  it('allows each entry the tar framing of the longest name the archive rules allow (#1166)', async () => {
+    const top = 't'.repeat(PLUGIN_ARCHIVE_MAX_SEGMENT_BYTES);
+    const segment = (char: string) => char.repeat(PLUGIN_ARCHIVE_MAX_SEGMENT_BYTES);
+    const path = [segment('a'), segment('b'), segment('c'), 'd'.repeat(PLUGIN_ARCHIVE_MAX_SEGMENT_BYTES - 1), 'e'].join(
+      '/',
+    );
+    expect(Buffer.byteLength(path)).toBe(PLUGIN_ARCHIVE_MAX_PATH_BYTES);
+
+    const tar = gunzipSync(await buildPluginTarball([{ name: `./${top}/${path}`, content: 'x' }]));
+    const endBlocks = 1024;
+    const framing = tar.length - endBlocks - 'x'.length;
+    const allowance =
+      (PLUGIN_ARCHIVE_MAX_DECOMPRESSED_BYTES - PLUGIN_ARCHIVE_MAX_EXTRACTED_BYTES - 1024 * 1024) /
+      PLUGIN_ARCHIVE_MAX_ENTRIES;
+
+    expect(framing).toBeGreaterThan(2048);
+    expect(framing).toBeLessThanOrEqual(allowance);
   });
 
   it('lets the hook tighten the decompression bound (#1094)', () => {

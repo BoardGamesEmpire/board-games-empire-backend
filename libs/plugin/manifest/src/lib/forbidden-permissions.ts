@@ -9,10 +9,10 @@ export interface ForbiddenPermissionViolation {
 
 /**
  * Categorical exclusions on the manifest's permission surface (#59):
- * plugin-administration authority requested as a core check, a declared
+ * plugin-administration authority requested as a core permission, a declared
  * bare slug that mimics the administration vocabulary, or a declared slug
  * claiming the `'all'` subject. Pattern-based on purpose — the refusal must
- * not depend on the C4 seed rows existing.
+ * not depend on the #59 Phase C4 seed rows existing.
  */
 export const collectForbiddenPermissionViolations = (
   validated: PluginManifestValidationResult,
@@ -34,7 +34,7 @@ export const collectForbiddenPermissionViolations = (
     if (isPluginAdministrationSlug(parsed.bareSlug)) {
       violations.push({
         permissionSlug: declared.canonicalSlug,
-        detail: 'mimics the plugin-administration vocabulary — the hard exclusion applies to the bare form',
+        detail: 'mimics the plugin-administration vocabulary — the categorical exclusion applies to the bare form',
       });
     }
 
