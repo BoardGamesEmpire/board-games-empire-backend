@@ -62,6 +62,20 @@ describe('buildApiDocument (#1511)', () => {
       { type: 'apiKey', name: 'x-api-key', in: 'header' },
     ]);
   });
+
+  // Swagger serves the document through its own factory and patch, not
+  // through buildApiDocument, so this pins the two to one document: #635's
+  // export must publish what /docs serves.
+  it('builds the same document the API document page serves', async () => {
+    const sources = { config: HEADER, loadAuthSchema: async () => AUTH_SCHEMA, globalPrefix: 'api' };
+    setupApiDocument(app, sources);
+    await app.listen(0);
+
+    const served = await fetch(`${await app.getUrl()}/docs/json`);
+
+    expect(served.status).toBe(200);
+    await expect(served.json()).resolves.toEqual(JSON.parse(JSON.stringify(await buildApiDocument(app, sources))));
+  });
 });
 
 /**
