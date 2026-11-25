@@ -4,6 +4,7 @@ import {
   DEFAULT_MIN_REASON_LENGTH,
   EVENT_NAME_PATTERN,
   IDENTIFIER_PATTERN,
+  isRequiredAtUnitConsentScope,
   LOW_EFFORT_REASON_PATTERN,
   OWN_TABLE_SUFFIX_PATTERN,
   pluginEmitPrefix,
@@ -358,13 +359,13 @@ export const validatePluginManifest = (
       }
     }
 
-    if (check.required && consentScope !== 'server') {
+    if (isRequiredAtUnitConsentScope(check.required, consentScope)) {
       warnings.push({
         code: ManifestWarningCode.REQUIRED_UNIT_SCOPE_PERMISSION,
         path,
         message:
-          `'${check.slug}' is required at '${consentScope}' consent scope: introducing or promoting such a permission ` +
-          'is a per-unit breaking change (semver-major) and will auto-disable the plugin for non-consenting units (#59)',
+          `'${check.slug}' is required at '${consentScope}' consent scope: introducing it, or making it required, is an escalation ` +
+          'that sends each household or user that has not consented to review pending, so it belongs in a major release (#59)',
       });
     }
   });

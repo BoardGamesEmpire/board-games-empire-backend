@@ -23,6 +23,7 @@ import type { PluginModuleImporter } from './plugin-module-importer';
 
 jest.mock('@boardgamesempire/plugin-manifest', () => ({
   validatePluginManifest: jest.fn(),
+  isPlainJsonObject: jest.requireActual('@boardgamesempire/plugin-manifest').isPlainJsonObject,
   PLUGIN_SLUG_PATTERN: /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/,
 }));
 

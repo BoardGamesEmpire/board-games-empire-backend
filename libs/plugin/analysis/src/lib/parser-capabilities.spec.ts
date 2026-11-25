@@ -1,4 +1,4 @@
-import { PARSER_CAPABILITY_PROBES, probeParserCapabilities, resolvedParserVersion } from './parser-capabilities';
+import { PARSER_CAPABILITY_PROBES, probeParserCapabilities, resolvedParserVersion } from './parser-capabilities.js';
 
 /**
  * Runs against the REAL resolved meriyah — no mock — so this suite IS the

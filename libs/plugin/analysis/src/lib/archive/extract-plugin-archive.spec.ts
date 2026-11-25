@@ -1,25 +1,28 @@
-import { PLUGIN_ARCHIVE_MAX_ENTRIES, PLUGIN_ARCHIVE_MAX_MANIFEST_BYTES } from '@boardgamesempire/plugin-manifest';
+import {
+  PLUGIN_ARCHIVE_MAX_ENTRIES,
+  PLUGIN_ARCHIVE_MAX_EXTRACTED_BYTES,
+  PLUGIN_ARCHIVE_MAX_PATH_BYTES,
+  PLUGIN_ARCHIVE_MAX_SEGMENT_BYTES,
+} from '@boardgamesempire/plugin-manifest';
 import * as fs from 'node:fs';
 import * as fsPromises from 'node:fs/promises';
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Writable } from 'node:stream';
 import { gunzipSync, gzipSync } from 'node:zlib';
-import { PluginArchiveRefusedError } from '../artifacts.errors';
-import type { PluginTarballEntry } from '../testing/plugin-tarball';
-import { buildPluginTarball } from '../testing/plugin-tarball';
-import { allocateIncoming } from '../workspace/incoming';
+import type { PluginTarballEntry } from '../testing/plugin-tarball.js';
+import { buildPluginTarball } from '../testing/plugin-tarball.js';
+import { PluginArchiveRefusedError } from './archive.errors.js';
 import {
   boundedDecompressedLimit,
   extractPluginArchive,
   PLUGIN_ARCHIVE_MAX_DECOMPRESSED_BYTES,
-} from './extract-plugin-archive';
-import { readArtifactSlug } from './read-artifact-slug';
+} from './extract-plugin-archive.js';
 
 jest.mock('node:fs/promises', () => {
   const actual = jest.requireActual('node:fs/promises');
-  return { ...actual, mkdir: jest.fn(actual.mkdir), readFile: jest.fn(actual.readFile) };
+  return { ...actual, mkdir: jest.fn(actual.mkdir) };
 });
 
 jest.mock('node:fs', () => {
@@ -288,12 +291,32 @@ describe('extractPluginArchive (#1094)', () => {
     expect(await exists(intoDir)).toBe(false);
   });
 
-  it('refuses a name the filesystem cannot hold as unsafe-path (#1094)', async () => {
+  it('refuses a name over the caps as unsafe-path, refused by the archive rules before extraction (#1166)', async () => {
     await write([...VALID, { name: `package/${'n'.repeat(300)}`, content: 'x' }]);
 
     const err = await refusal();
 
     expect(err.rule).toBe('unsafe-path');
+    expect(await exists(intoDir)).toBe(false);
+  });
+
+  // The extractor's own ENAMETOOLONG mapping stays for a name the disk refuses
+  // below the caps (a filesystem with a shorter limit, say).
+  it('refuses a name the disk cannot hold below the caps as unsafe-path (#1166)', async () => {
+    await write(VALID);
+    (fs.createWriteStream as unknown as jest.Mock).mockImplementationOnce(
+      () =>
+        new Writable({
+          write(_chunk, _encoding, callback) {
+            callback(Object.assign(new Error('name too long'), { code: 'ENAMETOOLONG', syscall: 'open' }));
+          },
+        }),
+    );
+
+    const err = await refusal();
+
+    expect(err.rule).toBe('unsafe-path');
+    expect(err.entry).toBe('package/manifest.json');
     expect(await exists(intoDir)).toBe(false);
   });
 
@@ -407,6 +430,29 @@ describe('extractPluginArchive (#1094)', () => {
     expect(boundedDecompressedLimit(bound)).toBe(PLUGIN_ARCHIVE_MAX_DECOMPRESSED_BYTES);
   });
 
+  // An artifact that passes every archive rule must fit the bound, or the
+  // server refuses as extracted-size one that `bge-plugin build` wrote. The
+  // longest name the rules allow needs pax records, so its framing is more
+  // than a header block and padding (#1166).
+  it('allows each entry the tar framing of the longest name the archive rules allow (#1166)', async () => {
+    const top = 't'.repeat(PLUGIN_ARCHIVE_MAX_SEGMENT_BYTES);
+    const segment = (char: string) => char.repeat(PLUGIN_ARCHIVE_MAX_SEGMENT_BYTES);
+    const path = [segment('a'), segment('b'), segment('c'), 'd'.repeat(PLUGIN_ARCHIVE_MAX_SEGMENT_BYTES - 1), 'e'].join(
+      '/',
+    );
+    expect(Buffer.byteLength(path)).toBe(PLUGIN_ARCHIVE_MAX_PATH_BYTES);
+
+    const tar = gunzipSync(await buildPluginTarball([{ name: `./${top}/${path}`, content: 'x' }]));
+    const endBlocks = 1024;
+    const framing = tar.length - endBlocks - 'x'.length;
+    const allowance =
+      (PLUGIN_ARCHIVE_MAX_DECOMPRESSED_BYTES - PLUGIN_ARCHIVE_MAX_EXTRACTED_BYTES - 1024 * 1024) /
+      PLUGIN_ARCHIVE_MAX_ENTRIES;
+
+    expect(framing).toBeGreaterThan(2048);
+    expect(framing).toBeLessThanOrEqual(allowance);
+  });
+
   it('lets the hook tighten the decompression bound (#1094)', () => {
     expect(boundedDecompressedLimit(1234)).toBe(1234);
   });
@@ -431,94 +477,4 @@ describe('extractPluginArchive (#1094)', () => {
     expect((await refusal()).rule).toBe('entry-count');
     expect(await exists(intoDir)).toBe(false);
   }, 120_000);
-
-  it('reads the slug from an extracted manifest (#1094)', async () => {
-    await write(VALID);
-    await extractPluginArchive(archivePath, intoDir);
-
-    expect(await readArtifactSlug(intoDir)).toBe('demo-sink');
-  });
-
-  it.each([
-    ['not JSON', 'nope'],
-    ['not an object', '[]'],
-    ['no slug', '{}'],
-    ['a slug that is not a string', '{"slug": 5}'],
-    ['a slug that fails the pattern', '{"slug": "../evil"}'],
-  ])('refuses %s as manifest-slug (#1094)', async (_label, manifest) => {
-    await mkdir(intoDir, { recursive: true });
-    await writeFile(join(intoDir, 'manifest.json'), manifest);
-
-    await expect(readArtifactSlug(intoDir)).rejects.toMatchObject({ rule: 'manifest-slug' });
-  });
-
-  it('reads a manifest of exactly the manifest cap and refuses one a byte over as manifest-size, the checker rule (#1094)', async () => {
-    const manifestOf = (bytes: number): string => {
-      const empty = JSON.stringify({ slug: 'demo-sink', pad: '' });
-      return JSON.stringify({ slug: 'demo-sink', pad: 'x'.repeat(bytes - empty.length) });
-    };
-
-    await mkdir(intoDir, { recursive: true });
-
-    await writeFile(join(intoDir, 'manifest.json'), manifestOf(PLUGIN_ARCHIVE_MAX_MANIFEST_BYTES));
-    await expect(readArtifactSlug(intoDir)).resolves.toBe('demo-sink');
-
-    await writeFile(join(intoDir, 'manifest.json'), manifestOf(PLUGIN_ARCHIVE_MAX_MANIFEST_BYTES + 1));
-    await expect(readArtifactSlug(intoDir)).rejects.toMatchObject({ rule: 'manifest-size', entry: 'manifest.json' });
-  });
-
-  it('refuses a missing manifest as manifest-slug (#1094)', async () => {
-    await mkdir(intoDir, { recursive: true });
-
-    await expect(readArtifactSlug(intoDir)).rejects.toMatchObject({ rule: 'manifest-slug' });
-  });
-
-  it('refuses a manifest.json that is a directory as manifest-slug (#1094)', async () => {
-    await mkdir(join(intoDir, 'manifest.json'), { recursive: true });
-
-    await expect(readArtifactSlug(intoDir)).rejects.toMatchObject({ rule: 'manifest-slug' });
-  });
-
-  // A disk fault is the server's, not the archive's: it must not reach the
-  // uploader as a refusal of their manifest.
-  it.each(['EACCES', 'EIO'])('lets %s reading the manifest propagate as it is (#1094)', async (code) => {
-    await mkdir(intoDir, { recursive: true });
-    await writeFile(join(intoDir, 'manifest.json'), JSON.stringify({ slug: 'demo-sink' }));
-    const failure = Object.assign(new Error(code), { code, syscall: 'open' });
-    (fsPromises.readFile as unknown as jest.Mock).mockRejectedValueOnce(failure);
-
-    await expect(readArtifactSlug(intoDir)).rejects.toBe(failure);
-  });
-
-  it('refuses a .incoming that is a symbolic link (#1094)', async () => {
-    // The sweep never follows a link, so scratch written through one would
-    // never be cleared, and it may lie outside the plugins root.
-    const root = join(dir, 'plugins');
-    const elsewhere = join(dir, 'elsewhere');
-    await mkdir(root);
-    await mkdir(elsewhere);
-    await symlink(elsewhere, join(root, '.incoming'));
-
-    await expect(allocateIncoming(root)).rejects.toThrow('symbolic link');
-  });
-
-  it('allocates paths under .incoming without creating them, and cleans up (#1094)', async () => {
-    const root = join(dir, 'plugins');
-
-    const incoming = await allocateIncoming(root);
-
-    expect(incoming.archivePath).toBe(join(root, '.incoming', `${incoming.id}.tgz`));
-    expect(incoming.extractDir).toBe(join(root, '.incoming', incoming.id));
-    expect(await exists(join(root, '.incoming'))).toBe(true);
-    expect(await exists(incoming.archivePath)).toBe(false);
-    expect(await exists(incoming.extractDir)).toBe(false);
-
-    await writeFile(incoming.archivePath, 'x');
-    await mkdir(incoming.extractDir);
-    await incoming.cleanup();
-    await incoming.cleanup();
-
-    expect(await exists(incoming.archivePath)).toBe(false);
-    expect(await exists(incoming.extractDir)).toBe(false);
-  });
 });

@@ -1,7 +1,7 @@
 import { DatabaseService } from '@bge/database';
+import { isPlainJsonObject } from '@boardgamesempire/plugin-manifest';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
-import { isPlainJsonObject } from '../is-plain-json-object';
 import { PluginConfigEventsService } from './plugin-config-events.service';
 import { PLUGIN_CONFIG_REFRESH_INTERVAL_MS, PLUGIN_CONFIG_REFRESH_INTERVAL_NAME } from './plugin-config.constants';
 

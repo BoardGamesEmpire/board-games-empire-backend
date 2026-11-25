@@ -16,13 +16,13 @@
       "path": "../../common/testing/tsconfig.lib.json"
     },
     {
-      "path": "../../common/actor-context/tsconfig.lib.json"
-    },
-    {
       "path": "../manifest/tsconfig.lib.json"
     },
     {
       "path": "../contract/tsconfig.lib.json"
+    },
+    {
+      "path": "../analysis/tsconfig.lib.json"
     },
     {
       "path": "../../common/secure-http/tsconfig.lib.json"
@@ -32,6 +32,9 @@
     },
     {
       "path": "../../database/tsconfig.lib.json"
+    },
+    {
+      "path": "../../common/actor-context/tsconfig.lib.json"
     }
   ],
   "exclude": ["jest.config.ts", "jest.config.cts", "src/**/*.spec.ts", "src/**/*.test.ts", "src/**/*.contract.ts"]

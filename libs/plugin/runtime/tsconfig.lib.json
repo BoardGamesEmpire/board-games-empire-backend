@@ -28,6 +28,9 @@
       "path": "../contract/tsconfig.lib.json"
     },
     {
+      "path": "../analysis/tsconfig.lib.json"
+    },
+    {
       "path": "../../common/secure-http/tsconfig.lib.json"
     },
     {

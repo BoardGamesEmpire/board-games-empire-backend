@@ -1,7 +1,7 @@
 import { MutationEvent } from '@bge/actor-context';
 import { PluginGrantScope, PluginGrantStatus, RiskLevel } from '@bge/database';
+import type { StaticAnalysisFinding } from '@boardgamesempire/plugin-analysis';
 import { PluginEvent, buildPluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
-import type { StaticAnalysisFinding } from '../install/static-analysis.types';
 import type {
   GrantedPermissionRecord,
   NpmAuditFinding,

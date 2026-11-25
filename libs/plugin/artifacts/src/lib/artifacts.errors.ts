@@ -1,32 +1,6 @@
-import type { PluginArchiveRule } from '@boardgamesempire/plugin-manifest';
+import { quoteUntrustedText } from '@boardgamesempire/plugin-analysis';
 
-/**
- * Untrusted text (an archive's entry name, a checksum a client sent): quote it
- * and cut it so it cannot forge lines in a message.
- */
-const printable = (entry: string): string => {
-  const quoted = JSON.stringify(entry);
-  return quoted.length > 200 ? `${quoted.slice(0, 200)}...` : quoted;
-};
-
-/**
- * A plugin artifact archive broke one of the archive rules (#1094). `name` is
- * the stable code a client can match on; the message is plain English.
- */
-export class PluginArchiveRefusedError extends Error {
-  override readonly name = 'PluginArchiveRefusedError';
-
-  constructor(
-    readonly rule: PluginArchiveRule,
-    readonly entry?: string,
-  ) {
-    super(
-      entry === undefined
-        ? `The plugin artifact breaks the archive rule '${rule}'.`
-        : `The plugin artifact breaks the archive rule '${rule}' at ${printable(entry)}.`,
-    );
-  }
-}
+export { PluginArchiveRefusedError } from '@boardgamesempire/plugin-analysis';
 
 /**
  * The plugin artifact's bytes do not have the checksum the server admin
@@ -43,7 +17,7 @@ export class PluginArtifactChecksumMismatchError extends Error {
   ) {
     super(
       actualSha256 === null
-        ? `The expected checksum ${printable(expectedSha256)} is not a SHA-256 checksum: it must be 64 hexadecimal characters.`
+        ? `The expected checksum ${quoteUntrustedText(expectedSha256)} is not a SHA-256 checksum: it must be 64 hexadecimal characters.`
         : `The plugin artifact's checksum is ${actualSha256}, not the expected ${expectedSha256}.`,
     );
   }
@@ -124,7 +98,7 @@ export class PluginArtifactNotFoundError extends Error {
   override readonly name = 'PluginArtifactNotFoundError';
 
   constructor(readonly sha256: string) {
-    super(`No plugin artifact with the checksum ${printable(sha256)} is waiting on this server.`);
+    super(`No plugin artifact with the checksum ${quoteUntrustedText(sha256)} is waiting on this server.`);
   }
 }
 

@@ -1,5 +1,5 @@
+import type { StaticAnalysisFinding } from '@boardgamesempire/plugin-analysis';
 import type { ManifestIssue } from '@boardgamesempire/plugin-manifest';
-import type { StaticAnalysisFinding } from '../install/static-analysis.types';
 
 /**
  * Typed failures for the update pipeline (#59 Phase C3). Domain errors, not

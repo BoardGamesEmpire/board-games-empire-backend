@@ -1,10 +1,9 @@
 import type { PluginGrantScope, RiskLevel } from '@bge/database';
 import type { NormalizedPermissionRequest } from '@boardgamesempire/plugin-manifest';
-import { parsePluginPermissionSlug } from '@boardgamesempire/plugin-manifest';
+import { isPluginAdministrationSlug, parsePluginPermissionSlug } from '@boardgamesempire/plugin-manifest';
 import type { ConsentCatalogPermission } from '../consent/consent-catalog-flags';
 import { consentCatalogFlags } from '../consent/consent-catalog-flags';
 import type { ConsentManifestSource } from '../consent/consent-classification.types';
-import { isPluginAdministrationSlug } from './plugin-admin-permissions';
 
 /**
  * Why a requested permission can never be granted at all, whoever consents.

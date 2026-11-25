@@ -1,8 +1,8 @@
 import type { Permission } from '@bge/database';
 import { RiskLevel } from '@bge/database';
+import type { StaticAnalysisReport } from '@boardgamesempire/plugin-analysis';
 import { buildPluginManifest, validatePluginManifest } from '@boardgamesempire/plugin-manifest';
 import type { PluginInstallAssessment } from '../install/plugin-installer.service';
-import type { StaticAnalysisReport } from '../install/static-analysis.types';
 import { presentArtifactChecks } from './artifact-check-presentation';
 
 describe('presentArtifactChecks', () => {

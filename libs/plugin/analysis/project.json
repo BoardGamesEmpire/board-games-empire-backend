@@ -1,0 +1,9 @@
+{
+  "name": "plugin-analysis",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/plugin/analysis/src",
+  "projectType": "library",
+  "tags": ["plugins", "publish"],
+  "// targets": "to see all targets run: nx show project plugin-analysis --web",
+  "targets": {}
+}

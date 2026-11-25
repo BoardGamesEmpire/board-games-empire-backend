@@ -272,6 +272,9 @@
     },
     {
       "path": "./libs/api/upstream-account"
+    },
+    {
+      "path": "./libs/plugin/analysis"
     }
   ]
 }

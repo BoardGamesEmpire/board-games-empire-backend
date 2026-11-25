@@ -2,6 +2,8 @@ import {
   createPluginArchiveChecker,
   PLUGIN_ARCHIVE_MAX_ENTRIES,
   PLUGIN_ARCHIVE_MAX_EXTRACTED_BYTES,
+  PLUGIN_ARCHIVE_MAX_PATH_BYTES,
+  PLUGIN_ARCHIVE_MAX_SEGMENT_BYTES,
 } from '@boardgamesempire/plugin-manifest';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { mkdir, open, rm } from 'node:fs/promises';
@@ -10,24 +12,49 @@ import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { createGunzip } from 'node:zlib';
 import { extract as createTarExtract } from 'tar-stream';
-import { PluginArchiveRefusedError } from '../artifacts.errors';
-import { isGzipMagic } from './gzip-magic';
+import { PluginArchiveRefusedError } from './archive.errors.js';
+import { isGzipMagic } from './gzip-magic.js';
 
 export interface PluginArchiveExtraction {
   readonly entryCount: number;
   readonly extractedBytes: number;
 }
 
+const TAR_BLOCK_BYTES = 512;
+
+/**
+ * The tar framing one entry may carry under the archive rules (#1094, #1166):
+ * its header block, a pax header block and the pax records, and up to a block
+ * less one of padding after its body. The pax records are sized for the
+ * longest name the rules allow (a top-level folder name, a slash, the path
+ * inside it, and a `./` and a trailing slash some tools add) plus a block for
+ * the other records a tool may write (times, owner, size).
+ */
+const PER_ENTRY_FRAMING_BYTES =
+  TAR_BLOCK_BYTES +
+  TAR_BLOCK_BYTES +
+  Math.ceil(
+    (PLUGIN_ARCHIVE_MAX_SEGMENT_BYTES + 1 + PLUGIN_ARCHIVE_MAX_PATH_BYTES + 3 + TAR_BLOCK_BYTES) / TAR_BLOCK_BYTES,
+  ) *
+    TAR_BLOCK_BYTES +
+  (TAR_BLOCK_BYTES - 1);
+
 /**
  * How many decompressed bytes the extractor will walk (#1094). Zero blocks and
  * pax headers are not entries, so neither the entry cap nor the extracted-size
  * cap sees them, and a small gzip could otherwise make the server walk
- * gigabytes. The bound is the extracted cap, plus 2 KiB of tar framing (header
- * block, padding, a pax record) for each entry the rules allow, plus 1 MiB for
- * the archive's end blocks and global headers.
+ * gigabytes. The bound is the extracted cap, plus the framing each entry the
+ * rules allow may carry, plus 1 MiB for the archive's end blocks and global
+ * headers. The framing is sized from the name caps, so an artifact whose pax
+ * records hold only its name and the usual times, owner and size (as
+ * `bge-plugin build` writes it) is never refused here. The archive rules do
+ * not bound any other pax record, so an archive carrying more can pass them
+ * and still be refused here as `extracted-size` (#1166). The server and
+ * `bge-plugin validate` both extract through this function, so they refuse
+ * the same archives.
  */
 export const PLUGIN_ARCHIVE_MAX_DECOMPRESSED_BYTES =
-  PLUGIN_ARCHIVE_MAX_EXTRACTED_BYTES + PLUGIN_ARCHIVE_MAX_ENTRIES * 2048 + 1024 * 1024;
+  PLUGIN_ARCHIVE_MAX_EXTRACTED_BYTES + PLUGIN_ARCHIVE_MAX_ENTRIES * PER_ENTRY_FRAMING_BYTES + 1024 * 1024;
 
 export interface PluginArchiveExtractOptions {
   /** Lets a test use a small bound instead of generating gigabytes. */

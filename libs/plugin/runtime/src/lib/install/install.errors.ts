@@ -1,5 +1,5 @@
+import type { StaticAnalysisFinding } from '@boardgamesempire/plugin-analysis';
 import type { ManifestIssue } from '@boardgamesempire/plugin-manifest';
-import type { StaticAnalysisFinding } from './static-analysis.types';
 
 /**
  * Typed failures for the install pipeline (#59 Phase C2). Domain errors, not
@@ -93,35 +93,13 @@ export class PluginInstallCriticalConfirmationError extends Error {
 }
 
 /**
- * The resolved meriyah build failed one or more parser capability probes
- * (#219), so the AST pass would degrade: every file using syntax the
- * build cannot parse records `parse-failure` instead of being walked, its
- * `require()` calls go unscreened, and the lexer-failure fallback is gone
- * for it. Whatever screening survives, a gate running at partial coverage
- * while its report reads as complete is the one outcome static analysis
- * must never produce — so the analyzer refuses to run instead of proceeding
- * on a log line. Known cause: a stale meriyah major shadowing the pinned
- * one — 1.x honours the legacy `module` option key and parses a bare
- * import, which is why the probe exercises the modern syntax classes real
- * plugin code uses rather than module parsing alone.
+ * Raised by the analyzer when the resolved parser build cannot give a full
+ * scan (#219). The class lives with the analyzer in `plugin-analysis` so the
+ * server and a plugin author's tools raise one class (#1093); it is
+ * re-exported here so this barrel, the exception filter's `instanceof` and
+ * the filter's completeness spec all see that one identity.
  */
-export class PluginStaticAnalysisUnavailableError extends Error {
-  override readonly name = 'PluginStaticAnalysisUnavailableError';
-
-  constructor(
-    /** Capability probe names the resolved parser failed. */
-    public readonly failedCapabilities: readonly string[],
-    /** The resolved parser's self-reported version; `'unknown'` when the build exports none. */
-    public readonly parserVersion: string,
-  ) {
-    super(
-      `Static analysis is unavailable: the resolved meriyah build (version ${parserVersion}) failed ` +
-        `${failedCapabilities.length} parser capability probe(s) [${failedCapabilities.join(', ')}], so install ` +
-        'screening would run at partial coverage while reporting a complete scan. Check the dependency tree for a ' +
-        'meriyah build shadowing the pinned major before installing plugins.',
-    );
-  }
-}
+export { PluginStaticAnalysisUnavailableError } from '@boardgamesempire/plugin-analysis';
 
 /**
  * Static analysis found forbidden specifiers in the default scan and the

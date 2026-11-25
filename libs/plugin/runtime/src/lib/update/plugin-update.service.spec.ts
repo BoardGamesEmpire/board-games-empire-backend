@@ -13,6 +13,7 @@ import {
 import { deadlock, uniqueViolation, uniqueViolationWithoutMeta } from '@bge/database/testing';
 import type { MockDatabaseService } from '@bge/testing';
 import { createMockDatabaseService, UNIT_BOUND_RULES } from '@bge/testing';
+import type { StaticAnalysisFinding, StaticAnalysisReport } from '@boardgamesempire/plugin-analysis';
 import type { PluginArtifactDirectory, PluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
 import { buildPluginArtifactSha256 as sha } from '@boardgamesempire/plugin-contract';
 import type { PluginManifest } from '@boardgamesempire/plugin-manifest';
@@ -34,7 +35,6 @@ import {
 } from '../events/plugin.events';
 import type { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
 import type { PluginStaticAnalysisService } from '../install/plugin-static-analysis.service';
-import type { StaticAnalysisFinding, StaticAnalysisReport } from '../install/static-analysis.types';
 import { PluginDirectoryLayoutError } from '../loader/loader.errors';
 import type { PluginDirectoryResolverService } from '../loader/plugin-directory-resolver.service';
 import { buildPluginModuleOptions } from '../testing/plugin-module-options.fixture';

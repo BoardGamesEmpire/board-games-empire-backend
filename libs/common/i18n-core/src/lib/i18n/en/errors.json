@@ -456,7 +456,7 @@
     "artifact_archive_not_gzip": "This file is not a plugin artifact: it is not a gzip-compressed tar archive (a .tgz file). Check that you chose the right file.",
     "artifact_archive_corrupt": "The plugin artifact is damaged and could not be read to the end. Build it again, or send it again in case it was cut off.",
     "artifact_archive_entry_type": "The plugin artifact holds something other than plain files and folders, such as a link or a device file. Plugin artifacts may hold only files and folders.",
-    "artifact_archive_unsafe_path": "The plugin artifact holds a file or folder name the server will not unpack. A name is refused if it climbs out of the plugin's folder with .., starts at the root, contains a backslash (as archives made on Windows may), contains a NUL character, or is a file whose name ends in a slash. Ask the plugin's author to build it again.",
+    "artifact_archive_unsafe_path": "The plugin artifact holds a file or folder name the server will not unpack. A name is refused if it climbs out of the plugin's folder with .., starts at the root, contains a backslash (as archives made on Windows may), contains a NUL character, is a file whose name ends in a slash, or is too long: each file or folder name may be at most 255 bytes, and each path inside the plugin's folder at most 1,024 bytes. Ask the plugin's author to build it again.",
     "artifact_archive_top_level": "The plugin artifact must hold exactly one top-level folder, with every file inside it.",
     "artifact_archive_entry_count": "The plugin artifact holds more files and folders than a plugin artifact may. The limit is 50,000.",
     "artifact_archive_extracted_size": "The plugin artifact is too large once unpacked. The limit is 512 MiB.",

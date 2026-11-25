@@ -20,13 +20,13 @@ import {
   SecureHttpService,
   SsrfRejectionError,
 } from '@bge/secure-http';
+import { extractPluginArchive } from '@boardgamesempire/plugin-analysis';
 import type { PluginArtifactDirectory, PluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
 import { PLUGIN_MANIFEST_FILENAME, PLUGIN_PACKAGE_JSON_FILENAME } from '@boardgamesempire/plugin-contract';
 import { PLUGIN_ARCHIVE_MAX_COMPRESSED_BYTES } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
-import { extractPluginArchive } from '../archive/extract-plugin-archive';
 import { readArtifactSlug } from '../archive/read-artifact-slug';
 import {
   PluginArtifactChecksumMismatchError,

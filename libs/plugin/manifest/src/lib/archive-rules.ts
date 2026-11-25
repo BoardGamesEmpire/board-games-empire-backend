@@ -5,21 +5,34 @@ import { posix } from 'node:path';
  * extractor calls these, and the plugin author CLI will call them too once it
  * is built (#84), so there is one list. Plain synchronous functions: the
  * caller owns the stream.
+ *
+ * The entry cap counts listed entries and also the distinct paths they create,
+ * parent directories an entry implies included, and names have byte caps
+ * (#1166).
  */
 
 export const PLUGIN_ARCHIVE_MAX_COMPRESSED_BYTES = 100 * 1024 * 1024;
 export const PLUGIN_ARCHIVE_MAX_EXTRACTED_BYTES = 512 * 1024 * 1024;
+/**
+ * The cap on listed entries, and on the distinct paths those entries create,
+ * the top-level directory excluded (#1166).
+ */
 export const PLUGIN_ARCHIVE_MAX_ENTRIES = 50_000;
+/** The longest any one name segment may be, in UTF-8 bytes: a common filesystem limit (#1166). */
+export const PLUGIN_ARCHIVE_MAX_SEGMENT_BYTES = 255;
+/** The longest a path may be, in UTF-8 bytes, with the top-level directory stripped (#1166). */
+export const PLUGIN_ARCHIVE_MAX_PATH_BYTES = 1024;
 /** The largest root `manifest.json` an archive may hold; the server reads the manifest into memory whole. */
 export const PLUGIN_ARCHIVE_MAX_MANIFEST_BYTES = 1024 * 1024;
 
 /**
- * The checker returns `entry-type`, `unsafe-path`, `top-level`, `entry-count`,
- * `extracted-size`, `manifest-size`, `required-file` and, for an entry whose
- * size is not a non-negative safe integer or whose path collides with an
- * earlier entry's, `corrupt`. The reader also reports `corrupt` for a damaged
- * stream; `not-gzip` and `manifest-slug` are for the reader and the receiver
- * to report. They all live here so the rules stay in one list.
+ * The checker returns `entry-type`, `unsafe-path` (a name that climbs out, or
+ * is too long), `top-level`, `entry-count`, `extracted-size`, `manifest-size`,
+ * `required-file` and, for an entry whose size is not a non-negative safe
+ * integer or whose path collides with an earlier entry's, `corrupt`. The
+ * reader also reports `corrupt` for a damaged stream; `not-gzip` and
+ * `manifest-slug` are for the reader and the receiver to report. They all live
+ * here so the rules stay in one list.
  *
  * The compressed-size cap is not a rule here. It is enforced where the bytes
  * arrive (the download's byte cap, the upload's), before anything reads the
@@ -114,6 +127,32 @@ const createArchivePaths = () => {
       return false;
     },
 
+    /** How many distinct paths the accepted entries have made, listed or implied. */
+    size(): number {
+      return ids.size;
+    },
+
+    /**
+     * How many of `segments` no accepted entry has made yet, so how many
+     * paths recording them would add. Once one segment is new, every deeper
+     * one is too.
+     */
+    missing(segments: readonly string[]): number {
+      let parent = ROOT;
+
+      for (const [index, segment] of segments.entries()) {
+        const id = ids.get(key(parent, segment));
+
+        if (id === undefined) {
+          return segments.length - index;
+        }
+
+        parent = id;
+      }
+
+      return 0;
+    },
+
     record(segments: readonly string[], kind: 'file' | 'directory'): void {
       let parent = ROOT;
 
@@ -190,14 +229,24 @@ export function createPluginArchiveChecker(): PluginArchiveChecker {
         return refuse('top-level', name);
       }
 
+      // The disk refuses a name over its limits (ENAMETOOLONG), and a
+      // checker that writes nothing has to refuse it the same way (#1166).
+      // The top-level directory counts toward the segment cap, not the path's.
+      const path = rest.join('/');
+
+      if (
+        segments.some((segment) => Buffer.byteLength(segment, 'utf8') > PLUGIN_ARCHIVE_MAX_SEGMENT_BYTES) ||
+        Buffer.byteLength(path, 'utf8') > PLUGIN_ARCHIVE_MAX_PATH_BYTES
+      ) {
+        return refuse('unsafe-path', name);
+      }
+
       // Two files at one path, a file and a directory at one path, or a path
       // under a file: the extractor would meet each on disk, and a checker
       // that writes nothing has to refuse it the same way.
       if (paths.collides(rest, type)) {
         return refuse('corrupt', name);
       }
-
-      const path = rest.join('/');
 
       if (type === 'file' && path === MANIFEST_FILE && size > PLUGIN_ARCHIVE_MAX_MANIFEST_BYTES) {
         return refuse('manifest-size', name);
@@ -206,6 +255,12 @@ export function createPluginArchiveChecker(): PluginArchiveChecker {
       // Directory entries count too (each costs an extraction operation), the
       // top-level directory's own entry included.
       if (entries + 1 > PLUGIN_ARCHIVE_MAX_ENTRIES) {
+        return refuse('entry-count', name);
+      }
+
+      // A deep entry makes its parent directories too, so a few entries can
+      // create far more paths than they list (#1166).
+      if (paths.size() + paths.missing(rest) > PLUGIN_ARCHIVE_MAX_ENTRIES) {
         return refuse('entry-count', name);
       }
 

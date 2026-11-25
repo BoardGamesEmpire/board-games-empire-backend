@@ -9,6 +9,8 @@ import {
   RiskLevel,
   SERVER_SCOPE_SENTINEL,
 } from '@bge/database';
+import type { StaticAnalysisFinding, StaticAnalysisReport } from '@boardgamesempire/plugin-analysis';
+import { gatingFindings } from '@boardgamesempire/plugin-analysis';
 import type { PluginArtifactDirectory } from '@boardgamesempire/plugin-contract';
 import type {
   ManifestWarning,
@@ -17,6 +19,7 @@ import type {
   PluginManifestValidationResult,
 } from '@boardgamesempire/plugin-manifest';
 import {
+  collectForbiddenPermissionViolations,
   PluginManifestValidationError,
   resolveLocalizedString,
   validatePluginManifest,
@@ -39,7 +42,6 @@ import { MODULE_OPTIONS_TOKEN } from '../plugin-module.options';
 import { MANIFEST_CATEGORY_TO_PRISMA } from '../registry/plugin-category.map';
 import { CLEARED_STAGED_UPDATE } from '../update/staged-update.columns';
 import {
-  collectForbiddenPermissionViolations,
   collectUnboundedUnitConsentViolations,
   collectWildcardSubjectViolations,
   compareExactReentry,
@@ -65,8 +67,6 @@ import {
 } from './manifest-enum.maps';
 import { findDataGatewayNameHolder, placePluginDataGatewayRow, pluginDataGatewayName } from './plugin-data-gateway-row';
 import { PluginStaticAnalysisService } from './plugin-static-analysis.service';
-import type { StaticAnalysisFinding, StaticAnalysisReport } from './static-analysis.types';
-import { gatingFindings } from './static-analysis.types';
 
 export interface PluginInstallInput {
   /**

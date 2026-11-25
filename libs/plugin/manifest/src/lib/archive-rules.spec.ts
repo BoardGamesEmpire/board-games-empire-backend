@@ -5,6 +5,8 @@ import {
   PLUGIN_ARCHIVE_MAX_ENTRIES,
   PLUGIN_ARCHIVE_MAX_EXTRACTED_BYTES,
   PLUGIN_ARCHIVE_MAX_MANIFEST_BYTES,
+  PLUGIN_ARCHIVE_MAX_PATH_BYTES,
+  PLUGIN_ARCHIVE_MAX_SEGMENT_BYTES,
 } from './archive-rules.js';
 
 const MIB = 1024 * 1024;
@@ -12,7 +14,9 @@ const file = (name: string, size = 1) => ({ name, type: 'file', size });
 const dir = (name: string) => ({ name, type: 'directory', size: 0 });
 
 describe('plugin archive rules (#1094)', () => {
-  it('holds the archive caps (#1094)', () => {
+  it('holds the archive caps (#1094, #1166)', () => {
+    expect(PLUGIN_ARCHIVE_MAX_SEGMENT_BYTES).toBe(255);
+    expect(PLUGIN_ARCHIVE_MAX_PATH_BYTES).toBe(1024);
     expect(PLUGIN_ARCHIVE_MAX_COMPRESSED_BYTES).toBe(100 * MIB);
     expect(PLUGIN_ARCHIVE_MAX_EXTRACTED_BYTES).toBe(512 * MIB);
     expect(PLUGIN_ARCHIVE_MAX_ENTRIES).toBe(50_000);
@@ -166,6 +170,150 @@ describe('plugin archive rules (#1094)', () => {
       ok: false,
       rule: 'entry-count',
       entry: 'package/one-too-many',
+    });
+  });
+
+  describe('the paths an archive creates (#1166)', () => {
+    // 25,000 directories each holding a file create 50,000 paths from only
+    // 25,000 entries, so the listed-entry cap never trips (#1166).
+    it('refuses the entry that would create path 50,001, though few entries were listed (#1166)', () => {
+      const checker = createPluginArchiveChecker();
+      for (let i = 0; i < PLUGIN_ARCHIVE_MAX_ENTRIES / 2; i++) {
+        expect(checker.check(file(`package/d${i}/f`, 0)).ok).toBe(true);
+      }
+
+      expect(checker.check(file('package/d25000/f', 0))).toEqual({
+        ok: false,
+        rule: 'entry-count',
+        entry: 'package/d25000/f',
+      });
+    });
+
+    it('accepts the entries that reach path 50,000 and refuses the one that is one over (#1166)', () => {
+      const checker = createPluginArchiveChecker();
+      // 24,999 directories each holding a file create 49,998 paths.
+      for (let i = 0; i < PLUGIN_ARCHIVE_MAX_ENTRIES / 2 - 1; i++) {
+        expect(checker.check(file(`package/d${i}/f`, 0)).ok).toBe(true);
+      }
+
+      // Each file in an existing directory creates one more path.
+      expect(checker.check(file('package/d0/g', 0)).ok).toBe(true);
+      expect(checker.check(file('package/d0/h', 0)).ok).toBe(true);
+      expect(checker.check(file('package/d0/i', 0))).toEqual({
+        ok: false,
+        rule: 'entry-count',
+        entry: 'package/d0/i',
+      });
+    });
+
+    it('counts a directory both listed and implied once (#1166)', () => {
+      const checker = createPluginArchiveChecker();
+      expect(checker.check(dir('package/d0/')).ok).toBe(true);
+      for (let i = 0; i < PLUGIN_ARCHIVE_MAX_ENTRIES / 2; i++) {
+        expect(checker.check(file(`package/d${i}/f`, 0)).ok).toBe(true);
+      }
+
+      expect(checker.check(file('package/d25000/f', 0))).toEqual({
+        ok: false,
+        rule: 'entry-count',
+        entry: 'package/d25000/f',
+      });
+    });
+
+    it('counts a directory both implied and then listed once (#1166)', () => {
+      const checker = createPluginArchiveChecker();
+      expect(checker.check(file('package/d0/f', 0)).ok).toBe(true);
+      expect(checker.check(dir('package/d0/')).ok).toBe(true);
+      for (let i = 1; i < PLUGIN_ARCHIVE_MAX_ENTRIES / 2; i++) {
+        expect(checker.check(file(`package/d${i}/f`, 0)).ok).toBe(true);
+      }
+
+      expect(checker.check(file('package/d25000/f', 0))).toEqual({
+        ok: false,
+        rule: 'entry-count',
+        entry: 'package/d25000/f',
+      });
+    });
+
+    it('creates no paths for a refused entry, so the cap still allows exactly 50,000 (#1166)', () => {
+      const checker = createPluginArchiveChecker();
+      expect(checker.check(file(`package/deep/${'a'.repeat(256)}`, 0))).toMatchObject({
+        ok: false,
+        rule: 'unsafe-path',
+      });
+
+      for (let i = 0; i < PLUGIN_ARCHIVE_MAX_ENTRIES; i++) {
+        expect(checker.check(file(`package/f${i}`, 0)).ok).toBe(true);
+      }
+
+      expect(checker.check(file('package/one-too-many', 0))).toEqual({
+        ok: false,
+        rule: 'entry-count',
+        entry: 'package/one-too-many',
+      });
+    });
+  });
+
+  describe('the length of a name (#1166)', () => {
+    const SEGMENT_BYTES = PLUGIN_ARCHIVE_MAX_SEGMENT_BYTES;
+
+    it('accepts a 255-byte segment and refuses a 256-byte one as unsafe-path (#1166)', () => {
+      expect(createPluginArchiveChecker().check(file(`package/${'a'.repeat(SEGMENT_BYTES)}`)).ok).toBe(true);
+
+      const tooLong = `package/${'a'.repeat(SEGMENT_BYTES + 1)}`;
+      expect(createPluginArchiveChecker().check(file(tooLong))).toEqual({
+        ok: false,
+        rule: 'unsafe-path',
+        entry: tooLong,
+      });
+    });
+
+    it('counts a segment in UTF-8 bytes, not characters (#1166)', () => {
+      // 'é' is two bytes: 127 of them and an 'a' make 255, 128 make 256.
+      expect(createPluginArchiveChecker().check(file(`package/${'é'.repeat(127)}a`)).ok).toBe(true);
+
+      const tooLong = `package/${'é'.repeat(128)}`;
+      expect(createPluginArchiveChecker().check(file(tooLong))).toEqual({
+        ok: false,
+        rule: 'unsafe-path',
+        entry: tooLong,
+      });
+    });
+
+    it('holds the top-level directory to the segment cap too (#1166)', () => {
+      const tooLong = `${'t'.repeat(SEGMENT_BYTES + 1)}/`;
+
+      expect(createPluginArchiveChecker().check(dir(tooLong))).toEqual({
+        ok: false,
+        rule: 'unsafe-path',
+        entry: tooLong,
+      });
+    });
+
+    it('accepts a stripped path of exactly 1,024 bytes and refuses one byte more as unsafe-path (#1166)', () => {
+      const directories = Array.from({ length: 4 }, (_, i) => String(i).repeat(200));
+      const nameOf = (fileBytes: number) => `package/${directories.join('/')}/${'f'.repeat(fileBytes)}`;
+
+      // 4 x 200 + 4 slashes + 220 = 1,024
+      expect(createPluginArchiveChecker().check(file(nameOf(220))).ok).toBe(true);
+      expect(createPluginArchiveChecker().check(file(nameOf(221)))).toEqual({
+        ok: false,
+        rule: 'unsafe-path',
+        entry: nameOf(221),
+      });
+    });
+
+    it('counts the path cap in UTF-8 bytes, not characters (#1166)', () => {
+      // 4 directories of 100 'é' (200 bytes each) + 4 slashes + 220 = 1,024 bytes, in far fewer characters.
+      const directories = Array.from({ length: 4 }, () => 'é'.repeat(100));
+      const nameOf = (fileBytes: number) => `package/${directories.join('/')}/${'a'.repeat(fileBytes)}`;
+
+      expect(createPluginArchiveChecker().check(file(nameOf(220))).ok).toBe(true);
+      expect(createPluginArchiveChecker().check(file(nameOf(221)))).toEqual({
+        ok: false,
+        rule: 'unsafe-path',
+        entry: nameOf(221),
+      });
     });
   });
 
