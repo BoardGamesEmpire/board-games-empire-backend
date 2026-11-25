@@ -1,4 +1,3 @@
-import { AuditContextModule } from '@bge/actor-context';
 import { DatabaseModule } from '@bge/database';
 import { InvitesModule } from '@bge/invites';
 import { NotificationsServiceModule } from '@bge/notifications-service';
@@ -14,10 +13,9 @@ import { HouseholdGameShareController } from './game-share/household-game-share.
 import { HouseholdGameShareService } from './game-share/household-game-share.service';
 import { HouseholdController } from './household.controller';
 import { HouseholdService } from './household.service';
+import { HouseholdInviteResponder } from './invite/household-invite-responder';
 import { HouseholdInviteController } from './invite/household-invite.controller';
 import { HouseholdInviteService } from './invite/household-invite.service';
-import { PartyInviteController } from './invite/party-invite.controller';
-import { PartyInviteService } from './invite/party-invite.service';
 import { HouseholdNotificationListener } from './listeners/household-notification.listener';
 import { CollectionSharingController } from './member/collection-sharing.controller';
 import { CollectionSharingService } from './member/collection-sharing.service';
@@ -34,18 +32,15 @@ import { HouseholdQuotaController } from './quota/household-quota.controller';
   // status; the soft delete revokes a household's outstanding invites through
   // it (#161), and the invite routes create and accept through it (#162,
   // #163).
-  // AuditContextModule supplies AuditContextService to the accept and the
-  // inbox, which refuse every actor but a session user (#163).
   // NotificationsServiceModule supplies NotificationsService to the
   // notification listener, which tells invitees, and household owners and
   // admins, about the household's invites (#167).
-  imports: [DatabaseModule, QuotaModule, InvitesModule, AuditContextModule, NotificationsServiceModule],
+  imports: [DatabaseModule, QuotaModule, InvitesModule, NotificationsServiceModule],
   controllers: [
     HouseholdController,
     HouseholdMemberController,
     CollectionSharingController,
     HouseholdInviteController,
-    PartyInviteController,
     HouseholdQuotaController,
     HouseholdBanController,
     HouseholdGameShareController,
@@ -57,7 +52,7 @@ import { HouseholdQuotaController } from './quota/household-quota.controller';
     HouseholdMemberService,
     CollectionSharingService,
     HouseholdInviteService,
-    PartyInviteService,
+    HouseholdInviteResponder,
     HouseholdGameShareService,
     HouseholdNotificationListener,
     HouseholdBanService,
@@ -66,6 +61,7 @@ import { HouseholdQuotaController } from './quota/household-quota.controller';
     // after commit (#245). The lib's own, so the module doesn't export it.
     HouseholdEventPublisher,
   ],
-  exports: [HouseholdService, HouseholdMemberService],
+  // The party routes (#742) hand a household invite to HouseholdInviteResponder.
+  exports: [HouseholdService, HouseholdMemberService, HouseholdInviteResponder],
 })
 export class HouseholdModule {}

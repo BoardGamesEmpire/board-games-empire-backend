@@ -1,5 +1,6 @@
 export * from './lib/constants/household-events.constant';
 export * from './lib/constants/household.constants';
+export { InviteTokenDto, ListSentInvitesQueryDto } from './lib/dto';
 export * from './lib/events/household.events';
 export * from './lib/game-share/household-game-share.controller';
 export * from './lib/game-share/household-game-share.service';
@@ -12,8 +13,11 @@ export { householdExists, lockExistingHousehold } from './lib/household-access.h
 export * from './lib/household.controller';
 export * from './lib/household.module';
 export * from './lib/household.service';
+export * from './lib/invite/household-invite-responder';
 export * from './lib/invite/household-invite.controller';
 export * from './lib/invite/household-invite.service';
+export { receivedHouseholdInviteWhere, vouchedEmailOf } from './lib/invite/received-invites';
+export { sentHouseholdInviteWhere } from './lib/invite/sent-invites';
 export * from './lib/member/household-member.controller';
 export * from './lib/member/household-member.service';
 export * from './lib/quota/household-quota.controller';
