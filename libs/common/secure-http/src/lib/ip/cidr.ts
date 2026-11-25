@@ -47,9 +47,10 @@ export function parseCidr(input: string): ParsedCidr | null {
   const prefixLength = Number.parseInt(prefixPart, 10);
 
   // An IPv6 zone ID (`fe80::1%eth0`) names an interface on one host, which
-  // no rule can match on. `parseIp` reads past it, so refuse it here rather
-  // than apply the entry as if the zone weren't there (#1525).
-  if (addrPart.includes('%')) {
+  // no rule can match on. `parseIp` drops it, so refuse it here rather than
+  // apply the entry as if the zone weren't there (#1525). The whole input is
+  // checked: a zone after the prefix (`/64%eth0`) is no more matchable.
+  if (input.includes('%')) {
     return null;
   }
 

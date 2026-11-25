@@ -64,7 +64,7 @@ export const operationalConfigValidationSchema = {
         : helpers.message(
             {
               custom:
-                '{{#label}} must be a comma-separated list of CIDR ranges such as 10.0.0.0/8. These entries are not: {{#entries}}',
+                '{{#label}} must be a comma-separated list of CIDR ranges such as 10.0.0.0/8, with no IPv6 zone ID such as %eth0. These entries are not: {{#entries}}',
             },
             { entries: unreadable.map((entry) => `"${entry}"`).join(', ') },
           );

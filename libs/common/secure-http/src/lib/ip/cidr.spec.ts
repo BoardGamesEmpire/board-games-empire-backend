@@ -85,7 +85,7 @@ describe('parseCidr', () => {
 
   // #1525: a zone names an interface on one host, which no rule can match on.
   // Reading past it would apply the entry as if the zone weren't there.
-  it.each(['fe80::1%eth0/64', 'fe80::%eth0/10', '::ffff:10.0.0.1%x/32'])(
+  it.each(['fe80::1%eth0/64', 'fe80::%eth0/10', '::ffff:10.0.0.1%x/32', 'fe80::1/64%eth0'])(
     'rejects an address with an IPv6 zone ID (%s) instead of dropping the zone (#1525)',
     (input) => {
       expect(parseCidr(input)).toBeNull();

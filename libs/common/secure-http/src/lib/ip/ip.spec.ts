@@ -61,10 +61,25 @@ describe('parseIp', () => {
 
     // #1525: DNS results and peer addresses can carry a zone; the address
     // still has to read as itself so the fe80::/10 block keeps applying.
-    it('reads a scoped address as its address, without the zone ID (#1525)', () => {
-      const result = parseIp('fe80::1%eth0');
+    // Node's isIPv6 lets a zone hold '.' and ':' (a VLAN interface such as
+    // eth0.100), which must not be read as an IPv4 tail or an extra group.
+    it.each([
+      ['fe80::1%eth0', 'fe80::1'],
+      ['fe80::1%eth0.100', 'fe80::1'],
+      ['fe80::1:2:3:4%br-1.5', 'fe80::1:2:3:4'],
+      ['fe80::abcd%a:b', 'fe80::abcd'],
+      ['::1%lo.0', '::1'],
+    ])('reads the scoped address %s as %s, without the zone ID (#1525)', (input, canonical) => {
+      const result = parseIp(input);
       expect(result?.family).toBe(6);
-      expect(result?.canonical).toBe('fe80::1');
+      expect(result?.canonical).toBe(canonical);
+    });
+
+    it('reads a scoped IPv4-mapped address as its IPv4 address (#1525)', () => {
+      const result = parseIp('::ffff:10.0.0.1%eth0.5');
+      expect(result?.family).toBe(4);
+      expect(result?.canonical).toBe('10.0.0.1');
+      expect(result?.wasIpv4Mapped).toBe(true);
     });
   });
 

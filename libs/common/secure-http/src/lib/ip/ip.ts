@@ -47,7 +47,11 @@ export function parseIp(input: string): ParsedIp | null {
   }
 
   if (isIPv6(lower)) {
-    const v6Bytes = ipv6ToBytes(lower);
+    // A zone ID (`fe80::1%eth0`) names an interface, not part of the address,
+    // and `isIPv6` lets it hold `.` and `:` (`%eth0.100`), which would read as
+    // an IPv4 tail or an extra group. Cut it off before reading (#1525).
+    const zoneIndex = lower.indexOf('%');
+    const v6Bytes = ipv6ToBytes(zoneIndex === -1 ? lower : lower.slice(0, zoneIndex));
 
     // IPv4-mapped IPv6: first 10 bytes zero, bytes 10-11 are 0xff,
     // bytes 12-15 are the IPv4 address.
