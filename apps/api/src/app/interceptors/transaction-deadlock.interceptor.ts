@@ -67,7 +67,14 @@ export class TransactionDeadlockError extends CodedHttpException {
  */
 @Injectable()
 export class TransactionDeadlockInterceptor implements NestInterceptor {
-  intercept(_context: ExecutionContext, next: CallHandler): Observable<unknown> {
+  intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
+    // Nest runs global interceptors on a gateway's frames too. This answer is
+    // the HTTP handler's, so a frame's deadlock stays its filter's to answer
+    // (#426).
+    if (context.getType() !== 'http') {
+      return next.handle();
+    }
+
     return next
       .handle()
       .pipe(

@@ -70,10 +70,11 @@ class HandshakeRefusal extends Error {
  * abilities primed ({@link WsFrameScope}), so guards, the handler and the
  * exception filter read the actor as they do over HTTP (#498).
  *
- * The guards and filter are bound here, not on each gateway: no app-wide
- * enhancer runs on a gateway message, so a gateway that left them out would
- * go on serving a revoked session, ignore `@CheckPolicies`, and answer in
- * Nest's default shape, and nothing would fail. Nest reads a class's enhancers
+ * The guards and filter are bound here, not on each gateway: the app-wide
+ * guards step aside on a frame, and no app-wide filter runs on one, so a
+ * gateway that left them out would go on serving a revoked session, ignore
+ * `@CheckPolicies`, and answer in Nest's default shape, and nothing would
+ * fail. Nest reads a class's enhancers
  * from its parents too. The throttler comes first, as it does over HTTP, so a
  * flood of frames costs a counter each and no session lookup (#510). The
  * session guard comes next, so a frame whose session has ended is refused

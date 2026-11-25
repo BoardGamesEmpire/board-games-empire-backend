@@ -119,6 +119,19 @@ describe('WsThrottlerGuard', () => {
     await expect(guard.canActivate(frame(socketNamed('socket-2'), undefined))).resolves.toBe(true);
   });
 
+  // The guard keeps RateLimitGuard's transport check with its own transport:
+  // it counts frames, and a request is the app-wide guard's to count (#510).
+  it('leaves an HTTP request uncounted, to the app-wide RateLimitGuard', async () => {
+    const request = {
+      getType: () => 'http',
+      getClass: () => SearchGateway,
+      getHandler: () => SearchGateway.prototype.search,
+      switchToWs: () => ({ getClient: () => socketNamed('socket-1'), getData: () => ({}) }),
+    } as unknown as ExecutionContext;
+
+    await sendAllowed(LIMIT + 1, () => request);
+  });
+
   it("reads `ignoreUserAgents` from the frame's handshake, where a socket's headers are", async () => {
     const ignoring = new WsThrottlerGuard(
       { throttlers: appThrottlers(), ignoreUserAgents: [/crawler/] },

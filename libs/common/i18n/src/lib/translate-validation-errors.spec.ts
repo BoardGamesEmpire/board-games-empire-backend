@@ -23,8 +23,9 @@ class ActionDto {
 }
 
 /**
- * What `I18nValidationPipe` throws where no nestjs-i18n context exists, as on a
- * WebSocket frame: the errors still carry their raw markers.
+ * What `I18nValidationPipe` throws where no nestjs-i18n context exists: the
+ * errors still carry their raw markers, as the api's `WsValidationPipe` leaves
+ * them on every WebSocket frame (#180).
  */
 function validationFailure(metatype: new () => object, payload: object): Promise<I18nValidationException> {
   return new I18nValidationPipe().transform(payload, { type: 'body', metatype }).then(

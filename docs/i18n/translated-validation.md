@@ -96,10 +96,15 @@ one app.
 
 ### On WebSocket frames (#180)
 
-A gateway handler binds `I18nValidationPipe` itself, since no global pipe or
-filter runs on a gateway message. A frame has no nestjs-i18n context, so the
-pipe cannot translate there: its `I18nValidationException` carries the raw
-markers, and its body is only "Bad Request". The gateways' `WsErrorFilter`
+A gateway handler binds `WsValidationPipe`
+(`apps/api/src/app/gateways/base/ws-validation.pipe.ts`) itself. Nest runs the
+api's global pipe on a frame too, but `RouteValidationPipe` leaves a frame's
+payload to the gateway, and no global filter runs on a gateway message.
+`I18nValidationPipe` would translate only on a socket's first frame: nestjs-i18n's
+interceptor opens a context for that frame alone, and keeps its locale on the
+socket for the rest. `WsValidationPipe` never translates, so every frame's
+`I18nValidationException` carries the raw markers, and its body is only "Bad
+Request". The gateways' `WsErrorFilter`
 formats `exception.errors` with `translateValidationErrors` (`@bge/i18n`),
 which calls nestjs-i18n's own formatter in the frame's locale and flattens as
 `detailedErrors: false` does. A WS client gets the same `message: string[]` an

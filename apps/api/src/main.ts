@@ -6,6 +6,7 @@ import { registerShutdownHandlers } from '@bge/otel';
 import { bootstrapLogger, otel } from './app/lib/logger';
 
 // Imports below this line are instrumented by the OTel auto-instrumentations.
+import { AuditContextService } from '@bge/actor-context';
 import {
   AUTH_INSTANCE,
   AUTH_REQUEST_HANDLER,
@@ -24,7 +25,7 @@ import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import compression from 'compression';
-import { I18nService, I18nValidationPipe } from 'nestjs-i18n';
+import { I18nService } from 'nestjs-i18n';
 import { Logger as PinoLogger } from 'nestjs-pino';
 import type { Server } from 'node:http';
 import { createServer } from 'node:http';
@@ -42,6 +43,7 @@ import { allowsEveryHost, createHostRule } from './app/lib/host-rule';
 import { createOperationalGate, OPERATIONAL_PATHS } from './app/lib/operational-gate';
 import { createSourceRule } from './app/lib/operational-sources';
 import { PATHS_WITHOUT_QUERY } from './app/lib/paths-without-query';
+import { RouteValidationPipe } from './app/lib/route-validation.pipe';
 import { createSecurityHeaders } from './app/lib/security-headers';
 
 // The paths name feature-lib routes, imported above, so they reach the SDK
@@ -139,8 +141,10 @@ async function bootstrap() {
     // decorator messages tagged via `i18nValidationMessage` (see @bge/i18n) are
     // resolved against the request locale by the I18nValidationExceptionFilter
     // (app.module). Options are unchanged from the plain ValidationPipe; #142.
+    // RouteValidationPipe applies it to routes only: a gateway's frames keep
+    // their handlers' own pipes (#180).
     .useGlobalPipes(
-      new I18nValidationPipe({
+      new RouteValidationPipe(app.get(AuditContextService), {
         forbidNonWhitelisted: true,
         transform: true,
         whitelist: true,

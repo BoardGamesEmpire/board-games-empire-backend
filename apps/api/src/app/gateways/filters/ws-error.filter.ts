@@ -26,10 +26,10 @@ import { refuseSocket, wsErrorPayload, wsExceptionPayload } from './ws-error-pay
  * the catalog copy the HTTP 500 carries (#527), in the locale the frame's CLS
  * scope carries.
  *
- * No app-wide filter runs on a gateway message (Nest builds the WS exception
- * context without the application's global enhancers), so it is bound on
- * `AuthenticatedGateway`, and a gateway that does not extend it binds it
- * itself.
+ * No app-wide filter runs on a gateway message (Nest runs global guards,
+ * interceptors and pipes on a frame, but builds its exception context without
+ * the global filters), so it is bound on `AuthenticatedGateway`, and a gateway
+ * that does not extend it binds it itself.
  */
 @Catch()
 export class WsErrorFilter implements WsExceptionFilter {

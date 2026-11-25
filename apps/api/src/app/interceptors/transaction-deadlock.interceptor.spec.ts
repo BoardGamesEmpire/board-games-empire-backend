@@ -7,7 +7,7 @@ import { TransactionDeadlockError, TransactionDeadlockInterceptor } from './tran
 
 describe('TransactionDeadlockInterceptor', () => {
   const interceptor = new TransactionDeadlockInterceptor();
-  const context = {} as ExecutionContext;
+  const context = { getType: () => 'http' } as unknown as ExecutionContext;
   const handlerThrowing = (error: unknown): CallHandler => ({ handle: () => throwError(() => error) });
 
   const intercepted = (error: unknown): Promise<unknown> =>
@@ -50,6 +50,15 @@ describe('TransactionDeadlockInterceptor', () => {
     const violation = uniqueViolation();
 
     await expect(intercepted(violation)).rejects.toBe(violation);
+  });
+
+  // Nest runs global interceptors on a gateway's frames too; a frame's failure
+  // is its gateway filter's to answer (#426).
+  it("leaves a gateway frame's deadlock to the gateway", async () => {
+    const victim = deadlock();
+    const frame = { getType: () => 'ws' } as unknown as ExecutionContext;
+
+    await expect(lastValueFrom(interceptor.intercept(frame, handlerThrowing(victim)))).rejects.toBe(victim);
   });
 
   it('leaves a successful response alone', async () => {

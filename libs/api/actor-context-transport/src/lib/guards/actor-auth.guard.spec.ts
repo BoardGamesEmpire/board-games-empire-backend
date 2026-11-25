@@ -66,8 +66,8 @@ class RoleRoutes {
   }
 }
 
-const contextFor = (target: new () => object, handler: () => void): ExecutionContext =>
-  ({ getHandler: () => handler, getClass: () => target }) as unknown as ExecutionContext;
+const contextFor = (target: new () => object, handler: () => void, type = 'http'): ExecutionContext =>
+  ({ getType: () => type, getHandler: () => handler, getClass: () => target }) as unknown as ExecutionContext;
 
 describe('ActorAuthGuard', () => {
   let actor: Actor | null;
@@ -105,6 +105,12 @@ describe('ActorAuthGuard', () => {
       code: 'UNAUTHORIZED',
       message: t('errors.auth.unauthenticated'),
     });
+  });
+
+  // Nest runs global guards on a gateway's frames too. A gateway authenticates
+  // at the handshake and checks each frame with its own guards (#511).
+  it('leaves a gateway frame to the gateway', () => {
+    expect(guard.canActivate(contextFor(Routes, Routes.prototype.guarded, 'ws'))).toBe(true);
   });
 
   it('admits a request with no actor to a route marked @AllowAnonymous()', () => {
