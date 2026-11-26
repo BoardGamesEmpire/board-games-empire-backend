@@ -61,3 +61,46 @@ describe.each([
     await expect(reachErrors({ reach })).resolves.toEqual(['reach']);
   });
 });
+
+// The copy an add creates, when it creates one: every field optional, each
+// one checked, and nothing the copy doesn't name. The money object is checked
+// as its own DTO (#1231).
+describe('CreateGameCollectionDto copy (#1231)', () => {
+  const base = { platformGameId: 'pg-1', medium: GameMedium.Physical };
+  const copyErrors = (copy: unknown) => propertiesWithErrors(CreateGameCollectionDto, { ...base, copy });
+
+  it('accepts a copy with every field', async () => {
+    await expect(
+      copyErrors({
+        releaseId: 'rel-1',
+        condition: 'LikeNew',
+        acquiredOn: '2019-03',
+        acquiredFrom: 'x'.repeat(200),
+        pricePaid: { amount: 2500, currency: 'EUR' },
+        currentValue: { amount: 0, currency: 'JPY' },
+        note: 'x'.repeat(10000),
+      }),
+    ).resolves.toEqual([]);
+  });
+
+  it('accepts an empty copy, and none at all', async () => {
+    await expect(copyErrors({})).resolves.toEqual([]);
+    await expect(propertiesWithErrors(CreateGameCollectionDto, base)).resolves.toEqual([]);
+  });
+
+  it.each([
+    ['an acquisition date that is no date', { acquiredOn: '2019-13' }],
+    ['a condition it does not know', { condition: 'Mint' }],
+    ['where it came from, past 200 characters', { acquiredFrom: 'x'.repeat(201) }],
+    ['a note past 10000 characters', { note: 'x'.repeat(10001) }],
+    ['a price with no currency', { pricePaid: { amount: 100 } }],
+    ['a value below zero', { currentValue: { amount: -1, currency: 'EUR' } }],
+    ['a field a copy does not have', { quantity: 2 }],
+  ])('refuses %s', async (_, copy) => {
+    await expect(copyErrors(copy)).resolves.toEqual(['copy']);
+  });
+
+  it('refuses a copy that is not an object', async () => {
+    await expect(copyErrors('a copy')).resolves.toEqual(['copy']);
+  });
+});

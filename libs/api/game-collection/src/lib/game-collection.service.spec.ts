@@ -3,6 +3,7 @@ import {
   Action,
   ContentType,
   DatePrecision,
+  GameCondition,
   GameMedium,
   GameRemovalReason,
   ListKind,
@@ -10,6 +11,7 @@ import {
   Reach,
   ResourceType,
 } from '@bge/database';
+import { uniqueViolation, uniqueViolationWithoutMeta } from '@bge/database/testing';
 import type { CollectionSupplyChange } from '@bge/event';
 import { emitCollectionSupplyChanges, syncCollectionEntrySupply } from '@bge/event';
 import { t } from '@bge/i18n';
@@ -25,6 +27,7 @@ import {
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { COLLECTION_INCLUDE } from './collection-row';
+import { CollectionWriteService } from './collection-write.service';
 import { GameCollectionService } from './game-collection.service';
 
 // The supply sync has its own spec in `@bge/event`; here it is a seam, so the
@@ -45,6 +48,27 @@ const SUPPLY_CHANGES: CollectionSupplyChange[] = [
 
 const dependentRecordNotFound = () =>
   new Prisma.PrismaClientKnownRequestError('Dependent record not found', { code: 'P2025', clientVersion: 'test' });
+
+/** What a second insert of one entry identity raises, once the first has committed (#1231). */
+const identityViolation = () => uniqueViolation({ index: 'game_collections_user_id_platform_game_id_medium_key' });
+
+/** What an insert raises when a row it names went before it committed (#1231). */
+const foreignKeyViolation = () =>
+  new Prisma.PrismaClientKnownRequestError('Foreign key constraint violated', { code: 'P2003', clientVersion: 'test' });
+
+/** A copy with nothing known about it: what an add with no `copy` records (#1231). */
+const UNKNOWN_COPY = {
+  acquiredFrom: null,
+  acquiredOn: null,
+  acquiredOnPrecision: null,
+  condition: null,
+  currentValueAmount: null,
+  currentValueCurrency: null,
+  note: null,
+  pricePaidAmount: null,
+  pricePaidCurrency: null,
+  releaseId: null,
+};
 
 const COND = { id: 'sentinel-condition' };
 const ME = 'user-1';
@@ -111,7 +135,10 @@ describe('GameCollectionService', () => {
   let service: GameCollectionService;
   let db: MockDatabaseService;
   let abilityService: jest.Mocked<
-    Pick<AbilityService, 'getCurrentResourceConditions' | 'getActingUserId' | 'getCurrentAccess'>
+    Pick<
+      AbilityService,
+      'assertCurrentActorCan' | 'getCurrentResourceConditions' | 'getActingUserId' | 'getCurrentAccess'
+    >
   >;
   let compose: jest.SpyInstance;
   let eventEmitter: { emit: jest.Mock };
@@ -120,6 +147,8 @@ describe('GameCollectionService', () => {
     eventEmitter = { emit: jest.fn() };
 
     abilityService = {
+      // Allows, unless a spec says otherwise (#1288).
+      assertCurrentActorCan: jest.fn(),
       getCurrentResourceConditions: jest.fn().mockReturnValue([COND]),
       getActingUserId: jest.fn().mockReturnValue(ME),
       // The actor can read lists, unless a spec says otherwise (#1241).
@@ -129,6 +158,10 @@ describe('GameCollectionService', () => {
     const ctx = await createTestingModuleWithDb({
       providers: [
         GameCollectionService,
+        // The REAL write runner, over the mocked database, so the writes
+        // below reconcile ownership and sync offers as they do in the api
+        // (#1231).
+        CollectionWriteService,
         // The REAL composer, over the mocked ability service, so the where
         // clauses asserted below are the merge the lists actually run.
         ScopeComposer,
@@ -147,6 +180,8 @@ describe('GameCollectionService', () => {
     // The actor's wishlist is readable, unless a spec says otherwise (#1241).
     db.list.findFirst.mockResolvedValue({ id: 'wishlist-1' } as never);
     db.listEntry.findMany.mockResolvedValue([]);
+    // An entry's removal reads its owned copies' acquisitions (#1231).
+    db.collectionCopy.findMany.mockResolvedValue([]);
     service = ctx.module.get(GameCollectionService);
     compose = jest.spyOn(ctx.module.get(ScopeComposer), 'compose');
   });
@@ -171,6 +206,20 @@ describe('GameCollectionService', () => {
 
       return result;
     }) as never);
+  }
+
+  /**
+   * The entry as the write runner reads it after a write: `state` for the
+   * reconcile, which selects the entry's removal and its count of owned
+   * copies, and `row` for the answer, which includes the row's relations
+   * (#1231).
+   */
+  function entryReads(
+    state: { deletedAt: Date | null; owned: number },
+    row: GameCollection = entryOwning(state.owned, { deletedAt: state.deletedAt }),
+  ): void {
+    db.gameCollection.findUniqueOrThrow.mockImplementation((async (args: { include?: unknown }) =>
+      args.include === undefined ? { deletedAt: state.deletedAt, _count: { copies: state.owned } } : row) as never);
   }
 
   /**
@@ -567,12 +616,20 @@ describe('GameCollectionService', () => {
   });
 
   describe('addToCollection', () => {
-    /** The upsert's answer for a genuine create: the row under the id the service minted (#1221). */
-    const created = (async ({ create }: { create: { id: string } }) => entry({ id: create.id })) as never;
+    /** When the entry was removed, for an entry acquired again (#1231). */
+    const REMOVED_AT = new Date('2026-11-01T00:00:00Z');
+
+    /** The identity lock's answer: the entry the user already has for the game, or none (#1221). */
+    const lockedAs = (row?: { deletedAt: Date | null; id: string }) =>
+      db.$queryRaw.mockResolvedValue((row === undefined ? [] : [row]) as never);
 
     beforeEach(() => {
       db.platformGame.findUnique.mockResolvedValue({ id: 'pg-1' } as PlatformGame);
-      db.gameCollection.upsert.mockImplementation(created);
+      lockedAs();
+      db.gameCollection.create.mockResolvedValue({ id: 'gc-1' } as GameCollection);
+      db.gameCollection.update.mockResolvedValue({ id: 'gc-1' } as GameCollection);
+      db.collectionCopy.count.mockResolvedValue(1);
+      entryReads({ deletedAt: null, owned: 1 });
     });
 
     it('404s when the platform game does not exist', async () => {
@@ -581,62 +638,169 @@ describe('GameCollectionService', () => {
       await expect(service.addToCollection({ platformGameId: 'pg-404', medium: GameMedium.Physical })).rejects.toThrow(
         NotFoundException,
       );
-      expect(db.gameCollection.upsert).not.toHaveBeenCalled();
+      expect(db.$transaction).not.toHaveBeenCalled();
     });
 
-    it('upserts on the (user, platformGame, medium) identity', async () => {
-      await service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical, rating: 7 });
+    // The identity lock is the transaction's first lock, so an add takes
+    // turns with a nomination naming the entry, or its attendee coming back
+    // (#1221).
+    it('locks the (user, platformGame, medium) identity FOR UPDATE first', async () => {
+      await service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical });
 
-      expect(db.gameCollection.upsert).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { userId_platformGameId_medium: { userId: ME, platformGameId: 'pg-1', medium: GameMedium.Physical } },
-          create: expect.objectContaining({ id: expect.any(String), userId: ME, platformGameId: 'pg-1', rating: 7 }),
-        }),
+      const [lock] = db.$queryRaw.mock.calls[0] as unknown as [Prisma.Sql];
+      expect(rawQueryText(lock)).toBe(
+        'SELECT id, deleted_at AS "deletedAt" FROM game_collections WHERE user_id = ? AND platform_game_id = ? AND medium = ?::game_mediums FOR UPDATE',
       );
+      expect(lock.values).toEqual([ME, 'pg-1', GameMedium.Physical]);
     });
 
-    // A new entry is one game with one copy, which the user can describe
-    // later. The upsert's update branch runs on an entry that exists, owned or
-    // removed, so it never adds a copy itself (#1231).
-    it('adding a game creates the entry with one copy (#1231)', async () => {
-      const row = await service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical });
+    // A create grant pinned to one entry names a row that already exists, so
+    // the check of the new row refuses it, as `ListService.create` does
+    // (#1288).
+    it('a new entry is checked against create with its user, platform game and medium (#1288)', async () => {
+      const order: string[] = [];
+      abilityService.assertCurrentActorCan.mockImplementation(() => {
+        order.push('check');
+      });
+      db.gameCollection.create.mockImplementation((async () => {
+        order.push('insert');
+        return { id: 'gc-1' };
+      }) as never);
 
-      const { create, update } = db.gameCollection.upsert.mock.calls[0][0];
-      expect(create).toMatchObject({ copies: { create: {} } });
-      expect(update).not.toHaveProperty('copies');
+      await service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical });
+
+      expect(abilityService.assertCurrentActorCan).toHaveBeenCalledWith(Action.create, ResourceType.GameCollection, {
+        userId: ME,
+        platformGameId: 'pg-1',
+        medium: GameMedium.Physical,
+      });
+      expect(order).toEqual(['check', 'insert']);
+    });
+
+    it('a new entry the actor may not create is refused, and nothing is written (#1288)', async () => {
+      abilityService.assertCurrentActorCan.mockImplementation(() => {
+        throw new ForbiddenException();
+      });
+
+      await expect(service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical })).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(db.gameCollection.create).not.toHaveBeenCalled();
       expect(db.collectionCopy.create).not.toHaveBeenCalled();
-      expect(row.quantity).toBe(1);
     });
 
-    // A repeated add of a game the user owns updates the entry's own fields
-    // and adds no copy, so a replayed request is harmless (#1231).
-    it('a repeated add of a live entry adds no copy (#1231)', async () => {
-      db.$queryRaw.mockResolvedValue([{ deletedAt: null }] as never);
-      db.gameCollection.upsert.mockResolvedValue(entryOwning(1));
-
+    // The copy fields the request carries describe the new entry's one copy,
+    // created with the entry (#1231).
+    it('a new entry is created with one copy from `copy` (#1231)', async () => {
       const row = await service.addToCollection({
         platformGameId: 'pg-1',
         medium: GameMedium.Physical,
-        favorite: true,
+        rating: 7,
+        copy: { acquiredOn: '2019', pricePaid: { amount: 2500, currency: 'EUR' } },
       });
 
+      expect(db.gameCollection.create).toHaveBeenCalledWith({
+        data: {
+          userId: ME,
+          platformGameId: 'pg-1',
+          medium: GameMedium.Physical,
+          rating: 7,
+          lastUpdated: expect.any(Date),
+          copies: {
+            create: {
+              ...UNKNOWN_COPY,
+              acquiredOn: new Date('2019-01-01T00:00:00Z'),
+              acquiredOnPrecision: DatePrecision.Year,
+              pricePaidAmount: 2500,
+              pricePaidCurrency: 'EUR',
+            },
+          },
+        },
+        select: { id: true },
+      });
       expect(db.collectionCopy.create).not.toHaveBeenCalled();
       expect(row.quantity).toBe(1);
     });
 
-    // A removed entry has no owned copy, so acquiring it again gives it one,
-    // in the add-back's transaction under the entry's lock, before its offers
-    // resume (#1231, #1221).
-    it('adding back a removed entry gives it one new copy (#1231)', async () => {
+    it('a new entry with no `copy` gets one copy with nothing known about it (#1231)', async () => {
+      await service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical });
+
+      expect(db.gameCollection.create.mock.calls[0]?.[0]?.data.copies).toEqual({ create: UNKNOWN_COPY });
+    });
+
+    // The add writes a row that exists, so it is an update of that row, held
+    // to the update conditions as PATCH is. A grant pinned to another entry
+    // is refused before the write; the conditions in the write's `where`
+    // hold it to them as well (#1288).
+    it('an existing entry is written under its update conditions (#1288)', async () => {
+      lockedAs({ id: 'gc-1', deletedAt: null });
+
+      await service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical, favorite: true });
+
+      expect(abilityService.assertCurrentActorCan).toHaveBeenCalledWith(Action.update, ResourceType.GameCollection, {
+        id: 'gc-1',
+        userId: ME,
+        platformGameId: 'pg-1',
+        medium: GameMedium.Physical,
+        deletedAt: null,
+      });
+      expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(
+        ResourceType.GameCollection,
+        Action.update,
+      );
+      expect(db.gameCollection.update).toHaveBeenNthCalledWith(1, {
+        where: { id: 'gc-1', AND: [COND] },
+        data: { favorite: true, lastUpdated: expect.any(Date) },
+        select: { id: true },
+      });
+      expect(db.gameCollection.create).not.toHaveBeenCalled();
+    });
+
+    it('an existing entry outside the update conditions answers COLLECTION_ENTRY_NOT_FOUND (#1288)', async () => {
+      lockedAs({ id: 'gc-1', deletedAt: REMOVED_AT });
+      db.gameCollection.update.mockRejectedValueOnce(dependentRecordNotFound());
+
+      await expect(
+        service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical }),
+      ).rejects.toMatchObject(ENTRY_NOT_FOUND);
+      expect(db.collectionCopy.create).not.toHaveBeenCalled();
+      expect(syncSupply).not.toHaveBeenCalled();
+    });
+
+    it('an existing entry the actor may not update is refused, and nothing is written (#1288)', async () => {
+      lockedAs({ id: 'gc-1', deletedAt: REMOVED_AT });
+      abilityService.assertCurrentActorCan.mockImplementation((action) => {
+        if (action === Action.update) {
+          throw new ForbiddenException();
+        }
+      });
+
+      await expect(service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical })).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(db.gameCollection.update).not.toHaveBeenCalled();
+      expect(db.collectionCopy.create).not.toHaveBeenCalled();
+    });
+
+    // Acquiring a removed entry again is an update of it and one new copy,
+    // under the entry's lock. The reconcile then clears the entry's removal,
+    // and the sync resumes the offers its removal paused, in the same
+    // transaction; the emit waits for the commit (#1221, #1231).
+    it('a removed entry acquired again gets one new copy from `copy` and resumes its offers (#1221, #1231)', async () => {
       const order: string[] = [];
       recordTransaction(order);
       db.$queryRaw.mockImplementation((async () => {
         order.push('lock');
-        return [{ deletedAt: new Date('2026-11-01') }];
+        return [{ id: 'gc-1', deletedAt: REMOVED_AT }];
       }) as never);
-      db.gameCollection.upsert.mockImplementation((async () => {
-        order.push('upsert');
-        return entryOwning(0);
+      // The entry's own update, then the reconcile's.
+      db.gameCollection.update.mockImplementation((async () => {
+        order.push('update');
+        return { id: 'gc-1' };
+      }) as never);
+      db.collectionCopy.count.mockImplementation((async () => {
+        order.push('cap');
+        return 1;
       }) as never);
       db.collectionCopy.create.mockImplementation((async () => {
         order.push('copy');
@@ -644,141 +808,168 @@ describe('GameCollectionService', () => {
       }) as never);
       syncSupply.mockImplementation(async () => {
         order.push('sync');
-        return [];
-      });
-
-      const row = await service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical });
-
-      expect(db.collectionCopy.create).toHaveBeenCalledWith({ data: { entryId: 'gc-1' } });
-      expect(row.quantity).toBe(1);
-      expect(order).toEqual(['begin', 'lock', 'upsert', 'copy', 'sync', 'commit']);
-    });
-
-    // Another request created the entry after the pre-read. If that entry
-    // still owns a copy, this add is a repeat and adds none; if it was removed
-    // in that window, this add acquires it again and gives it one (#1231,
-    // #1221).
-    it.each([
-      ['still owned', 1, 0],
-      ['removed since', 0, 1],
-    ])(
-      'adding an entry another request created after the pre-read, %s, adds a copy only when it owns none (#1231)',
-      async (_, owned, copiesAdded) => {
-        db.$queryRaw.mockResolvedValue([] as never);
-        db.gameCollection.upsert.mockResolvedValue(entryOwning(owned, { id: 'gc-other' }));
-
-        const row = await service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical });
-
-        expect(db.collectionCopy.create).toHaveBeenCalledTimes(copiesAdded);
-        expect(row.quantity).toBe(1);
-      },
-    );
-
-    it('resurrects a tombstoned entry without touching play history', async () => {
-      await service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical });
-
-      const { update } = db.gameCollection.upsert.mock.calls[0][0];
-      expect(update).toMatchObject({ deletedAt: null, deleteReason: null });
-      // Server-managed play history and unspecified fields must survive the cycle.
-      expect(update).not.toHaveProperty('playCount');
-      expect(update).not.toHaveProperty('lastPlayed');
-      expect(update).not.toHaveProperty('favorite');
-      expect(update).not.toHaveProperty('playAgain');
-    });
-
-    // The add-back locks the entry's row before it writes, and that lock is
-    // the transaction's first, so a nomination naming the entry, or its
-    // attendee coming back, takes turns with it. The transaction keeps the
-    // default isolation, READ COMMITTED, so each statement of the sync reads
-    // what had committed when it started (#1221).
-    it('addToCollection of a removed entry locks the row, clears the removal and resumes its offers (#1221)', async () => {
-      const order: string[] = [];
-      recordTransaction(order);
-      db.$queryRaw.mockImplementation((async () => {
-        order.push('lock');
-        return [{ deletedAt: new Date('2026-11-01') }];
-      }) as never);
-      db.gameCollection.upsert.mockImplementation((async () => {
-        order.push('upsert');
-        return entryOwning(0);
-      }) as never);
-      syncSupply.mockImplementation(async () => {
-        order.push('sync');
         return SUPPLY_CHANGES;
       });
       emitSupply.mockImplementation(() => {
         order.push('emit');
       });
+      entryReads({ deletedAt: REMOVED_AT, owned: 1 });
 
-      await service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical });
+      const row = await service.addToCollection({
+        platformGameId: 'pg-1',
+        medium: GameMedium.Physical,
+        copy: { condition: GameCondition.LikeNew, acquiredFrom: 'A friend' },
+      });
 
-      const [lock] = db.$queryRaw.mock.calls[0] as unknown as [Prisma.Sql];
-      expect(rawQueryText(lock)).toBe(
-        'SELECT deleted_at AS "deletedAt" FROM game_collections WHERE user_id = ? AND platform_game_id = ? AND medium = ?::game_mediums FOR UPDATE',
-      );
-      expect(lock.values).toEqual([ME, 'pg-1', GameMedium.Physical]);
-
-      const { update } = db.gameCollection.upsert.mock.calls[0][0];
-      expect(update).toMatchObject({ deletedAt: null, deleteReason: null });
-      expect(syncSupply).toHaveBeenCalledWith(db, { id: 'gc-1', deletedAt: null }, update.lastUpdated);
-      expect(emitSupply).toHaveBeenCalledWith(eventEmitter, SUPPLY_CHANGES, ME, update.lastUpdated);
-      expect(order).toEqual(['begin', 'lock', 'upsert', 'sync', 'commit', 'emit']);
+      expect(db.collectionCopy.create).toHaveBeenCalledWith({
+        data: { entryId: 'gc-1', ...UNKNOWN_COPY, condition: GameCondition.LikeNew, acquiredFrom: 'A friend' },
+      });
+      const lastUpdated = db.gameCollection.update.mock.calls[0]?.[0]?.data.lastUpdated;
+      expect(syncSupply).toHaveBeenCalledWith(db, { id: 'gc-1', deletedAt: null }, lastUpdated);
+      expect(emitSupply).toHaveBeenCalledWith(eventEmitter, SUPPLY_CHANGES, ME, lastUpdated);
+      expect(order).toEqual(['begin', 'lock', 'update', 'cap', 'copy', 'update', 'sync', 'commit', 'emit']);
+      expect(row.quantity).toBe(1);
+      // The default isolation, READ COMMITTED (#1221).
       expect(db.$transaction.mock.calls[0]).toHaveLength(1);
     });
 
-    // The pre-read found no row, but another request created one before the
-    // upsert, which then updates that row rather than creating its own: its
-    // id is not the one minted here. The row may have been removed in that
-    // window, so the sync reads it as the add-back leaves it, live. The
-    // upsert's UPDATE is the first lock on it (#1221).
-    it('addToCollection of an entry another request created after its pre-read resumes its offers (#1221)', async () => {
-      const order: string[] = [];
-      recordTransaction(order);
-      db.$queryRaw.mockImplementation((async () => {
-        order.push('lock');
-        return [];
-      }) as never);
-      db.gameCollection.upsert.mockImplementation((async () => {
-        order.push('upsert');
-        return entry({ id: 'gc-other' });
-      }) as never);
-      syncSupply.mockImplementation(async () => {
-        order.push('sync');
-        return SUPPLY_CHANGES;
-      });
-      emitSupply.mockImplementation(() => {
-        order.push('emit');
-      });
+    // The entry's removal clears in the reconcile, so the add's own update
+    // writes only what the request names: play history and every field the
+    // request leaves out survive the removal and the acquisition.
+    it('a removed entry acquired again keeps its play history and the fields the add leaves out', async () => {
+      lockedAs({ id: 'gc-1', deletedAt: REMOVED_AT });
 
-      await service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical });
+      await service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical, rating: 6 });
 
-      const { update } = db.gameCollection.upsert.mock.calls[0][0];
-      expect(syncSupply).toHaveBeenCalledWith(db, { id: 'gc-other', deletedAt: null }, update.lastUpdated);
-      expect(emitSupply).toHaveBeenCalledWith(eventEmitter, SUPPLY_CHANGES, ME, update.lastUpdated);
-      expect(order).toEqual(['begin', 'lock', 'upsert', 'sync', 'commit', 'emit']);
+      expect(db.gameCollection.update.mock.calls[0]?.[0]?.data).toEqual({ rating: 6, lastUpdated: expect.any(Date) });
     });
 
-    // A plain add locks the entry's row too, but has no paused offers to
-    // resume, so it reads no event and emits nothing. A genuine create
-    // answers the id it was given (#1221).
+    // A replayed add of a game the user owns updates the entry's own fields
+    // and adds no copy, whatever `copy` says, so a replay is harmless. The
+    // copy is never read, so its release isn't looked up either (#1231).
+    it('a repeated add of an owned entry adds no copy (#1231)', async () => {
+      lockedAs({ id: 'gc-1', deletedAt: null });
+
+      const row = await service.addToCollection({
+        platformGameId: 'pg-1',
+        medium: GameMedium.Physical,
+        favorite: true,
+        copy: { releaseId: 'rel-1', acquiredOn: '2019', pricePaid: { amount: 2500, currency: 'EUR' } },
+      });
+
+      expect(db.collectionCopy.create).not.toHaveBeenCalled();
+      expect(db.collectionCopy.count).not.toHaveBeenCalled();
+      expect(db.gameRelease.findUnique).not.toHaveBeenCalled();
+      expect(db.gameCollection.update.mock.calls[0]?.[0]?.data).toEqual({
+        favorite: true,
+        lastUpdated: expect.any(Date),
+      });
+      expect(syncSupply).not.toHaveBeenCalled();
+      expect(row.quantity).toBe(1);
+    });
+
+    // The copy cap counts removed and taken-back copies too (#1231), so an
+    // entry's history stays bounded.
+    it('an entry at 100 copies refuses another acquisition with COLLECTION_COPY_LIMIT_REACHED', async () => {
+      lockedAs({ id: 'gc-1', deletedAt: REMOVED_AT });
+      db.collectionCopy.count.mockResolvedValue(100);
+
+      await expect(
+        service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical }),
+      ).rejects.toMatchObject({
+        status: 409,
+        code: 'COLLECTION_COPY_LIMIT_REACHED',
+      });
+      expect(db.collectionCopy.count).toHaveBeenCalledWith({ where: { entryId: 'gc-1' } });
+      expect(db.collectionCopy.create).not.toHaveBeenCalled();
+      expect(syncSupply).not.toHaveBeenCalled();
+    });
+
+    // Two first adds of one game both find no row to lock, and both insert.
+    // The second insert waits for the first to commit, then fails on the
+    // entry's unique identity. Postgres has aborted its transaction, so the
+    // whole transaction runs again, and finds the entry the other made
+    // (#1231).
+    it('a unique violation on create retries once as an existing entry', async () => {
+      db.$queryRaw.mockResolvedValueOnce([] as never).mockResolvedValueOnce([{ id: 'gc-1', deletedAt: null }] as never);
+      db.gameCollection.create.mockRejectedValueOnce(identityViolation());
+
+      const row = await service.addToCollection({
+        platformGameId: 'pg-1',
+        medium: GameMedium.Physical,
+        favorite: true,
+      });
+
+      expect(db.$transaction).toHaveBeenCalledTimes(2);
+      expect(db.gameCollection.create).toHaveBeenCalledTimes(1);
+      expect(db.gameCollection.update).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          where: { id: 'gc-1', AND: [COND] },
+          data: expect.objectContaining({ favorite: true }),
+        }),
+      );
+      expect(db.collectionCopy.create).not.toHaveBeenCalled();
+      expect(row.id).toBe('gc-1');
+    });
+
+    it('retries a unique violation only once', async () => {
+      const violation = identityViolation();
+      db.gameCollection.create.mockRejectedValue(violation);
+
+      await expect(service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical })).rejects.toBe(
+        violation,
+      );
+      expect(db.$transaction).toHaveBeenCalledTimes(2);
+    });
+
+    // Only the race on the entry's identity has an entry to find on a second
+    // run. Any other unique the add hits would hit it again (#1231).
+    it('a unique violation on another constraint is not retried (#1231)', async () => {
+      const violation = uniqueViolation({ index: 'collection_copies_upstream_account_id_upstream_key_key' });
+      db.gameCollection.create.mockRejectedValue(violation);
+
+      await expect(service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical })).rejects.toBe(
+        violation,
+      );
+      expect(db.$transaction).toHaveBeenCalledTimes(1);
+    });
+
+    // A violation whose constraint can't be named is most likely the
+    // identity race, the entry table's only unique besides its generated
+    // key; one more run costs a transaction, and a second violation is
+    // thrown as it is (#1231).
+    it('a unique violation whose constraint cannot be named is retried once (#1231)', async () => {
+      db.gameCollection.create.mockRejectedValue(uniqueViolationWithoutMeta());
+
+      await expect(
+        service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical }),
+      ).rejects.toMatchObject({ code: 'P2002' });
+      expect(db.$transaction).toHaveBeenCalledTimes(2);
+    });
+
+    // The platform game is read without a lock, so it can go before the
+    // insert commits; the insert then fails on its foreign key, and the
+    // client hears the 404 it would have heard a moment earlier (#1231).
+    it('a platform game deleted mid-add answers its 404, not a 500 (#1231)', async () => {
+      db.gameCollection.create.mockRejectedValue(foreignKeyViolation());
+
+      await expect(service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical })).rejects.toThrow(
+        new NotFoundException(t('errors.platform_game.not_found', { id: 'pg-1' })),
+      );
+      expect(db.$transaction).toHaveBeenCalledTimes(1);
+    });
+
+    // A new entry and one still owned have no paused offers to resume, so
+    // they read no event and emit nothing (#1221).
     it.each([
-      ['a new entry', [], created],
-      ['a live entry', [{ deletedAt: null }], (async () => entry()) as never],
-    ])('addToCollection of a new or live entry runs no sync (#1221): %s', async (_, locked, answer) => {
-      const order: string[] = [];
-      recordTransaction(order);
-      db.$queryRaw.mockImplementation((async () => {
-        order.push('lock');
-        return locked;
-      }) as never);
-      db.gameCollection.upsert.mockImplementation((async (args: never) => {
-        order.push('upsert');
-        return (answer as (args: never) => Promise<GameCollection>)(args);
-      }) as never);
+      ['a new entry', undefined],
+      ['a live entry', { id: 'gc-1', deletedAt: null }],
+    ])('runs no sync for %s (#1221)', async (_, locked) => {
+      lockedAs(locked);
 
       await service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical });
 
-      expect(order).toEqual(['begin', 'lock', 'upsert', 'commit']);
       expect(syncSupply).not.toHaveBeenCalled();
       expect(emitSupply).not.toHaveBeenCalled();
     });
@@ -837,31 +1028,90 @@ describe('GameCollectionService', () => {
   });
 
   describe('remove', () => {
+    /** The entry's row as `lockEntry` answers it (#1231). */
+    const LOCKED = { deletedAt: null, medium: GameMedium.Physical, platformGameId: 'pg-1', userId: ME };
+
     beforeEach(() => {
-      db.gameCollection.update.mockResolvedValue(entry({ deletedAt: new Date() }));
+      db.$queryRaw.mockResolvedValue([LOCKED] as never);
+      db.gameCollection.update.mockResolvedValue({ id: 'gc-1' } as GameCollection);
+      db.collectionCopy.updateMany.mockResolvedValue({ count: 1 });
+      // After its copies are removed the entry owns none, so the reconcile
+      // removes it (#1231).
+      entryReads({ deletedAt: null, owned: 0 }, entryOwning(0, { deletedAt: new Date() }));
     });
 
-    it('soft deletes with an optional reason in a single scoped write', async () => {
+    // The entry's row is the transaction's first lock, so the removal takes
+    // turns with a nomination naming the entry (#1221). It is then held to
+    // the delete conditions and to being live, under that lock, so an
+    // update-only key can't remove it, and a repeat misses (#1288). The
+    // reconcile removes the entry once its last owned copy is removed, and
+    // the sync pauses its offers in the same transaction; the emit waits for
+    // the commit, so no listener hears of a pause that rolled back.
+    it('locks the entry, holds it to its delete conditions, removes its owned copies, then syncs and emits (#1221, #1288)', async () => {
+      const order: string[] = [];
+      recordTransaction(order);
+      db.$queryRaw.mockImplementation((async () => {
+        order.push('lock');
+        return [LOCKED];
+      }) as never);
+      // The scoped check, then the reconcile's.
+      db.gameCollection.update.mockImplementation((async () => {
+        order.push('update');
+        return { id: 'gc-1' };
+      }) as never);
+      db.collectionCopy.updateMany.mockImplementation((async () => {
+        order.push('copies');
+        return { count: 1 };
+      }) as never);
+      syncSupply.mockImplementation(async () => {
+        order.push('sync');
+        return SUPPLY_CHANGES;
+      });
+      emitSupply.mockImplementation(() => {
+        order.push('emit');
+      });
+
       await service.remove('gc-1', { reason: GameRemovalReason.Sold });
 
-      expect(db.gameCollection.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({ id: 'gc-1', deletedAt: null, AND: [COND] }),
-          data: expect.objectContaining({ deletedAt: expect.any(Date), deleteReason: GameRemovalReason.Sold }),
-        }),
+      const [lock] = db.$queryRaw.mock.calls[0] as unknown as [Prisma.Sql];
+      expect(rawQueryText(lock)).toMatch(/FROM game_collections WHERE id = \? FOR UPDATE$/);
+      expect(lock.values).toEqual(['gc-1']);
+      expect(db.gameCollection.update).toHaveBeenNthCalledWith(1, {
+        where: { id: 'gc-1', deletedAt: null, AND: [COND] },
+        data: { lastUpdated: expect.any(Date) },
+        select: { id: true },
+      });
+      expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(
+        ResourceType.GameCollection,
+        Action.delete,
       );
-      // Never a hard delete — play history and child rows must survive.
+
+      const now = db.gameCollection.update.mock.calls[0]?.[0]?.data.lastUpdated;
+      expect(syncSupply).toHaveBeenCalledWith(db, { id: 'gc-1', deletedAt: now }, now);
+      expect(emitSupply).toHaveBeenCalledWith(eventEmitter, SUPPLY_CHANGES, ME, now);
+      expect(order).toEqual(['begin', 'lock', 'update', 'copies', 'update', 'sync', 'commit', 'emit']);
+      // Never a hard delete: play history and the rows that name the entry
+      // survive a removal.
       expect(db.gameCollection.delete).not.toHaveBeenCalled();
-      // No pre-read: the `deletedAt: null` filter carries the state check.
-      expect(db.gameCollection.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('removal dates every owned copy removedOn when given, with the reason', async () => {
+      await service.remove('gc-1', { reason: GameRemovalReason.Sold, removedOn: '2019-03' });
+
+      expect(db.collectionCopy.updateMany).toHaveBeenCalledWith({
+        where: { entryId: 'gc-1', removedAt: null, retractedAt: null },
+        data: {
+          removedAt: expect.any(Date),
+          removedOn: new Date('2019-03-01T00:00:00Z'),
+          removedOnPrecision: DatePrecision.Month,
+          removeReason: GameRemovalReason.Sold,
+        },
+      });
     });
 
     it('defaults the reason to null', async () => {
       await service.remove('gc-1', {});
 
-      expect(db.gameCollection.update).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ deleteReason: null }) }),
-      );
       expect(db.collectionCopy.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ removeReason: null }) }),
       );
@@ -876,89 +1126,121 @@ describe('GameCollectionService', () => {
         jest.useRealTimers();
       });
 
-      // Removing the entry removes every copy the user still owns, with the
-      // entry's reason, dated today in UTC. Copies already removed or taken
-      // back keep what they have. The entry's scoped update runs first: it
-      // locks the entry's row as the transaction's first lock, so the removal
-      // takes turns with nominations (#1221). The answer owns no copy (#1231).
-      it('removing an entry removes each of its owned copies (#1231)', async () => {
-        const order: string[] = [];
-        recordTransaction(order);
-        db.gameCollection.update.mockImplementation((async () => {
-          order.push('entry');
-          return entryOwning(2, { deletedAt: new Date() });
-        }) as never);
-        db.collectionCopy.updateMany.mockImplementation((async () => {
-          order.push('copies');
-          return { count: 2 };
-        }) as never);
-        syncSupply.mockImplementation(async () => {
-          order.push('sync');
-          return [];
-        });
+      // With no date given, the removal is dated today, in UTC: the server's
+      // zone never decides what today is (#1231).
+      it('removal dates every owned copy today in UTC when no date is given', async () => {
+        await service.remove('gc-1', { reason: GameRemovalReason.Sold });
 
-        const removed = await service.remove('gc-1', { reason: GameRemovalReason.Sold });
-
-        expect(db.collectionCopy.updateMany).toHaveBeenCalledWith({
-          where: { entryId: 'gc-1', removedAt: null, retractedAt: null },
-          data: {
-            removedAt: new Date('2026-11-27T04:30:00Z'),
-            removedOn: new Date('2026-11-27T00:00:00Z'),
-            removedOnPrecision: DatePrecision.Day,
-            removeReason: GameRemovalReason.Sold,
-          },
+        expect(db.collectionCopy.updateMany.mock.calls[0]?.[0]?.data).toEqual({
+          removedAt: new Date('2026-11-27T04:30:00Z'),
+          removedOn: new Date('2026-11-27T00:00:00Z'),
+          removedOnPrecision: DatePrecision.Day,
+          removeReason: GameRemovalReason.Sold,
         });
-        expect(order).toEqual(['begin', 'entry', 'copies', 'sync', 'commit']);
-        expect(removed.quantity).toBe(0);
+      });
+
+      // Today in UTC is already the 27th, so the 27th is not in the future
+      // and the 28th is (#1231).
+      it('removal takes the date of today in UTC', async () => {
+        await service.remove('gc-1', { removedOn: '2026-11-27' });
+
+        expect(db.collectionCopy.updateMany.mock.calls[0]?.[0]?.data).toMatchObject({
+          removedOn: new Date('2026-11-27T00:00:00Z'),
+        });
+      });
+
+      it('removal refuses a future date with COLLECTION_DATE_IN_FUTURE, and locks nothing', async () => {
+        await expect(service.remove('gc-1', { removedOn: '2026-11-28' })).rejects.toMatchObject({
+          status: 400,
+          code: 'COLLECTION_DATE_IN_FUTURE',
+        });
+        expect(db.$transaction).not.toHaveBeenCalled();
+        expect(db.collectionCopy.updateMany).not.toHaveBeenCalled();
       });
     });
+
+    // A copy can't be removed before it was acquired. Each owned copy is
+    // checked against the removal's date, under the entry's lock (#1231).
+    it('refuses a removal dated before an owned copy was acquired with COLLECTION_DATE_ORDER', async () => {
+      db.collectionCopy.findMany.mockResolvedValue([
+        { acquiredOn: null, acquiredOnPrecision: null },
+        { acquiredOn: new Date('2020-05-01T00:00:00Z'), acquiredOnPrecision: DatePrecision.Month },
+      ] as never);
+
+      await expect(service.remove('gc-1', { removedOn: '2019' })).rejects.toMatchObject({
+        status: 400,
+        code: 'COLLECTION_DATE_ORDER',
+      });
+      expect(db.collectionCopy.findMany).toHaveBeenCalledWith({
+        where: { entryId: 'gc-1', removedAt: null, retractedAt: null },
+        select: { acquiredOn: true, acquiredOnPrecision: true },
+      });
+      expect(db.collectionCopy.updateMany).not.toHaveBeenCalled();
+      expect(syncSupply).not.toHaveBeenCalled();
+    });
+
+    // The last day of "2020" is after a May 2020 acquisition (#1231).
+    it('takes a removal whose period ends on or after the acquisition', async () => {
+      db.collectionCopy.findMany.mockResolvedValue([
+        { acquiredOn: new Date('2020-05-01T00:00:00Z'), acquiredOnPrecision: DatePrecision.Month },
+      ] as never);
+
+      await service.remove('gc-1', { removedOn: '2020' });
+
+      expect(db.collectionCopy.updateMany).toHaveBeenCalled();
+    });
+
+    // The answer is the entry as the transaction leaves it: removed, owning
+    // no copy, whatever the sync changed (#1221, #1231).
+    it('answers the removed entry, which owns no copy', async () => {
+      const removed = await service.remove('gc-1', {});
+
+      expect(removed).toMatchObject({ id: 'gc-1', deletedAt: expect.any(Date), quantity: 0 });
+      expect(db.gameCollection.findUniqueOrThrow).toHaveBeenLastCalledWith({
+        where: { id: 'gc-1' },
+        include: COLLECTION_INCLUDE,
+      });
+    });
+
+    // `now` is taken before the entry lock is waited on, so a copy removal
+    // that commits meanwhile can stamp a later `removedAt` than this one's.
+    // The entry's removal is this request's, so its reason is the one the
+    // request gave, or none when it gave none (#1231).
+    it.each([
+      ['a reason', GameRemovalReason.Sold, GameRemovalReason.Sold],
+      ['no reason', undefined, null],
+    ])(
+      'an entry removal names its own reason, whatever an earlier-stamped copy says (#1231): %s',
+      async (_, reason, deleteReason) => {
+        db.collectionCopy.findFirst.mockResolvedValue({ removeReason: GameRemovalReason.Traded } as never);
+
+        await service.remove('gc-1', { reason });
+
+        expect(db.gameCollection.update).toHaveBeenLastCalledWith({
+          where: { id: 'gc-1' },
+          data: { deletedAt: expect.any(Date), deleteReason, lastUpdated: expect.any(Date) },
+          select: { id: true },
+        });
+      },
+    );
 
     // A client reads this 404 as "already removed" and completes its queued
-    // removal, so it must be told apart from a route that moved (#634). The
-    // entry's update misses first, so no copy is touched (#1231).
-    it('404s missing, already-removed, and foreign rows alike, naming the collection entry (#634)', async () => {
-      db.gameCollection.update.mockRejectedValue(dependentRecordNotFound());
+    // removal, so it must be told apart from a route that moved (#634). No
+    // copy is touched and nothing is synced (#1221, #1231).
+    it('404s a missing entry, naming the collection entry (#634)', async () => {
+      db.$queryRaw.mockResolvedValue([] as never);
 
       await expect(service.remove('gc-404', {})).rejects.toMatchObject(ENTRY_NOT_FOUND);
+      expect(db.gameCollection.update).not.toHaveBeenCalled();
       expect(db.collectionCopy.updateMany).not.toHaveBeenCalled();
+      expect(syncSupply).not.toHaveBeenCalled();
     });
 
-    // The removal's `UPDATE` is the transaction's first lock, on the entry's
-    // row, and the sync reads the state written under it. The emit waits for
-    // the commit, so no listener hears of a pause that rolled back (#1221).
-    it("remove runs the supply sync in the removal's transaction with the removed row, and emits after it commits (#1221)", async () => {
-      const order: string[] = [];
-      recordTransaction(order);
-      db.gameCollection.update.mockImplementation((async () => {
-        order.push('update');
-        return entry({ deletedAt: new Date() });
-      }) as never);
-      syncSupply.mockImplementation(async () => {
-        order.push('sync');
-        return SUPPLY_CHANGES;
-      });
-      emitSupply.mockImplementation(() => {
-        order.push('emit');
-      });
-
-      // The owner's answer is the removed entry, whatever the sync changed (#1221).
-      expect(await service.remove('gc-1', {})).toMatchObject({ id: 'gc-1', deletedAt: expect.any(Date) });
-
-      const { data } = db.gameCollection.update.mock.calls[0][0];
-      expect(syncSupply).toHaveBeenCalledWith(db, { id: 'gc-1', deletedAt: data.deletedAt }, data.deletedAt);
-      expect(emitSupply).toHaveBeenCalledWith(eventEmitter, SUPPLY_CHANGES, ME, data.deletedAt);
-      expect(order).toEqual(['begin', 'update', 'sync', 'commit', 'emit']);
-      // The default isolation, READ COMMITTED: the sync relies on each of its
-      // statements reading what had committed when it started (#1221).
-      expect(db.$transaction.mock.calls[0]).toHaveLength(1);
-    });
-
-    // The scoped update misses, the transaction rolls back, and the client
-    // still reads the 404 as "already removed" (#634, #1221).
-    it('remove of an entry already removed answers 404 and syncs nothing (#1221)', async () => {
-      db.gameCollection.update.mockRejectedValue(dependentRecordNotFound());
+    it('404s an entry already removed, or outside the delete conditions, alike (#634, #1288)', async () => {
+      db.gameCollection.update.mockRejectedValueOnce(dependentRecordNotFound());
 
       await expect(service.remove('gc-1', {})).rejects.toMatchObject(ENTRY_NOT_FOUND);
+      expect(db.collectionCopy.updateMany).not.toHaveBeenCalled();
       expect(syncSupply).not.toHaveBeenCalled();
       expect(emitSupply).not.toHaveBeenCalled();
     });
@@ -974,15 +1256,6 @@ describe('GameCollectionService', () => {
       await service.remove('gc-1', {});
 
       expect(emitSupply).toHaveBeenCalledWith(eventEmitter, SUPPLY_CHANGES, null, expect.any(Date));
-    });
-
-    it('uses delete conditions for the write', async () => {
-      await service.remove('gc-1', {});
-
-      expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(
-        ResourceType.GameCollection,
-        Action.delete,
-      );
     });
   });
 
@@ -1021,8 +1294,13 @@ describe('GameCollectionService', () => {
       db.gameCollection.count.mockResolvedValue(1);
       db.gameCollection.findUnique.mockResolvedValue(entryOn('g-1'));
       db.platformGame.findUnique.mockResolvedValue({ id: 'pg-1' } as PlatformGame);
-      db.gameCollection.upsert.mockResolvedValue(entryOn('g-1'));
       db.gameCollection.update.mockResolvedValue(entryOn('g-1'));
+      // The add and the removal each lock the entry first, and answer the row
+      // the write runner reads after them (#1231).
+      db.$queryRaw.mockResolvedValue([
+        { id: 'gc-1', deletedAt: null, medium: GameMedium.Physical, platformGameId: 'pg-1', userId: ME },
+      ] as never);
+      entryReads({ deletedAt: null, owned: 1 }, entryOn('g-1'));
     });
 
     it('names each row’s base games through one link read, over the live games the viewer could open by id', async () => {

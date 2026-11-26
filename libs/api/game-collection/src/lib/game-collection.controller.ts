@@ -62,14 +62,36 @@ export class GameCollectionController {
   @ApiOperation({
     summary: "Add a game to the acting user's collection",
     description:
-      'Idempotent on (user, platformGame, medium). A new entry is created with one copy. Adding a removed ' +
-      'entry again restores it with its play history and one new copy. Adding an entry you still own updates ' +
-      'its fields and adds no copy, so a repeated request is harmless.',
+      'Idempotent on (user, platformGame, medium). A new entry is created with one copy, described by `copy`. ' +
+      'Adding a removed entry again restores it with its play history and one new copy, described by `copy`, ' +
+      'and the offers its removal paused in events count again. Adding an entry you still own updates its ' +
+      'fields, ignores `copy` and adds no copy, so a repeated request is harmless. A new entry needs ' +
+      'permission to create it; an entry you already have needs permission to update it.',
   })
   @ApiResponse({ status: Http.Created, type: GameCollectionMessageResponseDto })
+  @ApiResponse({
+    status: Http.BadRequest,
+    description:
+      'A condition on a digital copy (code COLLECTION_CONDITION_DIGITAL), an acquisition after today ' +
+      '(code COLLECTION_DATE_IN_FUTURE), a price in a currency that is not an ISO 4217 code ' +
+      '(code COLLECTION_CURRENCY_UNKNOWN), a release of another platform game, or a malformed body',
+  })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
-  @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
-  @ApiResponse({ status: Http.NotFound, description: 'Platform game not found' })
+  @ApiResponse({
+    status: Http.Forbidden,
+    description:
+      'Insufficient permissions: no permission to create the new entry, or to update the entry you already ' +
+      'have for this platform game and medium',
+  })
+  @ApiResponse({
+    status: Http.NotFound,
+    description: 'Platform game or release not found, including a platform game deleted while the add ran',
+  })
+  @ApiResponse({
+    status: Http.Conflict,
+    description:
+      'The removed entry already holds its most copies, removed ones included (code COLLECTION_COPY_LIMIT_REACHED)',
+  })
   @CheckPolicies((ability) => ability.can(Action.create, ResourceType.GameCollection))
   @Post()
   addToCollection(@Body() createGameCollectionDto: CreateGameCollectionDto) {
@@ -96,13 +118,20 @@ export class GameCollectionController {
     summary: "Remove a game from the acting user's collection",
     description:
       'The entry is marked removed, optionally with a reason, so play history survives, and adding the same ' +
-      'game back restores it. Each copy you still own is removed with it, dated today, with the same reason. ' +
+      'game back restores it. Each copy you still own is removed with it, dated `removedOn`, or today (UTC) ' +
+      'when none is given, with the same reason. ' +
       'In every event that offers it, unless the event was deleted, the offer stops counting: ' +
       'nominations of the game that await an outcome pause, and the game leaves the lineup of every date still ahead. ' +
       'The offers stay, and count again when the game is added back, which resumes the paused nominations.',
   })
   @ApiParam({ name: 'id', type: String })
   @ApiResponse({ status: Http.Ok, type: GameCollectionMessageResponseDto })
+  @ApiResponse({
+    status: Http.BadRequest,
+    description:
+      'A removal date after today (code COLLECTION_DATE_IN_FUTURE), or before a copy you own was acquired ' +
+      '(code COLLECTION_DATE_ORDER)',
+  })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @ApiResponse({ status: Http.NotFound, description: 'Collection entry not found (code COLLECTION_ENTRY_NOT_FOUND)' })

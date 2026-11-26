@@ -1,3 +1,4 @@
+export * from './create-collection-copy.dto';
 export * from './create-game-collection.dto';
 export * from './game-collection.dto';
 export * from './list-game-collections.query.dto';

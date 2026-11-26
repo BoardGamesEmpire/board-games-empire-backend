@@ -11,8 +11,15 @@ import { renderHeldAllow } from './key-scope-render';
  * covers the pin; household lists that answer 403 to a pinned key stay off it,
  * and so does `HouseholdPlugin`, whose routes check `householdId` and would
  * make a pinned key work nowhere (#1417, #266).
+ *
+ * `GameCollection` joined when the add checked the row it writes: a new entry
+ * against `create`, an entry the user already has against `update`, so a key
+ * pinned to one entry adds no other (#1288). Its reads, updates and removals
+ * take a pin through the route. Its create pin stays refused there, by
+ * {@link acceptsPin}, since no entry exists yet to pin.
  */
 export const API_KEY_PINNABLE_TYPES: ReadonlySet<ResourceType> = new Set<ResourceType>([
+  ResourceType.GameCollection,
   ResourceType.Job,
   ResourceType.WebhookSubscription,
   ResourceType.User,

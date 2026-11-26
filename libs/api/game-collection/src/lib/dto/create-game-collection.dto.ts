@@ -2,7 +2,20 @@ import { GameMedium, Reach } from '@bge/database';
 import { i18nValidationMessage } from '@bge/i18n';
 import { ReachProperty } from '@bge/shared';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsEnum, IsInt, IsNotEmpty, IsOptional, IsString, Max, Min } from 'class-validator';
+import { Type } from 'class-transformer';
+import {
+  IsBoolean,
+  IsEnum,
+  IsInt,
+  IsNotEmpty,
+  IsObject,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+  ValidateNested,
+} from 'class-validator';
+import { CreateCollectionCopyDto } from './create-collection-copy.dto';
 
 const COLLECTION_REACHES = [
   Reach.Private,
@@ -69,4 +82,16 @@ export class CreateGameCollectionDto {
 
   @CollectionReachProperty(Reach.Private)
   reach?: CollectionReach;
+
+  @ApiPropertyOptional({
+    type: CreateCollectionCopyDto,
+    description:
+      'The copy this add acquires: the one copy of a new entry, or the new copy of an entry you removed. ' +
+      'An entry you still own gets no copy, so this is not read; add another copy through its copies instead.',
+  })
+  @IsOptional()
+  @IsObject({ message: i18nValidationMessage('validation.isObject') })
+  @ValidateNested()
+  @Type(() => CreateCollectionCopyDto)
+  copy?: CreateCollectionCopyDto;
 }

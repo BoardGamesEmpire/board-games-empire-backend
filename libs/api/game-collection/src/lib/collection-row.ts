@@ -61,9 +61,10 @@ export type GameCollectionWithRelations = Prisma.GameCollectionGetPayload<{ incl
  * A relation added to `COLLECTION_INCLUDE` needs an arm here, or the drain
  * misses its changes.
  *
- * - The count of owned copies needs no arm: every write that adds or removes
- *   a copy writes the entry too, so the entry's own arm resends the row
- *   (#1231).
+ * - The count of owned copies needs no arm: every write of a copy runs
+ *   through `CollectionWriteService`, whose `reconcileOwnership` sets the
+ *   entry's `lastUpdated` and so bumps its `updatedAt`, and the entry's own
+ *   arm resends the row (#1231).
  * - Each arm tests `updatedAt` alone, under no ceiling. A base game whose
  *   own `reach` or `deletedAt` changes takes a new `updatedAt`, so the row is
  *   resent whether the viewer gained or lost it.

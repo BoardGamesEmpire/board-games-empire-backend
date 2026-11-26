@@ -1,25 +1,24 @@
-import type { GameCollection } from '@bge/database';
 import {
   Action,
+  constraintIdentity,
   DatabaseService,
-  DatePrecision,
+  identifiesConstraint,
   isPrismaDependentRecordNotFoundError,
+  isPrismaForeignKeyConstraintError,
   ListKind,
   Prisma,
   readBaseGameLinksOnPlatform,
   readWishlistedPlatformGames,
   ResourceType,
 } from '@bge/database';
-import { emitCollectionSupplyChanges, syncCollectionEntrySupply } from '@bge/event';
-import { CodedHttpException, t } from '@bge/i18n';
+import { t } from '@bge/i18n';
 import { AbilityService, resolveActingUserIdOrNull, resolveScopeSubjectId, ScopeComposer } from '@bge/permissions';
 import { PaginatedRows, PaginationQueryDto, pickDefined } from '@bge/shared';
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { EventEmitter2 } from '@nestjs/event-emitter';
-import { createId } from '@paralleldrive/cuid2';
-import { Http } from '@status/codes';
+import { BadRequestException, HttpException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { assertCopyRoom, copyCreateData } from './collection-copy-data';
 import type { GameCollectionRow, GameCollectionWithRelations } from './collection-row';
 import { changedSince, COLLECTION_INCLUDE, OWNED_COPY } from './collection-row';
+import { CollectionWriteService } from './collection-write.service';
 import {
   CreateGameCollectionDto,
   GameCollectionDto,
@@ -28,25 +27,49 @@ import {
   RemoveGameCollectionQueryDto,
   UpdateGameCollectionDto,
 } from './dto';
+import { collectionEntryNotFound } from './game-collection.errors';
+import type { PartialDate } from './values/partial-date';
+import {
+  assertNotInFuture,
+  assertRemovalAfterAcquisition,
+  parsePartialDate,
+  partialDateFromColumns,
+  todayUtc,
+} from './values/partial-date';
 
 /**
- * The refusal for a collection entry the actor can't see: missing, already
- * removed, or outside their scope, which the 404 never tells apart. Its code
- * says the 404 is about this row, so a client may read it as "already removed"
- * and complete a queued removal, where a 404 without it (a route that moved,
- * an id that matched no route) may not (#634).
+ * The unique that keeps a user to one entry per platform game and medium, in
+ * every spelling a P2002 identity reports it (see `identifiesConstraint`): the
+ * index name, the raw columns, and the Prisma fields (#1231).
  */
-function collectionEntryNotFound(id: string): CodedHttpException {
-  return new CodedHttpException(
-    Http.NotFound,
-    'COLLECTION_ENTRY_NOT_FOUND',
-    t('errors.game_collection.not_found', { id }),
-  );
+const ENTRY_IDENTITY_SPELLINGS = [
+  ['game_collections_user_id_platform_game_id_medium_key'],
+  ['user_id', 'platform_game_id', 'medium'],
+  ['userId', 'platformGameId', 'medium'],
+] as const;
+
+/**
+ * Whether `error` is a unique violation on the entry's identity, the race of
+ * two first adds (#1231). One whose constraint can't be named counts: the
+ * entry table's only other unique is its generated key, so the identity is by
+ * far the likelier, and the retry it earns runs once.
+ */
+function isEntryIdentityViolation(error: unknown): boolean {
+  const identity = constraintIdentity(error);
+
+  return identity.source === 'unknown' || identifiesConstraint(identity, ...ENTRY_IDENTITY_SPELLINGS);
 }
 
-/** Midnight UTC of `at`'s day: the date a removal records when the user gives none (#1231). */
-function utcDayOf(at: Date): Date {
-  return new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate()));
+/**
+ * The date a removal records (#1231): `removedOn` as the user gave it, which
+ * the DTO's `@IsPartialDate()` has already passed, or today in UTC when they
+ * gave none. A date after today is refused.
+ */
+function removalDate(removedOn: string | undefined, now: Date): PartialDate {
+  const removal = (removedOn === undefined ? null : parsePartialDate(removedOn)) ?? todayUtc(now);
+  assertNotInFuture(removal, now);
+
+  return removal;
 }
 
 /**
@@ -62,7 +85,7 @@ export class GameCollectionService {
     private readonly db: DatabaseService,
     private readonly abilityService: AbilityService,
     private readonly scopeComposer: ScopeComposer,
-    private readonly eventEmitter: EventEmitter2,
+    private readonly writes: CollectionWriteService,
   ) {}
 
   /**
@@ -220,37 +243,40 @@ export class GameCollectionService {
   }
 
   /**
-   * Add a game to the acting user's collection. Idempotent upsert on the
-   * `(user, platformGame, medium)` identity: re-adding an active entry updates
-   * the provided fields, and adding back a removed entry clears its removal,
-   * while server-managed play history (`playCount`, `lastPlayed`) and any
-   * unspecified fields survive the removal and the add-back.
+   * Add a game to the acting user's collection, idempotent on the
+   * `(user, platformGame, medium)` identity (#1231):
    *
-   * A new entry is created with one copy. An entry added back owns no copy,
-   * and gets one new copy in the same transaction. An entry still owned gets
-   * none, so a repeated add is harmless (#1231).
+   * - **No entry yet:** a new entry, created with one copy from `copy`.
+   * - **A removed entry:** acquired again. Its own fields are updated and it
+   *   gets one new copy from `copy`; the write runner then clears its removal
+   *   and resumes the offers the removal paused (#1221).
+   * - **An entry still owned:** only its own fields are updated. `copy` is not
+   *   read, so a replayed add adds no copy.
    *
-   * Adding back a removed entry also resumes the nominations its removal
-   * paused, in every live event that offers it
-   * (`syncCollectionEntrySupply`, #1221). The entry's row is locked
-   * `FOR UPDATE` before the write, as the transaction's first lock, so a
-   * nomination naming the entry, or an attendee offering it coming back,
-   * takes turns with the add-back: whichever comes second waits, then reads
-   * what the first committed. A new entry, or one never removed, has nothing
-   * paused, so it runs no sync. The changes are emitted once the transaction
-   * commits.
+   * Play history (`playCount`, `lastPlayed`) and every field the add leaves
+   * out survive a removal and an acquisition.
    *
-   * When the pre-read finds no row, the `FOR UPDATE` locks nothing, and
-   * another request may create the entry, offer it and remove it before the
-   * upsert, which then adds that row back. The id the create would use is
-   * minted here, so an upsert that answers another id updated a row it did
-   * not create, and runs the sync on it as well. Its `UPDATE` is then the
-   * first lock on the row. A genuine create answers the minted id and runs
-   * no sync.
+   * Each case is checked against the row it writes (#1288): a new entry
+   * against `create` with its user, platform game and medium, as
+   * `ListService.create` checks a list; an existing one against `update`, on
+   * the locked row and inside its write's `where`, as `PATCH` is. A key whose
+   * grants are pinned to one entry therefore adds no other.
+   *
+   * The identity is locked `FOR UPDATE` first, as the transaction's first
+   * lock, so the add takes turns with a nomination naming the entry, or with
+   * its attendee coming back (#1221). When no entry exists the lock holds
+   * nothing, and a concurrent first add of the same game may insert it too.
+   * The second insert waits for the first to commit, then fails on the
+   * entry's unique key, and the whole transaction runs once more, finding the
+   * entry the other made.
+   *
+   * The platform game is read without a lock, so it can go before the insert
+   * commits; the insert's foreign key then fails, and answers the same 404 as
+   * a platform game that was never there.
    */
   async addToCollection(dto: CreateGameCollectionDto): Promise<GameCollectionDto> {
     const userId = this.abilityService.getActingUserId();
-    const { platformGameId, medium, ...attributes } = dto;
+    const { platformGameId, medium, copy, ...attributes } = dto;
 
     const platformGame = await this.db.platformGame.findUnique({
       where: { id: platformGameId },
@@ -260,49 +286,65 @@ export class GameCollectionService {
       throw new NotFoundException(t('errors.platform_game.not_found', { id: platformGameId }));
     }
 
+    const identity = { userId, platformGameId, medium };
+    const described = copy ?? {};
     const provided = pickDefined(attributes);
-    const lastUpdated = new Date();
-    // The schema's own default, cuid2, minted here so the upsert's answer
-    // says whether it created the row (#1221).
-    const newId = createId();
+    const now = new Date();
+
+    const acquire = () =>
+      this.writes.runForRow(
+        async (tx) => {
+          const [locked] = await tx.$queryRaw<{ deletedAt: Date | null; id: string }[]>(Prisma.sql`
+            SELECT id, deleted_at AS "deletedAt"
+            FROM game_collections
+            WHERE user_id = ${userId} AND platform_game_id = ${platformGameId} AND medium = ${medium}::game_mediums
+            FOR UPDATE
+          `);
+
+          if (locked === undefined) {
+            this.abilityService.assertCurrentActorCan(Action.create, ResourceType.GameCollection, identity);
+
+            const copyData = await copyCreateData(tx, described, identity, now);
+            try {
+              const created = await tx.gameCollection.create({
+                data: { ...identity, ...provided, lastUpdated: now, copies: { create: copyData } },
+                select: { id: true },
+              });
+
+              return created.id;
+            } catch (error) {
+              if (isPrismaForeignKeyConstraintError(error)) {
+                throw new NotFoundException(t('errors.platform_game.not_found', { id: platformGameId }));
+              }
+
+              throw error;
+            }
+          }
+
+          this.abilityService.assertCurrentActorCan(Action.update, ResourceType.GameCollection, {
+            id: locked.id,
+            ...identity,
+            deletedAt: locked.deletedAt,
+          });
+          await this.writeEntryUnder(tx, locked.id, Action.update, {}, { ...provided, lastUpdated: now });
+
+          if (locked.deletedAt !== null) {
+            await assertCopyRoom(tx, locked.id);
+            await tx.collectionCopy.create({
+              data: { entryId: locked.id, ...(await copyCreateData(tx, described, identity, now)) },
+            });
+          }
+
+          return locked.id;
+        },
+        userId,
+        now,
+      );
 
     return this.writtenRow(
-      () =>
-        this.writeThenSyncSupply(
-          async (tx) => {
-            const [locked] = await tx.$queryRaw<{ deletedAt: Date | null }[]>(Prisma.sql`
-              SELECT deleted_at AS "deletedAt"
-              FROM game_collections
-              WHERE user_id = ${userId} AND platform_game_id = ${platformGameId} AND medium = ${medium}::game_mediums
-              FOR UPDATE
-            `);
-
-            const upserted = await tx.gameCollection.upsert({
-              where: { userId_platformGameId_medium: { userId, platformGameId, medium } },
-              // A new entry starts with one copy. The update branch also runs
-              // on an entry still owned, so it adds none (#1231).
-              create: { id: newId, userId, platformGameId, medium, ...provided, lastUpdated, copies: { create: {} } },
-              update: { ...provided, deletedAt: null, deleteReason: null, lastUpdated },
-              include: COLLECTION_INCLUDE,
-            });
-
-            // Removed when locked, or created by another request since the
-            // pre-read and possibly removed in that window.
-            const addedBack = locked === undefined ? upserted.id !== newId : locked.deletedAt !== null;
-            const row = addedBack ? await this.withOwnedCopy(tx, upserted) : upserted;
-
-            return { row, synced: addedBack ? { id: row.id, deletedAt: null } : null };
-          },
-          userId,
-          lastUpdated,
-        ),
-      (error) => {
-        this.logger.error(`Error adding platform game ${platformGameId} to collection for user ${userId}`, error);
-
-        return isPrismaDependentRecordNotFoundError(error)
-          ? new NotFoundException(t('errors.platform_game.not_found', { id: platformGameId }))
-          : error;
-      },
+      () => this.onceMoreOnIdentityViolation(acquire),
+      (error) =>
+        this.unexpected(error, `Error adding platform game ${platformGameId} to collection for user ${userId}`),
     );
   }
 
@@ -336,116 +378,135 @@ export class GameCollectionService {
 
   /**
    * Remove a game from the collection: "I no longer own this", not "never
-   * played". The entry stays, marked removed, so play history and the rows
-   * that name it (locations, offers) survive a removal and an add-back. Each
-   * copy the user still owns is removed with it, dated today in UTC, with the
-   * entry's reason; copies already removed or taken back keep what they have
-   * (#1231).
+   * played" (#1231). Each copy the user still owns is removed, dated
+   * `removedOn`, or today in UTC when the user gives no date, with the
+   * reason; copies already removed or taken back keep what they have. The
+   * write runner then removes the entry with its last owned copy, with that
+   * reason. The entry stays, so play history and the rows that name it
+   * (locations, offers) survive, and adding the game again brings it back.
+   *
+   * The entry's row is locked first, as the transaction's first lock
+   * (#1221), then held to the `delete` conditions and to being live, inside
+   * the check's `where`, so a key that may only update entries removes none
+   * (#1288). A missing, foreign or already-removed entry answers
+   * `COLLECTION_ENTRY_NOT_FOUND`, which a client may read as "already
+   * removed" (#634). A removal dated after today, or before an owned copy was
+   * acquired, is refused (#1231).
    *
    * Every live event that offers the entry stops counting it as supplied
    * (`syncCollectionEntrySupply`, #1221): the nominations of its game that
    * await an outcome pause, and it leaves the lineup of every date still
    * ahead. The offers themselves stay, and resume supplying when the game is
-   * added back. The removal's `UPDATE` is the transaction's first lock, on
-   * the entry's row, so a nomination naming the entry takes turns with it.
-   * The changes are emitted once the transaction commits. The owner's answer
-   * is the removed entry, whatever the sync changed.
+   * acquired again. The owner's answer is the removed entry, whatever the
+   * sync changed.
    */
-  async remove(id: string, { reason }: RemoveGameCollectionQueryDto): Promise<GameCollectionDto> {
+  async remove(id: string, { reason, removedOn }: RemoveGameCollectionQueryDto): Promise<GameCollectionDto> {
     const now = new Date();
     const actingUserId = resolveActingUserIdOrNull(this.abilityService);
+    const removal = removalDate(removedOn, now);
 
-    // Single scoped write: `deletedAt: null` in the filter makes a repeat
-    // removal (or a foreign/missing row) miss and surface as 404, which rolls
-    // the transaction back before the sync runs.
     return this.writtenRow(
       () =>
-        this.writeThenSyncSupply(
+        this.writes.runForRow(
           async (tx) => {
-            const row = await tx.gameCollection.update({
-              where: {
-                id,
-                deletedAt: null,
-                // eslint-disable-next-line no-restricted-syntax -- single-row removal by id, not a collection read
-                AND: this.abilityService.getCurrentResourceConditions(ResourceType.GameCollection, Action.delete),
-              },
-              data: { deletedAt: now, deleteReason: reason ?? null, lastUpdated: now },
-              include: COLLECTION_INCLUDE,
-            });
+            if ((await this.writes.lockEntry(tx, id)) === null) {
+              throw collectionEntryNotFound(id);
+            }
 
-            // After the entry's update, which locks its row as the
-            // transaction's first lock (#1221).
+            await this.writeEntryUnder(tx, id, Action.delete, { deletedAt: null }, { lastUpdated: now });
+
+            const owned = await tx.collectionCopy.findMany({
+              where: { entryId: id, ...OWNED_COPY },
+              select: { acquiredOn: true, acquiredOnPrecision: true },
+            });
+            for (const { acquiredOn, acquiredOnPrecision } of owned) {
+              assertRemovalAfterAcquisition(partialDateFromColumns(acquiredOn, acquiredOnPrecision), removal);
+            }
+
             await tx.collectionCopy.updateMany({
-              where: { entryId: row.id, ...OWNED_COPY },
+              where: { entryId: id, ...OWNED_COPY },
               data: {
                 removedAt: now,
-                removedOn: utcDayOf(now),
-                removedOnPrecision: DatePrecision.Day,
+                removedOn: removal.on,
+                removedOnPrecision: removal.precision,
                 removeReason: reason ?? null,
               },
             });
 
-            // The include counted the owned copies before they were removed.
-            return { row: { ...row, _count: { copies: 0 } }, synced: { id: row.id, deletedAt: now } };
+            return id;
           },
           actingUserId,
           now,
+          reason ?? null,
         ),
-      (error) => this.mapMissingToNotFound(error, id),
+      (error) => this.unexpected(error, `Error removing collection entry ${id}`),
     );
   }
 
   /**
-   * An entry added back gets one new copy, unless it owns one already: an
-   * entry another request created after the add's pre-read may still be
-   * owned, and then this add is a repeat (#1231). It runs under the entry's
-   * lock, so the include's count of owned copies is current, and the row
-   * answers the new count without a second read.
+   * Writes `data` to the entry, held to the actor's `action` conditions on it
+   * and to `state`, inside the write's own `where`, as `PATCH` is (#1288). A
+   * miss, whether the entry is outside the conditions or not in `state`,
+   * answers `COLLECTION_ENTRY_NOT_FOUND`, as one that doesn't exist does
+   * (#634).
    */
-  private async withOwnedCopy(
+  private async writeEntryUnder(
     tx: Prisma.TransactionClient,
-    row: GameCollectionWithRelations,
-  ): Promise<GameCollectionWithRelations> {
-    if (row._count.copies > 0) {
-      return row;
+    id: string,
+    action: Action,
+    state: Pick<Prisma.GameCollectionWhereInput, 'deletedAt'>,
+    data: Prisma.GameCollectionUncheckedUpdateInput,
+  ): Promise<void> {
+    try {
+      await tx.gameCollection.update({
+        where: {
+          id,
+          ...state,
+          // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
+          AND: this.abilityService.getCurrentResourceConditions(ResourceType.GameCollection, action),
+        },
+        data,
+        select: { id: true },
+      });
+    } catch (error) {
+      if (isPrismaDependentRecordNotFoundError(error)) {
+        throw collectionEntryNotFound(id);
+      }
+
+      throw error;
     }
-
-    await tx.collectionCopy.create({ data: { entryId: row.id } });
-
-    return { ...row, _count: { copies: 1 } };
   }
 
   /**
-   * Runs `write`, then `syncCollectionEntrySupply` on the entry state it
-   * answers, in one transaction, and emits what the sync changed once that
-   * commits (#1221). A `write` that answers `synced: null` runs no sync and
-   * emits nothing. Its first statement must lock the entry's row, as the
-   * transaction's first lock, so every write that changes what the entry
-   * supplies takes turns with it (`syncCollectionEntrySupply`).
-   *
-   * The transaction keeps the default isolation, READ COMMITTED: the sync
-   * relies on each of its statements reading what had committed when it
-   * started.
+   * Runs `attempt`, and once more when it fails on the entry's identity
+   * (#1231). Postgres aborts a transaction on the violation, so nothing
+   * inside it can recover; the second run is a transaction of its own, and
+   * reads what the other committed. A violation of any other unique would
+   * only happen again, so it is thrown as it is, and so is a second one.
    */
-  private async writeThenSyncSupply(
-    write: (tx: Prisma.TransactionClient) => Promise<{
-      row: GameCollectionWithRelations;
-      synced: Pick<GameCollection, 'id' | 'deletedAt'> | null;
-    }>,
-    actingUserId: string | null,
-    now: Date,
-  ): Promise<GameCollectionWithRelations> {
-    const { row, supplyChanges } = await this.db.$transaction(async (tx) => {
-      const { row, synced } = await write(tx);
+  private async onceMoreOnIdentityViolation<T>(attempt: () => Promise<T>): Promise<T> {
+    try {
+      return await attempt();
+    } catch (error) {
+      if (!isEntryIdentityViolation(error)) {
+        throw error;
+      }
 
-      return { row, supplyChanges: synced ? await syncCollectionEntrySupply(tx, synced, now) : null };
-    });
+      return attempt();
+    }
+  }
 
-    if (supplyChanges) {
-      emitCollectionSupplyChanges(this.eventEmitter, supplyChanges, actingUserId, now);
+  /**
+   * A write's failure as the client gets it. A refusal is an HTTP exception
+   * already, and passes as it is; anything else is logged first.
+   */
+  private unexpected(error: unknown, context: string): unknown {
+    if (!(error instanceof HttpException)) {
+      const failure = error instanceof Error ? error : new Error(String(error));
+      this.logger.error(`${context}: ${failure.message}`, failure.stack);
     }
 
-    return row;
+    return error;
   }
 
   /**
@@ -494,9 +555,8 @@ export class GameCollectionService {
 
   /**
    * The row a write returns, with its game's base games (#1070). `toError`
-   * maps the write's own failure, a missing row to 404 in every caller. The
-   * link read runs after that mapping, never inside it, so a failed link read
-   * reaches the client as itself.
+   * maps the write's own failure. The link read runs after that mapping,
+   * never inside it, so a failed link read reaches the client as itself.
    */
   private async writtenRow(
     write: () => Promise<GameCollectionWithRelations>,
@@ -513,8 +573,8 @@ export class GameCollectionService {
   }
 
   /**
-   * The scoped `where` matched no row: missing, already tombstoned (remove), or
-   * outside the actor's CASL scope. All collapse to 404 so foreign rows are
+   * The update's scoped `where` matched no row: missing, or outside the
+   * actor's CASL scope. Both collapse to 404 so foreign rows are
    * indistinguishable from absent ones (mirrors FriendshipService).
    */
   private mapMissingToNotFound(error: unknown, id: string) {
