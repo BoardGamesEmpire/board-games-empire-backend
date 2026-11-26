@@ -1,0 +1,92 @@
+{
+  "name": "plugin-toolkit",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/plugin/toolkit/src",
+  "projectType": "library",
+  "tags": ["plugins", "publish"],
+  "// targets": "to see all targets run: nx show project plugin-toolkit --web",
+  "targets": {
+    "generate": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["{workspaceRoot}/package.json", "{workspaceRoot}/libs/scripts/src/bin/generate-bge-version.js"],
+      "outputs": ["{projectRoot}/src/lib/generated/bge-version.ts"],
+      "options": {
+        "command": "node libs/scripts/src/bin/generate-bge-version.js libs/plugin/toolkit/src/lib/generated/bge-version.ts"
+      },
+      "metadata": {
+        "description": "Stamp the workspace version into the plugin author CLI, as the default `bge-plugin --bge-version` (#1093). The output is gitignored; build, typecheck and test run this first."
+      }
+    },
+    "build": {
+      "dependsOn": ["generate", "^build"],
+      "// inputs": "The list @nx/js/typescript infers, plus the generated TypeScript itself (the last entry, which hashes generate's output). bge-version.ts is gitignored, so without it a workspace version bump keeps this task's hash and restores a dist whose default --bge-version is the old version (#1093). An explicit inputs list replaces the inferred one, so re-derive it after an @nx/js upgrade. See docs/NX_CACHING.md.",
+      "inputs": [
+        "{projectRoot}/package.json",
+        "{workspaceRoot}/tsconfig.base.json",
+        "{projectRoot}/tsconfig.lib.json",
+        "{projectRoot}/src/**/*.ts",
+        "!{projectRoot}/jest.config.ts",
+        "!{projectRoot}/jest.config.cts",
+        "!{projectRoot}/src/**/*.spec.ts",
+        "!{projectRoot}/src/**/*.test.ts",
+        {
+          "dependentTasksOutputFiles": "**/*.{d.ts,d.cts,d.mts,tsbuildinfo}",
+          "transitive": true
+        },
+        {
+          "fileset": "{projectRoot}/**/*.{d.ts,d.cts,d.mts}",
+          "dependencies": true
+        },
+        "^{projectRoot}/tsconfig.lib.json",
+        {
+          "dependentTasksOutputFiles": "**/*.ts"
+        }
+      ]
+    },
+    "typecheck": {
+      "dependsOn": ["generate", "^typecheck", "^generate"],
+      "// inputs": "The list @nx/js/typescript infers, plus the generated TypeScript itself (the last entry, which hashes generate's output), for the reason given on build. See docs/NX_CACHING.md.",
+      "inputs": [
+        "{projectRoot}/package.json",
+        "{workspaceRoot}/tsconfig.base.json",
+        "{projectRoot}/tsconfig.json",
+        "{projectRoot}/tsconfig.lib.json",
+        "{projectRoot}/tsconfig.spec.json",
+        "{projectRoot}/src/**/*.ts",
+        "{projectRoot}/jest.config.ts",
+        "{projectRoot}/jest.config.cts",
+        "{projectRoot}/src/**/*.test.ts",
+        "{projectRoot}/src/**/*.spec.ts",
+        "{projectRoot}/src/**/*.d.ts",
+        {
+          "dependentTasksOutputFiles": "**/*.{d.ts,d.cts,d.mts,tsbuildinfo}",
+          "transitive": true
+        },
+        {
+          "fileset": "{projectRoot}/**/*.{d.ts,d.cts,d.mts}",
+          "dependencies": true
+        },
+        "^{projectRoot}/tsconfig.lib.json",
+        {
+          "dependentTasksOutputFiles": "**/*.ts"
+        }
+      ]
+    },
+    "test": {
+      "dependsOn": ["generate", "^build", "^generate"],
+      "// inputs": "The list @nx/jest infers, plus the generated TypeScript itself (the last entry, which hashes generate's output): the specs compare against the stamped BGE_VERSION, so a version bump must re-run them rather than replay a cached pass (#1093). See docs/NX_CACHING.md.",
+      "inputs": [
+        "default",
+        "^production",
+        "{workspaceRoot}/jest.preset.js",
+        {
+          "externalDependencies": ["jest", "@nx/jest", "reflect-metadata", "@swc/jest"]
+        },
+        {
+          "dependentTasksOutputFiles": "**/*.ts"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "name": "@boardgamesempire/plugin-toolkit",
+  "version": "0.0.1",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "bge-plugin": "./dist/bin/bge-plugin.js"
+  },
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "@board-games-empire/backend": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "!**/*.tsbuildinfo"
+  ],
+  "dependencies": {
+    "@boardgamesempire/plugin-analysis": "^0.0.1",
+    "@boardgamesempire/plugin-manifest": "^0.0.1",
+    "semver": "^7.8.5",
+    "tar-stream": "^3.2.2",
+    "tslib": "^2.3.0",
+    "zod": "^4.6.7"
+  }
+}

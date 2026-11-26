@@ -251,6 +251,16 @@ a cached pass. Its `dependsOn` already holds `generate`. The `test` targets of
 the projects that depend on `@bge/database` do not have it yet, so a
 schema-only change still replays theirs.
 
+`plugin-toolkit` gives its `build`, `typecheck` and `test` targets the same
+entry, each on the list its plugin infers (`@nx/js` for the first two, `@nx/jest`
+for `test`), and each holds `generate` in its `dependsOn`. Its `generate` stamps
+the workspace version into the gitignored `src/lib/generated/bge-version.ts`,
+the default `bge-plugin --bge-version` (#1093). Without the entry, a version
+bump kept all three hashes: `build` restored a `dist` whose default was the old
+version, and the specs that compare against the stamped version replayed a
+cached pass. Re-derive the lists the same way after an `@nx/js` or `@nx/jest`
+upgrade.
+
 ## `@bge/database:test` hashes the TypeScript that names a permission
 
 The same `inputs` list ends with a `runtime` entry:

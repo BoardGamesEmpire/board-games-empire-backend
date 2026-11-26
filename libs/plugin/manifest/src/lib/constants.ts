@@ -2,8 +2,8 @@
  * Shared vocabulary for the plugin manifest (issue #59, Phase A).
  *
  * This lib is deliberately framework-free (zod + semver only) so the same
- * validator can be embedded in the `@bge/plugin-toolkit` author CLI (#84)
- * without dragging NestJS or the generated database client along. The
+ * validator can be embedded in the `@boardgamesempire/plugin-toolkit` author
+ * CLI (#84) without dragging NestJS or the generated database client along. The
  * `PluginCategory` / scope tuples below are therefore the manifest-side
  * source of truth; `@bge/plugin` asserts bijection with the Prisma enums in
  * a spec so the two surfaces cannot drift silently.

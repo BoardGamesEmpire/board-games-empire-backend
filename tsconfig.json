@@ -275,6 +275,9 @@
     },
     {
       "path": "./libs/plugin/analysis"
+    },
+    {
+      "path": "./libs/plugin/toolkit"
     }
   ]
 }

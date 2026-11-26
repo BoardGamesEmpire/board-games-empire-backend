@@ -1143,6 +1143,10 @@ _Avoid_: bundled plugin, built-in plugin
 The packaged, checksummed file one version of a plugin is distributed as. A server admin installs from one by link or by upload.
 _Avoid_: package, bundle
 
+**Plugin author CLI**:
+`bge-plugin`: the command a plugin author runs to check a plugin and build its plugin artifact, using the server's own checks.
+_Avoid_: toolkit on its own, SDK
+
 **Provenance**:
 Where a plugin's artifact came from: its link, checksum and registry.
 _Avoid_: provenance for who maintains a permission catalog entry (say managed by), the lifecycle history, or a revocation reason
