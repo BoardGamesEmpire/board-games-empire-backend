@@ -1,11 +1,13 @@
-import type { GameCollection, GameMedium, GameRemovalReason } from '@bge/database';
-import { DatabaseService, Prisma } from '@bge/database';
+import type { Action, GameCollection, GameMedium, GameRemovalReason } from '@bge/database';
+import { DatabaseService, isPrismaDependentRecordNotFoundError, Prisma, ResourceType } from '@bge/database';
 import type { CollectionSupplyChange } from '@bge/event';
 import { emitCollectionSupplyChanges, syncCollectionEntrySupply } from '@bge/event';
+import type { AbilityService } from '@bge/permissions';
 import { Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { GameCollectionWithRelations } from './collection-row';
 import { COLLECTION_INCLUDE, OWNED_COPY } from './collection-row';
+import { collectionEntryNotFound } from './game-collection.errors';
 
 /** A collection entry as {@link CollectionWriteService.lockEntry} holds it. */
 export interface LockedEntry {
@@ -19,6 +21,42 @@ export interface LockedEntry {
 export interface EntryWrite<T> {
   entryId: string;
   result: T;
+}
+
+/**
+ * Writes `data` to the entry, held to the actor's `action` conditions on it
+ * and to `state`, inside the write's own `where`, as `PATCH` is (#1288). A
+ * miss, whether the entry is outside the conditions or not in `state`,
+ * answers `COLLECTION_ENTRY_NOT_FOUND`, as one that doesn't exist does
+ * (#634). The entry add, the entry removal and the copy routes share it, so
+ * each holds the entry to its conditions the same way.
+ */
+export async function writeEntryUnder(
+  tx: Prisma.TransactionClient,
+  abilityService: Pick<AbilityService, 'getCurrentResourceConditions'>,
+  id: string,
+  action: Action,
+  state: Pick<Prisma.GameCollectionWhereInput, 'deletedAt'>,
+  data: Prisma.GameCollectionUncheckedUpdateInput,
+): Promise<void> {
+  try {
+    await tx.gameCollection.update({
+      where: {
+        id,
+        ...state,
+        // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
+        AND: abilityService.getCurrentResourceConditions(ResourceType.GameCollection, action),
+      },
+      data,
+      select: { id: true },
+    });
+  } catch (error) {
+    if (isPrismaDependentRecordNotFoundError(error)) {
+      throw collectionEntryNotFound(id);
+    }
+
+    throw error;
+  }
 }
 
 /**
@@ -52,13 +90,17 @@ export class CollectionWriteService {
    * one transaction. When ownership flipped, the entry's offers are synced in
    * that transaction, and the changes emitted after it commits, as
    * `actingUserId`'s. Answers what `write` answered.
+   *
+   * A copy removal passes its own `removeReason`, which the reconcile gives
+   * the entry only when the removal removes it ({@link reconcileOwnership}).
    */
   async run<T>(
     write: (tx: Prisma.TransactionClient) => Promise<EntryWrite<T>>,
     actingUserId: string | null,
     now: Date,
+    removeReason?: GameRemovalReason | null,
   ): Promise<T> {
-    return this.transact(write, async (_tx, { result }) => result, actingUserId, now);
+    return this.transact(write, async (_tx, { result }) => result, actingUserId, now, removeReason);
   }
 
   /**
@@ -115,6 +157,10 @@ export class CollectionWriteService {
    *   removal, it is the reason of the copy removed last. A copy taken back
    *   is no removal, so its reason never names the entry's.
    * - **An owned copy, the entry removed:** its removal clears.
+   * - **No owned copy, the entry removed already:** it stays removed. When the
+   *   write gives no `removeReason`, as a copy edit doesn't, the entry's
+   *   reason is read again from the copy removed last, so a corrected
+   *   removal reason on that copy reaches the entry's summary too.
    *
    * It always sets `lastUpdated`, which bumps `updatedAt`, so the
    * `updatedSince` catch-up resends the row after any write of its copies
@@ -146,6 +192,12 @@ export class CollectionWriteService {
       await this.writeEntry(tx, entryId, { deletedAt: null, deleteReason: null, lastUpdated: now });
 
       return { id: entryId, deletedAt: null };
+    }
+
+    if (owned === 0 && entry.deletedAt !== null && removeReason === undefined) {
+      await this.writeEntry(tx, entryId, { deleteReason: await this.lastRemovalReason(tx, entryId), lastUpdated: now });
+
+      return null;
     }
 
     await this.writeEntry(tx, entryId, { lastUpdated: now });

@@ -1,4 +1,4 @@
-import type { Prisma } from '@bge/database';
+import type { DatePrecision, GameCondition, Prisma } from '@bge/database';
 import { GameMedium } from '@bge/database';
 import { t } from '@bge/i18n';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
@@ -21,53 +21,123 @@ interface CopyEntry {
 }
 
 /**
+ * What a user says about a copy, adding or editing it (#1231): each field of
+ * {@link CreateCollectionCopyDto}, left out when not said, null when said to
+ * be unknown.
+ */
+export type CopyDescription = { [K in keyof CreateCollectionCopyDto]?: CreateCollectionCopyDto[K] | null };
+
+/** The columns of a copy that describe it, as {@link copyColumns} writes them (#1231). */
+export interface CopyColumns {
+  acquiredFrom: string | null;
+  acquiredOn: Date | null;
+  acquiredOnPrecision: DatePrecision | null;
+  condition: GameCondition | null;
+  currentValueAmount: number | null;
+  currentValueCurrency: string | null;
+  note: string | null;
+  pricePaidAmount: number | null;
+  pricePaidCurrency: string | null;
+  releaseId: string | null;
+}
+
+/** A copy nothing is known about (#1231). */
+const UNKNOWN_COPY: CopyColumns = {
+  acquiredFrom: null,
+  acquiredOn: null,
+  acquiredOnPrecision: null,
+  condition: null,
+  currentValueAmount: null,
+  currentValueCurrency: null,
+  note: null,
+  pricePaidAmount: null,
+  pricePaidCurrency: null,
+  releaseId: null,
+};
+
+/**
  * The columns of a new copy, from what the user said about it (#1231). A
- * field left out, or sent as null, is unknown. Refuses:
+ * field left out, or sent as null, is unknown. Refuses what
+ * {@link copyColumns} refuses.
+ */
+export async function copyCreateData(
+  tx: Prisma.TransactionClient,
+  dto: CopyDescription,
+  entry: CopyEntry,
+  now: Date,
+): Promise<Prisma.CollectionCopyUncheckedCreateWithoutEntryInput> {
+  return { ...UNKNOWN_COPY, ...(await copyColumns(tx, dto, entry, now)) };
+}
+
+/**
+ * The columns for what the user said about a copy, adding or editing it
+ * (#1231): only the fields `dto` names, so an edit leaves the rest as they
+ * are, and a field sent as null clears. Refuses:
  *
- * - a release that doesn't exist, or that belongs to another platform game;
+ * - a price in a currency ISO 4217 doesn't list (`COLLECTION_CURRENCY_UNKNOWN`);
  * - a condition on a digital copy (`COLLECTION_CONDITION_DIGITAL`);
  * - an acquisition after today, in UTC (`COLLECTION_DATE_IN_FUTURE`);
- * - a price in a currency ISO 4217 doesn't list (`COLLECTION_CURRENCY_UNKNOWN`).
+ * - a release that doesn't exist, or that belongs to another platform game.
  *
  * The acquisition date has already passed the DTO's `@IsPartialDate()`, so it
  * parses. The release is read through `tx`, in the write's transaction.
  */
-export async function copyCreateData(
+export async function copyColumns(
   tx: Prisma.TransactionClient,
-  dto: CreateCollectionCopyDto,
+  dto: CopyDescription,
   entry: CopyEntry,
   now: Date,
-): Promise<Prisma.CollectionCopyUncheckedCreateWithoutEntryInput> {
-  const releaseId = dto.releaseId ?? null;
-  const condition = dto.condition ?? null;
-  const acquired = dto.acquiredOn == null ? null : parsePartialDate(dto.acquiredOn);
-  const pricePaid = moneyOf(dto.pricePaid);
-  const currentValue = moneyOf(dto.currentValue);
+): Promise<Partial<CopyColumns>> {
+  const columns: Partial<CopyColumns> = {};
 
-  if (condition !== null && entry.medium === GameMedium.Digital) {
-    throw conditionOnDigital();
+  if (dto.pricePaid !== undefined) {
+    const pricePaid = moneyOf(dto.pricePaid);
+    columns.pricePaidAmount = pricePaid?.amount ?? null;
+    columns.pricePaidCurrency = pricePaid?.currency ?? null;
   }
 
-  if (acquired !== null) {
-    assertNotInFuture(acquired, now);
+  if (dto.currentValue !== undefined) {
+    const currentValue = moneyOf(dto.currentValue);
+    columns.currentValueAmount = currentValue?.amount ?? null;
+    columns.currentValueCurrency = currentValue?.currency ?? null;
   }
 
-  if (releaseId !== null) {
-    await assertReleaseBelongsTo(tx, releaseId, entry.platformGameId);
+  if (dto.condition !== undefined) {
+    if (dto.condition !== null && entry.medium === GameMedium.Digital) {
+      throw conditionOnDigital();
+    }
+
+    columns.condition = dto.condition;
   }
 
-  return {
-    releaseId,
-    condition,
-    acquiredOn: acquired?.on ?? null,
-    acquiredOnPrecision: acquired?.precision ?? null,
-    acquiredFrom: dto.acquiredFrom ?? null,
-    pricePaidAmount: pricePaid?.amount ?? null,
-    pricePaidCurrency: pricePaid?.currency ?? null,
-    currentValueAmount: currentValue?.amount ?? null,
-    currentValueCurrency: currentValue?.currency ?? null,
-    note: dto.note ?? null,
-  };
+  if (dto.acquiredOn !== undefined) {
+    const acquired = dto.acquiredOn === null ? null : parsePartialDate(dto.acquiredOn);
+
+    if (acquired !== null) {
+      assertNotInFuture(acquired, now);
+    }
+
+    columns.acquiredOn = acquired?.on ?? null;
+    columns.acquiredOnPrecision = acquired?.precision ?? null;
+  }
+
+  if (dto.releaseId !== undefined) {
+    if (dto.releaseId !== null) {
+      await assertReleaseBelongsTo(tx, dto.releaseId, entry.platformGameId);
+    }
+
+    columns.releaseId = dto.releaseId;
+  }
+
+  if (dto.acquiredFrom !== undefined) {
+    columns.acquiredFrom = dto.acquiredFrom;
+  }
+
+  if (dto.note !== undefined) {
+    columns.note = dto.note;
+  }
+
+  return columns;
 }
 
 /**

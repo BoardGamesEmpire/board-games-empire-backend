@@ -18,6 +18,33 @@ const PLAYERS_AND_PLAY_TIME = {
 export const OWNED_COPY: Prisma.CollectionCopyWhereInput = { removedAt: null, retractedAt: null };
 
 /**
+ * A copy as its owner reads it on the copy routes (#1231): every field that
+ * describes it, its acquisition and its removal included, and its release's
+ * name and year. When the user last edited it, and the upstream account that
+ * synced it, are never selected, so they never ship.
+ */
+export const OWNER_COPY_SELECT = {
+  id: true,
+  createdAt: true,
+  condition: true,
+  acquiredOn: true,
+  acquiredOnPrecision: true,
+  acquiredFrom: true,
+  pricePaidAmount: true,
+  pricePaidCurrency: true,
+  currentValueAmount: true,
+  currentValueCurrency: true,
+  note: true,
+  removedAt: true,
+  removedOn: true,
+  removedOnPrecision: true,
+  removeReason: true,
+  release: { select: { id: true, editionName: true, releaseYear: true } },
+} as const satisfies Prisma.CollectionCopySelect;
+
+export type OwnerCopyRow = Prisma.CollectionCopyGetPayload<{ select: typeof OWNER_COPY_SELECT }>;
+
+/**
  * What a collection row embeds, so a client can render, filter, sort and nest
  * a collection without further fetches (#1070): the platform game with its
  * overrides of players and play time and of content type (#1391), its

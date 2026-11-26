@@ -3,6 +3,7 @@ import {
   EventSchedulingMode,
   GameAdditionMode,
   GameMedium,
+  GameRemovalReason,
   NominationStatus,
   OccurrenceStatus,
   Reach,
@@ -12,7 +13,7 @@ import type { Actors, AuthenticatedActor } from '@bge/testing-e2e';
 import { createActors } from '@bge/testing-e2e';
 import request from 'supertest';
 import { arrangeCollectionEntry } from '../game-collection/game-collection-fixtures';
-import { readCollectionEnvelope } from '../game-collection/game-collection-wire';
+import { copyEnvelope, readCollectionEnvelope } from '../game-collection/game-collection-wire';
 import { requireBaseUrl } from '../support/e2e-env';
 import type { Barrier } from '../support/lock-barrier';
 import { expectLockWaiter, withBarrier } from '../support/lock-barrier';
@@ -283,6 +284,41 @@ describe('removing an offered game from the collection (#1221)', () => {
     expect(reopened.status).toBe(NominationStatus.Open);
     expect(reopened.pausedFrom).toBeNull();
     expect(voteOf(reopened, stayerAttendeeId)).toMatchObject({ voteType: VoteType.For, eligible: true });
+  });
+
+  // The copy route removes the entry with its last owned copy, through the
+  // same write runner, so the entry's offers follow as they do when the
+  // entry itself is removed (#1231, #1221).
+  it("removing the entry's last copy through the copy route pauses its nominations, as removing the entry does (#1231)", async () => {
+    const { host, owner, eventId, ownerAttendeeId, stayerAttendeeId, offered, nomination } = await arrangeEvent();
+    const { id: copyId } = await db.client.collectionCopy.findFirstOrThrow({
+      where: { entryId: offered.collectionId },
+      select: { id: true },
+    });
+
+    const removedCopy = copyEnvelope(
+      await request(baseUrl)
+        .delete(`${COLLECTIONS_PATH}/${offered.collectionId}/copies/${copyId}`)
+        .query({ reason: GameRemovalReason.Sold })
+        .set(owner.headers)
+        .expect(200),
+      'DELETE /api/game-collections/:id/copies/:copyId as the owner',
+    );
+    expect(removedCopy).toMatchObject({ id: copyId, removedAt: expect.any(String) });
+
+    const paused = await readNomination(host, eventId, nomination.id);
+    expect(paused.status).toBe(NominationStatus.Paused);
+    expect(paused.pausedFrom).toBe(NominationStatus.Open);
+    expect(voteOf(paused, stayerAttendeeId)).toMatchObject({ voteType: VoteType.For, eligible: true });
+    expect((await offerReads(host, eventId, ownerAttendeeId)).event.ids).not.toContain(offered.suppliedById);
+
+    // Adding a copy back acquires the entry again, and reopens the nomination.
+    await request(baseUrl)
+      .post(`${COLLECTIONS_PATH}/${offered.collectionId}/copies`)
+      .set(owner.headers)
+      .send({})
+      .expect(201);
+    expect((await readNomination(host, eventId, nomination.id)).status).toBe(NominationStatus.Open);
   });
 
   it('takes the game off the lineup still ahead and keeps it off after the add-back (#1221)', async () => {

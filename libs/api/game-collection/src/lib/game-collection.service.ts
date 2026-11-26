@@ -18,7 +18,7 @@ import { BadRequestException, HttpException, Injectable, Logger, NotFoundExcepti
 import { assertCopyRoom, copyCreateData } from './collection-copy-data';
 import type { GameCollectionRow, GameCollectionWithRelations } from './collection-row';
 import { changedSince, COLLECTION_INCLUDE, OWNED_COPY } from './collection-row';
-import { CollectionWriteService } from './collection-write.service';
+import { CollectionWriteService, writeEntryUnder } from './collection-write.service';
 import {
   CreateGameCollectionDto,
   GameCollectionDto,
@@ -28,14 +28,7 @@ import {
   UpdateGameCollectionDto,
 } from './dto';
 import { collectionEntryNotFound } from './game-collection.errors';
-import type { PartialDate } from './values/partial-date';
-import {
-  assertNotInFuture,
-  assertRemovalAfterAcquisition,
-  parsePartialDate,
-  partialDateFromColumns,
-  todayUtc,
-} from './values/partial-date';
+import { assertRemovalAfterAcquisition, partialDateFromColumns, removalDate } from './values/partial-date';
 
 /**
  * The unique that keeps a user to one entry per platform game and medium, in
@@ -58,18 +51,6 @@ function isEntryIdentityViolation(error: unknown): boolean {
   const identity = constraintIdentity(error);
 
   return identity.source === 'unknown' || identifiesConstraint(identity, ...ENTRY_IDENTITY_SPELLINGS);
-}
-
-/**
- * The date a removal records (#1231): `removedOn` as the user gave it, which
- * the DTO's `@IsPartialDate()` has already passed, or today in UTC when they
- * gave none. A date after today is refused.
- */
-function removalDate(removedOn: string | undefined, now: Date): PartialDate {
-  const removal = (removedOn === undefined ? null : parsePartialDate(removedOn)) ?? todayUtc(now);
-  assertNotInFuture(removal, now);
-
-  return removal;
 }
 
 /**
@@ -326,7 +307,14 @@ export class GameCollectionService {
             ...identity,
             deletedAt: locked.deletedAt,
           });
-          await this.writeEntryUnder(tx, locked.id, Action.update, {}, { ...provided, lastUpdated: now });
+          await writeEntryUnder(
+            tx,
+            this.abilityService,
+            locked.id,
+            Action.update,
+            {},
+            { ...provided, lastUpdated: now },
+          );
 
           if (locked.deletedAt !== null) {
             await assertCopyRoom(tx, locked.id);
@@ -413,7 +401,14 @@ export class GameCollectionService {
               throw collectionEntryNotFound(id);
             }
 
-            await this.writeEntryUnder(tx, id, Action.delete, { deletedAt: null }, { lastUpdated: now });
+            await writeEntryUnder(
+              tx,
+              this.abilityService,
+              id,
+              Action.delete,
+              { deletedAt: null },
+              { lastUpdated: now },
+            );
 
             const owned = await tx.collectionCopy.findMany({
               where: { entryId: id, ...OWNED_COPY },
@@ -441,40 +436,6 @@ export class GameCollectionService {
         ),
       (error) => this.unexpected(error, `Error removing collection entry ${id}`),
     );
-  }
-
-  /**
-   * Writes `data` to the entry, held to the actor's `action` conditions on it
-   * and to `state`, inside the write's own `where`, as `PATCH` is (#1288). A
-   * miss, whether the entry is outside the conditions or not in `state`,
-   * answers `COLLECTION_ENTRY_NOT_FOUND`, as one that doesn't exist does
-   * (#634).
-   */
-  private async writeEntryUnder(
-    tx: Prisma.TransactionClient,
-    id: string,
-    action: Action,
-    state: Pick<Prisma.GameCollectionWhereInput, 'deletedAt'>,
-    data: Prisma.GameCollectionUncheckedUpdateInput,
-  ): Promise<void> {
-    try {
-      await tx.gameCollection.update({
-        where: {
-          id,
-          ...state,
-          // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
-          AND: this.abilityService.getCurrentResourceConditions(ResourceType.GameCollection, action),
-        },
-        data,
-        select: { id: true },
-      });
-    } catch (error) {
-      if (isPrismaDependentRecordNotFoundError(error)) {
-        throw collectionEntryNotFound(id);
-      }
-
-      throw error;
-    }
   }
 
   /**

@@ -128,3 +128,15 @@ export function assertRemovalAfterAcquisition(acquired: PartialDate | null, remo
     throw dateOrder();
   }
 }
+
+/**
+ * The date a removal records (#1231): `removedOn` as the user gave it, which
+ * the DTO's `@IsPartialDate()` has already passed, or today in UTC when they
+ * gave none. A date after today is refused.
+ */
+export function removalDate(removedOn: string | undefined, now: Date): PartialDate {
+  const removal = (removedOn === undefined ? null : parsePartialDate(removedOn)) ?? todayUtc(now);
+  assertNotInFuture(removal, now);
+
+  return removal;
+}

@@ -3,7 +3,7 @@ import { DatePrecision, GameCondition, GameMedium } from '@bge/database';
 import type { MockDatabaseService } from '@bge/testing';
 import { createMockDatabaseService } from '@bge/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { assertCopyRoom, COLLECTION_COPY_LIMIT, copyCreateData } from './collection-copy-data';
+import { assertCopyRoom, COLLECTION_COPY_LIMIT, copyColumns, copyCreateData } from './collection-copy-data';
 
 const asTx = (mock: MockDatabaseService): Prisma.TransactionClient => mock as unknown as Prisma.TransactionClient;
 
@@ -142,6 +142,71 @@ describe('copyCreateData (#1231)', () => {
     tx.gameRelease.findUnique.mockResolvedValue(null);
 
     await expect(copyCreateData(asTx(tx), { releaseId: 'rel-404' }, PHYSICAL, NOW)).rejects.toThrow(NotFoundException);
+  });
+});
+
+// An edit of a copy writes only what it names, under the same refusals as
+// an add (#1231).
+describe('copyColumns (#1231)', () => {
+  let tx: MockDatabaseService;
+
+  beforeEach(() => {
+    tx = createMockDatabaseService();
+    tx.gameRelease.findUnique.mockResolvedValue({ platformGameId: 'pg-1' } as GameRelease);
+  });
+
+  it('writes only the fields given, so an edit leaves the rest as they are', async () => {
+    await expect(copyColumns(asTx(tx), { note: 'Sleeved', acquiredOn: '2019' }, PHYSICAL, NOW)).resolves.toEqual({
+      acquiredOn: new Date('2019-01-01T00:00:00Z'),
+      acquiredOnPrecision: DatePrecision.Year,
+      note: 'Sleeved',
+    });
+  });
+
+  it('clears each field sent as null, a price by both its columns, and reads no release', async () => {
+    await expect(
+      copyColumns(
+        asTx(tx),
+        { releaseId: null, condition: null, acquiredOn: null, pricePaid: null, acquiredFrom: null },
+        PHYSICAL,
+        NOW,
+      ),
+    ).resolves.toEqual({
+      acquiredFrom: null,
+      acquiredOn: null,
+      acquiredOnPrecision: null,
+      condition: null,
+      pricePaidAmount: null,
+      pricePaidCurrency: null,
+      releaseId: null,
+    });
+    expect(tx.gameRelease.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('writes nothing for an empty edit', async () => {
+    await expect(copyColumns(asTx(tx), {}, PHYSICAL, NOW)).resolves.toEqual({});
+  });
+
+  it('refuses a condition on a digital copy, and takes clearing it', async () => {
+    await expect(copyColumns(asTx(tx), { condition: GameCondition.Good }, DIGITAL, NOW)).rejects.toMatchObject({
+      code: 'COLLECTION_CONDITION_DIGITAL',
+    });
+    await expect(copyColumns(asTx(tx), { condition: null }, DIGITAL, NOW)).resolves.toEqual({ condition: null });
+  });
+
+  it('refuses an acquisition after today, and an unknown currency', async () => {
+    await expect(copyColumns(asTx(tx), { acquiredOn: '2026-11-27' }, PHYSICAL, NOW)).rejects.toMatchObject({
+      code: 'COLLECTION_DATE_IN_FUTURE',
+    });
+    await expect(
+      copyColumns(asTx(tx), { currentValue: { amount: 1, currency: 'XYZ' } }, PHYSICAL, NOW),
+    ).rejects.toMatchObject({ code: 'COLLECTION_CURRENCY_UNKNOWN' });
+  });
+
+  it('refuses a release of another platform game', async () => {
+    tx.gameRelease.findUnique.mockResolvedValue({ platformGameId: 'pg-2' } as GameRelease);
+
+    await expect(copyColumns(asTx(tx), { releaseId: 'rel-2' }, PHYSICAL, NOW)).rejects.toThrow(BadRequestException);
   });
 });
 

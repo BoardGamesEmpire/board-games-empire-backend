@@ -1,4 +1,6 @@
 import type { Game, GameCollection, Platform, PlatformGame } from '@bge/database';
+import { GameCondition, GameRemovalReason } from '@bge/database';
+import { z } from 'zod';
 import type { ExpansionLinkWire } from '../game/game-wire';
 import type { HttpResponseLike, RequestDescription, Wire } from '../support/wire';
 import { envelopeFailure, isRecord } from '../support/wire';
@@ -139,4 +141,65 @@ export function readCollectionEnvelope(
   }
 
   return { collection };
+}
+
+/** A price on the wire: whole minor units and an ISO 4217 code (#1231). */
+const moneyWireSchema = z.object({ amount: z.number().int(), currency: z.string() }).strict();
+
+/**
+ * A copy as its owner reads it (#1231). Strict, so a field the owner's shape
+ * doesn't name, such as when the user last edited it or its upstream
+ * account, fails the parse rather than passing unread.
+ */
+export const collectionCopyWireSchema = z
+  .object({
+    acquiredFrom: z.string().nullable(),
+    acquiredOn: z.string().nullable(),
+    condition: z.enum(GameCondition).nullable(),
+    createdAt: z.string(),
+    currentValue: moneyWireSchema.nullable(),
+    id: z.string().min(1),
+    note: z.string().nullable(),
+    pricePaid: moneyWireSchema.nullable(),
+    release: z
+      .object({ editionName: z.string().nullable(), id: z.string().min(1), releaseYear: z.number().nullable() })
+      .strict()
+      .nullable(),
+    removedAt: z.string().nullable(),
+    removedOn: z.string().nullable(),
+    removeReason: z.enum(GameRemovalReason).nullable(),
+  })
+  .strict();
+
+export type CollectionCopyWire = z.infer<typeof collectionCopyWireSchema>;
+
+const copyEnvelopeSchema = z.object({ copy: collectionCopyWireSchema });
+
+const listCopiesEnvelopeSchema = z.object({ copies: z.array(collectionCopyWireSchema) });
+
+/** `POST`, `PATCH` and `DELETE` on `/api/game-collections/:id/copies`: `{ copy, message }` (#1231). */
+export function copyEnvelope(response: HttpResponseLike, request: RequestDescription): CollectionCopyWire {
+  const parsed = copyEnvelopeSchema.safeParse(response.body);
+  if (!parsed.success) {
+    return fail(`its 'copy' is not a copy as its owner reads it (${parsed.error.message})`, request, response);
+  }
+
+  return parsed.data.copy;
+}
+
+/** `GET /api/game-collections/:id/copies`: `{ copies: [...] }` (#1231). */
+export function listCopiesEnvelope(
+  response: HttpResponseLike,
+  request: RequestDescription,
+): readonly CollectionCopyWire[] {
+  const parsed = listCopiesEnvelopeSchema.safeParse(response.body);
+  if (!parsed.success) {
+    return fail(
+      `its 'copies' is not a list of copies as their owner reads them (${parsed.error.message})`,
+      request,
+      response,
+    );
+  }
+
+  return parsed.data.copies;
 }

@@ -137,11 +137,8 @@ describe('CollectionWriteService', () => {
     // Every write through the runner bumps the entry's `lastUpdated`, and so
     // its `updatedAt`, so the `updatedSince` catch-up resends the row when a
     // copy changes, though ownership did not flip.
-    it.each([
-      ['a live entry that owns a copy', null, 2],
-      ['a removed entry that owns none', REMOVED_AT, 0],
-    ])('answers null for %s, and still bumps lastUpdated', async (_, deletedAt, owned) => {
-      db.gameCollection.findUniqueOrThrow.mockResolvedValue(entryState(deletedAt, owned) as never);
+    it('answers null for a live entry that owns a copy, and still bumps lastUpdated', async () => {
+      db.gameCollection.findUniqueOrThrow.mockResolvedValue(entryState(null, 2) as never);
 
       await expect(service.reconcileOwnership(asTx(db), 'gc-1', NOW)).resolves.toBeNull();
 
@@ -150,6 +147,32 @@ describe('CollectionWriteService', () => {
         data: { lastUpdated: NOW },
         select: { id: true },
       });
+    });
+
+    // The entry's reason is a summary of its copies, so a corrected reason on
+    // the copy removed last reaches it, though the entry doesn't flip (#1231).
+    it("reads a removed entry's reason again from the copy removed last, and answers null", async () => {
+      db.gameCollection.findUniqueOrThrow.mockResolvedValue(entryState(REMOVED_AT, 0) as never);
+      db.collectionCopy.findFirst.mockResolvedValue({ removeReason: GameRemovalReason.Stolen } as never);
+
+      await expect(service.reconcileOwnership(asTx(db), 'gc-1', NOW)).resolves.toBeNull();
+
+      expect(db.gameCollection.update).toHaveBeenCalledWith({
+        where: { id: 'gc-1' },
+        data: { deleteReason: GameRemovalReason.Stolen, lastUpdated: NOW },
+        select: { id: true },
+      });
+    });
+
+    // A reason the write gives is read only on a flip, so it never rewrites
+    // the reason of an entry that was removed already (#1231).
+    it("leaves a removed entry's reason alone when the write gives one, and reads no copy", async () => {
+      db.gameCollection.findUniqueOrThrow.mockResolvedValue(entryState(REMOVED_AT, 0) as never);
+
+      await expect(service.reconcileOwnership(asTx(db), 'gc-1', NOW, GameRemovalReason.Sold)).resolves.toBeNull();
+
+      expect(db.gameCollection.update.mock.calls[0]?.[0]?.data).toEqual({ lastUpdated: NOW });
+      expect(db.collectionCopy.findFirst).not.toHaveBeenCalled();
     });
   });
 
@@ -276,6 +299,21 @@ describe('CollectionWriteService', () => {
         where: { id: 'gc-1' },
         include: COLLECTION_INCLUDE,
       });
+    });
+
+    // A copy removal names its own reason, so a removal stamped later by a
+    // racing request can't lend the entry another (#1231).
+    it("run hands the reconcile the copy removal's reason (#1231)", async () => {
+      db.gameCollection.findUniqueOrThrow.mockResolvedValue(entryState(null, 0) as never);
+      db.collectionCopy.findFirst.mockResolvedValue({ removeReason: GameRemovalReason.Traded } as never);
+
+      await service.run(async () => ({ entryId: 'gc-1', result: null }), 'user-1', NOW, GameRemovalReason.Lost);
+
+      expect(db.gameCollection.update.mock.calls[0]?.[0]?.data).toMatchObject({
+        deletedAt: NOW,
+        deleteReason: GameRemovalReason.Lost,
+      });
+      expect(db.collectionCopy.findFirst).not.toHaveBeenCalled();
     });
 
     it("hands the reconcile the entry removal's reason (#1231)", async () => {
