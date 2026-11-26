@@ -1,0 +1,18 @@
+// One earlier version of a rating change, kept each time the entry's owner
+// corrects it (#1231). `values` holds the change's fields as they were before
+// the correction. The history is the entry owner's alone, and goes with the
+// rating change.
+model CollectionRatingRevision {
+  id String @id @default(cuid(2))
+
+  ratingChange   CollectionRatingChange @relation(fields: [ratingChangeId], references: [id], onDelete: Cascade)
+  ratingChangeId String                 @map("rating_change_id")
+
+  // The rating change's values before the correction.
+  values Json
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([ratingChangeId, createdAt])
+  @@map("collection_rating_revisions")
+}

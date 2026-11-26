@@ -1,0 +1,17 @@
+// One earlier version of a copy, kept each time the entry's owner corrects it
+// (#1231). `values` holds the copy's fields as they were before the
+// correction. The history is the entry owner's alone, and goes with the copy.
+model CollectionCopyRevision {
+  id String @id @default(cuid(2))
+
+  copy   CollectionCopy @relation(fields: [copyId], references: [id], onDelete: Cascade)
+  copyId String         @map("copy_id")
+
+  // The copy's values before the correction.
+  values Json
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([copyId, createdAt])
+  @@map("collection_copy_revisions")
+}
