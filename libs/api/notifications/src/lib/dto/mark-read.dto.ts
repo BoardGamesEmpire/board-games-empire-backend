@@ -1,15 +1,12 @@
 import { i18nValidationMessage } from '@bge/i18n';
 import { ApiProperty } from '@nestjs/swagger';
-import { IsArray, IsNotEmpty, IsString } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsString } from 'class-validator';
+import { MAX_UNREAD_NOTIFICATIONS } from '../notifications.constants';
 
 export class MarkReadDto {
-  @ApiProperty()
-  @IsString({ message: i18nValidationMessage('validation.isString') })
-  @IsNotEmpty({ message: i18nValidationMessage('validation.isNotEmpty') })
-  userId!: string;
-
-  @ApiProperty({ type: [String] })
+  @ApiProperty({ type: [String], maxItems: MAX_UNREAD_NOTIFICATIONS })
   @IsArray({ message: i18nValidationMessage('validation.isArray') })
+  @ArrayMaxSize(MAX_UNREAD_NOTIFICATIONS, { message: i18nValidationMessage('validation.arrayMaxSize') })
   @IsString({ each: true, message: i18nValidationMessage('validation.each.isString') })
   notificationIds!: string[];
 }

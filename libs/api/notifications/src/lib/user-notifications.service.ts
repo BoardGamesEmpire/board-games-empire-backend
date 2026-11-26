@@ -2,15 +2,7 @@ import { Action, DatabaseService, ResourceType } from '@bge/database';
 import type { NotificationPayload, UnreadNotificationDto } from '@bge/notifications-service';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
 import { Injectable, Logger } from '@nestjs/common';
-
-/**
- * Upper bound on rows returned by {@link UserNotificationsService.getUnread}.
- * The endpoint is unpaginated and polled, and there is no unread-pruning, so a
- * dormant account can accumulate thousands of unread rows; without a cap every
- * poll would fetch all of them. 100 most-recent is plenty for a notification
- * tray.
- */
-const MAX_UNREAD_NOTIFICATIONS = 100;
+import { MAX_UNREAD_NOTIFICATIONS } from './notifications.constants';
 
 /**
  * One user's own notifications: the unread list and marking them read.

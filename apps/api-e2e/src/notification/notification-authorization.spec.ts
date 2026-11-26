@@ -105,11 +105,24 @@ describe('notification authorization', () => {
     await request(baseUrl)
       .post(MARK_READ_PATH)
       .set(reader.headers)
-      .send({ userId: reader.user.id, notificationIds: [marked] })
-      .expect(201);
+      .send({ notificationIds: [marked] })
+      .expect(200);
 
     await expect(isRead(marked)).resolves.toBe(true);
     await expect(unreadIds(reader)).resolves.toEqual([kept]);
+  });
+
+  it('refuses a body that names a userId, which the route never read (#584)', async () => {
+    const reader = await actors.user();
+    const unread = await notify(reader);
+
+    await request(baseUrl)
+      .post(MARK_READ_PATH)
+      .set(reader.headers)
+      .send({ userId: reader.user.id, notificationIds: [unread] })
+      .expect(400);
+
+    await expect(isRead(unread)).resolves.toBe(false);
   });
 
   it('mark-read leaves readAt alone on a notification already read (#903)', async () => {
@@ -121,8 +134,8 @@ describe('notification authorization', () => {
     await request(baseUrl)
       .post(MARK_READ_PATH)
       .set(reader.headers)
-      .send({ userId: reader.user.id, notificationIds: [alreadyRead, unread] })
-      .expect(201);
+      .send({ notificationIds: [alreadyRead, unread] })
+      .expect(200);
 
     const readAt = async (id: string) =>
       (await db.client.notification.findUniqueOrThrow({ where: { id }, select: { readAt: true } })).readAt;
@@ -138,25 +151,24 @@ describe('notification authorization', () => {
 
     await expect(unreadIds(reader)).resolves.toHaveLength(2);
 
-    await request(baseUrl).post(MARK_ALL_READ_PATH).set(reader.headers).expect(201);
+    await request(baseUrl).post(MARK_ALL_READ_PATH).set(reader.headers).expect(200);
 
     await expect(unreadIds(reader)).resolves.toEqual([]);
     await expect(isRead(theirs)).resolves.toBe(false);
   });
 
-  it("does not let a user mark another user's notification read, even naming that user in the body", async () => {
-    // The body's `userId` is required by the DTO and ignored by the route,
-    // which marks by the session's user. Naming the owner is the strongest
-    // form of the attempt, and it still reaches nothing: the update matches
-    // no row, so the answer is the same 201 an empty mark gets.
+  it("does not let a user mark another user's notification read by naming its id (#584)", async () => {
+    // The body names no user: the route marks the acting user's own, so an
+    // actor can only name ids. Another user's id reaches no row, so the
+    // answer is the same 200 an empty mark gets.
     const [owner, other] = await Promise.all([actors.user(), actors.user()]);
     const target = await notify(owner);
 
     await request(baseUrl)
       .post(MARK_READ_PATH)
       .set(other.headers)
-      .send({ userId: owner.user.id, notificationIds: [target] })
-      .expect(201);
+      .send({ notificationIds: [target] })
+      .expect(200);
 
     await expect(isRead(target)).resolves.toBe(false);
     await expect(unreadIds(owner)).resolves.toEqual([target]);
@@ -199,8 +211,8 @@ describe('notification authorization', () => {
       await request(baseUrl)
         .post(MARK_READ_PATH)
         .set((await updateKey(owner, scoped)).headers)
-        .send({ userId: owner.user.id, notificationIds: [scoped, other] })
-        .expect(201);
+        .send({ notificationIds: [scoped, other] })
+        .expect(200);
 
       await expect(isRead(scoped)).resolves.toBe(true);
       await expect(isRead(other)).resolves.toBe(false);
@@ -214,7 +226,7 @@ describe('notification authorization', () => {
       await request(baseUrl)
         .post(MARK_ALL_READ_PATH)
         .set((await updateKey(owner, scoped)).headers)
-        .expect(201);
+        .expect(200);
 
       await expect(isRead(scoped)).resolves.toBe(true);
       await expect(isRead(other)).resolves.toBe(false);
