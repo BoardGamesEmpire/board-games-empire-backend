@@ -133,6 +133,23 @@ describe('SafeHttpPolicyService', () => {
       expect(snapshot.allowedCidrs).toEqual(['10.0.0.0/8', '192.168.0.0/16']);
       expect(snapshot.blockedCidrs).toEqual(['203.0.113.0/24']);
     });
+
+    // #1525: an entry with an IPv6 zone ID was applied as if the zone weren't
+    // there; the loader drops it, as it drops any entry the admin DTO refuses.
+    it('drops entries with an IPv6 zone ID instead of applying them without it', async () => {
+      db.safeHttpPolicy.findUnique.mockResolvedValue(
+        buildRow({
+          allowedCidrs: ['10.0.0.0/8', 'fe80::1%eth0/64'],
+          blockedCidrs: ['203.0.113.0/24', 'fe80::1/64%eth0'],
+        }),
+      );
+
+      await service.onModuleInit();
+      const snapshot = service.current();
+
+      expect(snapshot.allowedCidrs).toEqual(['10.0.0.0/8']);
+      expect(snapshot.blockedCidrs).toEqual(['203.0.113.0/24']);
+    });
   });
 
   describe('hot reload', () => {

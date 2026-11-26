@@ -76,6 +76,9 @@ describe("the api's operational port config (#1511)", () => {
     'fc00::/129',
     '10.0.0.0/8x',
     '10.0.0.0/2 4',
+    // An IPv6 zone ID names an interface, which the rule can't match on (#1525).
+    'fe80::1%eth0/64',
+    'fe80::1/64%eth0',
   ])('rejects an OPERATIONAL_SOURCES of %p, naming the variable', (sources) => {
     expect(validate({ OPERATIONAL_SOURCES: sources }).error?.message).toMatch(/OPERATIONAL_SOURCES/);
   });
