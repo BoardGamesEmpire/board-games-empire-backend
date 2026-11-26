@@ -64,6 +64,15 @@ describe('IsCidrConstraint', () => {
       '10.0.0.0/-1', // negative prefix
       '10.0.0.0/abc', // non-integer prefix
       'not-an-ip/8', // bad address
+      // #1519: junk after the prefix digits was read as the digits alone
+      '10.0.0.0/8abc',
+      '10.0.0.0/ 8',
+      '10.0.0.0/8.5',
+      '10.0.0.0/0x10', // was read as /0, every IPv4 address
+      '10.0.0.0/8/9',
+      'fc00::/7x',
+      '10.0.0.0/00', // a leading zero: would be read as /0
+      '10.0.0.0/08',
       '',
     ])('rejects %s', (input) => {
       expect(c.validate(input)).toBe(false);

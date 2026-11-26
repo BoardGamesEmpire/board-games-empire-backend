@@ -17,9 +17,6 @@ export const DEFAULT_OPERATIONAL_PORT = 33334;
 
 const splitList = (value: string): string[] => value.split(',').map((entry) => entry.trim());
 
-/** An address, a slash, and a prefix of one to three digits and nothing else. */
-const CIDR_SHAPE = /^[^/]+\/\d{1,3}$/;
-
 /**
  * The operational port and the networks that may reach it (#1511). Both
  * defaults are applied here and not in the Joi schema: a Joi default is written
@@ -52,14 +49,14 @@ export default registerAs('operational', () =>
  * bare address is refused as `parseCidr` refuses it, for want of a prefix.
  * Both variables accept `''`, which `@bge/env` reads as unset.
  *
- * `parseCidr` reads the prefix with `parseInt`, so `/8x` would pass as /8 and
- * `/2 4` as /2, silently widening the range (#1511); the prefix must be digits.
+ * `parseCidr` refuses a prefix that isn't a plain decimal number (#1519), so
+ * `/8x` and `/2 4` are refused here, not read as /8 and /2 (#1511).
  */
 export const operationalConfigValidationSchema = {
   OPERATIONAL_PORT: Joi.number().port().allow(''),
   OPERATIONAL_SOURCES: Joi.string()
     .custom((value: string, helpers) => {
-      const unreadable = splitList(value).filter((entry) => !CIDR_SHAPE.test(entry) || parseCidr(entry) === null);
+      const unreadable = splitList(value).filter((entry) => parseCidr(entry) === null);
 
       // The entries go in as context, not into the template, so a `{` in one stays text.
       return unreadable.length === 0
