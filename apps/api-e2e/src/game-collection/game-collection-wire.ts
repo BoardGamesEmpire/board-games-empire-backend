@@ -253,3 +253,38 @@ export function listCopiesEnvelope(
 
   return parsed.data.copies;
 }
+
+/**
+ * A change of an entry's rating as its owner reads it (#1231). Strict, so a
+ * field the owner's shape doesn't name, such as its upstream account, fails
+ * the parse rather than passing unread.
+ */
+export const ratingChangeWireSchema = z
+  .object({
+    createdAt: z.string(),
+    id: z.string().min(1),
+    occurredOn: z.string().nullable(),
+    rating: z.number().int().nullable(),
+  })
+  .strict();
+
+export type RatingChangeWire = z.infer<typeof ratingChangeWireSchema>;
+
+const listRatingsEnvelopeSchema = z.object({ ratings: z.array(ratingChangeWireSchema) });
+
+/** `GET /api/game-collections/:id/ratings`: `{ ratings: [...] }` (#1231). */
+export function listRatingsEnvelope(
+  response: HttpResponseLike,
+  request: RequestDescription,
+): readonly RatingChangeWire[] {
+  const parsed = listRatingsEnvelopeSchema.safeParse(response.body);
+  if (!parsed.success) {
+    return fail(
+      `its 'ratings' is not a list of rating changes as their owner reads them (${parsed.error.message})`,
+      request,
+      response,
+    );
+  }
+
+  return parsed.data.ratings;
+}

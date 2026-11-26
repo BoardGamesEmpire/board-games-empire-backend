@@ -1,4 +1,5 @@
 export * from './collection-copy.dto';
+export * from './collection-rating-change.dto';
 export * from './create-collection-copy.dto';
 export * from './create-game-collection.dto';
 export * from './game-collection.dto';

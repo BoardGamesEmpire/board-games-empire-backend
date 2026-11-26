@@ -3,7 +3,6 @@ import {
   constraintIdentity,
   DatabaseService,
   identifiesConstraint,
-  isPrismaDependentRecordNotFoundError,
   isPrismaForeignKeyConstraintError,
   ListKind,
   Prisma,
@@ -16,6 +15,7 @@ import { AbilityService, resolveActingUserIdOrNull, resolveScopeSubjectId, Scope
 import { PaginatedRows, PaginationQueryDto, pickDefined } from '@bge/shared';
 import { BadRequestException, HttpException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { assertCopyRoom, copyCreateData } from './collection-copy-data';
+import { appendRatingChange } from './collection-rating.service';
 import type { GameCollectionRow, GameCollectionWithRelations } from './collection-row';
 import { changedSince, COLLECTION_INCLUDE, OWNED_COPY, readOwnerCopies } from './collection-row';
 import { CollectionWriteService, writeEntryUnder } from './collection-write.service';
@@ -296,6 +296,11 @@ export class GameCollectionService {
    * entry's unique key, and the whole transaction runs once more, finding the
    * entry the other made.
    *
+   * A rating the add carries is a change of the entry's rating, kept in the
+   * history dated today: the first one for a new entry, and one for an
+   * existing entry only when it differs from the rating the locked row holds,
+   * so a replayed add appends nothing (#1231).
+   *
    * The platform game is read without a lock, so it can go before the insert
    * commits; the insert's foreign key then fails, and answers the same 404 as
    * a platform game that was never there.
@@ -320,8 +325,10 @@ export class GameCollectionService {
     const acquire = () =>
       this.writes.runForRow(
         async (tx) => {
-          const [locked] = await tx.$queryRaw<{ deletedAt: Date | null; id: string }[]>(Prisma.sql`
-            SELECT id, deleted_at AS "deletedAt"
+          const [locked] = await tx.$queryRaw<
+            { deletedAt: Date | null; id: string; rating: number | null }[]
+          >(Prisma.sql`
+            SELECT id, deleted_at AS "deletedAt", rating
             FROM game_collections
             WHERE user_id = ${userId} AND platform_game_id = ${platformGameId} AND medium = ${medium}::game_mediums
             FOR UPDATE
@@ -331,13 +338,13 @@ export class GameCollectionService {
             this.abilityService.assertCurrentActorCan(Action.create, ResourceType.GameCollection, identity);
 
             const copyData = await copyCreateData(tx, described, identity, now);
+            let createdId: string;
             try {
               const created = await tx.gameCollection.create({
                 data: { ...identity, ...provided, lastUpdated: now, copies: { create: copyData } },
                 select: { id: true },
               });
-
-              return created.id;
+              createdId = created.id;
             } catch (error) {
               if (isPrismaForeignKeyConstraintError(error)) {
                 throw new NotFoundException(t('errors.platform_game.not_found', { id: platformGameId }));
@@ -345,6 +352,14 @@ export class GameCollectionService {
 
               throw error;
             }
+
+            // A null rating is no rating: an entry that never had one has
+            // nothing to clear, so its history starts empty (#1231).
+            if (provided.rating !== undefined && provided.rating !== null) {
+              await appendRatingChange(tx, createdId, provided.rating, now);
+            }
+
+            return createdId;
           }
 
           this.abilityService.assertCurrentActorCan(Action.update, ResourceType.GameCollection, {
@@ -360,6 +375,10 @@ export class GameCollectionService {
             {},
             { ...provided, lastUpdated: now },
           );
+
+          if (provided.rating !== undefined && provided.rating !== locked.rating) {
+            await appendRatingChange(tx, locked.id, provided.rating, now);
+          }
 
           if (locked.deletedAt !== null) {
             await assertCopyRoom(tx, locked.id);
@@ -387,6 +406,17 @@ export class GameCollectionService {
    * (`platformGameId`/`medium`) and play history (`playCount`/`lastPlayed`)
    * are not writable here, and neither are the copies' edition and count
    * (#1231).
+   *
+   * A rating that differs from the entry's current one is a change of the
+   * rating, kept in its history dated today, clearing it included. The
+   * current rating is read under the entry's lock, the transaction's first
+   * statement, so two patches can't both compare against the old rating and
+   * append twice (#1231). The entry is then written under the update
+   * conditions, as ever; a miss answers `COLLECTION_ENTRY_NOT_FOUND` and the
+   * transaction keeps nothing.
+   *
+   * The patch changes no copy, so it needs no reconcile, supply sync or emit
+   * (#1221): a plain transaction, not the write runner.
    */
   async update(id: string, dto: UpdateGameCollectionDto): Promise<GameCollectionDto> {
     const data = pickDefined(dto);
@@ -394,18 +424,29 @@ export class GameCollectionService {
       throw new BadRequestException(t('common.at_least_one_field'));
     }
 
+    const now = new Date();
+
     return this.writtenRow(
       () =>
-        this.db.gameCollection.update({
-          where: {
-            id,
-            // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
-            AND: this.abilityService.getCurrentResourceConditions(ResourceType.GameCollection, Action.update),
-          },
-          data: { ...data, lastUpdated: new Date() },
-          include: COLLECTION_INCLUDE,
+        this.db.$transaction(async (tx) => {
+          if ((await this.writes.lockEntry(tx, id)) === null) {
+            throw collectionEntryNotFound(id);
+          }
+
+          const current =
+            data.rating === undefined
+              ? null
+              : await tx.gameCollection.findUniqueOrThrow({ where: { id }, select: { rating: true } });
+
+          await writeEntryUnder(tx, this.abilityService, id, Action.update, {}, { ...data, lastUpdated: now });
+
+          if (current !== null && data.rating !== undefined && data.rating !== current.rating) {
+            await appendRatingChange(tx, id, data.rating, now);
+          }
+
+          return tx.gameCollection.findUniqueOrThrow({ where: { id }, include: COLLECTION_INCLUDE });
         }),
-      (error) => this.mapMissingToNotFound(error, id),
+      (error) => this.unexpected(error, `Error updating collection entry ${id}`),
     );
   }
 
@@ -413,7 +454,8 @@ export class GameCollectionService {
    * Remove a game from the collection: "I no longer own this", not "never
    * played" (#1231). Each copy the user still owns is removed, dated
    * `removedOn`, or today in UTC when the user gives no date, with the
-   * reason; copies already removed or taken back keep what they have. The
+   * reason, and stamped as edited by the user so a sync never undoes it;
+   * copies already removed or taken back keep what they have. The
    * write runner then removes the entry with its last owned copy, with that
    * reason. The entry stays, so play history and the rows that name it
    * (locations, offers) survive, and adding the game again brings it back.
@@ -470,6 +512,7 @@ export class GameCollectionService {
                 removedOn: removal.on,
                 removedOnPrecision: removal.precision,
                 removeReason: reason ?? null,
+                editedByUserAt: now,
               },
             });
 
@@ -577,19 +620,5 @@ export class GameCollectionService {
     }
 
     return this.rowWithOwnerCopies(await this.rowWithBaseGames(row));
-  }
-
-  /**
-   * The update's scoped `where` matched no row: missing, or outside the
-   * actor's CASL scope. Both collapse to 404 so foreign rows are
-   * indistinguishable from absent ones (mirrors FriendshipService).
-   */
-  private mapMissingToNotFound(error: unknown, id: string) {
-    if (isPrismaDependentRecordNotFoundError(error)) {
-      return collectionEntryNotFound(id);
-    }
-
-    this.logger.error(`Error mutating collection entry with id ${id}`, error);
-    return error instanceof Error ? error : new Error(String(error));
   }
 }

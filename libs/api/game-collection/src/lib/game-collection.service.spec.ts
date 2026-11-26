@@ -211,15 +211,17 @@ describe('GameCollectionService', () => {
   /**
    * The entry as the write runner reads it after a write: `state` for the
    * reconcile, which selects the entry's removal and its count of owned
-   * copies, and `row` for the answer, which includes the row's relations
-   * (#1231).
+   * copies, and for the update, which selects its current rating, and `row`
+   * for the answer, which includes the row's relations (#1231).
    */
   function entryReads(
-    state: { deletedAt: Date | null; owned: number },
+    state: { deletedAt: Date | null; owned: number; rating?: number | null },
     row: GameCollection = entryOwning(state.owned, { deletedAt: state.deletedAt }),
   ): void {
     db.gameCollection.findUniqueOrThrow.mockImplementation((async (args: { include?: unknown }) =>
-      args.include === undefined ? { deletedAt: state.deletedAt, _count: { copies: state.owned } } : row) as never);
+      args.include === undefined
+        ? { deletedAt: state.deletedAt, rating: state.rating ?? null, _count: { copies: state.owned } }
+        : row) as never);
   }
 
   /**
@@ -348,8 +350,8 @@ describe('GameCollectionService', () => {
       // The catch-up drain resends a row when the entry changed or a value it
       // embeds did: the platform game, its platform, the game, the game's links
       // as an expansion, and those links' base games and their platform games
-      // (#1391), and each owned copy's release (#1231). Written out rather than built from the code under test, so a
-      // dropped arm fails here.
+      // (#1391), and each owned copy's release (#1231). Written out rather
+      // than built from the code under test, so a dropped arm fails here.
       const changedSinceShape = {
         OR: [
           { updatedAt: { gte: since } },
@@ -622,7 +624,7 @@ describe('GameCollectionService', () => {
     const REMOVED_AT = new Date('2026-11-01T00:00:00Z');
 
     /** The identity lock's answer: the entry the user already has for the game, or none (#1221). */
-    const lockedAs = (row?: { deletedAt: Date | null; id: string }) =>
+    const lockedAs = (row?: { deletedAt: Date | null; id: string; rating?: number | null }) =>
       db.$queryRaw.mockResolvedValue((row === undefined ? [] : [row]) as never);
 
     beforeEach(() => {
@@ -651,7 +653,7 @@ describe('GameCollectionService', () => {
 
       const [lock] = db.$queryRaw.mock.calls[0] as unknown as [Prisma.Sql];
       expect(rawQueryText(lock)).toBe(
-        'SELECT id, deleted_at AS "deletedAt" FROM game_collections WHERE user_id = ? AND platform_game_id = ? AND medium = ?::game_mediums FOR UPDATE',
+        'SELECT id, deleted_at AS "deletedAt", rating FROM game_collections WHERE user_id = ? AND platform_game_id = ? AND medium = ?::game_mediums FOR UPDATE',
       );
       expect(lock.values).toEqual([ME, 'pg-1', GameMedium.Physical]);
     });
@@ -870,6 +872,88 @@ describe('GameCollectionService', () => {
       expect(row.quantity).toBe(1);
     });
 
+    describe('rating changes (#1231)', () => {
+      const TODAY = new Date('2026-11-26T00:00:00Z');
+
+      beforeEach(() => {
+        jest.useFakeTimers({ now: new Date('2026-11-26T12:00:00Z'), doNotFake: ['nextTick', 'setImmediate'] });
+      });
+
+      afterEach(() => {
+        jest.useRealTimers();
+      });
+
+      /** The one change the add appended, dated today (#1231). */
+      const change = (rating: number | null) => ({
+        data: { entryId: 'gc-1', occurredOn: TODAY, occurredOnPrecision: DatePrecision.Day, rating },
+        select: { id: true },
+      });
+
+      it('a new entry with a rating appends its first change', async () => {
+        await service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical, rating: 7 });
+
+        expect(db.collectionRatingChange.create).toHaveBeenCalledTimes(1);
+        expect(db.collectionRatingChange.create).toHaveBeenCalledWith(change(7));
+      });
+
+      // `rating: null` passes validation, which skips null on an optional
+      // field, and `pickDefined` keeps it (#1231).
+      it('a new entry sent with a null rating appends nothing (#1231)', async () => {
+        await service.addToCollection({
+          platformGameId: 'pg-1',
+          medium: GameMedium.Physical,
+          rating: null as unknown as number,
+        });
+
+        expect(db.collectionRatingChange.create).not.toHaveBeenCalled();
+      });
+
+      it('a new entry with no rating appends nothing', async () => {
+        await service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical });
+
+        expect(db.collectionRatingChange.create).not.toHaveBeenCalled();
+      });
+
+      it('an add that changes the rating of an existing entry appends a change, after its write', async () => {
+        lockedAs({ id: 'gc-1', deletedAt: null, rating: 5 });
+
+        await service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical, rating: 8 });
+
+        expect(db.collectionRatingChange.create).toHaveBeenCalledTimes(1);
+        expect(db.collectionRatingChange.create).toHaveBeenCalledWith(change(8));
+        expect(db.gameCollection.update.mock.invocationCallOrder[0]).toBeLessThan(
+          db.collectionRatingChange.create.mock.invocationCallOrder[0] ?? 0,
+        );
+      });
+
+      // A replayed add repeats the rating it already carries (#1231).
+      it('a replayed add that sends the rating the entry holds appends nothing', async () => {
+        lockedAs({ id: 'gc-1', deletedAt: null, rating: 8 });
+
+        await service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical, rating: 8 });
+
+        expect(db.collectionRatingChange.create).not.toHaveBeenCalled();
+      });
+
+      it('an add that sends no rating appends nothing, whatever the entry holds', async () => {
+        lockedAs({ id: 'gc-1', deletedAt: null, rating: 8 });
+
+        await service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical, favorite: true });
+
+        expect(db.collectionRatingChange.create).not.toHaveBeenCalled();
+      });
+
+      it('an entry the actor may not write gets no change', async () => {
+        lockedAs({ id: 'gc-1', deletedAt: null, rating: 5 });
+        db.gameCollection.update.mockRejectedValueOnce(dependentRecordNotFound());
+
+        await expect(
+          service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical, rating: 8 }),
+        ).rejects.toMatchObject(ENTRY_NOT_FOUND);
+        expect(db.collectionRatingChange.create).not.toHaveBeenCalled();
+      });
+    });
+
     // The copy cap counts removed and taken-back copies too (#1231), so an
     // entry's history stays bounded.
     it('an entry at 100 copies refuses another acquisition with COLLECTION_COPY_LIMIT_REACHED', async () => {
@@ -978,25 +1062,81 @@ describe('GameCollectionService', () => {
   });
 
   describe('update', () => {
+    /** The entry's row as `lockEntry` answers it (#1231). */
+    const LOCKED = { deletedAt: null, medium: GameMedium.Physical, platformGameId: 'pg-1', userId: ME };
+    const TODAY = new Date('2026-11-26T00:00:00Z');
+
     beforeEach(() => {
-      db.gameCollection.update.mockResolvedValue(entry());
+      jest.useFakeTimers({ now: new Date('2026-11-26T12:00:00Z'), doNotFake: ['nextTick', 'setImmediate'] });
+      db.$queryRaw.mockResolvedValue([LOCKED] as never);
+      db.gameCollection.update.mockResolvedValue({ id: 'gc-1' } as GameCollection);
+      entryReads({ deletedAt: null, owned: 1, rating: 5 });
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
     });
 
     it('rejects an empty patch', async () => {
       await expect(service.update('gc-1', {})).rejects.toThrow(BadRequestException);
+      expect(db.$transaction).not.toHaveBeenCalled();
       expect(db.gameCollection.update).not.toHaveBeenCalled();
     });
 
-    it('goes straight to the scoped update without a pre-read', async () => {
-      await service.update('gc-1', { rating: 7 });
+    // The rating is compared with the entry's current one under the entry's
+    // lock, so two patches can't both see the old rating and append twice. It
+    // changes no ownership, so it runs in a plain transaction: no reconcile,
+    // no supply sync, no emit (#1231, #1221).
+    it('locks the entry first, then writes under the update conditions, in one transaction', async () => {
+      const order: string[] = [];
+      recordTransaction(order);
+      db.$queryRaw.mockImplementation((async () => {
+        order.push('lock');
+        return [LOCKED];
+      }) as never);
+      db.gameCollection.update.mockImplementation((async () => {
+        order.push('update');
+        return { id: 'gc-1' };
+      }) as never);
 
-      expect(db.gameCollection.findUnique).not.toHaveBeenCalled();
+      await service.update('gc-1', { favorite: true });
+
+      const [lock] = db.$queryRaw.mock.calls[0] as unknown as [Prisma.Sql];
+      expect(rawQueryText(lock)).toMatch(/FROM game_collections WHERE id = \? FOR UPDATE$/);
+      expect(lock.values).toEqual(['gc-1']);
+      expect(db.gameCollection.update).toHaveBeenCalledWith({
+        where: { id: 'gc-1', AND: [COND] },
+        data: { favorite: true, lastUpdated: expect.any(Date) },
+        select: { id: true },
+      });
+      expect(order).toEqual(['begin', 'lock', 'update', 'commit']);
+      expect(syncSupply).not.toHaveBeenCalled();
+      expect(emitSupply).not.toHaveBeenCalled();
+    });
+
+    it('answers the entry as the transaction leaves it', async () => {
+      const row = await service.update('gc-1', { favorite: true });
+
+      expect(row).toMatchObject({ id: 'gc-1', quantity: 1 });
+      expect(db.gameCollection.findUniqueOrThrow).toHaveBeenLastCalledWith({
+        where: { id: 'gc-1' },
+        include: COLLECTION_INCLUDE,
+      });
     });
 
     it('404s when the entry does not exist (or is not the actor’s), naming the collection entry (#634)', async () => {
-      db.gameCollection.update.mockRejectedValue(dependentRecordNotFound());
+      db.$queryRaw.mockResolvedValue([] as never);
 
       await expect(service.update('gc-404', { rating: 7 })).rejects.toMatchObject(ENTRY_NOT_FOUND);
+      expect(db.gameCollection.update).not.toHaveBeenCalled();
+      expect(db.collectionRatingChange.create).not.toHaveBeenCalled();
+    });
+
+    it('404s an entry outside the update conditions, and appends no change (#634, #1288)', async () => {
+      db.gameCollection.update.mockRejectedValue(dependentRecordNotFound());
+
+      await expect(service.update('gc-1', { rating: 7 })).rejects.toMatchObject(ENTRY_NOT_FOUND);
+      expect(db.collectionRatingChange.create).not.toHaveBeenCalled();
     });
 
     it('passes explicit nulls through to clear nullable fields', async () => {
@@ -1026,6 +1166,64 @@ describe('GameCollectionService', () => {
         ResourceType.GameCollection,
         Action.update,
       );
+    });
+
+    describe('rating changes (#1231)', () => {
+      it('a PATCH that changes the rating appends a change dated today', async () => {
+        await service.update('gc-1', { rating: 8 });
+
+        expect(db.collectionRatingChange.create).toHaveBeenCalledTimes(1);
+        expect(db.collectionRatingChange.create).toHaveBeenCalledWith({
+          data: { entryId: 'gc-1', occurredOn: TODAY, occurredOnPrecision: DatePrecision.Day, rating: 8 },
+          select: { id: true },
+        });
+        expect(db.gameCollection.findUniqueOrThrow).toHaveBeenCalledWith({
+          where: { id: 'gc-1' },
+          select: { rating: true },
+        });
+      });
+
+      it('a PATCH that sends the same rating appends nothing', async () => {
+        await service.update('gc-1', { rating: 5, favorite: true });
+
+        expect(db.collectionRatingChange.create).not.toHaveBeenCalled();
+      });
+
+      it('clearing the rating appends a change with no value', async () => {
+        await service.update('gc-1', { rating: null });
+
+        expect(db.collectionRatingChange.create).toHaveBeenCalledWith({
+          data: { entryId: 'gc-1', occurredOn: TODAY, occurredOnPrecision: DatePrecision.Day, rating: null },
+          select: { id: true },
+        });
+      });
+
+      it('clearing a rating that was never set appends nothing', async () => {
+        entryReads({ deletedAt: null, owned: 1, rating: null });
+
+        await service.update('gc-1', { rating: null });
+
+        expect(db.collectionRatingChange.create).not.toHaveBeenCalled();
+      });
+
+      it('a PATCH that sends no rating reads none and appends nothing', async () => {
+        await service.update('gc-1', { comment: 'Great' });
+
+        expect(db.collectionRatingChange.create).not.toHaveBeenCalled();
+        expect(db.gameCollection.findUniqueOrThrow).not.toHaveBeenCalledWith(
+          expect.objectContaining({ select: { rating: true } }),
+        );
+      });
+
+      // The entry's own write goes first, under its conditions, so a refused
+      // one keeps no change (#1288).
+      it('appends the change after the entry write', async () => {
+        await service.update('gc-1', { rating: 8 });
+
+        expect(db.gameCollection.update.mock.invocationCallOrder[0]).toBeLessThan(
+          db.collectionRatingChange.create.mock.invocationCallOrder[0] ?? 0,
+        );
+      });
     });
   });
 
@@ -1107,8 +1305,23 @@ describe('GameCollectionService', () => {
           removedOn: new Date('2019-03-01T00:00:00Z'),
           removedOnPrecision: DatePrecision.Month,
           removeReason: GameRemovalReason.Sold,
+          editedByUserAt: expect.any(Date),
         },
       });
+    });
+
+    // A removal is the user's word on the copy, so a later sync must not
+    // undo it: each copy it removes is stamped as edited by the user (#1231).
+    it('an entry removal stamps each copy it removes as edited by the user (#1231)', async () => {
+      await service.remove('gc-1', {});
+
+      expect(db.collectionCopy.updateMany).toHaveBeenCalledWith({
+        where: { entryId: 'gc-1', removedAt: null, retractedAt: null },
+        data: expect.objectContaining({ editedByUserAt: expect.any(Date), removedAt: expect.any(Date) }),
+      });
+
+      const { data } = db.collectionCopy.updateMany.mock.calls[0][0];
+      expect(data.editedByUserAt).toEqual(data.removedAt);
     });
 
     it('defaults the reason to null', async () => {
@@ -1138,6 +1351,7 @@ describe('GameCollectionService', () => {
           removedOn: new Date('2026-11-27T00:00:00Z'),
           removedOnPrecision: DatePrecision.Day,
           removeReason: GameRemovalReason.Sold,
+          editedByUserAt: new Date('2026-11-27T04:30:00Z'),
         });
       });
 

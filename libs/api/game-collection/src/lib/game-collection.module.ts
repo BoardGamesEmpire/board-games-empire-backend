@@ -2,6 +2,8 @@ import { DatabaseModule } from '@bge/database';
 import { Module } from '@nestjs/common';
 import { CollectionCopyController } from './collection-copy.controller';
 import { CollectionCopyService } from './collection-copy.service';
+import { CollectionRatingController } from './collection-rating.controller';
+import { CollectionRatingService } from './collection-rating.service';
 import { CollectionWriteService } from './collection-write.service';
 import { GameCollectionController } from './game-collection.controller';
 import { GameCollectionService } from './game-collection.service';
@@ -9,8 +11,13 @@ import { UserGameCollectionsController } from './user-game-collections.controlle
 
 @Module({
   imports: [DatabaseModule],
-  controllers: [GameCollectionController, UserGameCollectionsController, CollectionCopyController],
-  providers: [CollectionCopyService, CollectionWriteService, GameCollectionService],
+  controllers: [
+    GameCollectionController,
+    UserGameCollectionsController,
+    CollectionCopyController,
+    CollectionRatingController,
+  ],
+  providers: [CollectionCopyService, CollectionRatingService, CollectionWriteService, GameCollectionService],
   exports: [GameCollectionService],
 })
 export class GameCollectionModule {}
