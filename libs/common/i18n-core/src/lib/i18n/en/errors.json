@@ -343,7 +343,6 @@
       "revoked": "This invite has been revoked.",
       "withdrawn": "This invite has been withdrawn."
     },
-    "expired": "Invite {id} has expired",
     "changed_concurrently": "Invite {id} changed while it was being updated; try again"
   },
   "quota": {

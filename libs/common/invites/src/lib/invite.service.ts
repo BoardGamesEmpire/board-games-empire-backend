@@ -14,7 +14,6 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
-  GoneException,
   Injectable,
   InternalServerErrorException,
   Logger,
@@ -432,8 +431,8 @@ export class InviteService {
    * The invite an invitee is about to accept, refused exactly as
    * {@link acceptWithin} refuses it, for a consumer that asks something of the
    * invite before accepting it: whether its inviter could still send it, for a
-   * household (#747). Nothing is written but the expiry stamp a 410 leaves, as
-   * the accept leaves it.
+   * household (#747). Nothing is written but the expiry stamp an expired invite
+   * leaves, as the accept leaves it.
    *
    * Asked before the accept, never after: an accept that went through has
    * already bound an invite by address to the acting user, and no later write
@@ -527,7 +526,12 @@ export class InviteService {
    * who approved and when (#166). The caller has asserted the approver's
    * authority over `scope`, and the read binds to it as a revoke's does. An
    * `expiresAt` restarts the invitee's window; an invite that expired while it
-   * waited is refused 410 like any other, not reopened.
+   * waited is refused 409 like any other, not reopened.
+   *
+   * A settled invite is refused as every other transition refuses one, coded
+   * `INVITE_NOT_OUTSTANDING` with its `state`, so an expired invite answers the
+   * same whether or not the sweep has stamped it yet (#1513). Only a `Pending`
+   * one, still outstanding but past approval, gets its own refusal.
    */
   async approveWithin(
     tx: Prisma.TransactionClient,
@@ -541,6 +545,8 @@ export class InviteService {
       target: { inviteId },
       scope,
       assertStatus: (row) => {
+        this.assertFrom(row, OUTSTANDING_INVITE_STATUSES);
+
         if (row.status !== InviteStatus.AwaitingApproval) {
           throw new ConflictException(t('errors.invite.not_awaiting_approval', { id: row.id }));
         }
@@ -1212,7 +1218,7 @@ export class InviteService {
    * The stamp is started, not awaited. The caller's transaction holds one pool
    * connection and the stamp needs another; a refusal that waited for it while
    * holding the first would, under a pool full of such requests, wait on
-   * itself until the pool timeout and turn every 410 into a 500. Thrown at
+   * itself until the pool timeout and turn every refusal into a 500. Thrown at
    * once, the refusal rolls the transaction back and frees its connection, and
    * the stamp takes the next one that comes free.
    */
@@ -1223,7 +1229,7 @@ export class InviteService {
 
     void this.persistExpiry(current, now);
 
-    throw new GoneException(t('errors.invite.expired', { id: current.id }));
+    throw inviteNotOutstanding(InviteStatus.Expired);
   }
 
   /**
@@ -1236,7 +1242,7 @@ export class InviteService {
    * moved the row. Emitted as soon as the write lands, since it is committed.
    *
    * Nothing waits on this, so a failure here can only be logged: the refusal
-   * already went out as the 410 it was, and the row is refused again on its
+   * already went out as the 409 it was, and the row is refused again on its
    * next transition and converged by #165's sweep regardless. A consumer that
    * updated the invite row inside its own transaction before calling would
    * hold the lock this statement needs; the statement then waits for that

@@ -14,7 +14,7 @@ const SWEEP_BATCH_SIZE = 500;
 /**
  * Stamps `Expired` on the outstanding invites whose window has closed and that
  * nothing has stamped since (#165). Nothing waits on it: reads compute expiry,
- * transitions refuse an expired invite with 410, and a create stamps the rows
+ * transitions refuse an expired invite with 409, and a create stamps the rows
  * in its way. The sweep converges the stored status and announces
  * `invite.expired` for the invites nobody touched.
  *

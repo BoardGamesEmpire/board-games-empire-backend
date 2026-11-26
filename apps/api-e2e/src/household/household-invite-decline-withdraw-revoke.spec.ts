@@ -213,7 +213,7 @@ describe('declining, withdrawing and revoking a household invite', () => {
       ]);
     });
 
-    it('answers 410 for an expired invite and 409 for a settled one', async () => {
+    it('answers 409 for an expired or settled invite (#1513)', async () => {
       const [owner, lapsed, withdrawn] = await Promise.all([actors.user(), actors.user(), actors.user()]);
       const { household } = await actors.householdWithMembers({ owner });
       const expired = await arrangeInvite(db.client, {
@@ -229,7 +229,10 @@ describe('declining, withdrawing and revoking a household invite', () => {
         status: InviteStatus.Withdrawn,
       });
 
-      await declineById(lapsed, expired.id).expect(410);
+      expect((await declineById(lapsed, expired.id).expect(409)).body).toMatchObject({
+        code: 'INVITE_NOT_OUTSTANDING',
+        state: InviteStatus.Expired,
+      });
       const refused = await declineById(withdrawn, settled.id).expect(409);
 
       // The code and the `state` field say it was withdrawn; the message is a
@@ -304,7 +307,7 @@ describe('declining, withdrawing and revoking a household invite', () => {
       await expect(storedInvite(invite.id)).resolves.toMatchObject({ status: InviteStatus.Pending });
     });
 
-    it('answers 410 for an expired invite and 409 for a settled one', async () => {
+    it('answers 409 for an expired or settled invite (#1513)', async () => {
       const [owner, invitee] = await Promise.all([actors.user(), actors.user()]);
       const { household } = await actors.householdWithMembers({ owner });
       const expired = await arrangeInvite(db.client, {
@@ -320,7 +323,10 @@ describe('declining, withdrawing and revoking a household invite', () => {
         status: InviteStatus.Declined,
       });
 
-      await withdraw(owner, expired.id).expect(410);
+      expect((await withdraw(owner, expired.id).expect(409)).body).toMatchObject({
+        code: 'INVITE_NOT_OUTSTANDING',
+        state: InviteStatus.Expired,
+      });
       await withdraw(owner, declined.id).expect(409);
     });
   });
@@ -392,7 +398,7 @@ describe('declining, withdrawing and revoking a household invite', () => {
       await expect(storedInvite(othersInvite.id)).resolves.toMatchObject({ status: InviteStatus.Pending });
     });
 
-    it('answers 410 for an expired invite, 409 for a settled one, and 404 once the household is deleted', async () => {
+    it('answers 409 for an expired or settled invite, and 404 once the household is deleted (#1513)', async () => {
       const [owner, admin, lapsed, declined, invitee] = await Promise.all(
         Array.from({ length: 5 }, () => actors.user()),
       );
@@ -414,7 +420,10 @@ describe('declining, withdrawing and revoking a household invite', () => {
       });
       const open = await createdInvite(owner, household.id, { inviteeId: invitee.user.id });
 
-      await revoke(admin, household.id, expired.id).expect(410);
+      expect((await revoke(admin, household.id, expired.id).expect(409)).body).toMatchObject({
+        code: 'INVITE_NOT_OUTSTANDING',
+        state: InviteStatus.Expired,
+      });
       await revoke(admin, household.id, settled.id).expect(409);
 
       await request(baseUrl).delete(`/api/households/${household.id}`).set(owner.headers).expect(200);

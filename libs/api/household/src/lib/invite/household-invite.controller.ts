@@ -109,9 +109,8 @@ export class HouseholdInviteController {
   @ApiResponse({ status: Http.NotFound, description: 'Household not found or deleted, or no such invite in it' })
   @ApiResponse({
     status: Http.Conflict,
-    description: 'The invite was already settled, or changed while it was being revoked',
+    description: 'The invite was already settled, has expired, or changed while it was being revoked',
   })
-  @ApiResponse({ status: Http.Gone, description: 'The invite has expired' })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.Invite))
   @HttpCode(Http.Ok)
   @Post(':inviteId/revoke')
@@ -140,9 +139,8 @@ export class HouseholdInviteController {
   @ApiResponse({ status: Http.NotFound, description: 'Household not found or deleted, or no such invite in it' })
   @ApiResponse({
     status: Http.Conflict,
-    description: 'The invite is not awaiting approval, or changed while it was being approved',
+    description: 'The invite is not awaiting approval, has expired, or changed while it was being approved',
   })
-  @ApiResponse({ status: Http.Gone, description: 'The invite has expired' })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.Invite))
   @HttpCode(Http.Ok)
   @Post(':inviteId/approve')
