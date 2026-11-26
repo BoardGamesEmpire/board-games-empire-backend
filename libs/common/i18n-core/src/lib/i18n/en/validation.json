@@ -10,6 +10,8 @@
   "arrayMaxSize": "{property} must contain no more than {constraints.0} elements",
   "arrayNotEmpty": "{property} should not be empty",
   "arrayUnique": "All {property}'s elements must be unique",
+  "isPartialDate": "{property} must be a year, a month or a day, written YYYY, YYYY-MM or YYYY-MM-DD, and the day must exist",
+  "isCurrencyCode": "{property} must be a three-letter uppercase currency code, such as EUR",
   "isISO8601": "{property} must be a valid ISO 8601 date string",
   "maxJsonBytes": "{property} exceeds the maximum serialized size of {constraints.0} UTF-8 bytes",
   "isDate": "{property} must be a Date instance",

@@ -53,9 +53,22 @@ better-auth writes itself (below):
 
   A 404 that a client may read as a statement about a row names the row:
   `COLLECTION_ENTRY_NOT_FOUND` for a collection entry the user can't see
-  (missing, already removed, or not theirs, which the 404 never tells apart). A
+  (missing, already removed, or not theirs, which the 404 never tells apart),
+  `COLLECTION_COPY_NOT_FOUND` for a copy the same way (#1231). A
   404 without such a code, `ROUTE_NOT_FOUND` above all, says nothing about any
   row (#634).
+
+- The collection's other refusals (#1231), each with its own code:
+  - `COLLECTION_COPY_LIMIT_REACHED`: a 409 for an entry already holding its
+    most copies, removed ones included, with that number in `limit`;
+  - `COLLECTION_COPY_OWNED`: a 409 for a change to the removal of a copy that
+    is still owned;
+  - `COLLECTION_CONDITION_DIGITAL`: a 400 for a condition on a digital copy;
+  - `COLLECTION_DATE_IN_FUTURE`: a 400 for an acquisition or removal date that
+    has not come yet;
+  - `COLLECTION_DATE_ORDER`: a 400 for a removal before the acquisition;
+  - `COLLECTION_CURRENCY_UNKNOWN`: a 400 for a price whose currency is not an
+    ISO 4217 code.
 
 - Any other field (a quota's `limit`, a permission catalog refusal's `problems`) sits
   beside these. No field can override `statusCode`, `error` or `message`. A
