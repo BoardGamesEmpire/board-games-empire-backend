@@ -1,5 +1,6 @@
-// Why a game left the user's collection. Recorded on soft delete so the
-// "previously owned" view can say more than "gone".
+// Why a copy left the user's collection, recorded on its removal, and on the
+// entry with its last owned copy, so the "previously owned" view can say more
+// than "gone" (#1231).
 enum GameRemovalReason {
   Destroyed
   Gifted
@@ -12,6 +13,10 @@ enum GameRemovalReason {
   @@map("game_removal_reasons")
 }
 
+// A collection entry: one game in a user's collection, with its copies
+// (#1231). The entry keeps the user's relationship with the game (rating,
+// comment, favorite, play history, reach); each copy keeps its own
+// acquisition, condition, edition and removal.
 model GameCollection {
   id String @id @default(cuid(2))
 
@@ -20,12 +25,8 @@ model GameCollection {
 
   platformGame   PlatformGame @relation(fields: [platformGameId], references: [id], onDelete: Cascade)
   platformGameId String       @map("platform_game_id")
-  release        GameRelease? @relation(fields: [releaseId], references: [id], onDelete: SetNull)
-  releaseId      String?      @map("release_id")
 
   medium GameMedium
-
-  quantity Int @default(1)
 
   // Who may see this row beyond the owner and their households. Friends reach
   // honors UserPreferences.showCollectionToFriends. A household sees the row
@@ -41,23 +42,26 @@ model GameCollection {
   lastPlayed  DateTime? @map("last_played") @db.Timestamptz(3)
   lastUpdated DateTime? @map("last_updated") @db.Timestamptz(3)
 
-  // Removal is a tombstone, never a hard delete: play history (playCount,
-  // lastPlayed, playAgain, favorite) must survive a remove→re-add cycle, and
-  // child rows (locations, event game lists, loans) would otherwise cascade.
-  // Re-adding the same (user, platformGame, medium) clears both fields.
+  // The entry's removal, a summary of its copies: set when its last owned copy
+  // is removed, cleared when it has an owned copy again, in the same
+  // transaction as the copy (#1231). It stays on the entry because the event,
+  // household and list libs filter on it. The entry itself is never
+  // hard-deleted, so play history (playCount, lastPlayed, playAgain, favorite)
+  // survives a removal and an add-back, and the rows that name the entry
+  // (locations, event game lists) stay.
   deletedAt    DateTime?          @map("deleted_at") @db.Timestamptz(3)
   deleteReason GameRemovalReason? @map("delete_reason")
 
+  copies                 CollectionCopy[]
+  ratingChanges          CollectionRatingChange[]
   excludedFromHouseholds ExcludedGame[]
   locations              GameLocation[]
   eventAttendeeGameLists EventAttendeeGameList[]
-  loadedGames            GameLoan[]
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@unique([userId, platformGameId, medium])
   @@index([platformGameId])
-  @@index([releaseId])
   @@map("game_collections")
 }

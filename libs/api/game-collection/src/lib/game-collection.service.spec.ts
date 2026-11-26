@@ -1,7 +1,8 @@
-import type { GameCollection, GameRelease, PlatformGame } from '@bge/database';
+import type { GameCollection, PlatformGame } from '@bge/database';
 import {
   Action,
   ContentType,
+  DatePrecision,
   GameMedium,
   GameRemovalReason,
   ListKind,
@@ -53,9 +54,10 @@ const entry = (overrides: Partial<GameCollection> = {}): GameCollection =>
     id: 'gc-1',
     userId: ME,
     platformGameId: 'pg-1',
-    releaseId: null,
     medium: GameMedium.Physical,
-    quantity: 1,
+    // The include counts the entry's owned copies, which the row sends as
+    // its `quantity` (#1231).
+    _count: { copies: 1 },
     reach: Reach.Private,
     rating: null,
     playCount: 3,
@@ -93,6 +95,10 @@ function inView(id: string, gameId: string, platformId = 'plat-1', contentType: 
 /** An entry on the game `gameId`, a standalone expansion, as the collection include returns it (#1070). */
 const entryOn = (gameId: string, overrides: Partial<GameCollection> = {}): GameCollection =>
   ({ ...entry(overrides), platformGame: inView(`pg-${gameId}`, gameId) }) as GameCollection;
+
+/** An entry as the collection include returns it, with `owned` copies neither removed nor taken back (#1231). */
+const entryOwning = (owned: number, overrides: Partial<GameCollection> = {}): GameCollection =>
+  ({ ...entry(overrides), _count: { copies: owned } }) as GameCollection;
 
 /** The refusal for a collection entry the actor can't see, whatever the reason (#634). */
 const ENTRY_NOT_FOUND = {
@@ -292,9 +298,10 @@ describe('GameCollectionService', () => {
 
       // The catch-up drain resends a row when the entry changed or a value it
       // embeds did: the platform game, its platform, the game, the game's links
-      // as an expansion, those links' base games and their platform games
-      // (#1391), and the release. Written out rather than built from the code
-      // under test, so a dropped arm fails here.
+      // as an expansion, and those links' base games and their platform games
+      // (#1391). The entry embeds no release since its copies hold them
+      // (#1231). Written out rather than built from the code under test, so a
+      // dropped arm fails here.
       const changedSinceShape = {
         OR: [
           { updatedAt: { gte: since } },
@@ -330,7 +337,6 @@ describe('GameCollectionService', () => {
               },
             },
           },
-          { release: { is: { updatedAt: { gte: since } } } },
         ],
       };
 
@@ -540,6 +546,24 @@ describe('GameCollectionService', () => {
 
       await expect(service.getById('gc-404')).rejects.toMatchObject(ENTRY_NOT_FOUND);
     });
+
+    // The entry no longer stores a quantity: the include counts its copies
+    // neither removed nor taken back, and the row sends that count as
+    // `quantity`, without the count's own shape. The release went to the
+    // copies with it (#1231).
+    it("a row's quantity is its number of owned copies (#1231)", async () => {
+      db.gameCollection.findUnique.mockResolvedValue(entryOwning(2));
+
+      const row = await service.getById('gc-1');
+
+      expect(COLLECTION_INCLUDE._count).toEqual({
+        select: { copies: { where: { removedAt: null, retractedAt: null } } },
+      });
+      expect(COLLECTION_INCLUDE).not.toHaveProperty('release');
+      expect(db.gameCollection.findUnique.mock.calls[0][0]?.include).toBe(COLLECTION_INCLUDE);
+      expect(row.quantity).toBe(2);
+      expect(row).not.toHaveProperty('_count');
+    });
   });
 
   describe('addToCollection', () => {
@@ -561,15 +585,94 @@ describe('GameCollectionService', () => {
     });
 
     it('upserts on the (user, platformGame, medium) identity', async () => {
-      await service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical, quantity: 2 });
+      await service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical, rating: 7 });
 
       expect(db.gameCollection.upsert).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { userId_platformGameId_medium: { userId: ME, platformGameId: 'pg-1', medium: GameMedium.Physical } },
-          create: expect.objectContaining({ id: expect.any(String), userId: ME, platformGameId: 'pg-1', quantity: 2 }),
+          create: expect.objectContaining({ id: expect.any(String), userId: ME, platformGameId: 'pg-1', rating: 7 }),
         }),
       );
     });
+
+    // A new entry is one game with one copy, which the user can describe
+    // later. The upsert's update branch runs on an entry that exists, owned or
+    // removed, so it never adds a copy itself (#1231).
+    it('adding a game creates the entry with one copy (#1231)', async () => {
+      const row = await service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical });
+
+      const { create, update } = db.gameCollection.upsert.mock.calls[0][0];
+      expect(create).toMatchObject({ copies: { create: {} } });
+      expect(update).not.toHaveProperty('copies');
+      expect(db.collectionCopy.create).not.toHaveBeenCalled();
+      expect(row.quantity).toBe(1);
+    });
+
+    // A repeated add of a game the user owns updates the entry's own fields
+    // and adds no copy, so a replayed request is harmless (#1231).
+    it('a repeated add of a live entry adds no copy (#1231)', async () => {
+      db.$queryRaw.mockResolvedValue([{ deletedAt: null }] as never);
+      db.gameCollection.upsert.mockResolvedValue(entryOwning(1));
+
+      const row = await service.addToCollection({
+        platformGameId: 'pg-1',
+        medium: GameMedium.Physical,
+        favorite: true,
+      });
+
+      expect(db.collectionCopy.create).not.toHaveBeenCalled();
+      expect(row.quantity).toBe(1);
+    });
+
+    // A removed entry has no owned copy, so acquiring it again gives it one,
+    // in the add-back's transaction under the entry's lock, before its offers
+    // resume (#1231, #1221).
+    it('adding back a removed entry gives it one new copy (#1231)', async () => {
+      const order: string[] = [];
+      recordTransaction(order);
+      db.$queryRaw.mockImplementation((async () => {
+        order.push('lock');
+        return [{ deletedAt: new Date('2026-11-01') }];
+      }) as never);
+      db.gameCollection.upsert.mockImplementation((async () => {
+        order.push('upsert');
+        return entryOwning(0);
+      }) as never);
+      db.collectionCopy.create.mockImplementation((async () => {
+        order.push('copy');
+        return {};
+      }) as never);
+      syncSupply.mockImplementation(async () => {
+        order.push('sync');
+        return [];
+      });
+
+      const row = await service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical });
+
+      expect(db.collectionCopy.create).toHaveBeenCalledWith({ data: { entryId: 'gc-1' } });
+      expect(row.quantity).toBe(1);
+      expect(order).toEqual(['begin', 'lock', 'upsert', 'copy', 'sync', 'commit']);
+    });
+
+    // Another request created the entry after the pre-read. If that entry
+    // still owns a copy, this add is a repeat and adds none; if it was removed
+    // in that window, this add acquires it again and gives it one (#1231,
+    // #1221).
+    it.each([
+      ['still owned', 1, 0],
+      ['removed since', 0, 1],
+    ])(
+      'adding an entry another request created after the pre-read, %s, adds a copy only when it owns none (#1231)',
+      async (_, owned, copiesAdded) => {
+        db.$queryRaw.mockResolvedValue([] as never);
+        db.gameCollection.upsert.mockResolvedValue(entryOwning(owned, { id: 'gc-other' }));
+
+        const row = await service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical });
+
+        expect(db.collectionCopy.create).toHaveBeenCalledTimes(copiesAdded);
+        expect(row.quantity).toBe(1);
+      },
+    );
 
     it('resurrects a tombstoned entry without touching play history', async () => {
       await service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical });
@@ -597,7 +700,7 @@ describe('GameCollectionService', () => {
       }) as never);
       db.gameCollection.upsert.mockImplementation((async () => {
         order.push('upsert');
-        return entry();
+        return entryOwning(0);
       }) as never);
       syncSupply.mockImplementation(async () => {
         order.push('sync');
@@ -679,27 +782,10 @@ describe('GameCollectionService', () => {
       expect(syncSupply).not.toHaveBeenCalled();
       expect(emitSupply).not.toHaveBeenCalled();
     });
-
-    it('404s when the release does not exist', async () => {
-      db.gameRelease.findUnique.mockResolvedValue(null);
-
-      await expect(
-        service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical, releaseId: 'r-404' }),
-      ).rejects.toThrow(NotFoundException);
-    });
-
-    it('400s when the release belongs to a different platform game', async () => {
-      db.gameRelease.findUnique.mockResolvedValue({ platformGameId: 'pg-other' } as GameRelease);
-
-      await expect(
-        service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical, releaseId: 'r-1' }),
-      ).rejects.toThrow(BadRequestException);
-    });
   });
 
   describe('update', () => {
     beforeEach(() => {
-      db.gameCollection.findUnique.mockResolvedValue({ platformGameId: 'pg-1' } as GameCollection);
       db.gameCollection.update.mockResolvedValue(entry());
     });
 
@@ -709,7 +795,7 @@ describe('GameCollectionService', () => {
     });
 
     it('goes straight to the scoped update without a pre-read', async () => {
-      await service.update('gc-1', { quantity: 2 });
+      await service.update('gc-1', { rating: 7 });
 
       expect(db.gameCollection.findUnique).not.toHaveBeenCalled();
     });
@@ -717,16 +803,16 @@ describe('GameCollectionService', () => {
     it('404s when the entry does not exist (or is not the actor’s), naming the collection entry (#634)', async () => {
       db.gameCollection.update.mockRejectedValue(dependentRecordNotFound());
 
-      await expect(service.update('gc-404', { quantity: 2 })).rejects.toMatchObject(ENTRY_NOT_FOUND);
+      await expect(service.update('gc-404', { rating: 7 })).rejects.toMatchObject(ENTRY_NOT_FOUND);
     });
 
     it('passes explicit nulls through to clear nullable fields', async () => {
-      await service.update('gc-1', { rating: null, comment: null, quantity: 2 });
+      await service.update('gc-1', { rating: null, comment: null, favorite: true });
 
       expect(db.gameCollection.update).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({ id: 'gc-1', AND: [COND] }),
-          data: expect.objectContaining({ rating: null, comment: null, quantity: 2 }),
+          data: expect.objectContaining({ rating: null, comment: null, favorite: true }),
         }),
       );
     });
@@ -737,27 +823,11 @@ describe('GameCollectionService', () => {
       const { data } = db.gameCollection.update.mock.calls[0][0];
       expect(data).not.toHaveProperty('rating');
       expect(data).not.toHaveProperty('comment');
-      expect(data).not.toHaveProperty('quantity');
-    });
-
-    it('validates a new release against the entry’s platform game (scoped pre-read)', async () => {
-      db.gameRelease.findUnique.mockResolvedValue({ platformGameId: 'pg-other' } as GameRelease);
-
-      await expect(service.update('gc-1', { releaseId: 'r-1' })).rejects.toThrow(BadRequestException);
-      expect(db.gameCollection.findUnique).toHaveBeenCalledWith(
-        expect.objectContaining({ where: expect.objectContaining({ id: 'gc-1', AND: [COND] }) }),
-      );
-    });
-
-    it('404s a release patch on a row outside the actor’s scope', async () => {
-      db.gameCollection.findUnique.mockResolvedValue(null);
-
-      await expect(service.update('gc-1', { releaseId: 'r-1' })).rejects.toMatchObject(ENTRY_NOT_FOUND);
-      expect(db.gameCollection.update).not.toHaveBeenCalled();
+      expect(data).not.toHaveProperty('playAgain');
     });
 
     it('uses update conditions, not read conditions, for the write', async () => {
-      await service.update('gc-1', { quantity: 2 });
+      await service.update('gc-1', { rating: 7 });
 
       expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(
         ResourceType.GameCollection,
@@ -792,14 +862,65 @@ describe('GameCollectionService', () => {
       expect(db.gameCollection.update).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ deleteReason: null }) }),
       );
+      expect(db.collectionCopy.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ removeReason: null }) }),
+      );
+    });
+
+    describe('with the clock at 23:30 in New York, already the next day in UTC', () => {
+      beforeEach(() => {
+        jest.useFakeTimers({ now: new Date('2026-11-26T23:30:00-05:00'), doNotFake: ['nextTick', 'setImmediate'] });
+      });
+
+      afterEach(() => {
+        jest.useRealTimers();
+      });
+
+      // Removing the entry removes every copy the user still owns, with the
+      // entry's reason, dated today in UTC. Copies already removed or taken
+      // back keep what they have. The entry's scoped update runs first: it
+      // locks the entry's row as the transaction's first lock, so the removal
+      // takes turns with nominations (#1221). The answer owns no copy (#1231).
+      it('removing an entry removes each of its owned copies (#1231)', async () => {
+        const order: string[] = [];
+        recordTransaction(order);
+        db.gameCollection.update.mockImplementation((async () => {
+          order.push('entry');
+          return entryOwning(2, { deletedAt: new Date() });
+        }) as never);
+        db.collectionCopy.updateMany.mockImplementation((async () => {
+          order.push('copies');
+          return { count: 2 };
+        }) as never);
+        syncSupply.mockImplementation(async () => {
+          order.push('sync');
+          return [];
+        });
+
+        const removed = await service.remove('gc-1', { reason: GameRemovalReason.Sold });
+
+        expect(db.collectionCopy.updateMany).toHaveBeenCalledWith({
+          where: { entryId: 'gc-1', removedAt: null, retractedAt: null },
+          data: {
+            removedAt: new Date('2026-11-27T04:30:00Z'),
+            removedOn: new Date('2026-11-27T00:00:00Z'),
+            removedOnPrecision: DatePrecision.Day,
+            removeReason: GameRemovalReason.Sold,
+          },
+        });
+        expect(order).toEqual(['begin', 'entry', 'copies', 'sync', 'commit']);
+        expect(removed.quantity).toBe(0);
+      });
     });
 
     // A client reads this 404 as "already removed" and completes its queued
-    // removal, so it must be told apart from a route that moved (#634).
+    // removal, so it must be told apart from a route that moved (#634). The
+    // entry's update misses first, so no copy is touched (#1231).
     it('404s missing, already-removed, and foreign rows alike, naming the collection entry (#634)', async () => {
       db.gameCollection.update.mockRejectedValue(dependentRecordNotFound());
 
       await expect(service.remove('gc-404', {})).rejects.toMatchObject(ENTRY_NOT_FOUND);
+      expect(db.collectionCopy.updateMany).not.toHaveBeenCalled();
     });
 
     // The removal's `UPDATE` is the transaction's first lock, on the entry's
@@ -891,7 +1012,7 @@ describe('GameCollectionService', () => {
     const singleRowReads = {
       getById: () => service.getById('gc-1'),
       addToCollection: () => service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical }),
-      update: () => service.update('gc-1', { quantity: 2 }),
+      update: () => service.update('gc-1', { rating: 7 }),
       remove: () => service.remove('gc-1', {}),
     } as const;
 

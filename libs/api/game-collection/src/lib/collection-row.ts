@@ -12,13 +12,21 @@ const PLAYERS_AND_PLAY_TIME = {
 } as const satisfies Prisma.GameSelect & Prisma.PlatformGameSelect;
 
 /**
+ * A copy the user still owns: neither removed nor taken back (#1231). An
+ * entry's `quantity` counts these, and the entry is removed with its last.
+ */
+export const OWNED_COPY: Prisma.CollectionCopyWhereInput = { removedAt: null, retractedAt: null };
+
+/**
  * What a collection row embeds, so a client can render, filter, sort and nest
  * a collection without further fetches (#1070): the platform game with its
  * overrides of players and play time and of content type (#1391), its
  * platform's type, and the game's content type, year, players and play time.
- * Each field is named, so no column ships by default (#460).
+ * Each field is named, so no column ships by default (#460). The count of
+ * owned copies becomes the row's `quantity` (#1231).
  */
 export const COLLECTION_INCLUDE = {
+  _count: { select: { copies: { where: OWNED_COPY } } },
   platformGame: {
     select: {
       id: true,
@@ -41,7 +49,6 @@ export const COLLECTION_INCLUDE = {
       },
     },
   },
-  release: { select: { id: true, editionName: true, releaseYear: true } },
 } satisfies Prisma.GameCollectionInclude;
 
 export type GameCollectionWithRelations = Prisma.GameCollectionGetPayload<{ include: typeof COLLECTION_INCLUDE }>;
@@ -50,10 +57,13 @@ export type GameCollectionWithRelations = Prisma.GameCollectionGetPayload<{ incl
  * The entries changed since `since`, for the `updatedSince` catch-up drain
  * (#1070): the entry itself, or a value it embeds. Beside the entry's own
  * arm come the platform game, its platform, the game, the game's links as an
- * expansion, those links' base games, those base games' platform games, and
- * the release. A relation added to `COLLECTION_INCLUDE` needs an arm here, or
- * the drain misses its changes.
+ * expansion, those links' base games, and those base games' platform games.
+ * A relation added to `COLLECTION_INCLUDE` needs an arm here, or the drain
+ * misses its changes.
  *
+ * - The count of owned copies needs no arm: every write that adds or removes
+ *   a copy writes the entry too, so the entry's own arm resends the row
+ *   (#1231).
  * - Each arm tests `updatedAt` alone, under no ceiling. A base game whose
  *   own `reach` or `deletedAt` changes takes a new `updatedAt`, so the row is
  *   resent whether the viewer gained or lost it.
@@ -110,7 +120,6 @@ export function changedSince(since: Date): Prisma.GameCollectionWhereInput {
           },
         },
       },
-      { release: { is: changed } },
     ],
   };
 }
@@ -119,9 +128,10 @@ type IncludedPlatformGame = GameCollectionWithRelations['platformGame'];
 
 /**
  * A collection row as the routes send it: the include's row, with its game's
- * `baseGames`, read after it by a link read of its own (#1070).
+ * `baseGames`, read after it by a link read of its own (#1070), and its count
+ * of owned copies as `quantity` (#1231).
  */
-export type GameCollectionRow = Omit<GameCollectionWithRelations, 'platformGame'> & {
+export type GameCollectionRow = Omit<GameCollectionWithRelations, '_count' | 'platformGame'> & {
   /**
    * Whether the entry's game is on the acting user's wishlist (#1241). Set on
    * the rows `GET /users/:userId/game-collections` serves only; `null` for an
@@ -132,4 +142,7 @@ export type GameCollectionRow = Omit<GameCollectionWithRelations, 'platformGame'
   platformGame: Omit<IncludedPlatformGame, 'game'> & {
     game: IncludedPlatformGame['game'] & { baseGames: ExpansionLink[] };
   };
+
+  /** The number of copies the owner still has: neither removed nor taken back (#1231). */
+  quantity: number;
 };

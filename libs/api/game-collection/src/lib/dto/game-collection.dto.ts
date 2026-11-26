@@ -130,25 +130,12 @@ export class CollectionPlatformGameSummaryDto implements CollectionPlatformGame 
   game!: CollectionGameSummaryDto;
 }
 
-export class CollectionReleaseSummaryDto {
-  @ApiProperty({ description: 'Unique release identifier' })
-  id!: string;
-
-  @ApiPropertyOptional({ description: 'Edition name (e.g. "5th Edition Deluxe")', nullable: true })
-  editionName!: string | null;
-
-  @ApiPropertyOptional({ description: 'Year of this release', nullable: true })
-  releaseYear!: number | null;
-}
-
 export class GameCollectionDto implements Pick<
   GameCollection,
   | 'id'
   | 'userId'
   | 'platformGameId'
-  | 'releaseId'
   | 'medium'
-  | 'quantity'
   | 'reach'
   | 'rating'
   | 'playCount'
@@ -171,13 +158,10 @@ export class GameCollectionDto implements Pick<
   @ApiProperty({ description: 'ID of the platform game' })
   platformGameId!: string;
 
-  @ApiPropertyOptional({ description: 'ID of a specific release', nullable: true })
-  releaseId!: string | null;
-
   @ApiProperty({ enum: GameMedium, description: 'Medium of the owned copy' })
   medium!: GameMedium;
 
-  @ApiProperty({ description: 'Number of copies owned' })
+  @ApiProperty({ description: 'Number of copies the owner still has', readOnly: true })
   quantity!: number;
 
   @ApiProperty({
@@ -227,9 +211,6 @@ export class GameCollectionDto implements Pick<
 
   @ApiProperty({ type: CollectionPlatformGameSummaryDto })
   platformGame!: CollectionPlatformGameSummaryDto;
-
-  @ApiPropertyOptional({ type: CollectionReleaseSummaryDto, nullable: true })
-  release!: CollectionReleaseSummaryDto | null;
 
   @ApiPropertyOptional({
     type: Boolean,

@@ -27,8 +27,8 @@ model GameRelease {
   maxPlayTime Int? @map("max_play_time")
 
   // Downstream opt-in references
-  collections GameCollection[]
-  listEntries ListEntry[]
+  collectionCopies CollectionCopy[]
+  listEntries      ListEntry[]
 
   eventGames       EventGame[]
   eventNominations EventGameNomination[]

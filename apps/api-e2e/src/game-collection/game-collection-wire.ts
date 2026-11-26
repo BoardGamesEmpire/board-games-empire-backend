@@ -10,8 +10,15 @@ import { envelopeFailure, isRecord } from '../support/wire';
  * against `undefined` that names neither the key nor the change.
  */
 
-/** `onWishlist` is sent on `GET /users/:userId/game-collections` only, and is null for an actor with no wishlist they can read (#1241). */
-export type GameCollectionWire = Wire<GameCollection> & { readonly onWishlist?: boolean | null };
+/**
+ * `onWishlist` is sent on `GET /users/:userId/game-collections` only, and is
+ * null for an actor with no wishlist they can read (#1241). `quantity` is the
+ * number of copies the owner still has, counted rather than stored (#1231).
+ */
+export type GameCollectionWire = Wire<GameCollection> & {
+  readonly onWishlist?: boolean | null;
+  readonly quantity: number;
+};
 
 /** The players and play time a game carries and its platform game may override (#1070). */
 export type PlayerAndPlayTimeField = 'minPlayers' | 'maxPlayers' | 'minPlayTime' | 'maxPlayTime';

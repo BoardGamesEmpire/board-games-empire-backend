@@ -1,0 +1,70 @@
+// One copy of a game in a collection entry, physical or digital, with its own
+// acquisition, condition, edition and removal (#1231). A game sold and bought
+// again is two copies. A copy is owned while it is neither removed nor taken
+// back, and an entry is removed with its last owned copy.
+//
+// The price paid, current value, where and when the copy was acquired, and the
+// note are the owner's alone, whatever the entry's reach (#1231).
+//
+// The migration's CHECK constraints hold the columns together: an amount and
+// its currency are set together, and an amount is zero or more; a date and its
+// precision are set together, and the date is the first day of its period; a
+// removal date or reason needs `removedAt`; an upstream account needs a key.
+// The key may outlive its account, which is set to null when the account goes.
+model CollectionCopy {
+  id String @id @default(cuid(2))
+
+  entry   GameCollection @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  entryId String         @map("entry_id")
+
+  // The copy's edition. Set to null when the release is deleted.
+  release   GameRelease? @relation(fields: [releaseId], references: [id], onDelete: SetNull)
+  releaseId String?      @map("release_id")
+
+  // Physical copies only.
+  condition GameCondition?
+
+  // The acquisition: when, where from and for how much the user got the copy.
+  // A null date is unknown, never an invented one.
+  acquiredOn          DateTime?      @map("acquired_on") @db.Date
+  acquiredOnPrecision DatePrecision? @map("acquired_on_precision")
+  acquiredFrom        String?        @map("acquired_from")
+
+  // Money as an integer in the currency's smallest unit, with its ISO 4217 code.
+  pricePaidAmount      Int?    @map("price_paid_amount")
+  pricePaidCurrency    String? @map("price_paid_currency") @db.Char(3)
+  currentValueAmount   Int?    @map("current_value_amount")
+  currentValueCurrency String? @map("current_value_currency") @db.Char(3)
+
+  // Kept as written, in Markdown.
+  note String?
+
+  // The removal: `removedAt` is when it was recorded, `removedOn` the date it
+  // happened, at its precision.
+  removedAt          DateTime?          @map("removed_at") @db.Timestamptz(3)
+  removedOn          DateTime?          @map("removed_on") @db.Date
+  removedOnPrecision DatePrecision?     @map("removed_on_precision")
+  removeReason       GameRemovalReason? @map("remove_reason")
+
+  // Set when the user takes the copy back as never having existed. A copy
+  // taken back counts as neither owned nor removed, and can be restored.
+  retractedAt DateTime? @map("retracted_at") @db.Timestamptz(3)
+
+  // A synced copy names its upstream account and the upstream's key for it.
+  // Any user edit, take-back or restore stamps `editedByUserAt`, and a sync
+  // leaves a copy so stamped as the user left it.
+  upstreamAccount   UpstreamAccount? @relation(fields: [upstreamAccountId], references: [id], onDelete: SetNull)
+  upstreamAccountId String?          @map("upstream_account_id")
+  upstreamKey       String?          @map("upstream_key")
+  editedByUserAt    DateTime?        @map("edited_by_user_at") @db.Timestamptz(3)
+
+  loans GameLoan[]
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([upstreamAccountId, upstreamKey])
+  @@index([entryId])
+  @@index([releaseId])
+  @@map("collection_copies")
+}

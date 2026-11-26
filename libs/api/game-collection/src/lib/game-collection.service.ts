@@ -2,6 +2,7 @@ import type { GameCollection } from '@bge/database';
 import {
   Action,
   DatabaseService,
+  DatePrecision,
   isPrismaDependentRecordNotFoundError,
   ListKind,
   Prisma,
@@ -18,7 +19,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { createId } from '@paralleldrive/cuid2';
 import { Http } from '@status/codes';
 import type { GameCollectionRow, GameCollectionWithRelations } from './collection-row';
-import { changedSince, COLLECTION_INCLUDE } from './collection-row';
+import { changedSince, COLLECTION_INCLUDE, OWNED_COPY } from './collection-row';
 import {
   CreateGameCollectionDto,
   GameCollectionDto,
@@ -41,6 +42,11 @@ function collectionEntryNotFound(id: string): CodedHttpException {
     'COLLECTION_ENTRY_NOT_FOUND',
     t('errors.game_collection.not_found', { id }),
   );
+}
+
+/** Midnight UTC of `at`'s day: the date a removal records when the user gives none (#1231). */
+function utcDayOf(at: Date): Date {
+  return new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate()));
 }
 
 /**
@@ -220,6 +226,10 @@ export class GameCollectionService {
    * while server-managed play history (`playCount`, `lastPlayed`) and any
    * unspecified fields survive the removal and the add-back.
    *
+   * A new entry is created with one copy. An entry added back owns no copy,
+   * and gets one new copy in the same transaction. An entry still owned gets
+   * none, so a repeated add is harmless (#1231).
+   *
    * Adding back a removed entry also resumes the nominations its removal
    * paused, in every live event that offers it
    * (`syncCollectionEntrySupply`, #1221). The entry's row is locked
@@ -240,7 +250,7 @@ export class GameCollectionService {
    */
   async addToCollection(dto: CreateGameCollectionDto): Promise<GameCollectionDto> {
     const userId = this.abilityService.getActingUserId();
-    const { platformGameId, medium, releaseId, ...attributes } = dto;
+    const { platformGameId, medium, ...attributes } = dto;
 
     const platformGame = await this.db.platformGame.findUnique({
       where: { id: platformGameId },
@@ -250,11 +260,7 @@ export class GameCollectionService {
       throw new NotFoundException(t('errors.platform_game.not_found', { id: platformGameId }));
     }
 
-    if (releaseId) {
-      await this.assertReleaseBelongsTo(releaseId, platformGameId);
-    }
-
-    const provided = pickDefined({ ...attributes, releaseId });
+    const provided = pickDefined(attributes);
     const lastUpdated = new Date();
     // The schema's own default, cuid2, minted here so the upsert's answer
     // says whether it created the row (#1221).
@@ -271,16 +277,19 @@ export class GameCollectionService {
               FOR UPDATE
             `);
 
-            const row = await tx.gameCollection.upsert({
+            const upserted = await tx.gameCollection.upsert({
               where: { userId_platformGameId_medium: { userId, platformGameId, medium } },
-              create: { id: newId, userId, platformGameId, medium, ...provided, lastUpdated },
+              // A new entry starts with one copy. The update branch also runs
+              // on an entry still owned, so it adds none (#1231).
+              create: { id: newId, userId, platformGameId, medium, ...provided, lastUpdated, copies: { create: {} } },
               update: { ...provided, deletedAt: null, deleteReason: null, lastUpdated },
               include: COLLECTION_INCLUDE,
             });
 
             // Removed when locked, or created by another request since the
             // pre-read and possibly removed in that window.
-            const addedBack = locked === undefined ? row.id !== newId : locked.deletedAt !== null;
+            const addedBack = locked === undefined ? upserted.id !== newId : locked.deletedAt !== null;
+            const row = addedBack ? await this.withOwnedCopy(tx, upserted) : upserted;
 
             return { row, synced: addedBack ? { id: row.id, deletedAt: null } : null };
           },
@@ -301,31 +310,13 @@ export class GameCollectionService {
    * Patch the mutable fields of an entry. Standard REST semantics: omitted
    * fields are preserved, explicit `null` clears nullable fields. Identity
    * (`platformGameId`/`medium`) and play history (`playCount`/`lastPlayed`)
-   * are not writable here.
+   * are not writable here, and neither are the copies' edition and count
+   * (#1231).
    */
   async update(id: string, dto: UpdateGameCollectionDto): Promise<GameCollectionDto> {
     const data = pickDefined(dto);
     if (Object.keys(data).length === 0) {
       throw new BadRequestException(t('common.at_least_one_field'));
-    }
-
-    // Only a release change needs a pre-read (the row's platform game); every
-    // other patch goes straight to the scoped update.
-    if (data.releaseId) {
-      const existing = await this.db.gameCollection.findUnique({
-        where: {
-          id,
-          // eslint-disable-next-line no-restricted-syntax -- single-row pre-read for a write by id, not a collection read
-          AND: this.abilityService.getCurrentResourceConditions(ResourceType.GameCollection, Action.update),
-        },
-        select: { platformGameId: true },
-      });
-
-      if (!existing) {
-        throw collectionEntryNotFound(id);
-      }
-
-      await this.assertReleaseBelongsTo(data.releaseId, existing.platformGameId);
     }
 
     return this.writtenRow(
@@ -346,7 +337,10 @@ export class GameCollectionService {
   /**
    * Remove a game from the collection: "I no longer own this", not "never
    * played". The entry stays, marked removed, so play history and the rows
-   * that name it (locations, offers, loans) survive a removal and an add-back.
+   * that name it (locations, offers) survive a removal and an add-back. Each
+   * copy the user still owns is removed with it, dated today in UTC, with the
+   * entry's reason; copies already removed or taken back keep what they have
+   * (#1231).
    *
    * Every live event that offers the entry stops counting it as supplied
    * (`syncCollectionEntrySupply`, #1221): the nominations of its game that
@@ -379,13 +373,46 @@ export class GameCollectionService {
               include: COLLECTION_INCLUDE,
             });
 
-            return { row, synced: { id: row.id, deletedAt: now } };
+            // After the entry's update, which locks its row as the
+            // transaction's first lock (#1221).
+            await tx.collectionCopy.updateMany({
+              where: { entryId: row.id, ...OWNED_COPY },
+              data: {
+                removedAt: now,
+                removedOn: utcDayOf(now),
+                removedOnPrecision: DatePrecision.Day,
+                removeReason: reason ?? null,
+              },
+            });
+
+            // The include counted the owned copies before they were removed.
+            return { row: { ...row, _count: { copies: 0 } }, synced: { id: row.id, deletedAt: now } };
           },
           actingUserId,
           now,
         ),
       (error) => this.mapMissingToNotFound(error, id),
     );
+  }
+
+  /**
+   * An entry added back gets one new copy, unless it owns one already: an
+   * entry another request created after the add's pre-read may still be
+   * owned, and then this add is a repeat (#1231). It runs under the entry's
+   * lock, so the include's count of owned copies is current, and the row
+   * answers the new count without a second read.
+   */
+  private async withOwnedCopy(
+    tx: Prisma.TransactionClient,
+    row: GameCollectionWithRelations,
+  ): Promise<GameCollectionWithRelations> {
+    if (row._count.copies > 0) {
+      return row;
+    }
+
+    await tx.collectionCopy.create({ data: { entryId: row.id } });
+
+    return { ...row, _count: { copies: 1 } };
   }
 
   /**
@@ -437,6 +464,9 @@ export class GameCollectionService {
    *   follows the platform game's own content type where it has one (#1391).
    * - The ceiling needs no user, so an anonymous viewer of another user's
    *   collection gets the base games it could open, the Public ones.
+   *
+   * Each row also sends the include's count of owned copies as its
+   * `quantity`, and not the count's own shape (#1231).
    */
   private async rowsWithBaseGames(rows: readonly GameCollectionWithRelations[]): Promise<GameCollectionRow[]> {
     const links = await readBaseGameLinksOnPlatform(
@@ -445,12 +475,13 @@ export class GameCollectionService {
       this.scopeComposer.compose(ResourceType.Game, Action.read, { deletedAt: null }),
     );
 
-    return rows.map(({ platformGame, ...row }) => ({
+    return rows.map(({ _count, platformGame, ...row }) => ({
       ...row,
       platformGame: {
         ...platformGame,
         game: { ...platformGame.game, baseGames: links.get(platformGame.id) ?? [] },
       },
+      quantity: _count.copies,
     }));
   }
 
@@ -493,22 +524,5 @@ export class GameCollectionService {
 
     this.logger.error(`Error mutating collection entry with id ${id}`, error);
     return error instanceof Error ? error : new Error(String(error));
-  }
-
-  private async assertReleaseBelongsTo(releaseId: string, platformGameId: string) {
-    const release = await this.db.gameRelease.findUnique({
-      where: { id: releaseId },
-      select: { platformGameId: true },
-    });
-
-    if (!release) {
-      throw new NotFoundException(t('errors.game_release.not_found', { id: releaseId }));
-    }
-
-    if (release.platformGameId !== platformGameId) {
-      throw new BadRequestException(
-        t('errors.game_collection.release_platform_mismatch', { releaseId, platformGameId }),
-      );
-    }
   }
 }

@@ -1,5 +1,15 @@
 import type { Prisma } from '@bge/database';
-import { AuthType, ContentType, GameMedium, ListKind, PlatformType, Reach, ResourceType } from '@bge/database';
+import {
+  AuthType,
+  ContentType,
+  DatePrecision,
+  GameMedium,
+  GameRemovalReason,
+  ListKind,
+  PlatformType,
+  Reach,
+  ResourceType,
+} from '@bge/database';
 import type { Actors, AuthenticatedActor } from '@bge/testing-e2e';
 import { createActors } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
@@ -395,6 +405,66 @@ describe('collection rows (#1070)', () => {
   });
 
   /**
+   * The entry stores no quantity: a row's `quantity` counts the copies the
+   * owner still has (#1231). An add creates the entry with one copy, a
+   * repeated add adds none, a removal removes every copy still owned, and an
+   * add after a removal adds one new copy, while the removed copy keeps its
+   * removal.
+   */
+  it("a row's quantity counts the copies the owner still has, through an add, a repeat, a removal and an add-back (#1231)", async () => {
+    const owner = await actors.user();
+    const { platformGameId } = await arrangePlatformGame();
+    const added = async (description: RequestDescription) =>
+      readCollectionEnvelope(
+        await request(baseUrl)
+          .post(COLLECTIONS_PATH)
+          .set(owner.headers)
+          .send({ platformGameId, medium: GameMedium.Physical })
+          .expect(201),
+        description,
+      ).collection;
+
+    const created = await added(`POST ${COLLECTIONS_PATH}`);
+    expect(created.quantity).toBe(1);
+    expect(await added(`POST ${COLLECTIONS_PATH} again`)).toMatchObject({ id: created.id, quantity: 1 });
+
+    const removed = readCollectionEnvelope(
+      await request(baseUrl)
+        .delete(`${COLLECTIONS_PATH}/${created.id}`)
+        .query({ reason: GameRemovalReason.Sold })
+        .set(owner.headers)
+        .expect(200),
+      `DELETE ${COLLECTIONS_PATH}/:id`,
+    ).collection;
+    expect(removed.quantity).toBe(0);
+
+    expect(await added(`POST ${COLLECTIONS_PATH} after the removal`)).toMatchObject({ id: created.id, quantity: 1 });
+    expect(
+      readCollectionEnvelope(await readEntry(owner, created.id).expect(200), `GET ${COLLECTIONS_PATH}/:id`).collection
+        .quantity,
+    ).toBe(1);
+
+    const copies = await db.client.collectionCopy.findMany({
+      where: { entryId: created.id },
+      orderBy: { createdAt: 'asc' },
+      select: { removedAt: true, removedOn: true, removedOnPrecision: true, removeReason: true },
+    });
+    expect(copies).toEqual([
+      {
+        removedAt: expect.any(Date),
+        removedOn: expect.any(Date),
+        removedOnPrecision: DatePrecision.Day,
+        removeReason: GameRemovalReason.Sold,
+      },
+      { removedAt: null, removedOn: null, removedOnPrecision: null, removeReason: null },
+    ]);
+    // The removal is dated the UTC day it was recorded on.
+    expect(copies[0]?.removedOn?.toISOString()).toBe(
+      `${copies[0]?.removedAt?.toISOString().slice(0, 10)}T00:00:00.000Z`,
+    );
+  });
+
+  /**
    * An expansion's base games on a row (#1070): the ones that are live and that
    * the viewer could open by id, the rule `GET /games/:id` uses, and that have
    * a platform game on the row's platform (#1391). Each denial is paired with a
@@ -529,7 +599,7 @@ describe('collection rows (#1070)', () => {
       const patched = await request(baseUrl)
         .patch(`${COLLECTIONS_PATH}/${entryId}`)
         .set(owner.headers)
-        .send({ quantity: 2 })
+        .send({ favorite: true })
         .expect(200);
       expect(embeddedIn(patched, `PATCH ${COLLECTIONS_PATH}/:id`).game.baseGames).toEqual(expected);
 
@@ -691,30 +761,6 @@ describe('collection rows (#1070)', () => {
 
       expect(drained).toEqual([{ id: row.entryId, baseGames: [{ gameId: base.id, isStandalone: false }] }]);
       expect(drained.map((drainedRow) => drainedRow.id)).not.toContain(untouched.entryId);
-    });
-
-    // The release is embedded too, and a re-import rewrites it in place.
-    it('resends a row when its release changes, and not an untouched neighbor (#1070)', async () => {
-      const owner = await actors.user();
-      const released = await arrangeRow(owner.user.id, { reach: Reach.Private });
-      const untouched = await arrangeRow(owner.user.id, { reach: Reach.Private });
-      const { platformGameId } = await db.client.gameCollection.findUniqueOrThrow({
-        where: { id: released.entryId },
-        select: { platformGameId: true },
-      });
-      const release = await db.client.gameRelease.create({
-        data: { platformGameId, editionKey: `e2e edition ${token()}`, editionName: 'First edition' },
-        select: { id: true },
-      });
-      await db.client.gameCollection.update({ where: { id: released.entryId }, data: { releaseId: release.id } });
-
-      const since = await startOfChanges();
-      await db.client.gameRelease.update({ where: { id: release.id }, data: { editionName: 'Second edition' } });
-
-      // The untouched row is the control: the drain is not every row.
-      const drained = (await drainedRows(owner, since)).map((row) => row.id);
-      expect(drained).toEqual([released.entryId]);
-      expect(drained).not.toContain(untouched.entryId);
     });
 
     // A base game deleted outright takes its link with it (cascade), so no

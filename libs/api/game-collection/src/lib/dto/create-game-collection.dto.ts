@@ -2,7 +2,7 @@ import { GameMedium, Reach } from '@bge/database';
 import { i18nValidationMessage } from '@bge/i18n';
 import { ReachProperty } from '@bge/shared';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsEnum, IsInt, IsNotEmpty, IsOptional, IsPositive, IsString, Max, Min } from 'class-validator';
+import { IsBoolean, IsEnum, IsInt, IsNotEmpty, IsOptional, IsString, Max, Min } from 'class-validator';
 
 const COLLECTION_REACHES = [
   Reach.Private,
@@ -44,18 +44,6 @@ export class CreateGameCollectionDto {
   @ApiProperty({ enum: GameMedium, description: 'Medium of the copy being added (Physical or Digital)' })
   @IsEnum(GameMedium, { message: i18nValidationMessage('validation.isEnum') })
   medium!: GameMedium;
-
-  @ApiPropertyOptional({ description: 'ID of a specific GameRelease of the platform game' })
-  @IsOptional()
-  @IsString({ message: i18nValidationMessage('validation.isString') })
-  @IsNotEmpty({ message: i18nValidationMessage('validation.isNotEmpty') })
-  releaseId?: string;
-
-  @ApiPropertyOptional({ description: 'Number of copies owned', default: 1 })
-  @IsOptional()
-  @IsInt({ message: i18nValidationMessage('validation.isInt') })
-  @IsPositive({ message: i18nValidationMessage('validation.isPositive') })
-  quantity?: number;
 
   @ApiPropertyOptional({ description: 'Personal rating (1-10)' })
   @IsOptional()

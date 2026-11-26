@@ -66,8 +66,8 @@ describe('GameCollectionController (delegation)', () => {
   });
 
   it('updateCollectionEntry forwards id and dto', async () => {
-    await firstValueFrom(controller.updateCollectionEntry('gc-1', { quantity: 2 }));
-    expect(service.update).toHaveBeenCalledWith('gc-1', { quantity: 2 });
+    await firstValueFrom(controller.updateCollectionEntry('gc-1', { rating: 7 }));
+    expect(service.update).toHaveBeenCalledWith('gc-1', { rating: 7 });
   });
 
   it('removeFromCollection forwards id and reason query', async () => {

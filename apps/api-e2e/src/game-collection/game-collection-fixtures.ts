@@ -10,7 +10,8 @@ import { tabletopPlatform } from '../support/seeded-platforms';
  * created per call.
  *
  * Extracted when a second suite needed it (#514), on the concrete-first rule
- * `../support/wire.ts` describes.
+ * `../support/wire.ts` describes. The entry owns one copy, as one the api
+ * adds would (#1231).
  */
 export async function arrangeCollectionEntry(prisma: PrismaClient, ownerId: string, reach: Reach): Promise<string> {
   const platform = await tabletopPlatform(prisma);
@@ -24,7 +25,13 @@ export async function arrangeCollectionEntry(prisma: PrismaClient, ownerId: stri
   });
 
   const entry = await prisma.gameCollection.create({
-    data: { userId: ownerId, platformGameId: platformGame.id, medium: GameMedium.Physical, reach },
+    data: {
+      userId: ownerId,
+      platformGameId: platformGame.id,
+      medium: GameMedium.Physical,
+      reach,
+      copies: { create: {} },
+    },
     select: { id: true },
   });
 

@@ -372,7 +372,7 @@ describe('GET /api/events/:eventId/offered-games (#1187)', () => {
     const added = await arrangeCollectionEntry(db.client, host.user.id, Reach.Private);
     await db.client.gameCollection.updateMany({
       where: { id: { in: [listed.collectionId, added] } },
-      data: { rating: 9, comment: note, playCount: 12, quantity: 3 },
+      data: { rating: 9, comment: note, playCount: 12 },
     });
 
     const entryKeys = ['attendeeId', 'collection', 'createdAt', 'id', 'onWishlist', 'supplies'];

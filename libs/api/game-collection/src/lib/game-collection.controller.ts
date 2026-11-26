@@ -62,13 +62,14 @@ export class GameCollectionController {
   @ApiOperation({
     summary: "Add a game to the acting user's collection",
     description:
-      'Idempotent upsert on (user, platformGame, medium): re-adding an active entry updates it, ' +
-      're-adding a removed entry resurrects it with play history intact.',
+      'Idempotent on (user, platformGame, medium). A new entry is created with one copy. Adding a removed ' +
+      'entry again restores it with its play history and one new copy. Adding an entry you still own updates ' +
+      'its fields and adds no copy, so a repeated request is harmless.',
   })
   @ApiResponse({ status: Http.Created, type: GameCollectionMessageResponseDto })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
-  @ApiResponse({ status: Http.NotFound, description: 'Platform game or release not found' })
+  @ApiResponse({ status: Http.NotFound, description: 'Platform game not found' })
   @CheckPolicies((ability) => ability.can(Action.create, ResourceType.GameCollection))
   @Post()
   addToCollection(@Body() createGameCollectionDto: CreateGameCollectionDto) {
@@ -95,7 +96,8 @@ export class GameCollectionController {
     summary: "Remove a game from the acting user's collection",
     description:
       'The entry is marked removed, optionally with a reason, so play history survives, and adding the same ' +
-      'game back restores it. In every event that offers it, unless the event was deleted, the offer stops counting: ' +
+      'game back restores it. Each copy you still own is removed with it, dated today, with the same reason. ' +
+      'In every event that offers it, unless the event was deleted, the offer stops counting: ' +
       'nominations of the game that await an outcome pause, and the game leaves the lineup of every date still ahead. ' +
       'The offers stay, and count again when the game is added back, which resumes the paused nominations.',
   })

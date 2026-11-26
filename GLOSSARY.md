@@ -770,8 +770,16 @@ A user's whole set of owned games.
 _Avoid_: library, shelf
 
 **Collection entry**:
-One game in a user's collection.
+One game in a user's collection, with its copies.
 _Avoid_: game collection
+
+**Copy**:
+One physical or digital copy of a game in a collection entry, with its own acquisition, condition, edition and removal. A game sold and bought again is two copies.
+_Avoid_: item, unit, instance
+
+**Acquisition**:
+When, where from and for how much a user got a copy.
+_Avoid_: purchase, for a gift or trade
 
 **Medium**:
 Whether a copy of a game is physical or digital, on any platform. A print-and-play file is a digital tabletop copy.
@@ -814,11 +822,19 @@ A planned named place where a user keeps games they own, such as a shelf or a ho
 _Avoid_: location for where an event or play takes place (say venue)
 
 **Removal**:
-Recording that a user no longer owns a game, optionally with a reason such as sold or traded. The game stays listed as previously owned and gets its history back if the user adds it again.
+Recording that a user no longer owns a copy, with its date and optionally a reason such as sold or traded. A removal is a copy's: an entry is removed with its last owned copy, then stays listed as previously owned and gets its history back if the user adds the game again.
 _Avoid_: delete, tombstone, resurrection
 
+**Taken back**:
+A copy or rating change the user says never happened. It counts as neither owned nor removed, and can be restored.
+_Avoid_: deleted, retracted, on its own
+
+**Revision**:
+An earlier state kept when something changes: a house rule's earlier wording, and the earlier values of a copy or rating change the user edited.
+_Avoid_: version, for a revision
+
 **Loan**:
-Planned: lending an owned game to someone, who need not have an account, recording when it went out, when it is due and came back, and its condition each way.
+Planned: lending an owned copy of a game to someone, who need not have an account, recording when it went out, when it is due and came back, and its condition each way.
 _Avoid_: loaned game, borrow (as the noun)
 
 ### Playing games
