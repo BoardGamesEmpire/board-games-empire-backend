@@ -34,6 +34,7 @@
   "game_collection": {
     "not_found": "Collection entry with ID {id} not found",
     "copy_not_found": "Copy with ID {id} not found",
+    "revision_not_found": "Revision with ID {id} not found for this copy",
     "copy_limit_reached": "You already own {max} copies of this game, the most it can hold.",
     "copy_not_removed": "This copy hasn't been removed, so it has no removal to change. Remove the copy first.",
     "condition_digital": "A digital copy has no condition. Leave the condition out.",

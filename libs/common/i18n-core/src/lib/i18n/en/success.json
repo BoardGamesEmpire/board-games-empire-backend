@@ -10,7 +10,8 @@
     "removed": "Game removed from collection successfully",
     "copy_added": "Copy added successfully",
     "copy_updated": "Copy updated successfully",
-    "copy_removed": "Copy removed successfully"
+    "copy_removed": "Copy removed successfully",
+    "copy_restored": "Copy restored to what it said before"
   },
   "list": {
     "created": "List created successfully",

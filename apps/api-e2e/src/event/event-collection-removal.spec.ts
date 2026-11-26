@@ -13,7 +13,7 @@ import type { Actors, AuthenticatedActor } from '@bge/testing-e2e';
 import { createActors } from '@bge/testing-e2e';
 import request from 'supertest';
 import { arrangeCollectionEntry } from '../game-collection/game-collection-fixtures';
-import { copyEnvelope, readCollectionEnvelope } from '../game-collection/game-collection-wire';
+import { copyEnvelope, listRevisionsEnvelope, readCollectionEnvelope } from '../game-collection/game-collection-wire';
 import { requireBaseUrl } from '../support/e2e-env';
 import type { Barrier } from '../support/lock-barrier';
 import { expectLockWaiter, withBarrier } from '../support/lock-barrier';
@@ -319,6 +319,46 @@ describe('removing an offered game from the collection (#1221)', () => {
       .send({})
       .expect(201);
     expect((await readNomination(host, eventId, nomination.id)).status).toBe(NominationStatus.Open);
+  });
+
+  // A copy removal keeps what the copy said before as a revision. Restoring
+  // it makes the copy owned again, so the entry comes back through the same
+  // write runner, and its offers resume as they do on an add-back (#1231,
+  // #1221).
+  it('removing a copy keeps what it said before, so restoring that revision makes it owned again and brings the entry back, resuming its offers (#1221)', async () => {
+    const { host, owner, eventId, ownerAttendeeId, offered, nomination } = await arrangeEvent();
+    const copiesPath = `${COLLECTIONS_PATH}/${offered.collectionId}/copies`;
+    const { id: copyId } = await db.client.collectionCopy.findFirstOrThrow({
+      where: { entryId: offered.collectionId },
+      select: { id: true },
+    });
+
+    await request(baseUrl)
+      .delete(`${copiesPath}/${copyId}`)
+      .query({ reason: GameRemovalReason.Sold })
+      .set(owner.headers)
+      .expect(200);
+    expect((await readNomination(host, eventId, nomination.id)).status).toBe(NominationStatus.Paused);
+
+    const [beforeRemoval] = listRevisionsEnvelope(
+      await request(baseUrl).get(`${copiesPath}/${copyId}/revisions`).set(owner.headers).expect(200),
+      'GET /api/game-collections/:id/copies/:copyId/revisions as the owner',
+    );
+    expect(beforeRemoval?.values.removedAt).toBeNull();
+
+    const restoredCopy = copyEnvelope(
+      await request(baseUrl)
+        .post(`${copiesPath}/${copyId}/revisions/${beforeRemoval?.id}/restore`)
+        .set(owner.headers)
+        .expect(200),
+      'POST /api/game-collections/:id/copies/:copyId/revisions/:revisionId/restore as the owner',
+    );
+    expect(restoredCopy).toMatchObject({ id: copyId, removedAt: null });
+
+    const reopened = await readNomination(host, eventId, nomination.id);
+    expect(reopened.status).toBe(NominationStatus.Open);
+    expect(reopened.pausedFrom).toBeNull();
+    expect((await offerReads(host, eventId, ownerAttendeeId)).event.ids).toContain(offered.suppliedById);
   });
 
   it('takes the game off the lineup still ahead and keeps it off after the add-back (#1221)', async () => {

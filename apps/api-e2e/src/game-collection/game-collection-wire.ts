@@ -288,3 +288,37 @@ export function listRatingsEnvelope(
 
   return parsed.data.ratings;
 }
+
+/**
+ * What a copy said before a correction, as its owner reads a revision
+ * (#1231): the copy's shape without its id and creation time. Strict, so a
+ * field the revision must never carry, such as when the user last edited the
+ * copy, its upstream account or the add's client request id, fails the parse.
+ */
+export const revisionValuesWireSchema = collectionCopyWireSchema.omit({ createdAt: true, id: true }).strict();
+
+/** A revision of a copy (#1231). Strict, as its values are. */
+export const collectionRevisionWireSchema = z
+  .object({ createdAt: z.string(), id: z.string().min(1), values: revisionValuesWireSchema })
+  .strict();
+
+export type CollectionRevisionWire = z.infer<typeof collectionRevisionWireSchema>;
+
+const listRevisionsEnvelopeSchema = z.object({ revisions: z.array(collectionRevisionWireSchema) });
+
+/** `GET /api/game-collections/:id/copies/:copyId/revisions`: `{ revisions: [...] }` (#1231). */
+export function listRevisionsEnvelope(
+  response: HttpResponseLike,
+  request: RequestDescription,
+): readonly CollectionRevisionWire[] {
+  const parsed = listRevisionsEnvelopeSchema.safeParse(response.body);
+  if (!parsed.success) {
+    return fail(
+      `its 'revisions' is not a list of a copy's revisions as its owner reads them (${parsed.error.message})`,
+      request,
+      response,
+    );
+  }
+
+  return parsed.data.revisions;
+}

@@ -20,6 +20,8 @@ import type { MockDatabaseService } from '@bge/testing';
 import { createTestingModuleWithDb, paginationQuery, rawQueryText, unwrapTransaction } from '@bge/testing';
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import type { CopyRevisionSource } from './collection-revisions';
+import { COPY_REVISION_SELECT, copyRevisionValues } from './collection-revisions';
 import { COLLECTION_INCLUDE, OWNER_COPY_SELECT } from './collection-row';
 import { CollectionWriteService } from './collection-write.service';
 import { GameCollectionService } from './game-collection.service';
@@ -126,6 +128,25 @@ const ENTRY_NOT_FOUND = {
   code: 'COLLECTION_ENTRY_NOT_FOUND',
   response: { statusCode: 404, error: 'Not Found', code: 'COLLECTION_ENTRY_NOT_FOUND' },
 };
+
+/** A copy's revision columns, as the entry removal reads them: nothing known (#1231). */
+const revisionColumns = (id: string): CopyRevisionSource => ({
+  id,
+  releaseId: null,
+  condition: null,
+  acquiredOn: null,
+  acquiredOnPrecision: null,
+  acquiredFrom: null,
+  pricePaidAmount: null,
+  pricePaidCurrency: null,
+  currentValueAmount: null,
+  currentValueCurrency: null,
+  note: null,
+  removedAt: null,
+  removedOn: null,
+  removedOnPrecision: null,
+  removeReason: null,
+});
 
 describe('GameCollectionService', () => {
   let service: GameCollectionService;
@@ -1405,6 +1426,45 @@ describe('GameCollectionService', () => {
       expect(db.gameCollection.delete).not.toHaveBeenCalled();
     });
 
+    // A removal edits each copy it removes, so each keeps what it said before
+    // as a revision, read under the entry's lock and written before the
+    // removal, in one statement (#1231).
+    it('an entry removal keeps a revision of each copy it removes, with its values before the removal (#1231)', async () => {
+      const owned = [
+        {
+          ...revisionColumns('copy-1'),
+          note: 'First',
+          acquiredOn: new Date('2019-01-01T00:00:00Z'),
+          acquiredOnPrecision: DatePrecision.Year,
+        },
+        { ...revisionColumns('copy-2'), pricePaidAmount: 1250, pricePaidCurrency: 'EUR' },
+      ];
+      db.collectionCopy.findMany.mockResolvedValueOnce(owned as never);
+      const order: string[] = [];
+      db.collectionCopyRevision.createMany.mockImplementation((async () => {
+        order.push('revisions');
+        return { count: 2 };
+      }) as never);
+      db.collectionCopy.updateMany.mockImplementation((async () => {
+        order.push('removal');
+        return { count: 2 };
+      }) as never);
+
+      await service.remove('gc-1', { reason: GameRemovalReason.Sold });
+
+      expect(db.collectionCopyRevision.createMany).toHaveBeenCalledWith({
+        data: owned.map((copy) => ({ copyId: copy.id, values: copyRevisionValues(copy) })),
+      });
+      expect(db.collectionCopyRevision.createMany.mock.calls[0]?.[0]?.data).toEqual([
+        {
+          copyId: 'copy-1',
+          values: expect.objectContaining({ note: 'First', acquiredOn: '2019-01-01', removedAt: null }),
+        },
+        { copyId: 'copy-2', values: expect.objectContaining({ pricePaidAmount: 1250, removedAt: null }) },
+      ]);
+      expect(order).toEqual(['revisions', 'removal']);
+    });
+
     it('removal dates every owned copy removedOn when given, with the reason', async () => {
       await service.remove('gc-1', { reason: GameRemovalReason.Sold, removedOn: '2019-03' });
 
@@ -1508,7 +1568,11 @@ describe('GameCollectionService', () => {
 
       it('a removal with no date of a copy acquired later than today in UTC is dated its acquisition day (#1231)', async () => {
         db.collectionCopy.findMany.mockResolvedValueOnce([
-          { id: 'copy-1', acquiredOn: new Date('2026-11-27T00:00:00Z'), acquiredOnPrecision: DatePrecision.Day },
+          {
+            ...revisionColumns('copy-1'),
+            acquiredOn: new Date('2026-11-27T00:00:00Z'),
+            acquiredOnPrecision: DatePrecision.Day,
+          },
         ] as never);
 
         await service.remove('gc-1', {});
@@ -1526,8 +1590,8 @@ describe('GameCollectionService', () => {
         'dates every owned copy today in UTC, as one statement, for %s',
         async (_, acquiredOn, acquiredOnPrecision) => {
           db.collectionCopy.findMany.mockResolvedValueOnce([
-            { id: 'copy-1', acquiredOn, acquiredOnPrecision },
-            { id: 'copy-2', acquiredOn, acquiredOnPrecision },
+            { ...revisionColumns('copy-1'), acquiredOn, acquiredOnPrecision },
+            { ...revisionColumns('copy-2'), acquiredOn, acquiredOnPrecision },
           ] as never);
 
           await service.remove('gc-1', {});
@@ -1544,9 +1608,17 @@ describe('GameCollectionService', () => {
       // acquisition, so the one acquired tomorrow is written apart.
       it('dates each copy by its own acquisition, one statement per date', async () => {
         db.collectionCopy.findMany.mockResolvedValueOnce([
-          { id: 'copy-1', acquiredOn: new Date('2026-11-20T00:00:00Z'), acquiredOnPrecision: DatePrecision.Day },
-          { id: 'copy-2', acquiredOn: new Date('2026-11-27T00:00:00Z'), acquiredOnPrecision: DatePrecision.Day },
-          { id: 'copy-3', acquiredOn: null, acquiredOnPrecision: null },
+          {
+            ...revisionColumns('copy-1'),
+            acquiredOn: new Date('2026-11-20T00:00:00Z'),
+            acquiredOnPrecision: DatePrecision.Day,
+          },
+          {
+            ...revisionColumns('copy-2'),
+            acquiredOn: new Date('2026-11-27T00:00:00Z'),
+            acquiredOnPrecision: DatePrecision.Day,
+          },
+          { ...revisionColumns('copy-3'), acquiredOn: null, acquiredOnPrecision: null },
         ] as never);
 
         await service.remove('gc-1', { reason: GameRemovalReason.Sold });
@@ -1564,7 +1636,11 @@ describe('GameCollectionService', () => {
 
       it('still refuses a removal date the user sent that ends before an acquisition', async () => {
         db.collectionCopy.findMany.mockResolvedValueOnce([
-          { id: 'copy-1', acquiredOn: new Date('2026-11-27T00:00:00Z'), acquiredOnPrecision: DatePrecision.Day },
+          {
+            ...revisionColumns('copy-1'),
+            acquiredOn: new Date('2026-11-27T00:00:00Z'),
+            acquiredOnPrecision: DatePrecision.Day,
+          },
         ] as never);
 
         await expect(service.remove('gc-1', { removedOn: '2026-11-26' })).rejects.toMatchObject({
@@ -1578,8 +1654,12 @@ describe('GameCollectionService', () => {
     // checked against the removal's date, under the entry's lock (#1231).
     it('refuses a removal dated before an owned copy was acquired with COLLECTION_DATE_ORDER', async () => {
       db.collectionCopy.findMany.mockResolvedValueOnce([
-        { id: 'copy-1', acquiredOn: null, acquiredOnPrecision: null },
-        { id: 'copy-2', acquiredOn: new Date('2020-05-01T00:00:00Z'), acquiredOnPrecision: DatePrecision.Month },
+        { ...revisionColumns('copy-1'), acquiredOn: null, acquiredOnPrecision: null },
+        {
+          ...revisionColumns('copy-2'),
+          acquiredOn: new Date('2020-05-01T00:00:00Z'),
+          acquiredOnPrecision: DatePrecision.Month,
+        },
       ] as never);
 
       await expect(service.remove('gc-1', { removedOn: '2019' })).rejects.toMatchObject({
@@ -1588,8 +1668,9 @@ describe('GameCollectionService', () => {
       });
       expect(db.collectionCopy.findMany).toHaveBeenCalledWith({
         where: { entryId: 'gc-1', removedAt: null, retractedAt: null },
-        select: { id: true, acquiredOn: true, acquiredOnPrecision: true },
+        select: COPY_REVISION_SELECT,
       });
+      expect(db.collectionCopyRevision.createMany).not.toHaveBeenCalled();
       expect(db.collectionCopy.updateMany).not.toHaveBeenCalled();
       expect(syncSupply).not.toHaveBeenCalled();
     });
@@ -1597,7 +1678,11 @@ describe('GameCollectionService', () => {
     // The last day of "2020" is after a May 2020 acquisition (#1231).
     it('takes a removal whose period ends on or after the acquisition', async () => {
       db.collectionCopy.findMany.mockResolvedValueOnce([
-        { acquiredOn: new Date('2020-05-01T00:00:00Z'), acquiredOnPrecision: DatePrecision.Month },
+        {
+          ...revisionColumns('copy-1'),
+          acquiredOn: new Date('2020-05-01T00:00:00Z'),
+          acquiredOnPrecision: DatePrecision.Month,
+        },
       ] as never);
 
       await service.remove('gc-1', { removedOn: '2020' });

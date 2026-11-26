@@ -54,9 +54,11 @@ better-auth writes itself (below):
   A 404 that a client may read as a statement about a row names the row:
   `COLLECTION_ENTRY_NOT_FOUND` for a collection entry the user can't see
   (missing, already removed, or not theirs, which the 404 never tells apart),
-  `COLLECTION_COPY_NOT_FOUND` for a copy the same way (#1231). A
-  404 without such a code, `ROUTE_NOT_FOUND` above all, says nothing about any
-  row (#634).
+  `COLLECTION_COPY_NOT_FOUND` for a copy the same way, and
+  `COLLECTION_REVISION_NOT_FOUND` for a revision of a copy: missing, a
+  revision of another copy, or one whose stored values can't be read back
+  (#1231). A 404 without such a code, `ROUTE_NOT_FOUND` above all, says
+  nothing about any row (#634).
 
 - The collection's other refusals (#1231), each with its own code:
   - `COLLECTION_COPY_LIMIT_REACHED`: a 409 for an entry whose user already

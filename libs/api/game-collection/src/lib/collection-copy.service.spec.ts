@@ -13,9 +13,11 @@ import { syncCollectionEntrySupply } from '@bge/event';
 import { AbilityService } from '@bge/permissions';
 import type { MockDatabaseService } from '@bge/testing';
 import { createTestingModuleWithDb, rawQueryText, unwrapTransaction } from '@bge/testing';
-import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CollectionCopyService } from './collection-copy.service';
+import type { CopyRevisionValues } from './collection-revisions';
+import { COPY_REVISION_SELECT, copyRevisionValues } from './collection-revisions';
 import { OWNER_COPY_SELECT } from './collection-row';
 import { CollectionWriteService } from './collection-write.service';
 
@@ -51,6 +53,29 @@ const copyRow = (overrides: Partial<CollectionCopy> & { release?: unknown } = {}
   removedOnPrecision: null,
   removeReason: null,
   release: null,
+  releaseId: null,
+  ...overrides,
+});
+
+/**
+ * A revision's stored values (#1231): an owned copy nothing is known about,
+ * unless given, as `copyRevisionValues` writes them.
+ */
+const storedValues = (overrides: Partial<CopyRevisionValues> = {}): CopyRevisionValues => ({
+  releaseId: null,
+  condition: null,
+  acquiredOn: null,
+  acquiredOnPrecision: null,
+  acquiredFrom: null,
+  pricePaidAmount: null,
+  pricePaidCurrency: null,
+  currentValueAmount: null,
+  currentValueCurrency: null,
+  note: null,
+  removedAt: null,
+  removedOn: null,
+  removedOnPrecision: null,
+  removeReason: null,
   ...overrides,
 });
 
@@ -96,10 +121,15 @@ describe('CollectionCopyService (#1231)', () => {
     db.collectionCopy.update.mockResolvedValue(copyRow() as never);
     db.collectionCopy.findUnique.mockResolvedValue(copyRow() as never);
     db.gameRelease.findUnique.mockResolvedValue({ platformGameId: 'pg-1' } as GameRelease);
+    db.collectionCopyRevision.findUnique.mockResolvedValue({ values: storedValues() } as never);
     service = ctx.module.get(CollectionCopyService);
   });
 
-  afterEach(() => jest.clearAllMocks());
+  afterEach(() => {
+    jest.clearAllMocks();
+    // Restores the Logger spies some specs make; the module mocks stay.
+    jest.restoreAllMocks();
+  });
 
   /**
    * Each write's first statement locks the entry's row, so it takes turns
@@ -520,7 +550,7 @@ describe('CollectionCopyService (#1231)', () => {
       expectLockedThenChecked();
       expect(db.collectionCopy.findUnique).toHaveBeenCalledWith({
         where: { id: 'copy-1', entryId: 'gc-1', AND: { removedAt: null, retractedAt: null } },
-        select: { acquiredOn: true, acquiredOnPrecision: true },
+        select: COPY_REVISION_SELECT,
       });
       const now = db.gameCollection.update.mock.calls[0]?.[0]?.data.lastUpdated;
       expect(db.collectionCopy.update).toHaveBeenCalledWith({
@@ -606,10 +636,9 @@ describe('CollectionCopyService (#1231)', () => {
       });
 
       it('a removal with no date of a copy acquired later than today in UTC is dated its acquisition day (#1231)', async () => {
-        db.collectionCopy.findUnique.mockResolvedValue({
-          acquiredOn: new Date('2026-11-27T00:00:00Z'),
-          acquiredOnPrecision: DatePrecision.Day,
-        } as never);
+        db.collectionCopy.findUnique.mockResolvedValue(
+          copyRow({ acquiredOn: new Date('2026-11-27T00:00:00Z'), acquiredOnPrecision: DatePrecision.Day }) as never,
+        );
 
         await service.remove('gc-1', 'copy-1', {});
 
@@ -621,10 +650,9 @@ describe('CollectionCopyService (#1231)', () => {
 
       it('dates the removal at Day precision when a month that has begun in UTC+14 only is the acquisition', async () => {
         jest.setSystemTime(new Date('2026-11-30T23:30:00Z'));
-        db.collectionCopy.findUnique.mockResolvedValue({
-          acquiredOn: new Date('2026-12-01T00:00:00Z'),
-          acquiredOnPrecision: DatePrecision.Month,
-        } as never);
+        db.collectionCopy.findUnique.mockResolvedValue(
+          copyRow({ acquiredOn: new Date('2026-12-01T00:00:00Z'), acquiredOnPrecision: DatePrecision.Month }) as never,
+        );
 
         await service.remove('gc-1', 'copy-1', {});
 
@@ -641,7 +669,7 @@ describe('CollectionCopyService (#1231)', () => {
         ['a Year acquisition that has begun', new Date('2026-01-01T00:00:00Z'), DatePrecision.Year],
         ['an acquisition today in UTC', new Date('2026-11-26T00:00:00Z'), DatePrecision.Day],
       ])('dates the removal today in UTC for %s', async (_, acquiredOn, acquiredOnPrecision) => {
-        db.collectionCopy.findUnique.mockResolvedValue({ acquiredOn, acquiredOnPrecision } as never);
+        db.collectionCopy.findUnique.mockResolvedValue(copyRow({ acquiredOn, acquiredOnPrecision }) as never);
 
         await service.remove('gc-1', 'copy-1', {});
 
@@ -652,10 +680,9 @@ describe('CollectionCopyService (#1231)', () => {
       });
 
       it('still refuses a removal date the user sent that ends before the acquisition', async () => {
-        db.collectionCopy.findUnique.mockResolvedValue({
-          acquiredOn: new Date('2026-11-27T00:00:00Z'),
-          acquiredOnPrecision: DatePrecision.Day,
-        } as never);
+        db.collectionCopy.findUnique.mockResolvedValue(
+          copyRow({ acquiredOn: new Date('2026-11-27T00:00:00Z'), acquiredOnPrecision: DatePrecision.Day }) as never,
+        );
 
         await expect(service.remove('gc-1', 'copy-1', { removedOn: '2026-11-26' })).rejects.toMatchObject({
           code: 'COLLECTION_DATE_ORDER',
@@ -665,10 +692,9 @@ describe('CollectionCopyService (#1231)', () => {
     });
 
     it('refuses a removal dated before the copy was acquired with COLLECTION_DATE_ORDER', async () => {
-      db.collectionCopy.findUnique.mockResolvedValue({
-        acquiredOn: new Date('2020-05-01T00:00:00Z'),
-        acquiredOnPrecision: DatePrecision.Month,
-      } as never);
+      db.collectionCopy.findUnique.mockResolvedValue(
+        copyRow({ acquiredOn: new Date('2020-05-01T00:00:00Z'), acquiredOnPrecision: DatePrecision.Month }) as never,
+      );
 
       await expect(service.remove('gc-1', 'copy-1', { removedOn: '2020-03' })).rejects.toMatchObject({
         code: 'COLLECTION_DATE_ORDER',
@@ -685,6 +711,526 @@ describe('CollectionCopyService (#1231)', () => {
   });
 
   /**
+   * #1231. A correction edits the copy and keeps what it said before: each
+   * user write of a copy first writes its previous values as a revision,
+   * under the entry's lock, in the write's own transaction.
+   */
+  describe('revisions kept by each write', () => {
+    /** The order the copy's revision and its write were made in. */
+    function recordOrder(): string[] {
+      const order: string[] = [];
+      db.collectionCopyRevision.createMany.mockImplementation((async () => {
+        order.push('revision');
+        return { count: 1 };
+      }) as never);
+      db.collectionCopy.update.mockImplementation((async () => {
+        order.push('write');
+        return copyRow();
+      }) as never);
+
+      return order;
+    }
+
+    const BEFORE = copyRow({
+      note: 'Unsleeved',
+      condition: GameCondition.Good,
+      pricePaidAmount: 1250,
+      pricePaidCurrency: 'EUR',
+      releaseId: 'rel-1',
+    });
+
+    it('editing a copy keeps what it said before as a revision (#1231)', async () => {
+      db.collectionCopy.findUnique.mockResolvedValue(BEFORE as never);
+      const order = recordOrder();
+
+      await service.update('gc-1', 'copy-1', { note: 'Sleeved' });
+
+      expect(db.collectionCopy.findUnique).toHaveBeenCalledWith({
+        where: { id: 'copy-1', entryId: 'gc-1' },
+        select: COPY_REVISION_SELECT,
+      });
+      expect(db.collectionCopyRevision.createMany).toHaveBeenCalledWith({
+        data: [{ copyId: 'copy-1', values: copyRevisionValues(BEFORE) }],
+      });
+      expect(order).toEqual(['revision', 'write']);
+    });
+
+    it('removing a copy keeps what it said before as a revision (#1231)', async () => {
+      db.collectionCopy.count.mockResolvedValue(2);
+      db.collectionCopy.findUnique.mockResolvedValue(BEFORE as never);
+      const order = recordOrder();
+
+      await service.remove('gc-1', 'copy-1', { reason: GameRemovalReason.Sold });
+
+      expect(db.collectionCopyRevision.createMany).toHaveBeenCalledWith({
+        data: [{ copyId: 'copy-1', values: expect.objectContaining({ note: 'Unsleeved', removedAt: null }) }],
+      });
+      expect(order).toEqual(['revision', 'write']);
+    });
+
+    it('a refused edit keeps no revision', async () => {
+      await expect(service.update('gc-1', 'copy-1', { removedOn: '2024' })).rejects.toMatchObject({
+        code: 'COLLECTION_COPY_NOT_REMOVED',
+      });
+      expect(db.collectionCopyRevision.createMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('listRevisions', () => {
+    const revisionRead = (revisions: unknown[]) =>
+      db.gameCollection.findUnique.mockResolvedValue({ copies: [{ revisions }] } as never);
+
+    // The history is the entry owner's alone, as the copy's details are, so
+    // the entry is read as the acting user's own (#1231).
+    it("lists the copy's revisions newest first, each in the owner's copy shape", async () => {
+      const newer = new Date('2026-03-01T00:00:00Z');
+      const older = new Date('2026-02-01T00:00:00Z');
+      revisionRead([
+        {
+          id: 'rev-2',
+          createdAt: newer,
+          values: storedValues({
+            releaseId: 'rel-1',
+            acquiredOn: '2019-03-01',
+            acquiredOnPrecision: DatePrecision.Month,
+            pricePaidAmount: 1250,
+            pricePaidCurrency: 'EUR',
+            removedAt: '2024-07-01T10:00:00.000Z',
+            removedOn: '2024-01-01',
+            removedOnPrecision: DatePrecision.Year,
+            removeReason: GameRemovalReason.Sold,
+          }),
+        },
+        { id: 'rev-1', createdAt: older, values: storedValues({ releaseId: 'rel-gone', note: 'First' }) },
+      ]);
+      db.gameRelease.findMany.mockResolvedValue([{ id: 'rel-1', editionName: 'Deluxe', releaseYear: 2019 }] as never);
+
+      const revisions = await service.listRevisions('gc-1', 'copy-1');
+
+      expect(db.gameCollection.findUnique).toHaveBeenCalledWith({
+        where: { id: 'gc-1', userId: ME, AND: [COND] },
+        select: {
+          copies: {
+            where: { id: 'copy-1' },
+            select: {
+              revisions: {
+                select: { id: true, createdAt: true, values: true },
+                orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+              },
+            },
+          },
+        },
+      });
+      expect(db.gameRelease.findMany).toHaveBeenCalledWith({
+        where: { id: { in: ['rel-1', 'rel-gone'] } },
+        select: { id: true, editionName: true, releaseYear: true },
+      });
+      expect(revisions).toEqual([
+        {
+          id: 'rev-2',
+          createdAt: newer,
+          values: {
+            acquiredFrom: null,
+            acquiredOn: '2019-03',
+            condition: null,
+            currentValue: null,
+            note: null,
+            pricePaid: { amount: 1250, currency: 'EUR' },
+            release: { id: 'rel-1', editionName: 'Deluxe', releaseYear: 2019 },
+            removedAt: new Date('2024-07-01T10:00:00.000Z'),
+            removedOn: '2024',
+            removeReason: GameRemovalReason.Sold,
+          },
+        },
+        // A release deleted since reads as none: restoring it writes none.
+        { id: 'rev-1', createdAt: older, values: expect.objectContaining({ note: 'First', release: null }) },
+      ]);
+    });
+
+    it('reads no release when no revision names one', async () => {
+      revisionRead([{ id: 'rev-1', createdAt: new Date(), values: storedValues() }]);
+
+      await service.listRevisions('gc-1', 'copy-1');
+
+      expect(db.gameRelease.findMany).not.toHaveBeenCalled();
+    });
+
+    it('answers COLLECTION_COPY_NOT_FOUND for a copy the entry does not hold', async () => {
+      db.gameCollection.findUnique.mockResolvedValue({ copies: [] } as never);
+
+      await expect(service.listRevisions('gc-1', 'copy-9')).rejects.toMatchObject({
+        status: 404,
+        code: 'COLLECTION_COPY_NOT_FOUND',
+      });
+    });
+
+    it("another user's revisions answer COLLECTION_ENTRY_NOT_FOUND (#1231)", async () => {
+      db.gameCollection.findUnique.mockResolvedValue(null);
+
+      await expect(service.listRevisions('gc-1', 'copy-1')).rejects.toMatchObject({
+        status: 404,
+        code: 'COLLECTION_ENTRY_NOT_FOUND',
+      });
+    });
+
+    // A stored revision that can't be read back can't be restored either, so
+    // the list leaves it out, and the server's log says why (#1231).
+    it('leaves out a stored revision that fails the schema, and logs one line', async () => {
+      const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      revisionRead([
+        { id: 'rev-2', createdAt: new Date(), values: { note: 7 } },
+        { id: 'rev-1', createdAt: new Date(), values: storedValues() },
+      ]);
+
+      const revisions = await service.listRevisions('gc-1', 'copy-1');
+
+      expect(revisions.map(({ id }) => id)).toEqual(['rev-1']);
+      expect(logged).toHaveBeenCalledTimes(1);
+      expect(logged.mock.calls[0]).toHaveLength(1);
+      expect(logged.mock.calls[0]?.[0]).toEqual(expect.stringContaining('rev-2'));
+      expect(logged.mock.calls[0]?.[0]).not.toContain('\n');
+    });
+  });
+
+  describe('restore', () => {
+    /** The entry's live copy, owned, as the restore reads it (#1231). */
+    const CURRENT = copyRow({ note: 'Now', retractedAt: null });
+
+    beforeEach(() => {
+      db.collectionCopy.findUnique.mockResolvedValue(CURRENT as never);
+    });
+
+    it("writes the revision's values back, and stamps the copy as edited by the user (#1231)", async () => {
+      db.collectionCopyRevision.findUnique.mockResolvedValue({
+        values: storedValues({
+          condition: GameCondition.Good,
+          acquiredOn: '2019-03-01',
+          acquiredOnPrecision: DatePrecision.Month,
+          acquiredFrom: 'A friend',
+          pricePaidAmount: 2500,
+          pricePaidCurrency: 'USD',
+          note: 'Then',
+        }),
+      } as never);
+      db.collectionCopy.update.mockResolvedValue(copyRow({ note: 'Then' }) as never);
+
+      const restored = await service.restore('gc-1', 'copy-1', 'rev-1');
+
+      expectLockedThenChecked();
+      expect(db.collectionCopy.findUnique).toHaveBeenCalledWith({
+        where: { id: 'copy-1', entryId: 'gc-1' },
+        select: { ...COPY_REVISION_SELECT, retractedAt: true },
+      });
+      expect(db.collectionCopyRevision.findUnique).toHaveBeenCalledWith({
+        where: { id: 'rev-1', copyId: 'copy-1' },
+        select: { values: true },
+      });
+      const now = db.gameCollection.update.mock.calls[0]?.[0]?.data.lastUpdated;
+      expect(db.collectionCopy.update).toHaveBeenCalledWith({
+        where: { id: 'copy-1' },
+        data: {
+          releaseId: null,
+          condition: GameCondition.Good,
+          acquiredOn: new Date('2019-03-01T00:00:00Z'),
+          acquiredOnPrecision: DatePrecision.Month,
+          acquiredFrom: 'A friend',
+          pricePaidAmount: 2500,
+          pricePaidCurrency: 'USD',
+          currentValueAmount: null,
+          currentValueCurrency: null,
+          note: 'Then',
+          removedAt: null,
+          removedOn: null,
+          removedOnPrecision: null,
+          removeReason: null,
+          editedByUserAt: now,
+        },
+        select: OWNER_COPY_SELECT,
+      });
+      expect(restored).toMatchObject({ id: 'copy-1', note: 'Then' });
+    });
+
+    it('restoring a revision records the current values as a revision first (#1231)', async () => {
+      const order: string[] = [];
+      db.collectionCopyRevision.createMany.mockImplementation((async () => {
+        order.push('revision');
+        return { count: 1 };
+      }) as never);
+      db.collectionCopy.update.mockImplementation((async () => {
+        order.push('write');
+        return copyRow();
+      }) as never);
+
+      await service.restore('gc-1', 'copy-1', 'rev-1');
+
+      expect(db.collectionCopyRevision.createMany).toHaveBeenCalledWith({
+        data: [{ copyId: 'copy-1', values: copyRevisionValues(CURRENT) }],
+      });
+      expect(order).toEqual(['revision', 'write']);
+    });
+
+    // Review Focus 5: a release deleted since the revision was kept must not
+    // fail the restore on its foreign key; the copy is restored with none.
+    // The release is read under a share lock, so it can't go before the
+    // write either (#1231).
+    it('a revision whose release has since gone restores with no release (#1231)', async () => {
+      db.collectionCopyRevision.findUnique.mockResolvedValue({
+        values: storedValues({ releaseId: 'rel-gone' }),
+      } as never);
+      db.$queryRaw.mockResolvedValueOnce([LOCKED] as never).mockResolvedValueOnce([] as never);
+
+      await service.restore('gc-1', 'copy-1', 'rev-1');
+
+      const [held] = db.$queryRaw.mock.calls[1] as unknown as [Prisma.Sql];
+      expect(rawQueryText(held)).toMatch(/FROM game_releases WHERE id = \? AND platform_game_id = \? FOR SHARE$/);
+      expect(held.values).toEqual(['rel-gone', 'pg-1']);
+      expect(db.collectionCopy.update.mock.calls[0]?.[0]?.data).toMatchObject({ releaseId: null });
+    });
+
+    it('a revision whose release still exists restores it', async () => {
+      db.collectionCopyRevision.findUnique.mockResolvedValue({ values: storedValues({ releaseId: 'rel-1' }) } as never);
+      db.$queryRaw.mockResolvedValueOnce([LOCKED] as never).mockResolvedValueOnce([{ id: 'rel-1' }] as never);
+
+      await service.restore('gc-1', 'copy-1', 'rev-1');
+
+      expect(db.collectionCopy.update.mock.calls[0]?.[0]?.data).toMatchObject({ releaseId: 'rel-1' });
+    });
+
+    it('answers COLLECTION_REVISION_NOT_FOUND for a revision of another copy, or none, and writes nothing', async () => {
+      db.collectionCopyRevision.findUnique.mockResolvedValue(null);
+
+      await expect(service.restore('gc-1', 'copy-1', 'rev-9')).rejects.toMatchObject({
+        status: 404,
+        code: 'COLLECTION_REVISION_NOT_FOUND',
+      });
+      expect(db.collectionCopyRevision.createMany).not.toHaveBeenCalled();
+      expect(db.collectionCopy.update).not.toHaveBeenCalled();
+    });
+
+    it('answers COLLECTION_COPY_NOT_FOUND for a copy the entry does not hold', async () => {
+      db.collectionCopy.findUnique.mockResolvedValue(null);
+
+      await expect(service.restore('gc-1', 'copy-9', 'rev-1')).rejects.toMatchObject({
+        status: 404,
+        code: 'COLLECTION_COPY_NOT_FOUND',
+      });
+      expect(db.collectionCopyRevision.findUnique).not.toHaveBeenCalled();
+    });
+
+    // The stored values are data from outside the process, read back with
+    // their schema. One that fails it can't be restored: the client is told
+    // the revision isn't there, and the server's log says why, on one line,
+    // as nestjs-pino drops an Error argument (#1231).
+    it('a stored revision that fails the schema answers COLLECTION_REVISION_NOT_FOUND and logs one line (#1231)', async () => {
+      const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      db.collectionCopyRevision.findUnique.mockResolvedValue({
+        values: { ...storedValues(), pricePaidAmount: 100 },
+      } as never);
+
+      await expect(service.restore('gc-1', 'copy-1', 'rev-1')).rejects.toMatchObject({
+        status: 404,
+        code: 'COLLECTION_REVISION_NOT_FOUND',
+      });
+      expect(logged).toHaveBeenCalledTimes(1);
+      expect(logged.mock.calls[0]).toHaveLength(1);
+      expect(logged.mock.calls[0]?.[0]).toEqual(expect.stringContaining('rev-1'));
+      expect(logged.mock.calls[0]?.[0]).not.toContain('\n');
+      expect(db.collectionCopy.update).not.toHaveBeenCalled();
+    });
+
+    // A restore is held to what any copy write is: the values it writes are
+    // checked as an edit's would be (#1231).
+    it('refuses a restored removal that ends before the acquisition with COLLECTION_DATE_ORDER', async () => {
+      db.collectionCopyRevision.findUnique.mockResolvedValue({
+        values: storedValues({
+          acquiredOn: '2020-05-01',
+          acquiredOnPrecision: DatePrecision.Month,
+          removedAt: '2020-06-01T00:00:00.000Z',
+          removedOn: '2020-03-01',
+          removedOnPrecision: DatePrecision.Month,
+        }),
+      } as never);
+
+      await expect(service.restore('gc-1', 'copy-1', 'rev-1')).rejects.toMatchObject({ code: 'COLLECTION_DATE_ORDER' });
+      expect(db.collectionCopy.update).not.toHaveBeenCalled();
+    });
+
+    it("refuses a restored condition on a digital entry's copy with COLLECTION_CONDITION_DIGITAL", async () => {
+      db.$queryRaw.mockResolvedValue([{ ...LOCKED, medium: GameMedium.Digital }] as never);
+      db.collectionCopyRevision.findUnique.mockResolvedValue({
+        values: storedValues({ condition: GameCondition.Good }),
+      } as never);
+
+      await expect(service.restore('gc-1', 'copy-1', 'rev-1')).rejects.toMatchObject({
+        code: 'COLLECTION_CONDITION_DIGITAL',
+      });
+      expect(db.collectionCopy.update).not.toHaveBeenCalled();
+    });
+
+    describe('a revision of the copy removed', () => {
+      const REMOVED_VALUES = storedValues({
+        removedAt: '2024-07-01T10:00:00.000Z',
+        removedOn: '2024-06-01',
+        removedOnPrecision: DatePrecision.Month,
+        removeReason: GameRemovalReason.Traded,
+      });
+
+      beforeEach(() => {
+        db.collectionCopyRevision.findUnique.mockResolvedValue({ values: REMOVED_VALUES } as never);
+      });
+
+      // The removal's date and reason are the revision's; the copy becomes
+      // removed by this restore, so the removal is recorded as written now
+      // (#1231).
+      it("writes the revision's removal date and reason back, recorded now", async () => {
+        db.collectionCopy.count.mockResolvedValue(2);
+
+        await service.restore('gc-1', 'copy-1', 'rev-1');
+
+        const now = db.gameCollection.update.mock.calls[0]?.[0]?.data.lastUpdated;
+        expect(db.collectionCopy.update.mock.calls[0]?.[0]?.data).toMatchObject({
+          removedAt: now,
+          removedOn: new Date('2024-06-01T00:00:00Z'),
+          removedOnPrecision: DatePrecision.Month,
+          removeReason: GameRemovalReason.Traded,
+        });
+        // Another copy is still owned, so the entry stays, and needs no delete permission.
+        expect(abilityService.assertCurrentActorCan).not.toHaveBeenCalled();
+      });
+
+      // Restoring a removal of the entry's last owned copy removes the entry,
+      // so it is held to the entry's delete permission, as the copy removal
+      // is (#1288); the entry takes the restored reason (#1231).
+      it("on the last owned copy needs the entry's delete permission, and removes the entry with the restored reason", async () => {
+        db.gameCollection.findUniqueOrThrow.mockResolvedValue({ deletedAt: null, _count: { copies: 0 } } as never);
+        db.collectionCopy.findFirst.mockResolvedValue({ removeReason: GameRemovalReason.Lost } as never);
+
+        await service.restore('gc-1', 'copy-1', 'rev-1');
+
+        expect(db.collectionCopy.count).toHaveBeenCalledWith({
+          where: { entryId: 'gc-1', removedAt: null, retractedAt: null },
+        });
+        expect(abilityService.assertCurrentActorCan).toHaveBeenCalledWith(Action.delete, ResourceType.GameCollection, {
+          id: 'gc-1',
+          ...LOCKED,
+        });
+        expect(db.collectionCopy.findFirst).not.toHaveBeenCalled();
+        expect(db.gameCollection.update).toHaveBeenLastCalledWith({
+          where: { id: 'gc-1' },
+          data: { deletedAt: expect.any(Date), deleteReason: GameRemovalReason.Traded, lastUpdated: expect.any(Date) },
+          select: { id: true },
+        });
+        expect(syncSupply).toHaveBeenCalledWith(db, { id: 'gc-1', deletedAt: expect.any(Date) }, expect.any(Date));
+      });
+
+      it('refuses the last owned copy to an actor that may not remove the entry, and writes nothing', async () => {
+        abilityService.assertCurrentActorCan.mockImplementation(() => {
+          throw new ForbiddenException();
+        });
+
+        await expect(service.restore('gc-1', 'copy-1', 'rev-1')).rejects.toThrow(ForbiddenException);
+        expect(db.collectionCopyRevision.createMany).not.toHaveBeenCalled();
+        expect(db.collectionCopy.update).not.toHaveBeenCalled();
+      });
+
+      // A copy that stays removed keeps when its removal was recorded, so the
+      // copy that removed the entry is still the one removed at the entry's
+      // `deletedAt` (#1231).
+      it("of a copy already removed keeps its removal stamp, with the revision's date and reason", async () => {
+        const stamp = new Date('2025-09-01T12:00:00Z');
+        db.collectionCopy.findUnique.mockResolvedValue(copyRow({ removedAt: stamp, retractedAt: null }) as never);
+
+        await service.restore('gc-1', 'copy-1', 'rev-1');
+
+        expect(db.collectionCopy.update.mock.calls[0]?.[0]?.data).toMatchObject({
+          removedAt: stamp,
+          removedOn: new Date('2024-06-01T00:00:00Z'),
+          removedOnPrecision: DatePrecision.Month,
+          removeReason: GameRemovalReason.Traded,
+        });
+      });
+
+      // The write runner reads a removed entry's reason again, on every write
+      // of its copies, from the copy removed at the entry's `deletedAt`. A
+      // restore that removes the entry records its copy's removal at that
+      // instant, so a later edit of another removed copy keeps the restored
+      // reason, rather than the reason of the copy removed last (#1231).
+      it("a later copy edit keeps the entry's restored reason (#1231)", async () => {
+        const removedCopies: { removedAt: Date; removeReason: GameRemovalReason }[] = [
+          { removedAt: new Date('2025-06-01T00:00:00Z'), removeReason: GameRemovalReason.Sold },
+        ];
+        db.collectionCopy.findFirst.mockImplementation((async (args: { where: { removedAt?: Date } }) => {
+          const at = args.where.removedAt;
+          const [latest] = removedCopies
+            .filter(({ removedAt }) => at === undefined || removedAt.getTime() === at.getTime())
+            .sort((a, b) => b.removedAt.getTime() - a.removedAt.getTime());
+
+          return latest === undefined ? null : { removeReason: latest.removeReason };
+        }) as never);
+        db.gameCollection.findUniqueOrThrow.mockResolvedValue({ deletedAt: null, _count: { copies: 0 } } as never);
+
+        await service.restore('gc-1', 'copy-1', 'rev-1');
+
+        const restoredCopy = db.collectionCopy.update.mock.calls[0]?.[0]?.data;
+        const removedEntry = db.gameCollection.update.mock.calls.at(-1)?.[0]?.data;
+        expect(removedEntry).toMatchObject({ deleteReason: GameRemovalReason.Traded });
+        expect(restoredCopy?.removedAt).toEqual(removedEntry?.deletedAt);
+
+        // The copy as the restore left it, and a note edit of the other copy.
+        removedCopies.push({ removedAt: restoredCopy?.removedAt as Date, removeReason: GameRemovalReason.Traded });
+        db.gameCollection.findUniqueOrThrow.mockResolvedValue({
+          deletedAt: removedEntry?.deletedAt,
+          _count: { copies: 0 },
+        } as never);
+        db.collectionCopy.findUnique.mockResolvedValue(
+          copyRow({ id: 'copy-2', removedAt: new Date('2025-06-01T00:00:00Z'), retractedAt: null }) as never,
+        );
+
+        await service.update('gc-1', 'copy-2', { note: 'Sold to a friend' });
+
+        expect(db.gameCollection.update).toHaveBeenLastCalledWith({
+          where: { id: 'gc-1' },
+          data: { deleteReason: GameRemovalReason.Traded, lastUpdated: expect.any(Date) },
+          select: { id: true },
+        });
+      });
+
+      // A copy removed already removes nothing more by being removed again.
+      it('of a copy already removed needs no delete permission', async () => {
+        db.collectionCopy.findUnique.mockResolvedValue(
+          copyRow({ removedAt: new Date('2025-01-01T00:00:00Z'), retractedAt: null }) as never,
+        );
+
+        await service.restore('gc-1', 'copy-1', 'rev-1');
+
+        expect(abilityService.assertCurrentActorCan).not.toHaveBeenCalled();
+      });
+    });
+
+    // Restoring what the copy said before its removal makes it owned again,
+    // and the entry comes back with it; the write runner then resumes the
+    // offers its removal paused (#1221).
+    it('restoring an owned revision of a removed copy brings the entry back and syncs its offers (#1221)', async () => {
+      db.collectionCopy.findUnique.mockResolvedValue(
+        copyRow({ removedAt: new Date('2025-01-01T00:00:00Z'), retractedAt: null }) as never,
+      );
+      db.gameCollection.findUniqueOrThrow.mockResolvedValue({
+        deletedAt: new Date('2025-01-01T00:00:00Z'),
+        _count: { copies: 1 },
+      } as never);
+
+      await service.restore('gc-1', 'copy-1', 'rev-1');
+
+      expect(db.gameCollection.update).toHaveBeenLastCalledWith({
+        where: { id: 'gc-1' },
+        data: { deletedAt: null, deleteReason: null, lastUpdated: expect.any(Date) },
+        select: { id: true },
+      });
+      expect(syncSupply).toHaveBeenCalledWith(db, { id: 'gc-1', deletedAt: null }, expect.any(Date));
+    });
+  });
+
+  /**
    * #1231. Each write answers the copy in the entry owner's shape, so the writes are
    * the entry owner's alone, as the list is. A role holding every permission (the
    * server's Owner) or a plugin with an update grant passes the update
@@ -697,6 +1243,7 @@ describe('CollectionCopyService (#1231)', () => {
       add: () => service.add('gc-1', { condition: GameCondition.Good, clientRequestId: 'key-1' }),
       update: () => service.update('gc-1', 'copy-1', { condition: GameCondition.Good }),
       remove: () => service.remove('gc-1', 'copy-1', {}),
+      restore: () => service.restore('gc-1', 'copy-1', 'rev-1'),
     } as const;
     const methods = Object.keys(writes) as (keyof typeof writes)[];
 
@@ -718,6 +1265,8 @@ describe('CollectionCopyService (#1231)', () => {
         expect(db.collectionCopy.count).not.toHaveBeenCalled();
         expect(db.collectionCopy.create).not.toHaveBeenCalled();
         expect(db.collectionCopy.update).not.toHaveBeenCalled();
+        expect(db.collectionCopyRevision.findUnique).not.toHaveBeenCalled();
+        expect(db.collectionCopyRevision.createMany).not.toHaveBeenCalled();
         expect(syncSupply).not.toHaveBeenCalled();
       },
     );

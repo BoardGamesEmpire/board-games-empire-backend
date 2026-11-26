@@ -22,9 +22,9 @@ export interface EntryWrite<T> {
 
   /**
    * The reason the entry takes from this write, when the write learns it
-   * only under the entry's lock (#1231): a correction of the reason of a copy
-   * removed with the entry. Given, it takes the place of the `removeReason`
-   * handed to `run`.
+   * only under the entry's lock (#1231): a restore of a revision that removes
+   * the entry, or a correction of the reason of a copy removed with the
+   * entry. Given, it takes the place of the `removeReason` handed to `run`.
    */
   removeReason?: GameRemovalReason | null;
 
@@ -101,6 +101,8 @@ export class CollectionWriteService {
    *
    * A copy removal passes its own `removeReason`, which the reconcile gives
    * the entry only when the removal removes it ({@link reconcileOwnership}).
+   * A write that learns its reason only under the entry's lock names it in
+   * its answer instead ({@link EntryWrite.removeReason}).
    */
   async run<T>(
     write: (tx: Prisma.TransactionClient) => Promise<EntryWrite<T>>,

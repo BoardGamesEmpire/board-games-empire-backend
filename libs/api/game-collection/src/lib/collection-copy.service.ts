@@ -10,29 +10,47 @@ import {
 import { t } from '@bge/i18n';
 import { AbilityService, resolveActingUserIdOrNull } from '@bge/permissions';
 import { pickDefined } from '@bge/shared';
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import {
   addCopy,
   assertRemovableOn,
   copyColumns,
   copyRemovalData,
-  REMOVAL_CHECK_SELECT,
   removalOf,
   writingRelease,
 } from './collection-copy-data';
+import type { CopyRevisionValues } from './collection-revisions';
+import {
+  COPY_REVISION_SELECT,
+  copyRevisionValuesSchema,
+  describeRevisionProblem,
+  recordCopyRevision,
+  restorableRelease,
+  restoredCopyOf,
+} from './collection-revisions';
 import type { OwnerCopyRow } from './collection-row';
 import { COPY_ORDER, OWNED_COPY, OWNER_COPY_SELECT, readOwnEntry, removedWithEntry } from './collection-row';
 import type { LockedEntry } from './collection-write.service';
 import { CollectionWriteService, writeEntryUnder } from './collection-write.service';
 import type {
   CollectionCopyDto,
+  CollectionReleaseSummaryDto,
+  CollectionRevisionDto,
   CreateCollectionCopyDto,
   RemoveCollectionCopyQueryDto,
   UpdateCollectionCopyDto,
 } from './dto';
-import { toCollectionCopyDto } from './dto';
-import { collectionEntryNotFound, copyNotFound, copyNotRemoved } from './game-collection.errors';
-import { assertRemovalAfterAcquisition, givenRemovalDate, partialDateFromColumns } from './values/partial-date';
+import { toCollectionCopyDto, toCollectionRevisionDto } from './dto';
+import { collectionEntryNotFound, copyNotFound, copyNotRemoved, revisionNotFound } from './game-collection.errors';
+import {
+  assertNotInFuture,
+  assertRemovalAfterAcquisition,
+  givenRemovalDate,
+  partialDateFromColumns,
+} from './values/partial-date';
+
+/** A copy's revisions, newest first, then by id, so revisions kept in the same instant keep one order (#1231). */
+const REVISION_ORDER: Prisma.CollectionCopyRevisionOrderByWithRelationInput[] = [{ createdAt: 'desc' }, { id: 'desc' }];
 
 /**
  * The unique that keeps one copy per client request id on an entry, in every
@@ -80,6 +98,8 @@ function isCopyKeyViolation(error: unknown): boolean {
  */
 @Injectable()
 export class CollectionCopyService {
+  private readonly logger = new Logger(CollectionCopyService.name);
+
   constructor(
     private readonly db: DatabaseService,
     private readonly abilityService: AbilityService,
@@ -165,8 +185,9 @@ export class CollectionCopyService {
    * change a removal, so only a removed copy takes them (`COLLECTION_COPY_NOT_REMOVED`).
    * The removal must not end before the acquisition, as the copy will hold
    * them both (`COLLECTION_DATE_ORDER`). Each edit stamps `editedByUserAt`,
-   * so a sync leaves the copy as the user left it. On a removed entry, a
-   * corrected removal reason of a copy removed with the entry becomes the
+   * so a sync leaves the copy as the user left it, and first keeps what the
+   * copy said before as a revision, which can be restored. On a removed entry,
+   * a corrected removal reason of a copy removed with the entry becomes the
    * entry's own reason, through the write runner's reconcile, whichever of
    * those copies it is.
    */
@@ -184,13 +205,7 @@ export class CollectionCopyService {
         const entry = await this.lockOwnEntryAndStampUpdate(tx, entryId, now);
         const copy = await tx.collectionCopy.findUnique({
           where: { id: copyId, entryId },
-          select: {
-            acquiredOn: true,
-            acquiredOnPrecision: true,
-            removedAt: true,
-            removedOn: true,
-            removedOnPrecision: true,
-          },
+          select: COPY_REVISION_SELECT,
         });
 
         if (copy === null) {
@@ -209,6 +224,7 @@ export class CollectionCopyService {
             : partialDateFromColumns(columns.acquiredOn, columns.acquiredOnPrecision ?? null);
         assertRemovalAfterAcquisition(acquisition, removal);
 
+        await recordCopyRevision(tx, copy);
         const edited = await writingRelease(described.releaseId, () =>
           tx.collectionCopy.update({
             where: { id: copyId },
@@ -247,7 +263,9 @@ export class CollectionCopyService {
    * as `DELETE /game-collections/:id` does (#1221).
    *
    * A removal is the user's word on the copy, so it stamps `editedByUserAt`
-   * (`copyRemovalData`), and a sync leaves the removed copy as it is (#1231).
+   * (`copyRemovalData`), and a sync leaves the removed copy as it is; it
+   * first keeps what the copy said before as a revision, so restoring that
+   * makes the copy owned again (#1231).
    */
   async remove(
     entryId: string,
@@ -262,23 +280,19 @@ export class CollectionCopyService {
         const entry = await this.lockOwnEntryAndStampUpdate(tx, entryId, now);
         const copy = await tx.collectionCopy.findUnique({
           where: { id: copyId, entryId, AND: OWNED_COPY },
-          select: REMOVAL_CHECK_SELECT,
+          select: COPY_REVISION_SELECT,
         });
 
         if (copy === null) {
           throw copyNotFound(copyId);
         }
 
-        if ((await tx.collectionCopy.count({ where: { entryId, ...OWNED_COPY } })) === 1) {
-          this.abilityService.assertCurrentActorCan(Action.delete, ResourceType.GameCollection, {
-            id: entryId,
-            ...entry,
-          });
-        }
+        await this.assertMayRemoveIfLastOwned(tx, entryId, entry);
 
         const removal = removalOf(copy, given, now);
         assertRemovableOn(copy, removal);
 
+        await recordCopyRevision(tx, copy);
         const removed = await tx.collectionCopy.update({
           where: { id: copyId },
           data: copyRemovalData(removal, reason, now),
@@ -291,6 +305,222 @@ export class CollectionCopyService {
       now,
       reason ?? null,
     );
+  }
+
+  /**
+   * The revisions of one copy of the acting user's own entry, newest
+   * first, each in the shape its owner reads the copy (#1231). Like the
+   * copy's details, its history is yours alone, whatever the entry's reach,
+   * so the entry is read as your own (`readOwnEntry`).
+   *
+   * Each revision names its edition by id; it is read as it is now, and one
+   * deleted since reads as none, as restoring the revision would give the
+   * copy. A stored revision that can't be read back is left out, as it can't
+   * be restored either, and the server's log says why.
+   */
+  async listRevisions(entryId: string, copyId: string): Promise<CollectionRevisionDto[]> {
+    const entry = await readOwnEntry(this.db, this.abilityService, entryId, {
+      copies: {
+        where: { id: copyId },
+        select: {
+          revisions: { select: { id: true, createdAt: true, values: true }, orderBy: REVISION_ORDER },
+        },
+      },
+    });
+    const [copy] = entry.copies;
+
+    if (copy === undefined) {
+      throw copyNotFound(copyId);
+    }
+
+    const readable = copy.revisions.flatMap((revision) => {
+      const values = this.readValues(copyId, revision.id, revision.values);
+
+      return values === null ? [] : [{ revision, values }];
+    });
+    const releases = await this.releaseSummaries(readable.map(({ values }) => values.releaseId));
+
+    return readable.map(({ revision, values }) =>
+      toCollectionRevisionDto(
+        revision,
+        values,
+        values.releaseId === null ? null : (releases.get(values.releaseId) ?? null),
+      ),
+    );
+  }
+
+  /**
+   * Writes a revision's values back to its copy (#1231), as a correction of
+   * the copy: what it says now is first kept as a revision of its own, and
+   * the copy is stamped as edited by the user, so a sync leaves it as the
+   * user left it. A revision the copy doesn't hold, or one whose stored
+   * values can't be read back, answers `COLLECTION_REVISION_NOT_FOUND`.
+   *
+   * The restored values are held to what an edit is: a condition on a
+   * digital copy, a price in a currency ISO 4217 doesn't list, an
+   * acquisition or removal on a day that is today nowhere yet, and a removal
+   * before the acquisition are refused. A digital entry's copies never take
+   * a condition, and an entry's medium never changes, so stored values can't
+   * name one; the check stays, so a damaged revision is refused rather than
+   * written. An edition deleted since, or no longer one of the entry's
+   * platform game, is restored as none rather than failing the write
+   * (`restorableRelease`).
+   *
+   * Through the write runner, a restore that makes a removed copy owned again
+   * acquires a removed entry again and resumes its offers (#1221). One that
+   * removes the entry's last owned copy removes the entry, with the restored
+   * reason, so it is held to the entry's `delete` permission too, as the
+   * copy removal is (#1288).
+   *
+   * A restored removal takes the revision's date and reason. When it is
+   * recorded is the copy's own: now, for a copy the restore removes, and
+   * unchanged, for one that stays removed (#1231). The revision this restore
+   * keeps still holds the earlier stamp.
+   */
+  async restore(entryId: string, copyId: string, revisionId: string): Promise<CollectionCopyDto> {
+    const now = new Date();
+
+    return this.writes.run(
+      async (tx) => {
+        const entry = await this.lockOwnEntryAndStampUpdate(tx, entryId, now);
+        const copy = await tx.collectionCopy.findUnique({
+          where: { id: copyId, entryId },
+          select: { ...COPY_REVISION_SELECT, retractedAt: true },
+        });
+
+        if (copy === null) {
+          throw copyNotFound(copyId);
+        }
+
+        const values = await this.revisionValues(tx, copyId, revisionId);
+        const { description, removal } = restoredCopyOf(values);
+        const columns = await copyColumns(tx, description, entry, now);
+
+        if (removal.removedOn !== null) {
+          assertNotInFuture(removal.removedOn, now, 'removedOn');
+        }
+
+        assertRemovalAfterAcquisition(
+          partialDateFromColumns(columns.acquiredOn ?? null, columns.acquiredOnPrecision ?? null),
+          removal.removedOn,
+        );
+
+        const releaseId =
+          values.releaseId === null ? null : await restorableRelease(tx, values.releaseId, entry.platformGameId);
+        const ownedNow = copy.removedAt === null && copy.retractedAt === null;
+        const removesEntry =
+          ownedNow && removal.removedAt !== null && (await this.assertMayRemoveIfLastOwned(tx, entryId, entry));
+
+        await recordCopyRevision(tx, copy);
+        const restored = await tx.collectionCopy.update({
+          where: { id: copyId },
+          data: {
+            ...columns,
+            releaseId,
+            // A copy the restore removes records the removal as written now,
+            // and one that stays removed keeps its own stamp: the copy that
+            // removed the entry is the one removed at its `deletedAt`, which
+            // the write runner reads the entry's reason from (#1231).
+            removedAt: removal.removedAt === null ? null : (copy.removedAt ?? now),
+            removedOn: removal.removedOn?.on ?? null,
+            removedOnPrecision: removal.removedOn?.precision ?? null,
+            removeReason: removal.removeReason,
+            editedByUserAt: now,
+          },
+          select: OWNER_COPY_SELECT,
+        });
+
+        return {
+          entryId,
+          result: toCollectionCopyDto(restored),
+          // The entry's removal is this restore's, so it takes the restored
+          // reason, not one read back from another copy (#1231).
+          ...(removesEntry ? { removeReason: removal.removeReason } : {}),
+        };
+      },
+      resolveActingUserIdOrNull(this.abilityService),
+      now,
+    );
+  }
+
+  /**
+   * Holds a write that removes an owned copy of a live entry to the entry's
+   * `delete` permission when that copy is the entry's last owned one, as its
+   * removal removes the entry (#1288). Answers whether it is the last. Run it
+   * under the entry's lock, with the copy still owned.
+   */
+  private async assertMayRemoveIfLastOwned(
+    tx: Prisma.TransactionClient,
+    entryId: string,
+    entry: LockedEntry,
+  ): Promise<boolean> {
+    if ((await tx.collectionCopy.count({ where: { entryId, ...OWNED_COPY } })) !== 1) {
+      return false;
+    }
+
+    this.abilityService.assertCurrentActorCan(Action.delete, ResourceType.GameCollection, { id: entryId, ...entry });
+
+    return true;
+  }
+
+  /**
+   * The values of the copy's revision `revisionId`, read back through their
+   * schema (#1231). A revision of another copy, none, or one whose values
+   * fail the schema answers `COLLECTION_REVISION_NOT_FOUND`.
+   */
+  private async revisionValues(
+    tx: Prisma.TransactionClient,
+    copyId: string,
+    revisionId: string,
+  ): Promise<CopyRevisionValues> {
+    const revision = await tx.collectionCopyRevision.findUnique({
+      where: { id: revisionId, copyId },
+      select: { values: true },
+    });
+    const values = revision === null ? null : this.readValues(copyId, revisionId, revision.values);
+
+    if (values === null) {
+      throw revisionNotFound(revisionId);
+    }
+
+    return values;
+  }
+
+  /**
+   * A revision's stored values, parsed: they are data from outside the
+   * process (#1231). Null when they fail the schema, which the server's log
+   * says on one line: nestjs-pino drops an Error argument.
+   */
+  private readValues(copyId: string, revisionId: string, stored: unknown): CopyRevisionValues | null {
+    const parsed = copyRevisionValuesSchema.safeParse(stored);
+
+    if (!parsed.success) {
+      this.logger.error(
+        `Revision ${revisionId} of copy ${copyId} can't be read back: ${describeRevisionProblem(parsed.error)}`,
+      );
+
+      return null;
+    }
+
+    return parsed.data;
+  }
+
+  /** The editions `releaseIds` name, by id, as they are now; one deleted since is absent (#1231). */
+  private async releaseSummaries(
+    releaseIds: readonly (string | null)[],
+  ): Promise<Map<string, CollectionReleaseSummaryDto>> {
+    const ids = [...new Set(releaseIds.filter((id): id is string => id !== null))];
+
+    if (ids.length === 0) {
+      return new Map();
+    }
+
+    const releases = await this.db.gameRelease.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, editionName: true, releaseYear: true },
+    });
+
+    return new Map(releases.map((release) => [release.id, release]));
   }
 
   /**

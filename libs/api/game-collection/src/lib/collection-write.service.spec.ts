@@ -480,6 +480,26 @@ describe('CollectionWriteService', () => {
       expect(db.collectionCopy.findFirst).not.toHaveBeenCalled();
     });
 
+    // A restore learns the reason it may remove the entry with only once it
+    // has read the revision under the entry's lock, so the write names it in
+    // its answer, and that wins over `run`'s (#1231).
+    it('hands the reconcile the reason the write names under the lock (#1231)', async () => {
+      db.gameCollection.findUniqueOrThrow.mockResolvedValue(entryState(null, 0) as never);
+      db.collectionCopy.findFirst.mockResolvedValue({ removeReason: GameRemovalReason.Lost } as never);
+
+      await service.run(
+        async () => ({ entryId: 'gc-1', result: null, removeReason: GameRemovalReason.Traded }),
+        'user-1',
+        NOW,
+      );
+
+      expect(db.gameCollection.update.mock.calls[0]?.[0]?.data).toMatchObject({
+        deletedAt: NOW,
+        deleteReason: GameRemovalReason.Traded,
+      });
+      expect(db.collectionCopy.findFirst).not.toHaveBeenCalled();
+    });
+
     it("hands the reconcile the entry removal's reason (#1231)", async () => {
       db.gameCollection.findUniqueOrThrow.mockResolvedValue(entryState(null, 0) as never);
       db.collectionCopy.findFirst.mockResolvedValue({ removeReason: GameRemovalReason.Traded } as never);

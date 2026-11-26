@@ -31,6 +31,20 @@ export function copyNotFound(id: string): CodedHttpException {
 }
 
 /**
+ * The refusal for a revision the route's copy doesn't hold: missing, a
+ * revision of another copy, or one whose stored values can't be read back,
+ * which the 404 never tells apart. Like `copyNotFound`, its code says the 404
+ * is about this row (#1231).
+ */
+export function revisionNotFound(id: string): CodedHttpException {
+  return new CodedHttpException(
+    Http.NotFound,
+    'COLLECTION_REVISION_NOT_FOUND',
+    t('errors.game_collection.revision_not_found', { id }),
+  );
+}
+
+/**
  * An entry holds at most `max` copies, removed and taken-back ones included;
  * `limit` carries the number for a client, as a quota's does (#1231).
  */
