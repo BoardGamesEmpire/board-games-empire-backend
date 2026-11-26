@@ -471,12 +471,12 @@ describe('CollectionRatingService (#1231)', () => {
     });
 
     // A change of another entry, or a taken-back one, is the same 404 as a missing one.
-    it('answers COLLECTION_RATING_NOT_FOUND for a change the entry does not hold, or one taken back', async () => {
+    it('answers COLLECTION_RATING_CHANGE_NOT_FOUND for a change the entry does not hold, or one taken back', async () => {
       db.collectionRatingChange.findUnique.mockResolvedValue(null);
 
       await expect(service.update('gc-1', 'rc-9', { rating: 3 })).rejects.toMatchObject({
         status: 404,
-        code: 'COLLECTION_RATING_NOT_FOUND',
+        code: 'COLLECTION_RATING_CHANGE_NOT_FOUND',
       });
       expect(db.collectionRatingRevision.create).not.toHaveBeenCalled();
     });
@@ -503,9 +503,11 @@ describe('CollectionRatingService (#1231)', () => {
 
       expectLockedThenChecked();
       const now = db.gameCollection.update.mock.calls[0]?.[0]?.data.lastUpdated;
+      // Read in any state, not as an edit reads it, so a take-back repeated
+      // finds the change (ADR 0002).
       expect(db.collectionRatingChange.findUnique).toHaveBeenCalledWith({
-        where: { id: 'rc-1', entryId: 'gc-1', retractedAt: null },
-        select: RATING_REVISION_SELECT,
+        where: { id: 'rc-1', entryId: 'gc-1' },
+        select: RATING_CHANGE_SELECT,
       });
       expect(db.collectionRatingRevision.create).not.toHaveBeenCalled();
       expect(db.collectionRatingChange.update).toHaveBeenCalledWith({
@@ -523,14 +525,31 @@ describe('CollectionRatingService (#1231)', () => {
       expect(db.collectionRatingChange.count).not.toHaveBeenCalled();
     });
 
-    it('answers COLLECTION_RATING_NOT_FOUND for a change missing or taken back already', async () => {
+    // ADR 0002: a take-back already in effect answers the change as it
+    // stands, and writes nothing to it: no stamp, no revision (#1231).
+    it('taking back a change taken back already answers it as it stands, and writes nothing to it', async () => {
+      const retractedAt = new Date('2026-11-20T00:00:00Z');
+      db.collectionRatingChange.findUnique.mockResolvedValue(changeRow({ rating: 4, retractedAt }) as never);
+
+      const taken = await service.takeBack('gc-1', 'rc-1');
+
+      expect(taken).toMatchObject({ id: 'rc-1', rating: 4, retractedAt });
+      expect(db.collectionRatingChange.update).not.toHaveBeenCalled();
+      expect(db.collectionRatingRevision.create).not.toHaveBeenCalled();
+    });
+
+    it('answers COLLECTION_RATING_CHANGE_NOT_FOUND to a take-back of a change the entry does not hold', async () => {
       db.collectionRatingChange.findUnique.mockResolvedValue(null);
 
-      await expect(service.takeBack('gc-1', 'rc-1')).rejects.toMatchObject({ code: 'COLLECTION_RATING_NOT_FOUND' });
+      await expect(service.takeBack('gc-1', 'rc-1')).rejects.toMatchObject({
+        status: 404,
+        code: 'COLLECTION_RATING_CHANGE_NOT_FOUND',
+      });
+      expect(db.collectionRatingChange.update).not.toHaveBeenCalled();
     });
 
     it('undoes a take-back and stamps the change edited by the user, without a revision', async () => {
-      db.collectionRatingChange.findUnique.mockResolvedValue({ id: 'rc-1', retractedAt: new Date() } as never);
+      db.collectionRatingChange.findUnique.mockResolvedValue(changeRow({ retractedAt: new Date() }) as never);
 
       await service.undoTakeBack('gc-1', 'rc-1');
 
@@ -538,7 +557,7 @@ describe('CollectionRatingService (#1231)', () => {
       const now = db.gameCollection.update.mock.calls[0]?.[0]?.data.lastUpdated;
       expect(db.collectionRatingChange.findUnique).toHaveBeenCalledWith({
         where: { id: 'rc-1', entryId: 'gc-1' },
-        select: { id: true, retractedAt: true },
+        select: RATING_CHANGE_SELECT,
       });
       expect(db.collectionRatingRevision.create).not.toHaveBeenCalled();
       expect(db.collectionRatingChange.update).toHaveBeenCalledWith({
@@ -548,29 +567,44 @@ describe('CollectionRatingService (#1231)', () => {
       });
     });
 
-    // A coded 404 reads as "this row is gone" (#634): a change that is live must not answer one.
-    it('answers 409 COLLECTION_RATING_NOT_TAKEN_BACK to an undo of a change that exists but is not taken back', async () => {
-      db.collectionRatingChange.findUnique.mockResolvedValue({ id: 'rc-1', retractedAt: null } as never);
+    // ADR 0002: an undo already in effect answers the change as it stands
+    // and writes nothing to it; never the row's 404, which a client reads as
+    // "this row is gone" (#634, #1231).
+    it('undoing the take-back of a change that is not taken back answers it as it stands, and writes nothing to it', async () => {
+      db.collectionRatingChange.findUnique.mockResolvedValue(changeRow({ retractedAt: null }) as never);
 
-      await expect(service.undoTakeBack('gc-1', 'rc-1')).rejects.toMatchObject({
-        status: 409,
-        code: 'COLLECTION_RATING_NOT_TAKEN_BACK',
-      });
+      const change = await service.undoTakeBack('gc-1', 'rc-1');
+
+      expect(change).toMatchObject({ id: 'rc-1', rating: 7, retractedAt: null });
       expect(db.collectionRatingChange.update).not.toHaveBeenCalled();
+      expect(db.collectionRatingRevision.create).not.toHaveBeenCalled();
     });
 
-    it('answers COLLECTION_RATING_NOT_FOUND to an undo of a change the entry does not hold', async () => {
+    it('answers COLLECTION_RATING_CHANGE_NOT_FOUND to an undo of a change the entry does not hold', async () => {
       db.collectionRatingChange.findUnique.mockResolvedValue(null);
 
       await expect(service.undoTakeBack('gc-1', 'rc-1')).rejects.toMatchObject({
         status: 404,
-        code: 'COLLECTION_RATING_NOT_FOUND',
+        code: 'COLLECTION_RATING_CHANGE_NOT_FOUND',
       });
+    });
+
+    it.each([
+      ['takeBack', () => service.takeBack('gc-1', 'rc-1')],
+      ['undoTakeBack', () => service.undoTakeBack('gc-1', 'rc-1')],
+    ])("%s answers COLLECTION_ENTRY_NOT_FOUND for another user's entry before it reads the change", async (_, act) => {
+      // The lock names the acting user, so it finds no row under another
+      // user's entry id (#1231).
+      db.$queryRaw.mockResolvedValue([] as never);
+
+      await expect(act()).rejects.toMatchObject({ status: 404, code: 'COLLECTION_ENTRY_NOT_FOUND' });
+      expect(db.collectionRatingChange.findUnique).not.toHaveBeenCalled();
+      expect(db.collectionRatingChange.update).not.toHaveBeenCalled();
     });
   });
 
   describe('listRevisions', () => {
-    it("reads the acting user's own entry, newest revision first, in the shape its owner reads the change", async () => {
+    it("reads the acting user's own entry, newest revision first, in the shape the entry's owner reads the change", async () => {
       db.gameCollection.findUnique.mockResolvedValue({
         ratingChanges: [
           {
@@ -628,11 +662,11 @@ describe('CollectionRatingService (#1231)', () => {
       expect(error).toHaveBeenCalledWith(expect.stringContaining('rev-bad'));
     });
 
-    it('answers COLLECTION_RATING_NOT_FOUND for a change the entry does not hold', async () => {
+    it('answers COLLECTION_RATING_CHANGE_NOT_FOUND for a change the entry does not hold', async () => {
       db.gameCollection.findUnique.mockResolvedValue({ ratingChanges: [] } as never);
 
       await expect(service.listRevisions('gc-1', 'rc-9')).rejects.toMatchObject({
-        code: 'COLLECTION_RATING_NOT_FOUND',
+        code: 'COLLECTION_RATING_CHANGE_NOT_FOUND',
       });
     });
 
@@ -684,11 +718,11 @@ describe('CollectionRatingService (#1231)', () => {
       expect(restored).toMatchObject({ id: 'rc-1', rating: 5 });
     });
 
-    it('answers COLLECTION_RATING_NOT_FOUND for a change that is taken back, before it reads the revision', async () => {
+    it('answers COLLECTION_RATING_CHANGE_NOT_FOUND for a change that is taken back, before it reads the revision', async () => {
       db.collectionRatingChange.findUnique.mockResolvedValue(null);
 
       await expect(service.restore('gc-1', 'rc-1', 'rev-1')).rejects.toMatchObject({
-        code: 'COLLECTION_RATING_NOT_FOUND',
+        code: 'COLLECTION_RATING_CHANGE_NOT_FOUND',
       });
       expect(db.collectionRatingRevision.findUnique).not.toHaveBeenCalled();
     });

@@ -21,7 +21,7 @@ export function collectionEntryNotFound(id: string): CodedHttpException {
  * entry, or on an entry the actor can't write, which the 404 never tells
  * apart. Like `collectionEntryNotFound`, its code says the 404 is about this
  * row (#1231). A taken-back copy never existed, so it answers this on every
- * write but the undo of its take-back.
+ * write but its take-back and the undo of it.
  */
 export function copyNotFound(id: string): CodedHttpException {
   return new CodedHttpException(
@@ -48,27 +48,14 @@ export function revisionNotFound(id: string): CodedHttpException {
 /**
  * The refusal for a rating change the route's entry doesn't hold: missing, on
  * another entry, on another user's entry, or taken back (where the route
- * takes only its undo), which the 404 never tells apart. Like `copyNotFound`,
- * its code says the 404 is about this row (#1231).
+ * takes only its take-back and the undo of it), which the 404 never tells
+ * apart. Like `copyNotFound`, its code says the 404 is about this row (#1231).
  */
 export function ratingChangeNotFound(id: string): CodedHttpException {
   return new CodedHttpException(
     Http.NotFound,
-    'COLLECTION_RATING_NOT_FOUND',
+    'COLLECTION_RATING_CHANGE_NOT_FOUND',
     t('errors.game_collection.rating_change_not_found', { id }),
-  );
-}
-
-/**
- * Undoing the take-back of a rating change that exists but is not taken back
- * (#1231). Not the row's 404: a client reads a coded 404 as "this row is
- * gone" (#634), and would drop a change that is live.
- */
-export function ratingChangeNotTakenBack(): CodedHttpException {
-  return new CodedHttpException(
-    Http.Conflict,
-    'COLLECTION_RATING_NOT_TAKEN_BACK',
-    t('errors.game_collection.rating_change_not_taken_back'),
   );
 }
 
@@ -82,19 +69,6 @@ export function copyLimitReached(max: number): CodedHttpException {
     'COLLECTION_COPY_LIMIT_REACHED',
     t('errors.game_collection.copy_limit_reached', { max }),
     { fields: { limit: max } },
-  );
-}
-
-/**
- * A copy the entry holds that isn't taken back has no take-back to undo
- * (#1231). A 409, never the copy's 404: a client reads that as "this copy is
- * gone" (#634), and the copy is still there.
- */
-export function copyNotTakenBack(): CodedHttpException {
-  return new CodedHttpException(
-    Http.Conflict,
-    'COLLECTION_COPY_NOT_TAKEN_BACK',
-    t('errors.game_collection.copy_not_taken_back'),
   );
 }
 
@@ -112,7 +86,7 @@ export function copyNotRemoved(): CodedHttpException {
  * with no copy, so it is refused: add the right copy first, or remove the
  * game (#1231).
  */
-export function lastCopy(): CodedHttpException {
+export function lastCopyTakeBack(): CodedHttpException {
   return new CodedHttpException(Http.Conflict, 'COLLECTION_LAST_COPY', t('errors.game_collection.last_copy'));
 }
 

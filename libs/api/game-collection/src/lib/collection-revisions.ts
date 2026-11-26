@@ -1,6 +1,7 @@
 import { DatePrecision, GameCondition, GameRemovalReason, Prisma } from '@bge/database';
 import type { Logger } from '@nestjs/common';
 import { z } from 'zod';
+import { revisionNotFound } from './game-collection.errors';
 import type { Money } from './values/money';
 import { moneyFromColumns } from './values/money';
 import type { PartialDate } from './values/partial-date';
@@ -271,6 +272,92 @@ export function parseRevisionValues<S extends z.ZodType>(
   }
 
   return parsed.data;
+}
+
+/**
+ * The order a revisions list reads in: newest first, then by id, so revisions
+ * kept in the same instant keep one order (#1231). A copy's revisions and a
+ * rating change's both read in it.
+ */
+export const REVISION_ORDER: { createdAt?: Prisma.SortOrder; id?: Prisma.SortOrder }[] = [
+  { createdAt: 'desc' },
+  { id: 'desc' },
+];
+
+/** What a revisions list reads of a copy's or a rating change's revisions, in {@link REVISION_ORDER} (#1231). */
+export const REVISION_LIST_READ = {
+  select: { createdAt: true, id: true, values: true },
+  orderBy: REVISION_ORDER,
+} as const;
+
+/** A revision as a revisions list reads it (#1231). */
+export interface StoredRevision {
+  createdAt: Date;
+  id: string;
+  values: unknown;
+}
+
+/**
+ * The revisions of a list whose stored values read back through `schema`,
+ * each beside its values, in the order given (#1231). One that fails the
+ * schema is left out, as it can't be restored either, and the server's log
+ * says why, naming the revision as `subject` does.
+ */
+export function readableRevisions<S extends z.ZodType>(
+  schema: S,
+  revisions: readonly StoredRevision[],
+  logger: Pick<Logger, 'error'>,
+  subject: (revisionId: string) => string,
+): { revision: StoredRevision; values: z.output<S> }[] {
+  return revisions.flatMap((revision) => {
+    const values = parseRevisionValues(schema, revision.values, logger, subject(revision.id));
+
+    return values === null ? [] : [{ revision, values }];
+  });
+}
+
+/**
+ * The values of the revision `found` holds, the one a restore asked for by
+ * `revisionId`, read back through `schema` (#1231). None found, a revision of
+ * another copy or change, or values that fail the schema answer
+ * `COLLECTION_REVISION_NOT_FOUND`, which the 404 never tells apart.
+ */
+export function restorableValues<S extends z.ZodType>(
+  schema: S,
+  found: { values: unknown } | null,
+  revisionId: string,
+  logger: Pick<Logger, 'error'>,
+  subject: string,
+): z.output<S> {
+  const values = found === null ? null : parseRevisionValues(schema, found.values, logger, subject);
+
+  if (values === null) {
+    throw revisionNotFound(revisionId);
+  }
+
+  return values;
+}
+
+/**
+ * Whether a take-back (`takenBack` true) or the undo of one (false) finds the
+ * copy or rating change already as it asks (#1231). Such a repeat answers the
+ * row as it stands and writes nothing to it, no stamp and no revision, and
+ * nothing is emitted: ADR 0002's rule for a state change already in the state
+ * asked for, so a client that sends it again can't tell a retry from the
+ * first request.
+ */
+export function isAlreadyTakenBackAs(row: { retractedAt: Date | null }, takenBack: boolean): boolean {
+  return (row.retractedAt !== null) === takenBack;
+}
+
+/**
+ * What a take-back (`takenBack` true) or the undo of one writes to a copy or a
+ * rating change (#1231): `retractedAt`, and the stamp that the user edited
+ * it, so an upstream sync never undoes the user's word. It changes none of the
+ * values a revision holds, so neither keeps a revision.
+ */
+export function takeBackData(takenBack: boolean, now: Date): { editedByUserAt: Date; retractedAt: Date | null } {
+  return { editedByUserAt: now, retractedAt: takenBack ? now : null };
 }
 
 /**

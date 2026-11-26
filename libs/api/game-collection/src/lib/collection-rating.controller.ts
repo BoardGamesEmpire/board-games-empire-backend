@@ -15,16 +15,20 @@ import {
   UpdateCollectionRatingChangeDto,
 } from './dto';
 
-const ENTRY_NOT_FOUND = 'Collection entry not found, or not yours (code COLLECTION_ENTRY_NOT_FOUND)';
-const RATING_NOT_FOUND = 'the rating change was not found on it (code COLLECTION_RATING_NOT_FOUND)';
+// Each 404 description is one sentence, its causes joined in the order the
+// route checks them (#1231).
+const ENTRY_NOT_FOUND = 'The collection entry was not found, or is not yours (code COLLECTION_ENTRY_NOT_FOUND)';
+const RATING_NOT_FOUND = 'the rating change was not found on it (code COLLECTION_RATING_CHANGE_NOT_FOUND)';
+const LIVE_RATING_NOT_FOUND =
+  'the rating change was not found on it, or is taken back (code COLLECTION_RATING_CHANGE_NOT_FOUND)';
 
 /**
- * The history of a collection entry's rating, on the entry owner's routes (#1231).
- * The entry's own routes append to it: each change of the rating, and
- * clearing it, is kept. The owner corrects the history here, and a correction
- * never changes the entry's current rating. Every route, the writes as much
- * as the reads, answers only the entry's owner, and each write is an update
- * of the entry, held to its conditions.
+ * The history of a collection entry's rating, on routes only the entry's owner
+ * uses (#1231). The entry's own routes append to it: each change of the
+ * rating, and clearing it, is kept. You correct the history of your entry's
+ * rating here, and a correction never changes the entry's current rating.
+ * Every route, the writes as much as the reads, answers only the entry's
+ * owner, and each write is an update of the entry, held to its conditions.
  */
 @ApiBearerAuth()
 @ApiSecurity('api_key')
@@ -104,7 +108,7 @@ export class CollectionRatingController {
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @ApiResponse({
     status: Http.NotFound,
-    description: `${ENTRY_NOT_FOUND}, or ${RATING_NOT_FOUND}, or taken back`,
+    description: `${ENTRY_NOT_FOUND}; or ${LIVE_RATING_NOT_FOUND}`,
   })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.GameCollection))
   @Patch(':ratingId')
@@ -123,17 +127,19 @@ export class CollectionRatingController {
     description:
       'Says the change never happened. It stays in the history, flagged with `retractedAt`, and the entry’s ' +
       'current rating stays as it is. A change taken back can’t be corrected or restored until the take-back is ' +
-      'undone. Only the entry’s owner can take one back: anyone else is told the entry was not found.',
+      'undone. Taking back a change taken back already answers it as it stands, and changes nothing, so a retry ' +
+      'is safe. Only the entry’s owner can take one back: anyone else is told the entry was not found.',
   })
   @ApiParam({ name: 'id', type: String, description: 'The collection entry' })
   @ApiParam({ name: 'ratingId', type: String })
-  @ApiResponse({ status: Http.Ok, type: CollectionRatingChangeMessageResponseDto })
+  @ApiResponse({
+    status: Http.Ok,
+    type: CollectionRatingChangeMessageResponseDto,
+    description: 'The change, taken back, or as it stands when it was taken back already',
+  })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
-  @ApiResponse({
-    status: Http.NotFound,
-    description: `${ENTRY_NOT_FOUND}, or ${RATING_NOT_FOUND}, or taken back already`,
-  })
+  @ApiResponse({ status: Http.NotFound, description: `${ENTRY_NOT_FOUND}; or ${RATING_NOT_FOUND}` })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.GameCollection))
   @HttpCode(Http.Ok)
   @Post(':ratingId/retraction')
@@ -146,18 +152,20 @@ export class CollectionRatingController {
   @ApiOperation({
     summary: 'Undo taking back a rating change',
     description:
-      'The change counts again. Only the entry’s owner can undo one: anyone else is told the entry was not found.',
+      'The change counts again. Undoing it for a change that isn’t taken back answers the change as it stands, ' +
+      'and changes nothing, so a retry is safe. Only the entry’s owner can undo one: anyone else is told the ' +
+      'entry was not found.',
   })
   @ApiParam({ name: 'id', type: String, description: 'The collection entry' })
   @ApiParam({ name: 'ratingId', type: String })
-  @ApiResponse({ status: Http.Ok, type: CollectionRatingChangeMessageResponseDto })
+  @ApiResponse({
+    status: Http.Ok,
+    type: CollectionRatingChangeMessageResponseDto,
+    description: 'The change, no longer taken back, or as it stands when it wasn’t taken back',
+  })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
-  @ApiResponse({ status: Http.NotFound, description: `${ENTRY_NOT_FOUND}, or ${RATING_NOT_FOUND}` })
-  @ApiResponse({
-    status: Http.Conflict,
-    description: 'The change exists but is not taken back (code COLLECTION_RATING_NOT_TAKEN_BACK)',
-  })
+  @ApiResponse({ status: Http.NotFound, description: `${ENTRY_NOT_FOUND}; or ${RATING_NOT_FOUND}` })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.GameCollection))
   @Delete(':ratingId/retraction')
   undoTakeBackRating(@Param('id') id: string, @Param('ratingId') ratingId: string) {
@@ -178,7 +186,7 @@ export class CollectionRatingController {
   @ApiResponse({ status: Http.Ok, type: CollectionRatingRevisionListResponseDto })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
-  @ApiResponse({ status: Http.NotFound, description: `${ENTRY_NOT_FOUND}, or ${RATING_NOT_FOUND}` })
+  @ApiResponse({ status: Http.NotFound, description: `${ENTRY_NOT_FOUND}; or ${RATING_NOT_FOUND}` })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.GameCollection))
   @Get(':ratingId/revisions')
   listRevisions(@Param('id') id: string, @Param('ratingId') ratingId: string) {
@@ -205,7 +213,7 @@ export class CollectionRatingController {
   @ApiResponse({
     status: Http.NotFound,
     description:
-      `${ENTRY_NOT_FOUND}, ${RATING_NOT_FOUND} or taken back, or the revision not found on the change, including ` +
+      `${ENTRY_NOT_FOUND}; ${LIVE_RATING_NOT_FOUND}; or the revision was not found on the change, including ` +
       'one whose stored values can’t be read back (code COLLECTION_REVISION_NOT_FOUND)',
   })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.GameCollection))

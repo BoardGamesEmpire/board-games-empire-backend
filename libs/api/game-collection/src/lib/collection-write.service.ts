@@ -1,9 +1,16 @@
 import type { GameCollection, GameMedium, GameRemovalReason } from '@bge/database';
-import { Action, DatabaseService, isPrismaDependentRecordNotFoundError, Prisma, ResourceType } from '@bge/database';
+import {
+  Action,
+  constraintIdentity,
+  DatabaseService,
+  identifiesConstraint,
+  isPrismaDependentRecordNotFoundError,
+  Prisma,
+  ResourceType,
+} from '@bge/database';
 import type { CollectionSupplyChange } from '@bge/event';
 import { emitCollectionSupplyChanges, syncCollectionEntrySupply } from '@bge/event';
-import type { AbilityService } from '@bge/permissions';
-import { resolveActingUserIdOrNull } from '@bge/permissions';
+import { AbilityService, resolveActingUserIdOrNull } from '@bge/permissions';
 import { Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { OWNED_COPY, REMOVED_COPY } from './collection-row';
@@ -69,6 +76,44 @@ export async function writeEntryUnder(
 }
 
 /**
+ * Runs a keyed add, `attempt`, and runs it once more when it trips its key's
+ * unique, named in every spelling a P2002 identity reports it by
+ * `keySpellings` (see `identifiesConstraint`): the index name, the raw
+ * columns, and the Prisma fields (#1231, #252).
+ *
+ * Two repeats of a keyed add wait for the entry's lock in turn, and the
+ * second finds the first's row under the key. Should a repeat still trip the
+ * unique, the second run, in a transaction of its own, finds the row the
+ * other committed, as `createOrReplay` does: Postgres aborts the transaction
+ * the violation happened in, so nothing inside it can look again.
+ *
+ * A violation whose constraint can't be named counts, when the add was keyed:
+ * the only other unique of a copy or a rating change is its upstream
+ * account's key, which no add on these routes sets. An add with no key, or a
+ * violation of another unique, is rethrown, and runs once.
+ */
+export async function retryKeyedAdd<T>(
+  attempt: () => Promise<T>,
+  clientRequestId: string | undefined,
+  keySpellings: readonly (readonly string[])[],
+): Promise<T> {
+  try {
+    return await attempt();
+  } catch (error) {
+    const identity = constraintIdentity(error);
+
+    if (
+      clientRequestId === undefined ||
+      !(identity.source === 'unknown' || identifiesConstraint(identity, ...keySpellings))
+    ) {
+      throw error;
+    }
+
+    return attempt();
+  }
+}
+
+/**
  * The one way a collection entry and its copies are written (#1231).
  *
  * An entry is removed when its last owned copy is, and owned again when it
@@ -91,6 +136,7 @@ export async function writeEntryUnder(
 export class CollectionWriteService {
   constructor(
     private readonly db: DatabaseService,
+    private readonly abilityService: AbilityService,
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
@@ -160,29 +206,30 @@ export class CollectionWriteService {
 
   /**
    * Locks the entry's row, as the transaction's first lock (#1221), only when
-   * it is the acting user's own (#1231), so a request for another user's
+   * it belongs to the acting user (#1231), so a request for another user's
    * entry never makes its owner's writes wait, and writes its `lastUpdated`
    * under the actor's `update` conditions (#1288): the start of every write
-   * only the entry's owner makes, which is an update of the entry, as the copy
-   * routes' and the rating change routes' are. Another user's entry, or any
-   * entry for an actor that is no user, answers `COLLECTION_ENTRY_NOT_FOUND`
-   * before anything is read or written, as the owner's reads do. Answers what
-   * the write is checked against: the entry's medium and platform game.
+   * the entry's owner alone makes, which is an update of the entry, as the
+   * copy routes' and the rating change routes' are. Another user's entry, or
+   * any entry for an actor that is no user, answers
+   * `COLLECTION_ENTRY_NOT_FOUND` before anything is read or written, as the
+   * reads of your own entry do. Answers what the write is checked against:
+   * the entry's medium and platform game.
+   *
+   * The `lastUpdated` write runs even for a write that turns out to change
+   * nothing, such as a take-back repeated: ADR 0002 asks only that such a
+   * repeat emits nothing and leaves the row it names as it was, and the
+   * entry's stamp only makes the `updatedSince` catch-up resend the row.
    */
-  async lockOwnEntryForUpdate(
-    tx: Prisma.TransactionClient,
-    abilityService: AbilityService,
-    entryId: string,
-    now: Date,
-  ): Promise<LockedEntry> {
-    const actingUserId = resolveActingUserIdOrNull(abilityService);
+  async lockOwnEntryForUpdate(tx: Prisma.TransactionClient, entryId: string, now: Date): Promise<LockedEntry> {
+    const actingUserId = resolveActingUserIdOrNull(this.abilityService);
     const locked = actingUserId === null ? null : await this.lockEntry(tx, entryId, actingUserId);
 
     if (locked === null) {
       throw collectionEntryNotFound(entryId);
     }
 
-    await writeEntryUnder(tx, abilityService, entryId, Action.update, {}, { lastUpdated: now });
+    await writeEntryUnder(tx, this.abilityService, entryId, Action.update, {}, { lastUpdated: now });
 
     return locked;
   }

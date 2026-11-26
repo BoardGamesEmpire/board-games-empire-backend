@@ -1,19 +1,23 @@
 import type { Prisma } from '@bge/database';
-import { constraintIdentity, DatabaseService, identifiesConstraint, normalizeClientRequestId } from '@bge/database';
+import { DatabaseService, normalizeClientRequestId } from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService } from '@bge/permissions';
 import { pickDefined } from '@bge/shared';
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import type { RatingRevisionValues } from './collection-revisions';
 import {
-  parseRevisionValues,
+  isAlreadyTakenBackAs,
   RATING_REVISION_SELECT,
   ratingRevisionValuesSchema,
+  readableRevisions,
   recordRatingRevision,
+  restorableValues,
   restoredRatingOf,
+  REVISION_LIST_READ,
+  takeBackData,
 } from './collection-revisions';
 import { readOwnEntry } from './collection-row';
-import { CollectionWriteService } from './collection-write.service';
+import { CollectionWriteService, retryKeyedAdd } from './collection-write.service';
 import type {
   CollectionRatingChangeDto,
   CollectionRatingRevisionDto,
@@ -21,9 +25,8 @@ import type {
   UpdateCollectionRatingChangeDto,
 } from './dto';
 import { toCollectionRatingChangeDto, toCollectionRatingRevisionDto } from './dto';
-import { ratingChangeNotFound, ratingChangeNotTakenBack, revisionNotFound } from './game-collection.errors';
-import type { PartialDate } from './values/partial-date';
-import { assertNotInFuture, parsePartialDate, todayUtc } from './values/partial-date';
+import { ratingChangeNotFound } from './game-collection.errors';
+import { assertNotInFuture, sentDate, todayUtc } from './values/partial-date';
 
 /** What the rating history reads of each change (#1231). */
 export const RATING_CHANGE_SELECT = {
@@ -77,26 +80,14 @@ export async function appendRatingChangeIfChanged(
 
 /**
  * The unique that keeps one rating change per client request id on an entry,
- * in every spelling a P2002 identity reports it (see `identifiesConstraint`):
- * the index name, the raw columns, and the Prisma fields (#1231, #252).
+ * in every spelling a P2002 identity reports it (see `retryKeyedAdd`): the
+ * index name, the raw columns, and the Prisma fields (#1231, #252).
  */
 const CHANGE_KEY_SPELLINGS = [
   ['collection_rating_change_entry_client_request_id_unique'],
   ['entry_id', 'client_request_id'],
   ['entryId', 'clientRequestId'],
 ] as const;
-
-/**
- * Whether `error` is a unique violation on a rating change's client request
- * id: a repeat of the add that committed first (#252). One whose constraint
- * can't be named counts, when the add was keyed: a change's only other unique
- * is its upstream account's key, which no add on this route sets.
- */
-function isChangeKeyViolation(error: unknown): boolean {
-  const identity = constraintIdentity(error);
-
-  return identity.source === 'unknown' || identifiesConstraint(identity, ...CHANGE_KEY_SPELLINGS);
-}
 
 /** The order the history reads in: the changes with no known date, then by date, then by when each was recorded (#1231). */
 const HISTORY_ORDER: Prisma.CollectionRatingChangeOrderByWithRelationInput[] = [
@@ -105,48 +96,28 @@ const HISTORY_ORDER: Prisma.CollectionRatingChangeOrderByWithRelationInput[] = [
   { id: 'asc' },
 ];
 
-/** A change's revisions, newest first, then by id, so revisions kept in the same instant keep one order (#1231). */
-const REVISION_ORDER: Prisma.CollectionRatingRevisionOrderByWithRelationInput[] = [
-  { createdAt: 'desc' },
-  { id: 'desc' },
-];
-
 /**
- * A date a request sent, which the DTO's `@IsPartialDate()` has already
- * passed, refused when it is today nowhere yet (#1231).
- */
-function sentDate(text: string, now: Date): PartialDate {
-  const date = parsePartialDate(text);
-
-  if (date === null) {
-    throw new BadRequestException(t('validation.isPartialDate', { property: 'occurredOn' }));
-  }
-
-  assertNotInFuture(date, now, 'occurredOn');
-
-  return date;
-}
-
-/**
- * The history of an entry's rating, on the entry owner's routes: the entry's
- * owner alone reads it and corrects it (#1231). Each change of the rating the
- * entry's own routes make is appended by {@link appendRatingChange}, under the
- * entry's lock.
+ * The history of an entry's rating, on routes only the entry's owner uses: you
+ * alone read the history of your entry's rating and correct it (#1231). Each
+ * change of the rating the entry's own routes make is appended by
+ * {@link appendRatingChange}, under the entry's lock.
  *
- * The owner can add an earlier change, edit one, take one back and undo
- * that, and restore a revision, on the terms copies have. Correcting the
- * history never changes the entry's current rating, and never reaches the
- * supply sync: a correction writes only rating change rows, and stamps the
- * entry's `lastUpdated`. Each write locks the entry's row first and holds the
- * entry to the actor's `update` conditions (`CollectionWriteService.lockOwnEntryForUpdate`); the
- * entry must be the acting user's own, so a change of another user's entry
- * answers `COLLECTION_ENTRY_NOT_FOUND`, and a change of another entry, as one
- * that doesn't exist, answers `COLLECTION_RATING_NOT_FOUND`.
+ * You can add an earlier change, edit one, take one back and undo that, and
+ * restore a revision, on the terms copies have. Correcting the history never
+ * changes the entry's current rating, and never reaches the supply sync: a
+ * correction writes only rating change rows, and stamps the entry's
+ * `lastUpdated`. Each write locks the entry's row first and holds the entry
+ * to the actor's `update` conditions
+ * (`CollectionWriteService.lockOwnEntryForUpdate`); the entry must be the
+ * acting user's own, so a change of another user's entry answers
+ * `COLLECTION_ENTRY_NOT_FOUND`, and a change of another entry, as one that
+ * doesn't exist, answers `COLLECTION_RATING_CHANGE_NOT_FOUND`.
  *
  * Every correction stamps `editedByUserAt`, so an upstream sync leaves the
  * change as the user left it (`SYNC_MAY_WRITE_RATING_CHANGE`). A change taken
- * back never happened, so it takes only the undo of its take-back: an edit
- * or a restore answers `COLLECTION_RATING_NOT_FOUND` until it is undone.
+ * back never happened, so it takes only its take-back and the undo of it: an
+ * edit or a restore answers `COLLECTION_RATING_CHANGE_NOT_FOUND` until it is
+ * undone.
  */
 @Injectable()
 export class CollectionRatingService {
@@ -162,7 +133,7 @@ export class CollectionRatingService {
    * Every change of the acting user's own entry's rating, oldest first
    * (#1231): the changes with no known date, then by date, then by when each
    * was recorded, and the id breaks the last tie. A change taken back is
-   * listed, with its `retractedAt`, so its owner can undo the take-back. The
+   * listed, with its `retractedAt`, so you can undo the take-back. The
    * history is yours alone, whatever the entry's reach, so the entry is read
    * as your own (`readOwnEntry`).
    */
@@ -188,9 +159,7 @@ export class CollectionRatingService {
    *
    * Two repeats wait for the entry's lock in turn, and the second finds the
    * first's change. Should a repeat still trip the key's unique, the add runs
-   * once more, in a transaction of its own, and finds the change the other
-   * committed: Postgres aborts the transaction the violation happened in, so
-   * nothing inside it can look again.
+   * once more and finds the change the other committed (`retryKeyedAdd`).
    */
   async add(entryId: string, dto: CreateCollectionRatingChangeDto): Promise<CollectionRatingChangeDto> {
     const clientRequestId = normalizeClientRequestId(dto.clientRequestId);
@@ -210,14 +179,14 @@ export class CollectionRatingService {
           return toCollectionRatingChangeDto(replayed);
         }
 
-        const occurred = sentDate(dto.occurredOn, now);
+        const occurred = sentDate(dto.occurredOn, now, 'occurredOn');
         const added = await tx.collectionRatingChange.create({
           data: {
             clientRequestId,
             editedByUserAt: now,
             entryId,
-            occurredOn: occurred.on,
-            occurredOnPrecision: occurred.precision,
+            occurredOn: occurred?.on ?? null,
+            occurredOnPrecision: occurred?.precision ?? null,
             rating: dto.rating,
           },
           select: RATING_CHANGE_SELECT,
@@ -226,15 +195,7 @@ export class CollectionRatingService {
         return toCollectionRatingChangeDto(added);
       });
 
-    try {
-      return await attempt();
-    } catch (error) {
-      if (clientRequestId === undefined || !isChangeKeyViolation(error)) {
-        throw error;
-      }
-
-      return attempt();
-    }
+    return retryKeyedAdd(attempt, clientRequestId, CHANGE_KEY_SPELLINGS);
   }
 
   /**
@@ -242,7 +203,7 @@ export class CollectionRatingService {
    * names. First keeps what the change said before as a revision, which can
    * be restored. `null` for `rating` makes the change a clearing, and for
    * `occurredOn` makes its date unknown. A change taken back answers
-   * `COLLECTION_RATING_NOT_FOUND`.
+   * `COLLECTION_RATING_CHANGE_NOT_FOUND`.
    */
   async update(
     entryId: string,
@@ -254,7 +215,7 @@ export class CollectionRatingService {
     }
 
     const now = new Date();
-    const occurred = dto.occurredOn === undefined || dto.occurredOn === null ? null : sentDate(dto.occurredOn, now);
+    const occurred = sentDate(dto.occurredOn, now, 'occurredOn');
 
     return this.write(entryId, now, async (tx) => {
       const change = await this.findLive(tx, entryId, ratingId);
@@ -274,64 +235,38 @@ export class CollectionRatingService {
   /**
    * Takes a change back (#1231): the user says it never happened. It stays in
    * the history, flagged by `retractedAt`, and the entry's current rating
-   * stays as it is, the latest change included. A change missing, or taken
-   * back already, answers `COLLECTION_RATING_NOT_FOUND`.
+   * stays as it is, the latest change included. A change missing answers
+   * `COLLECTION_RATING_CHANGE_NOT_FOUND`; one taken back already is answered
+   * as it stands, and nothing is written to it (ADR 0002).
    *
    * It changes none of the values a revision holds, so it keeps none; it
    * stamps `editedByUserAt`, so a sync never brings the change back.
    */
   async takeBack(entryId: string, ratingId: string): Promise<CollectionRatingChangeDto> {
-    const now = new Date();
-
-    return this.write(entryId, now, async (tx) => {
-      await this.findLive(tx, entryId, ratingId);
-
-      return this.writeChange(tx, ratingId, { editedByUserAt: now, retractedAt: now });
-    });
+    return this.setTakenBack(entryId, ratingId, true);
   }
 
   /**
-   * Undoes a change's take-back (#1231). A change that exists but isn't taken
-   * back answers 409 `COLLECTION_RATING_NOT_TAKEN_BACK`, never the row's 404,
-   * which a client reads as "this row is gone"; one missing, or of another
-   * entry, answers `COLLECTION_RATING_NOT_FOUND`. Like the take-back, it keeps
-   * no revision, and stamps `editedByUserAt`.
+   * Undoes a change's take-back (#1231). A change missing, or of another
+   * entry, answers `COLLECTION_RATING_CHANGE_NOT_FOUND`; one that isn't taken
+   * back is answered as it stands, and nothing is written to it (ADR 0002).
+   * Like the take-back, it keeps no revision, and stamps `editedByUserAt`.
    */
   async undoTakeBack(entryId: string, ratingId: string): Promise<CollectionRatingChangeDto> {
-    const now = new Date();
-
-    return this.write(entryId, now, async (tx) => {
-      const change = await tx.collectionRatingChange.findUnique({
-        where: { id: ratingId, entryId },
-        select: { id: true, retractedAt: true },
-      });
-
-      if (change === null) {
-        throw ratingChangeNotFound(ratingId);
-      }
-
-      if (change.retractedAt === null) {
-        throw ratingChangeNotTakenBack();
-      }
-
-      return this.writeChange(tx, ratingId, { editedByUserAt: now, retractedAt: null });
-    });
+    return this.setTakenBack(entryId, ratingId, false);
   }
 
   /**
    * The revisions of one change of the acting user's own entry's rating,
-   * newest first, each in the shape its owner reads the change (#1231). Like
-   * the history itself they are yours alone, so the entry is read as your own
+   * newest first, each in the shape you read the change (#1231). Like the
+   * history itself they are yours alone, so the entry is read as your own
    * (`readOwnEntry`). A taken-back change's revisions stay readable. A stored
    * revision that can't be read back is left out, as it can't be restored
    * either, and the server's log says why.
    */
   async listRevisions(entryId: string, ratingId: string): Promise<CollectionRatingRevisionDto[]> {
     const entry = await readOwnEntry(this.db, this.abilityService, entryId, {
-      ratingChanges: {
-        where: { id: ratingId },
-        select: { revisions: { select: { createdAt: true, id: true, values: true }, orderBy: REVISION_ORDER } },
-      },
+      ratingChanges: { where: { id: ratingId }, select: { revisions: REVISION_LIST_READ } },
     });
     const [change] = entry.ratingChanges;
 
@@ -339,11 +274,9 @@ export class CollectionRatingService {
       throw ratingChangeNotFound(ratingId);
     }
 
-    return change.revisions.flatMap((revision) => {
-      const values = this.readValues(ratingId, revision.id, revision.values);
-
-      return values === null ? [] : [toCollectionRatingRevisionDto(revision, values)];
-    });
+    return readableRevisions(ratingRevisionValuesSchema, change.revisions, this.logger, (revisionId) =>
+      this.subjectOf(ratingId, revisionId),
+    ).map(({ revision, values }) => toCollectionRatingRevisionDto(revision, values));
   }
 
   /**
@@ -352,7 +285,7 @@ export class CollectionRatingService {
    * own, so a restore can be undone the same way, and the change is stamped
    * as edited by the user. A revision the change doesn't hold, or one whose
    * stored values can't be read back, answers `COLLECTION_REVISION_NOT_FOUND`;
-   * a change taken back, `COLLECTION_RATING_NOT_FOUND`. The restored date is
+   * a change taken back, `COLLECTION_RATING_CHANGE_NOT_FOUND`. The restored date is
    * held to what an edit is: one that is today nowhere yet is refused.
    */
   async restore(entryId: string, ratingId: string, revisionId: string): Promise<CollectionRatingChangeDto> {
@@ -362,10 +295,7 @@ export class CollectionRatingService {
       const change = await this.findLive(tx, entryId, ratingId);
       const values = await this.revisionValues(tx, ratingId, revisionId);
       const { occurredOn, rating } = restoredRatingOf(values);
-
-      if (occurredOn !== null) {
-        assertNotInFuture(occurredOn, now, 'occurredOn');
-      }
+      assertNotInFuture(occurredOn, now, 'occurredOn');
 
       await recordRatingRevision(tx, change);
 
@@ -379,15 +309,46 @@ export class CollectionRatingService {
   }
 
   /**
+   * Takes the change back (`takenBack` true) or undoes that, under the
+   * entry's lock (#1231). The change is read in any state, not as
+   * `findLive` reads it, so one already as asked is answered as it stands,
+   * with no write to it (ADR 0002).
+   */
+  private async setTakenBack(
+    entryId: string,
+    ratingId: string,
+    takenBack: boolean,
+  ): Promise<CollectionRatingChangeDto> {
+    const now = new Date();
+
+    return this.write(entryId, now, async (tx) => {
+      const change = await tx.collectionRatingChange.findUnique({
+        where: { id: ratingId, entryId },
+        select: RATING_CHANGE_SELECT,
+      });
+
+      if (change === null) {
+        throw ratingChangeNotFound(ratingId);
+      }
+
+      if (isAlreadyTakenBackAs(change, takenBack)) {
+        return toCollectionRatingChangeDto(change);
+      }
+
+      return this.writeChange(tx, ratingId, takeBackData(takenBack, now));
+    });
+  }
+
+  /**
    * Runs `write` in one transaction that begins by locking the entry and
    * checking it is the actor's own, under their `update` conditions
-   * (`CollectionWriteService.lockOwnEntryForUpdate`). It doesn't reconcile the entry's ownership or
-   * run the supply sync: no rating change write changes what the entry
-   * supplies.
+   * (`CollectionWriteService.lockOwnEntryForUpdate`). It doesn't reconcile
+   * the entry's ownership or run the supply sync: no rating change write
+   * changes what the entry supplies.
    */
   private async write<T>(entryId: string, now: Date, write: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
     return this.db.$transaction(async (tx) => {
-      await this.writes.lockOwnEntryForUpdate(tx, this.abilityService, entryId, now);
+      await this.writes.lockOwnEntryForUpdate(tx, entryId, now);
 
       return write(tx);
     });
@@ -431,25 +392,20 @@ export class CollectionRatingService {
     ratingId: string,
     revisionId: string,
   ): Promise<RatingRevisionValues> {
-    const revision = await tx.collectionRatingRevision.findUnique({
-      where: { id: revisionId, ratingChangeId: ratingId },
-      select: { values: true },
-    });
-    const values = revision === null ? null : this.readValues(ratingId, revisionId, revision.values);
-
-    if (values === null) {
-      throw revisionNotFound(revisionId);
-    }
-
-    return values;
+    return restorableValues(
+      ratingRevisionValuesSchema,
+      await tx.collectionRatingRevision.findUnique({
+        where: { id: revisionId, ratingChangeId: ratingId },
+        select: { values: true },
+      }),
+      revisionId,
+      this.logger,
+      this.subjectOf(ratingId, revisionId),
+    );
   }
 
-  private readValues(ratingId: string, revisionId: string, stored: unknown): RatingRevisionValues | null {
-    return parseRevisionValues(
-      ratingRevisionValuesSchema,
-      stored,
-      this.logger,
-      `Revision ${revisionId} of rating change ${ratingId}`,
-    );
+  /** How the server's log names a revision of a rating change that can't be read back (#1231). */
+  private subjectOf(ratingId: string, revisionId: string): string {
+    return `Revision ${revisionId} of rating change ${ratingId}`;
   }
 }

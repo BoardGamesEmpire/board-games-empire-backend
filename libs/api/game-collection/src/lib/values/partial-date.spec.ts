@@ -9,6 +9,7 @@ import {
   latestToday,
   parsePartialDate,
   partialDateFromColumns,
+  sentDate,
   todayUtc,
 } from './partial-date';
 
@@ -158,6 +159,35 @@ describe('assertNotInFuture (#1231)', () => {
     const refused = refusal(() => assertNotInFuture(dateOf('2099'), new Date('2026-11-26T00:00:00Z'), field));
 
     expect(fieldsOf(refused)).toMatchObject({ code: 'COLLECTION_DATE_IN_FUTURE', field });
+  });
+
+  // An unknown date is in no future, so a restore of a revision with none passes (#1231).
+  it('accepts an unknown date', () => {
+    expect(() => assertNotInFuture(null, new Date('2026-11-26T00:00:00Z'), 'occurredOn')).not.toThrow();
+  });
+});
+
+// The one reading of a date a request sent, which the DTO's validation has
+// passed: no route refuses such a date in a way of its own (#1231).
+describe('sentDate (#1231)', () => {
+  const now = new Date('2026-11-26T23:30:00Z');
+
+  it('reads a date sent at its precision', () => {
+    expect(sentDate('2019-03', now, 'occurredOn')).toEqual({
+      on: new Date('2019-03-01T00:00:00Z'),
+      precision: DatePrecision.Month,
+    });
+  });
+
+  it.each([undefined, null])('answers null for %s: no date sent, or one made unknown', (text) => {
+    expect(sentDate(text, now, 'removedOn')).toBeNull();
+  });
+
+  it('refuses a day that is today nowhere yet with COLLECTION_DATE_IN_FUTURE, naming the field', () => {
+    expect(fieldsOf(refusal(() => sentDate('2026-11-28', now, 'occurredOn')))).toMatchObject({
+      code: 'COLLECTION_DATE_IN_FUTURE',
+      field: 'occurredOn',
+    });
   });
 });
 

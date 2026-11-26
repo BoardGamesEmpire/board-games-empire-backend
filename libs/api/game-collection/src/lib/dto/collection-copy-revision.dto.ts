@@ -6,12 +6,12 @@ import type { CollectionReleaseSummaryDto } from './collection-copy.dto';
 import { CollectionCopyDto } from './collection-copy.dto';
 
 /**
- * What a copy said before a correction, in the shape its owner reads the copy
+ * What a copy said before a correction, in the shape the entry's owner reads the copy
  * (#1231): dates at their precision, prices as one value, and the edition's
  * name and year. When the user last edited the copy, and the upstream account
  * that synced it, are no part of it.
  */
-export class CollectionRevisionValuesDto extends PickType(CollectionCopyDto, [
+export class CollectionCopyRevisionValuesDto extends PickType(CollectionCopyDto, [
   'acquiredFrom',
   'acquiredOn',
   'condition',
@@ -24,8 +24,8 @@ export class CollectionRevisionValuesDto extends PickType(CollectionCopyDto, [
   'removeReason',
 ] as const) {}
 
-/** A revision of a copy: what it said before its owner corrected it (#1231). */
-export class CollectionRevisionDto {
+/** A revision of a copy: what it said before the entry's owner corrected it (#1231). */
+export class CollectionCopyRevisionDto {
   @ApiProperty({
     type: String,
     format: 'date-time',
@@ -37,24 +37,24 @@ export class CollectionRevisionDto {
   id!: string;
 
   @ApiProperty({
-    type: CollectionRevisionValuesDto,
+    type: CollectionCopyRevisionValuesDto,
     description:
       'What the copy said before the correction. An edition deleted since reads as none, and restoring the ' +
       'revision gives the copy none.',
   })
-  values!: CollectionRevisionValuesDto;
+  values!: CollectionCopyRevisionValuesDto;
 }
 
 /**
- * A revision in its owner's shape (#1231). `release` is the edition its
+ * A revision in the entry owner's shape (#1231). `release` is the edition its
  * values name, as it is now, or null when they name none or it has been
  * deleted since.
  */
-export function toCollectionRevisionDto(
+export function toCollectionCopyRevisionDto(
   revision: { createdAt: Date; id: string },
   values: CopyRevisionValues,
   release: CollectionReleaseSummaryDto | null,
-): CollectionRevisionDto {
+): CollectionCopyRevisionDto {
   const { description, removal } = restoredCopyOf(values);
 
   return {
@@ -70,7 +70,7 @@ export function toCollectionRevisionDto(
   };
 }
 
-export class CollectionRevisionListResponseDto {
-  @ApiProperty({ type: [CollectionRevisionDto], description: "The copy's revisions, newest first" })
-  revisions!: CollectionRevisionDto[];
+export class CollectionCopyRevisionListResponseDto {
+  @ApiProperty({ type: [CollectionCopyRevisionDto], description: "The copy's revisions, newest first" })
+  revisions!: CollectionCopyRevisionDto[];
 }

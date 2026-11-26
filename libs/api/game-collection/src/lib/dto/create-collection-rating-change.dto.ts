@@ -11,7 +11,7 @@ export const RATING_MIN = 1;
 export const RATING_MAX = 10;
 
 /**
- * An earlier change of an entry's rating, as its owner adds it (#1231): what
+ * An earlier change of an entry's rating, as the entry's owner adds it (#1231): what
  * the rating became, and when. Both are required: a change with no `rating`
  * is the rating being cleared, and says so by sending `null`. The date is
  * judged against the clock by the service, where a refusal can carry its code.

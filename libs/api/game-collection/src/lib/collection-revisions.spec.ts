@@ -13,14 +13,18 @@ import {
   copyRevisionValues,
   copyRevisionValuesSchema,
   describeRevisionProblem,
+  isAlreadyTakenBackAs,
   parseRevisionValues,
   ratingRevisionValues,
   ratingRevisionValuesSchema,
+  readableRevisions,
   recordCopyRevision,
   recordCopyRevisions,
   recordRatingRevision,
+  restorableValues,
   restoredCopyOf,
   restoredRatingOf,
+  takeBackData,
 } from './collection-revisions';
 
 const asTx = (mock: MockDatabaseService): Prisma.TransactionClient => mock as unknown as Prisma.TransactionClient;
@@ -333,5 +337,59 @@ describe('rating change revisions (#1231)', () => {
       expect(error).toHaveBeenCalledWith(expect.stringMatching(/^Revision rev-1 can't be read back: .*rating/));
       expect(String(error.mock.calls[0]?.[0])).not.toContain('\n');
     });
+  });
+});
+
+// The shapes the copy and the rating change routes share, defined once (#1231).
+describe('what copies and rating changes share (#1231)', () => {
+  const logger = { error: jest.fn() };
+  const good = { occurredOn: '2019-03-02', occurredOnPrecision: DatePrecision.Day, rating: 7 };
+  const bad = { occurredOn: null, occurredOnPrecision: null, rating: 11 };
+
+  afterEach(() => jest.clearAllMocks());
+
+  it('a revisions list keeps the revisions that read back, in order, and logs one line for each that fails', () => {
+    const revisions = [
+      { createdAt: new Date('2026-11-27T00:00:00Z'), id: 'rev-bad', values: bad },
+      { createdAt: new Date('2026-11-26T00:00:00Z'), id: 'rev-ok', values: good },
+    ];
+
+    const readable = readableRevisions(ratingRevisionValuesSchema, revisions, logger, (id) => `Revision ${id}`);
+
+    expect(readable).toEqual([{ revision: revisions[1], values: good }]);
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('Revision rev-bad'));
+  });
+
+  it.each([
+    ['no revision found', null],
+    ['values that fail the schema', { values: bad }],
+  ])('a restore of %s answers COLLECTION_REVISION_NOT_FOUND', (_, found) => {
+    expect(() => restorableValues(ratingRevisionValuesSchema, found, 'rev-1', logger, 'Revision rev-1')).toThrow(
+      expect.objectContaining({ status: 404, code: 'COLLECTION_REVISION_NOT_FOUND' }),
+    );
+  });
+
+  it('a restore reads the values of the revision found', () => {
+    expect(restorableValues(ratingRevisionValuesSchema, { values: good }, 'rev-1', logger, 'Revision rev-1')).toEqual(
+      good,
+    );
+  });
+
+  // ADR 0002: a take-back or its undo already in effect is answered, not written.
+  it.each([
+    ['a take-back of a row taken back', new Date(), true, true],
+    ['a take-back of a row not taken back', null, true, false],
+    ['an undo of a row not taken back', null, false, true],
+    ['an undo of a row taken back', new Date(), false, false],
+  ])('%s: whether it is already as asked', (_, retractedAt, takenBack, already) => {
+    expect(isAlreadyTakenBackAs({ retractedAt }, takenBack)).toBe(already);
+  });
+
+  it('a take-back stamps the row taken back and edited by the user; its undo clears the take-back', () => {
+    const now = new Date('2026-11-27T10:00:00Z');
+
+    expect(takeBackData(true, now)).toEqual({ editedByUserAt: now, retractedAt: now });
+    expect(takeBackData(false, now)).toEqual({ editedByUserAt: now, retractedAt: null });
   });
 });

@@ -34,12 +34,10 @@
   "game_collection": {
     "not_found": "Collection entry with ID {id} not found",
     "copy_not_found": "Copy with ID {id} not found",
-    "revision_not_found": "Revision with ID {id} not found for this copy",
+    "revision_not_found": "Revision with ID {id} not found",
     "rating_change_not_found": "Rating change with ID {id} not found",
-    "rating_change_not_taken_back": "This rating change hasn't been taken back, so there is no take-back to undo.",
     "copy_limit_reached": "You already own {max} copies of this game, the most it can hold.",
     "copy_not_removed": "This copy hasn't been removed, so it has no removal to change. Remove the copy first.",
-    "copy_not_taken_back": "This copy hasn't been taken back, so there is nothing to undo.",
     "last_copy": "This is the last copy you own of this game, so it can't be taken back. Add the right copy first, or remove the game.",
     "condition_digital": "A digital copy has no condition. Leave the condition out.",
     "acquired_on_in_future": "The date the copy was acquired (acquiredOn) hasn't come yet.",

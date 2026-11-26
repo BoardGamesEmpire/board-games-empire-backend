@@ -57,9 +57,9 @@ better-auth writes itself (below):
   `COLLECTION_COPY_NOT_FOUND` for a copy the same way, and
   `COLLECTION_REVISION_NOT_FOUND` for a revision of a copy or of a rating
   change: missing, a revision of another one, or one whose stored values can't
-  be read back, and `COLLECTION_RATING_NOT_FOUND` for a rating change the same
-  way as a copy, one taken back included on every route but the undo of its
-  take-back (#1231). A 404 without such a code, `ROUTE_NOT_FOUND` above all, says
+  be read back, and `COLLECTION_RATING_CHANGE_NOT_FOUND` for a rating change
+  the same way as a copy, one taken back included on every route but its
+  take-back and the undo of it (#1231). A 404 without such a code, `ROUTE_NOT_FOUND` above all, says
   nothing about any row (#634).
 
 - The collection's other refusals (#1231), each with its own code:
@@ -70,10 +70,6 @@ better-auth writes itself (below):
     that has not been removed;
   - `COLLECTION_LAST_COPY`: a 409 for taking back the last copy the user owns
     of a game, which would leave the game with none;
-  - `COLLECTION_COPY_NOT_TAKEN_BACK`: a 409 for undoing the take-back of a
-    copy that exists but is not taken back;
-  - `COLLECTION_RATING_NOT_TAKEN_BACK`: a 409 for undoing the take-back of a
-    rating change that exists but is not taken back;
   - `COLLECTION_CONDITION_DIGITAL`: a 400 for a condition on a digital copy;
   - `COLLECTION_DATE_IN_FUTURE`: a 400 for an acquisition, removal or rating
     change date on a day that has begun nowhere on Earth yet, judged at

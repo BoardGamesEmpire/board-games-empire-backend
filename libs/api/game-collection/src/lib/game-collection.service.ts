@@ -38,7 +38,7 @@ import {
 } from './dto';
 import { collectionEntryNotFound, platformGameNotFound, releaseNotFound } from './game-collection.errors';
 import type { PartialDate } from './values/partial-date';
-import { defaultRemovalDate, givenRemovalDate } from './values/partial-date';
+import { defaultRemovalDate, sentDate } from './values/partial-date';
 
 /**
  * The unique that keeps a user to one entry per platform game and medium, in
@@ -509,7 +509,7 @@ export class GameCollectionService {
   async remove(id: string, { reason, removedOn }: RemoveGameCollectionQueryDto): Promise<GameCollectionDto> {
     const now = new Date();
     const actingUserId = resolveActingUserIdOrNull(this.abilityService);
-    const given = givenRemovalDate(removedOn, now);
+    const given = sentDate(removedOn, now, 'removedOn');
 
     return this.writtenRow(
       () =>

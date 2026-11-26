@@ -1,4 +1,4 @@
-import type { DatePrecision, GameCondition, GameRemovalReason, Prisma } from '@bge/database';
+import type { CollectionCopy, DatePrecision, GameCondition, GameRemovalReason, Prisma } from '@bge/database';
 import { foreignKeyIdentity, GameMedium, identifiesConstraint, isPrismaForeignKeyConstraintError } from '@bge/database';
 import type { OwnerCopyRow } from './collection-row';
 import { OWNED_COPY, OWNER_COPY_SELECT } from './collection-row';
@@ -13,11 +13,10 @@ import type { Money } from './values/money';
 import { assertKnownCurrency } from './values/money';
 import type { PartialDate } from './values/partial-date';
 import {
-  assertNotInFuture,
   assertRemovalAfterAcquisition,
   defaultRemovalDate,
-  parsePartialDate,
   partialDateFromColumns,
+  sentDate,
 } from './values/partial-date';
 
 /**
@@ -128,12 +127,7 @@ export async function copyColumns(
   }
 
   if (dto.acquiredOn !== undefined) {
-    const acquired = dto.acquiredOn === null ? null : parsePartialDate(dto.acquiredOn);
-
-    if (acquired !== null) {
-      assertNotInFuture(acquired, now, 'acquiredOn');
-    }
-
+    const acquired = sentDate(dto.acquiredOn, now, 'acquiredOn');
     columns.acquiredOn = acquired?.on ?? null;
     columns.acquiredOnPrecision = acquired?.precision ?? null;
   }
@@ -201,10 +195,7 @@ export async function addCopy(
 }
 
 /** What a removal is checked against: the copy's acquisition (#1231). */
-export const REMOVAL_CHECK_SELECT = {
-  acquiredOn: true,
-  acquiredOnPrecision: true,
-} as const satisfies Prisma.CollectionCopySelect;
+type RemovalCheckSource = Pick<CollectionCopy, 'acquiredOn' | 'acquiredOnPrecision'>;
 
 /**
  * The date `copy`'s removal records (#1231): the one the user gave, or, when
@@ -212,11 +203,7 @@ export const REMOVAL_CHECK_SELECT = {
  * ({@link defaultRemovalDate}). Decided per copy, for one copy or each copy
  * of the entry.
  */
-export function removalOf(
-  copy: Prisma.CollectionCopyGetPayload<{ select: typeof REMOVAL_CHECK_SELECT }>,
-  given: PartialDate | null,
-  now: Date,
-): PartialDate {
+export function removalOf(copy: RemovalCheckSource, given: PartialDate | null, now: Date): PartialDate {
   return given ?? defaultRemovalDate(partialDateFromColumns(copy.acquiredOn, copy.acquiredOnPrecision), now);
 }
 
@@ -225,10 +212,7 @@ export function removalOf(
  * was acquired (`COLLECTION_DATE_ORDER`, #1231): the check every removal of a
  * copy makes, one copy or the whole entry.
  */
-export function assertRemovableOn(
-  copy: Prisma.CollectionCopyGetPayload<{ select: typeof REMOVAL_CHECK_SELECT }>,
-  removal: PartialDate,
-): void {
+export function assertRemovableOn(copy: RemovalCheckSource, removal: PartialDate): void {
   assertRemovalAfterAcquisition(partialDateFromColumns(copy.acquiredOn, copy.acquiredOnPrecision), removal);
 }
 

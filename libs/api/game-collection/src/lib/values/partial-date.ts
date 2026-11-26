@@ -127,10 +127,11 @@ export function latestToday(now: Date): PartialDate {
 /**
  * Refuses a date that begins after {@link latestToday}, a day that is today
  * nowhere yet, naming `field` in the refusal. A year or month that has begun
- * passes, because its first day is not in the future (#1231).
+ * passes, because its first day is not in the future, and so does an unknown
+ * date, null (#1231).
  */
-export function assertNotInFuture(date: PartialDate, now: Date, field: CollectionDateField): void {
-  if (date.on.getTime() > latestToday(now).on.getTime()) {
+export function assertNotInFuture(date: PartialDate | null, now: Date, field: CollectionDateField): void {
+  if (date !== null && date.on.getTime() > latestToday(now).on.getTime()) {
     throw dateInFuture(field);
   }
 }
@@ -151,18 +152,18 @@ export function assertRemovalAfterAcquisition(acquired: PartialDate | null, remo
 }
 
 /**
- * The date the user gave a removal (#1231): `removedOn` as sent, which the
- * DTO's `@IsPartialDate()` has already passed, or null when they gave none.
- * A date that is today nowhere yet is refused.
+ * A date a request sent as `field` (#1231): `text` as sent, which the DTO's
+ * `@IsPartialDate()` has already passed, so it always reads; null when the
+ * request sent none, or sent null to make the date unknown. A date that is
+ * today nowhere yet is refused (`COLLECTION_DATE_IN_FUTURE`). The one place a
+ * sent date is read, so no route refuses a date the DTO passed in a way of its
+ * own.
  */
-export function givenRemovalDate(removedOn: string | undefined, now: Date): PartialDate | null {
-  const removal = removedOn === undefined ? null : parsePartialDate(removedOn);
+export function sentDate(text: string | null | undefined, now: Date, field: CollectionDateField): PartialDate | null {
+  const date = text === undefined || text === null ? null : parsePartialDate(text);
+  assertNotInFuture(date, now, field);
 
-  if (removal !== null) {
-    assertNotInFuture(removal, now, 'removedOn');
-  }
-
-  return removal;
+  return date;
 }
 
 /**

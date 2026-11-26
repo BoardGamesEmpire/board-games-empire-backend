@@ -23,7 +23,7 @@ import {
  * owner reads the history at `/game-collections/:id/ratings`, oldest first,
  * and no one else does, whatever the entry's reach.
  *
- * The owner corrects it there too: adds an earlier rating, edits one, takes
+ * The entry's owner corrects it there too: adds an earlier rating, edits one, takes
  * one back and restores a revision. Correcting the history never changes the
  * entry's current rating, and every correction stamps the change as edited by
  * the user, so an upstream sync leaves it alone.
@@ -57,21 +57,21 @@ describe('collection rating history (#1231)', () => {
         .set(caller.headers)
         .send({ platformGameId, medium: GameMedium.Physical, ...body })
         .expect(201),
-      'POST /api/game-collections as the owner',
+      "POST /api/game-collections as the entry's owner",
     ).collection;
 
-  /** The history as its owner reads it: each change's rating and date. */
+  /** The history as the entry's owner reads it: each change's rating and date. */
   const historyOf = async (owner: SessionActor, entryId: string) =>
     listRatingsEnvelope(
       await listRatings(owner, entryId).expect(200),
-      'GET /api/game-collections/:id/ratings as the owner',
+      "GET /api/game-collections/:id/ratings as the entry's owner",
     ).map(({ occurredOn, rating }) => ({ occurredOn, rating }));
 
-  /** The entry as its owner reads it: its current rating is the one the history never rewrites. */
+  /** The entry as the user it belongs to reads it: its current rating is the one the history never rewrites. */
   const readEntry = async (owner: SessionActor, entryId: string) =>
     readCollectionEnvelope(
       await request(baseUrl).get(`${COLLECTIONS_PATH}/${entryId}`).set(owner.headers).expect(200),
-      'GET /api/game-collections/:id as the owner',
+      "GET /api/game-collections/:id as the entry's owner",
     ).collection;
 
   /** Today's UTC date: the server's zone never decides it, and neither does the test's. */
@@ -92,7 +92,7 @@ describe('collection rating history (#1231)', () => {
 
     const history = listRatingsEnvelope(
       await listRatings(owner, entryId).expect(200),
-      'GET /api/game-collections/:id/ratings as the owner',
+      "GET /api/game-collections/:id/ratings as the entry's owner",
     );
 
     expect(history.map(({ rating }) => rating)).toEqual([6, 8, null]);
@@ -130,7 +130,7 @@ describe('collection rating history (#1231)', () => {
   it("another user's rating history answers COLLECTION_ENTRY_NOT_FOUND", async () => {
     const owner = await actors.user();
     const stranger = await actors.user();
-    // Public, so the stranger may read the entry itself: its history is still the owner's alone.
+    // Public, so the stranger may read the entry itself: its history is still the entry owner's alone.
     const entryId = await arrangeCollectionEntry(db.client, owner.user.id, Reach.Public);
     await patchEntry(owner, entryId, { rating: 8 }).expect(200);
 
@@ -184,31 +184,31 @@ describe('collection rating history (#1231)', () => {
         .post(`${changePath(entryId, ratingId)}/revisions/${revisionId}/restore`)
         .set(caller.headers);
 
-    /** An earlier rating, added as the owner: the change as the owner reads it. */
+    /** An earlier rating, added as the entry's owner: the change as the entry's owner reads it. */
     const added = async (owner: SessionActor, entryId: string, body: Record<string, unknown>) =>
       ratingChangeEnvelope(
         await addRating(owner, entryId, body).expect(201),
-        'POST /api/game-collections/:id/ratings as the owner',
+        "POST /api/game-collections/:id/ratings as the entry's owner",
       );
 
-    /** The owner's revisions of one change, newest first. */
+    /** The entry owner's revisions of one change, newest first. */
     const revisionsOf = async (owner: SessionActor, entryId: string, ratingId: string) =>
       listRatingRevisionsEnvelope(
         await listRevisions(owner, entryId, ratingId).expect(200),
-        'GET /api/game-collections/:id/ratings/:ratingId/revisions as the owner',
+        "GET /api/game-collections/:id/ratings/:ratingId/revisions as the entry's owner",
       );
 
-    /** The history with each change's id, flag and date, as the owner reads it. */
+    /** The history with each change's id, flag and date, as the entry's owner reads it. */
     const fullHistory = async (owner: SessionActor, entryId: string) =>
       listRatingsEnvelope(
         await listRatings(owner, entryId).expect(200),
-        'GET /api/game-collections/:id/ratings as the owner',
+        "GET /api/game-collections/:id/ratings as the entry's owner",
       );
 
     const editedByUserAt = async (ratingId: string) =>
       (await db.client.collectionRatingChange.findUniqueOrThrow({ where: { id: ratingId } })).editedByUserAt;
 
-    /** An entry the owner has rated 6, with that change as the owner reads it. */
+    /** An entry its user has rated 6, with that change as the entry's owner reads it. */
     const arrangeRatedEntry = async (owner: SessionActor, reach: Reach = Reach.Private) => {
       const entryId = await arrangeCollectionEntry(db.client, owner.user.id, reach);
       await patchEntry(owner, entryId, { rating: 6 }).expect(200);
@@ -288,7 +288,7 @@ describe('collection rating history (#1231)', () => {
 
       const edited = ratingChangeEnvelope(
         await editRating(owner, entryId, today.id, { occurredOn: '2010-02' }).expect(200),
-        'PATCH /api/game-collections/:id/ratings/:ratingId as the owner',
+        "PATCH /api/game-collections/:id/ratings/:ratingId as the entry's owner",
       );
 
       expect(edited).toMatchObject({ id: today.id, occurredOn: '2010-02', rating: 6 });
@@ -304,7 +304,7 @@ describe('collection rating history (#1231)', () => {
 
       const edited = ratingChangeEnvelope(
         await editRating(owner, entryId, today.id, { occurredOn: null, rating: null }).expect(200),
-        'PATCH /api/game-collections/:id/ratings/:ratingId as the owner',
+        "PATCH /api/game-collections/:id/ratings/:ratingId as the entry's owner",
       );
 
       expect(edited).toMatchObject({ occurredOn: null, rating: null });
@@ -339,7 +339,7 @@ describe('collection rating history (#1231)', () => {
 
       const taken = ratingChangeEnvelope(
         await takeBack(owner, entryId, today.id).expect(200),
-        'POST /api/game-collections/:id/ratings/:ratingId/retraction as the owner',
+        "POST /api/game-collections/:id/ratings/:ratingId/retraction as the entry's owner",
       );
 
       expect(taken).toMatchObject({ id: today.id, rating: 6, retractedAt: expect.any(String) });
@@ -352,43 +352,74 @@ describe('collection rating history (#1231)', () => {
       expect(await revisionsOf(owner, entryId, today.id)).toEqual([]);
     });
 
-    it('a taken-back change takes only the undo: edit, restore and a second take-back answer COLLECTION_RATING_NOT_FOUND', async () => {
+    it('a taken-back change takes only its take-back and the undo: edit and restore answer COLLECTION_RATING_CHANGE_NOT_FOUND', async () => {
       const owner = await actors.user();
       const { entryId, today } = await arrangeRatedEntry(owner);
       await editRating(owner, entryId, today.id, { rating: 3 }).expect(200);
       const [revision] = await revisionsOf(owner, entryId, today.id);
       await takeBack(owner, entryId, today.id).expect(200);
-      const notFound = { status: 404, code: 'COLLECTION_RATING_NOT_FOUND' };
+      const notFound = { status: 404, code: 'COLLECTION_RATING_CHANGE_NOT_FOUND' };
 
       expectErrorEnvelope(await editRating(owner, entryId, today.id, { rating: 4 }), notFound);
       expectErrorEnvelope(await restoreRevision(owner, entryId, today.id, revision?.id ?? ''), notFound);
-      expectErrorEnvelope(await takeBack(owner, entryId, today.id), notFound);
       // Its revisions stay readable.
       expect(await revisionsOf(owner, entryId, today.id)).toHaveLength(1);
 
       const undone = ratingChangeEnvelope(
         await undoTakeBack(owner, entryId, today.id).expect(200),
-        'DELETE /api/game-collections/:id/ratings/:ratingId/retraction as the owner',
+        "DELETE /api/game-collections/:id/ratings/:ratingId/retraction as the entry's owner",
       );
       expect(undone).toMatchObject({ id: today.id, rating: 3, retractedAt: null });
       // After the undo every route works again.
       await editRating(owner, entryId, today.id, { rating: 4 }).expect(200);
+      // A change that doesn't exist is still the 404, to the take-back and the undo.
+      expectErrorEnvelope(await takeBack(owner, entryId, 'no-such-change'), notFound);
+      expectErrorEnvelope(await undoTakeBack(owner, entryId, 'no-such-change'), notFound);
     });
 
-    // A coded 404 reads as "this row is gone" (#634): a live change must not answer one.
-    it('undoing the take-back of a change that is not taken back answers 409 COLLECTION_RATING_NOT_TAKEN_BACK', async () => {
+    // ADR 0002: a take-back sent again, as an offline client may, answers the
+    // change as it stands and writes nothing to it: no new stamp, no revision.
+    it('taking back a change taken back already answers 200 with the change as it stands, and writes nothing to it', async () => {
       const owner = await actors.user();
       const { entryId, today } = await arrangeRatedEntry(owner);
+      const first = ratingChangeEnvelope(
+        await takeBack(owner, entryId, today.id).expect(200),
+        "POST /api/game-collections/:id/ratings/:ratingId/retraction as the entry's owner",
+      );
+      const stored = () =>
+        db.client.collectionRatingChange.findUniqueOrThrow({
+          where: { id: today.id },
+          select: { editedByUserAt: true, retractedAt: true },
+        });
+      const before = await stored();
 
-      expectErrorEnvelope(await undoTakeBack(owner, entryId, today.id), {
-        status: 409,
-        code: 'COLLECTION_RATING_NOT_TAKEN_BACK',
-      });
-      // A change that doesn't exist is still the 404.
-      expectErrorEnvelope(await undoTakeBack(owner, entryId, 'no-such-change'), {
-        status: 404,
-        code: 'COLLECTION_RATING_NOT_FOUND',
-      });
+      const repeated = ratingChangeEnvelope(
+        await takeBack(owner, entryId, today.id).expect(200),
+        "POST /api/game-collections/:id/ratings/:ratingId/retraction again as the entry's owner",
+      );
+
+      expect(repeated).toEqual(first);
+      expect(await stored()).toEqual(before);
+      expect(await revisionsOf(owner, entryId, today.id)).toEqual([]);
+    });
+
+    // ADR 0002: undoing the take-back of a change that isn't taken back
+    // answers the change as it stands, never the row's 404, which a client
+    // reads as "this row is gone" (#634), and writes nothing to it.
+    it("undoing the take-back of a change that isn't taken back answers 200 with the change as it stands, and writes nothing to it", async () => {
+      const owner = await actors.user();
+      const { entryId, today } = await arrangeRatedEntry(owner);
+      // The route's own append leaves the change unstamped: no user corrected it.
+      expect(await editedByUserAt(today.id)).toBeNull();
+
+      const change = ratingChangeEnvelope(
+        await undoTakeBack(owner, entryId, today.id).expect(200),
+        "DELETE /api/game-collections/:id/ratings/:ratingId/retraction as the entry's owner",
+      );
+
+      expect(change).toEqual(today);
+      expect(await editedByUserAt(today.id)).toBeNull();
+      expect(await revisionsOf(owner, entryId, today.id)).toEqual([]);
     });
 
     it('restoring a revision of a rating change records the current values first', async () => {
@@ -399,7 +430,7 @@ describe('collection rating history (#1231)', () => {
 
       const restored = ratingChangeEnvelope(
         await restoreRevision(owner, entryId, today.id, original?.id ?? '').expect(200),
-        'POST /api/game-collections/:id/ratings/:ratingId/revisions/:revisionId/restore as the owner',
+        "POST /api/game-collections/:id/ratings/:ratingId/revisions/:revisionId/restore as the entry's owner",
       );
 
       expect(restored).toMatchObject({ id: today.id, occurredOn: today.occurredOn, rating: 6 });
@@ -452,7 +483,7 @@ describe('collection rating history (#1231)', () => {
     it("another user's rating change answers COLLECTION_ENTRY_NOT_FOUND on every route", async () => {
       const owner = await actors.user();
       const stranger = await actors.user();
-      // Public, so the stranger may read the entry itself: its rating history is still the owner's alone.
+      // Public, so the stranger may read the entry itself: its rating history is still the entry owner's alone.
       const { entryId, today } = await arrangeRatedEntry(owner, Reach.Public);
       await editRating(owner, entryId, today.id, { rating: 3 }).expect(200);
       const [revision] = await revisionsOf(owner, entryId, today.id);
@@ -464,7 +495,7 @@ describe('collection rating history (#1231)', () => {
       expectErrorEnvelope(await undoTakeBack(stranger, entryId, today.id), notFound);
       expectErrorEnvelope(await listRevisions(stranger, entryId, today.id), notFound);
       expectErrorEnvelope(await restoreRevision(stranger, entryId, today.id, revision?.id ?? ''), notFound);
-      // None of it changed anything: the control, the owner's history as it was.
+      // None of it changed anything: the control, the entry owner's history as it was.
       expect(await fullHistory(owner, entryId)).toEqual([expect.objectContaining({ rating: 3, retractedAt: null })]);
     });
 
@@ -482,11 +513,11 @@ describe('collection rating history (#1231)', () => {
       expect(await historyOf(entryOwner, entryId)).toEqual([{ occurredOn: today.occurredOn, rating: 6 }]);
     });
 
-    it("a rating change of another of the owner's entries answers COLLECTION_RATING_NOT_FOUND", async () => {
+    it("a rating change of another of the same user's entries answers COLLECTION_RATING_CHANGE_NOT_FOUND", async () => {
       const owner = await actors.user();
       const { today } = await arrangeRatedEntry(owner);
       const { entryId: otherEntryId } = await arrangeRatedEntry(owner);
-      const notFound = { status: 404, code: 'COLLECTION_RATING_NOT_FOUND' };
+      const notFound = { status: 404, code: 'COLLECTION_RATING_CHANGE_NOT_FOUND' };
 
       expectErrorEnvelope(await editRating(owner, otherEntryId, today.id, { rating: 9 }), notFound);
       expectErrorEnvelope(await takeBack(owner, otherEntryId, today.id), notFound);

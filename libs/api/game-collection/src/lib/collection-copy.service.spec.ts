@@ -54,6 +54,7 @@ const copyRow = (overrides: Partial<CollectionCopy> & { release?: unknown } = {}
   removeReason: null,
   release: null,
   releaseId: null,
+  retractedAt: null,
   ...overrides,
 });
 
@@ -783,7 +784,7 @@ describe('CollectionCopyService (#1231)', () => {
 
     // The history is the entry owner's alone, as the copy's details are, so
     // the entry is read as the acting user's own (#1231).
-    it("lists the copy's revisions newest first, each in the owner's copy shape", async () => {
+    it("lists the copy's revisions newest first, each in the entry owner's copy shape", async () => {
       const newer = new Date('2026-03-01T00:00:00Z');
       const older = new Date('2026-02-01T00:00:00Z');
       revisionRead([
@@ -1239,20 +1240,26 @@ describe('CollectionCopyService (#1231)', () => {
    * changes none of the values a revision holds, so it keeps none.
    */
   describe('takeBack', () => {
+    beforeEach(() => {
+      // The entry owns this copy and another, unless a spec says otherwise.
+      db.collectionCopy.count.mockResolvedValue(2);
+    });
+
     it('stamps the copy taken back and edited by the user, and keeps no revision', async () => {
       db.collectionCopy.update.mockResolvedValue(copyRow({ retractedAt: new Date('2026-11-26T00:00:00Z') }) as never);
 
       const taken = await service.takeBack('gc-1', 'copy-1');
 
       expectLockedThenChecked();
+      // Read in any state, so a take-back repeated finds the copy (ADR 0002).
       expect(db.collectionCopy.findUnique).toHaveBeenCalledWith({
-        where: { id: 'copy-1', entryId: 'gc-1', retractedAt: null },
-        select: { removedAt: true },
+        where: { id: 'copy-1', entryId: 'gc-1' },
+        select: OWNER_COPY_SELECT,
       });
       const now = db.gameCollection.update.mock.calls[0]?.[0]?.data.lastUpdated;
       expect(db.collectionCopy.update).toHaveBeenCalledWith({
         where: { id: 'copy-1' },
-        data: { retractedAt: now, editedByUserAt: now },
+        data: { editedByUserAt: now, retractedAt: now },
         select: OWNER_COPY_SELECT,
       });
       // A revision would hold the values the copy still has (#1231).
@@ -1266,7 +1273,7 @@ describe('CollectionCopyService (#1231)', () => {
       await service.takeBack('gc-1', 'copy-1');
 
       expect(db.collectionCopy.count).toHaveBeenCalledWith({
-        where: { entryId: 'gc-1', id: { not: 'copy-1' }, removedAt: null, retractedAt: null },
+        where: { entryId: 'gc-1', removedAt: null, retractedAt: null },
       });
       expect(db.collectionCopy.update).toHaveBeenCalled();
       expect(abilityService.assertCurrentActorCan).not.toHaveBeenCalled();
@@ -1275,7 +1282,7 @@ describe('CollectionCopyService (#1231)', () => {
     // A copy that never existed can't remove the entry: the user adds the
     // right copy first, or removes the game (#1231).
     it('taking back the last owned copy is refused with COLLECTION_LAST_COPY, and writes nothing', async () => {
-      db.collectionCopy.count.mockResolvedValue(0);
+      db.collectionCopy.count.mockResolvedValue(1);
 
       await expect(service.takeBack('gc-1', 'copy-1')).rejects.toMatchObject({
         status: 409,
@@ -1316,7 +1323,25 @@ describe('CollectionCopyService (#1231)', () => {
       expect(syncSupply).not.toHaveBeenCalled();
     });
 
-    it('taking back an already taken-back copy answers COLLECTION_COPY_NOT_FOUND', async () => {
+    // ADR 0002: a take-back already in effect answers the copy as it stands,
+    // writes nothing to it and emits nothing. It answers before the last copy
+    // is counted, so a retry of the take-back of what was the entry's last
+    // owned copy but one is no COLLECTION_LAST_COPY (#1231).
+    it('taking back a copy taken back already answers it as it stands, and writes nothing to it', async () => {
+      const retractedAt = new Date('2026-11-01T00:00:00Z');
+      db.collectionCopy.findUnique.mockResolvedValue(copyRow({ note: 'Never had it', retractedAt }) as never);
+      db.collectionCopy.count.mockResolvedValue(1);
+
+      const taken = await service.takeBack('gc-1', 'copy-1');
+
+      expect(taken).toMatchObject({ id: 'copy-1', note: 'Never had it', retractedAt });
+      expect(db.collectionCopy.count).not.toHaveBeenCalled();
+      expect(db.collectionCopy.update).not.toHaveBeenCalled();
+      expect(db.collectionCopyRevision.createMany).not.toHaveBeenCalled();
+      expect(syncSupply).not.toHaveBeenCalled();
+    });
+
+    it('answers COLLECTION_COPY_NOT_FOUND for a copy the entry does not hold, and writes nothing', async () => {
       db.collectionCopy.findUnique.mockResolvedValue(null);
 
       await expect(service.takeBack('gc-1', 'copy-1')).rejects.toMatchObject({
@@ -1342,13 +1367,13 @@ describe('CollectionCopyService (#1231)', () => {
       expectLockedThenChecked();
       expect(db.collectionCopy.findUnique).toHaveBeenCalledWith({
         where: { id: 'copy-1', entryId: 'gc-1' },
-        select: { retractedAt: true },
+        select: OWNER_COPY_SELECT,
       });
       const now = db.gameCollection.update.mock.calls[0]?.[0]?.data.lastUpdated;
       expect(db.collectionCopyRevision.createMany).not.toHaveBeenCalled();
       expect(db.collectionCopy.update).toHaveBeenCalledWith({
         where: { id: 'copy-1' },
-        data: { retractedAt: null, editedByUserAt: now },
+        data: { editedByUserAt: now, retractedAt: null },
         select: OWNER_COPY_SELECT,
       });
       expect(taken).toMatchObject({ id: 'copy-1' });
@@ -1400,16 +1425,18 @@ describe('CollectionCopyService (#1231)', () => {
       expect(db.collectionCopy.update).not.toHaveBeenCalled();
     });
 
-    // The copy is still there, so the refusal is never the copy's 404, which
-    // a client reads as "this copy is gone" (#634, #1231).
-    it('answers COLLECTION_COPY_NOT_TAKEN_BACK for a copy the entry holds that is not taken back, and writes nothing', async () => {
-      db.collectionCopy.findUnique.mockResolvedValue(copyRow({ retractedAt: null }) as never);
+    // ADR 0002: an undo already in effect answers the copy as it stands,
+    // writes nothing to it and emits nothing; never the copy's 404, which a
+    // client reads as "this copy is gone" (#634, #1231).
+    it('undoing the take-back of a copy that is not taken back answers it as it stands, and writes nothing to it', async () => {
+      db.collectionCopy.findUnique.mockResolvedValue(copyRow({ note: 'Still here', retractedAt: null }) as never);
 
-      await expect(service.undoTakeBack('gc-1', 'copy-1')).rejects.toMatchObject({
-        status: 409,
-        code: 'COLLECTION_COPY_NOT_TAKEN_BACK',
-      });
+      const copy = await service.undoTakeBack('gc-1', 'copy-1');
+
+      expect(copy).toMatchObject({ id: 'copy-1', note: 'Still here', retractedAt: null });
       expect(db.collectionCopy.update).not.toHaveBeenCalled();
+      expect(db.collectionCopyRevision.createMany).not.toHaveBeenCalled();
+      expect(syncSupply).not.toHaveBeenCalled();
     });
   });
 
@@ -1476,6 +1503,8 @@ describe('CollectionCopyService (#1231)', () => {
     it.each(methods)("%s lets an API key acting for the entry's owner write", async (method) => {
       abilityService.getActingUserId.mockReturnValue('key-owner');
       db.$queryRaw.mockResolvedValue([{ ...LOCKED, userId: 'key-owner' }] as never);
+      // The entry owns another copy, so the take-back is no last copy's.
+      db.collectionCopy.count.mockResolvedValue(2);
 
       await expect(writes[method]()).resolves.toMatchObject({ id: 'copy-1' });
     });

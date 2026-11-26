@@ -1,6 +1,7 @@
-// One earlier version of a copy, kept each time the entry's owner corrects it
-// (#1231). `values` holds the copy's fields as they were before the
-// correction. The history is the entry owner's alone, and goes with the copy.
+// A revision of a copy: its earlier values, kept each time the entry's owner
+// corrects it (#1231). `values` holds the copy's fields as they were before
+// the correction. The history is the entry owner's alone, and goes with the
+// copy.
 model CollectionCopyRevision {
   id String @id @default(cuid(2))
 

@@ -1,6 +1,6 @@
+export * from './collection-copy-revision.dto';
 export * from './collection-copy.dto';
 export * from './collection-rating-change.dto';
-export * from './collection-revision.dto';
 export * from './create-collection-copy.dto';
 export * from './create-collection-rating-change.dto';
 export * from './create-game-collection.dto';

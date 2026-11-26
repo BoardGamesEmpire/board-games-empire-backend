@@ -84,7 +84,7 @@ export class CollectionRatingListResponseDto {
 }
 
 /**
- * What a rating change said before a correction, in the shape its owner reads
+ * What a rating change said before a correction, in the shape the entry's owner reads
  * the change (#1231): its rating and its date at its precision. Whether it is
  * taken back is no part of it.
  */
@@ -93,7 +93,7 @@ export class CollectionRatingRevisionValuesDto extends PickType(CollectionRating
   'rating',
 ] as const) {}
 
-/** A revision of a rating change: what it said before its owner corrected it (#1231). */
+/** A revision of a rating change: what it said before the entry's owner corrected it (#1231). */
 export class CollectionRatingRevisionDto {
   @ApiProperty({
     type: String,
@@ -109,7 +109,7 @@ export class CollectionRatingRevisionDto {
   values!: CollectionRatingRevisionValuesDto;
 }
 
-/** A revision in its owner's shape (#1231). */
+/** A revision in the entry owner's shape (#1231). */
 export function toCollectionRatingRevisionDto(
   revision: { createdAt: Date; id: string },
   values: RatingRevisionValues,

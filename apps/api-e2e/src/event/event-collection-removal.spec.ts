@@ -144,7 +144,7 @@ describe('removing an offered game from the collection (#1221)', () => {
   const removed = async (owner: AuthenticatedActor, offer: Pick<Offer, 'collectionId'>) =>
     readCollectionEnvelope(
       await removeFromCollection(owner, offer.collectionId).expect(200),
-      'DELETE /api/game-collections/:id as the owner',
+      "DELETE /api/game-collections/:id as the entry's owner",
     ).collection;
 
   /** Adds the offer's game back to `owner`'s collection, as the same medium the fixture arranges. */
@@ -155,7 +155,7 @@ describe('removing an offered game from the collection (#1221)', () => {
         .set(owner.headers)
         .send({ platformGameId: offer.platformGameId, medium: GameMedium.Physical })
         .expect(201),
-      'POST /api/game-collections as the owner',
+      "POST /api/game-collections as the entry's owner",
     ).collection;
 
   /** The 404 a supply check answers for an offer that supplies nothing, its message telling it from the event's own 404. */
@@ -302,7 +302,7 @@ describe('removing an offered game from the collection (#1221)', () => {
         .query({ reason: GameRemovalReason.Sold })
         .set(owner.headers)
         .expect(200),
-      'DELETE /api/game-collections/:id/copies/:copyId as the owner',
+      "DELETE /api/game-collections/:id/copies/:copyId as the entry's owner",
     );
     expect(removedCopy).toMatchObject({ id: copyId, removedAt: expect.any(String) });
 
@@ -342,7 +342,7 @@ describe('removing an offered game from the collection (#1221)', () => {
 
     const [beforeRemoval] = listRevisionsEnvelope(
       await request(baseUrl).get(`${copiesPath}/${copyId}/revisions`).set(owner.headers).expect(200),
-      'GET /api/game-collections/:id/copies/:copyId/revisions as the owner',
+      "GET /api/game-collections/:id/copies/:copyId/revisions as the entry's owner",
     );
     expect(beforeRemoval?.values.removedAt).toBeNull();
 
@@ -351,7 +351,7 @@ describe('removing an offered game from the collection (#1221)', () => {
         .post(`${copiesPath}/${copyId}/revisions/${beforeRemoval?.id}/restore`)
         .set(owner.headers)
         .expect(200),
-      'POST /api/game-collections/:id/copies/:copyId/revisions/:revisionId/restore as the owner',
+      "POST /api/game-collections/:id/copies/:copyId/revisions/:revisionId/restore as the entry's owner",
     );
     expect(restoredCopy).toMatchObject({ id: copyId, removedAt: null });
 
@@ -373,7 +373,7 @@ describe('removing an offered game from the collection (#1221)', () => {
     });
     const second = copyEnvelope(
       await request(baseUrl).post(copiesPath).set(owner.headers).send({}).expect(201),
-      'POST /api/game-collections/:id/copies as the owner',
+      "POST /api/game-collections/:id/copies as the entry's owner",
     );
     await request(baseUrl).post(`${copiesPath}/${second.id}/retraction`).set(owner.headers).expect(200);
     await request(baseUrl)
@@ -385,7 +385,7 @@ describe('removing an offered game from the collection (#1221)', () => {
 
     const undone = copyEnvelope(
       await request(baseUrl).delete(`${copiesPath}/${second.id}/retraction`).set(owner.headers).expect(200),
-      'DELETE /api/game-collections/:id/copies/:copyId/retraction as the owner',
+      "DELETE /api/game-collections/:id/copies/:copyId/retraction as the entry's owner",
     );
     expect(undone).toMatchObject({ id: second.id, removedAt: null, retractedAt: null });
 
@@ -466,7 +466,7 @@ describe('removing an offered game from the collection (#1221)', () => {
           items: [{ collectionId: offered.collectionId }, { collectionId: neverOffered }, { collectionId: live }],
         })
         .expect(200),
-      'POST /api/events/:eventId/attendees/:attendeeId/games/batch as the owner',
+      "POST /api/events/:eventId/attendees/:attendeeId/games/batch as the entry's owner",
     );
 
     const outcomes = (rows: readonly OfferResultWire[]) =>
@@ -539,7 +539,7 @@ describe('removing an offered game from the collection (#1221)', () => {
         .set(owner.headers)
         .send({ collectionId: offered.collectionId })
         .expect(201),
-      'POST /api/events/:eventId/attendees/:attendeeId/games as the owner',
+      "POST /api/events/:eventId/attendees/:attendeeId/games as the entry's owner",
     );
     const atHousehold = nominationEnvelope(
       await nominate(owner, householdEventId, { ...offered, suppliedById: householdOfferId }).expect(201),

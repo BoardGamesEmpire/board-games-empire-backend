@@ -10,14 +10,17 @@ import { CollectionCopyService } from './collection-copy.service';
 import {
   CollectionCopyListResponseDto,
   CollectionCopyMessageResponseDto,
-  CollectionRevisionListResponseDto,
+  CollectionCopyRevisionListResponseDto,
   CreateCollectionCopyDto,
   RemoveCollectionCopyQueryDto,
   UpdateCollectionCopyDto,
 } from './dto';
 
-const ENTRY_NOT_FOUND = 'Collection entry not found, or not yours (code COLLECTION_ENTRY_NOT_FOUND)';
-const COPY_NOT_FOUND = 'the copy not found on it (code COLLECTION_COPY_NOT_FOUND)';
+// Each 404 description is one sentence, its causes joined in the order the
+// route checks them (#1231).
+const ENTRY_NOT_FOUND = 'The collection entry was not found, or is not yours (code COLLECTION_ENTRY_NOT_FOUND)';
+const COPY_NOT_FOUND = 'the copy was not found on it (code COLLECTION_COPY_NOT_FOUND)';
+const LIVE_COPY_NOT_FOUND = 'the copy was not found on it, or is taken back (code COLLECTION_COPY_NOT_FOUND)';
 
 /**
  * The copies of a collection entry, on the entry owner's routes (#1231). Every
@@ -78,7 +81,9 @@ export class CollectionCopyController {
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @ApiResponse({
     status: Http.NotFound,
-    description: `${ENTRY_NOT_FOUND}, or the release not found, including one deleted while the add ran (code GAME_RELEASE_NOT_FOUND)`,
+    description:
+      `${ENTRY_NOT_FOUND}; or the release was not found, including one deleted while the add ran ` +
+      '(code GAME_RELEASE_NOT_FOUND)',
   })
   @ApiResponse({
     status: Http.Conflict,
@@ -115,9 +120,7 @@ export class CollectionCopyController {
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @ApiResponse({
     status: Http.NotFound,
-    description:
-      `${ENTRY_NOT_FOUND}, the copy not found on it or taken back (code COLLECTION_COPY_NOT_FOUND), or the release not found ` +
-      '(code GAME_RELEASE_NOT_FOUND)',
+    description: `${ENTRY_NOT_FOUND}; ${LIVE_COPY_NOT_FOUND}; or the release was not found (code GAME_RELEASE_NOT_FOUND)`,
   })
   @ApiResponse({
     status: Http.Conflict,
@@ -158,7 +161,9 @@ export class CollectionCopyController {
   })
   @ApiResponse({
     status: Http.NotFound,
-    description: `${ENTRY_NOT_FOUND}, or the copy not found on it, already removed or taken back (code COLLECTION_COPY_NOT_FOUND)`,
+    description:
+      `${ENTRY_NOT_FOUND}; or the copy was not found on it, or is removed or taken back already ` +
+      '(code COLLECTION_COPY_NOT_FOUND)',
   })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.GameCollection))
   @Delete(':copyId')
@@ -174,18 +179,20 @@ export class CollectionCopyController {
       'Says the copy never existed, as when it was added by mistake: it counts as neither owned nor removed, ' +
       'leaves the entry’s quantity and its copies on the entry, and only the copies list shows it, with ' +
       '`retractedAt`. A copy taken back can’t be corrected, removed or restored until the take-back is undone. ' +
-      'The last copy you own can’t be taken back: add the right copy first, or remove the game. Only the ' +
+      'The last copy you own can’t be taken back: add the right copy first, or remove the game. Taking back a ' +
+      'copy taken back already answers it as it stands, and changes nothing, so a retry is safe. Only the ' +
       'entry’s owner can take one back: anyone else is told the entry was not found.',
   })
   @ApiParam({ name: 'id', type: String, description: 'The collection entry' })
   @ApiParam({ name: 'copyId', type: String })
-  @ApiResponse({ status: Http.Ok, type: CollectionCopyMessageResponseDto })
+  @ApiResponse({
+    status: Http.Ok,
+    type: CollectionCopyMessageResponseDto,
+    description: 'The copy, taken back, or as it stands when it was taken back already',
+  })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
-  @ApiResponse({
-    status: Http.NotFound,
-    description: `${ENTRY_NOT_FOUND}, or the copy not found on it, or taken back already (code COLLECTION_COPY_NOT_FOUND)`,
-  })
+  @ApiResponse({ status: Http.NotFound, description: `${ENTRY_NOT_FOUND}; or ${COPY_NOT_FOUND}` })
   @ApiResponse({
     status: Http.Conflict,
     description: 'The last copy you own of the game (code COLLECTION_LAST_COPY)',
@@ -204,21 +211,19 @@ export class CollectionCopyController {
     description:
       'The copy counts again, as a copy you own or one you removed, whichever it was. A copy you own on a game ' +
       'you had removed adds the game back to your collection, and the offers its removal paused in events count ' +
-      'again. Only the entry’s owner can undo one: anyone else is told the entry was not found.',
+      'again. Undoing it for a copy that isn’t taken back answers the copy as it stands, and changes nothing, so ' +
+      'a retry is safe. Only the entry’s owner can undo one: anyone else is told the entry was not found.',
   })
   @ApiParam({ name: 'id', type: String, description: 'The collection entry' })
   @ApiParam({ name: 'copyId', type: String })
-  @ApiResponse({ status: Http.Ok, type: CollectionCopyMessageResponseDto })
+  @ApiResponse({
+    status: Http.Ok,
+    type: CollectionCopyMessageResponseDto,
+    description: 'The copy, no longer taken back, or as it stands when it wasn’t taken back',
+  })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
-  @ApiResponse({
-    status: Http.NotFound,
-    description: `${ENTRY_NOT_FOUND}, or the copy not found on it (code COLLECTION_COPY_NOT_FOUND)`,
-  })
-  @ApiResponse({
-    status: Http.Conflict,
-    description: 'A copy you have not taken back (code COLLECTION_COPY_NOT_TAKEN_BACK)',
-  })
+  @ApiResponse({ status: Http.NotFound, description: `${ENTRY_NOT_FOUND}; or ${COPY_NOT_FOUND}` })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.GameCollection))
   @Delete(':copyId/retraction')
   undoTakeBackCopy(@Param('id') id: string, @Param('copyId') copyId: string) {
@@ -237,10 +242,10 @@ export class CollectionCopyController {
   })
   @ApiParam({ name: 'id', type: String, description: 'The collection entry' })
   @ApiParam({ name: 'copyId', type: String })
-  @ApiResponse({ status: Http.Ok, type: CollectionRevisionListResponseDto })
+  @ApiResponse({ status: Http.Ok, type: CollectionCopyRevisionListResponseDto })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
-  @ApiResponse({ status: Http.NotFound, description: `${ENTRY_NOT_FOUND}, or ${COPY_NOT_FOUND}` })
+  @ApiResponse({ status: Http.NotFound, description: `${ENTRY_NOT_FOUND}; or ${COPY_NOT_FOUND}` })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.GameCollection))
   @Get(':copyId/revisions')
   listRevisions(@Param('id') id: string, @Param('copyId') copyId: string) {
@@ -276,8 +281,8 @@ export class CollectionCopyController {
   @ApiResponse({
     status: Http.NotFound,
     description:
-      `${ENTRY_NOT_FOUND}, ${COPY_NOT_FOUND} or taken back, or the revision not found on the copy, including one whose stored ` +
-      'values can’t be read back (code COLLECTION_REVISION_NOT_FOUND)',
+      `${ENTRY_NOT_FOUND}; ${LIVE_COPY_NOT_FOUND}; or the revision was not found on the copy, including one whose ` +
+      'stored values can’t be read back (code COLLECTION_REVISION_NOT_FOUND)',
   })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.GameCollection))
   @HttpCode(Http.Ok)

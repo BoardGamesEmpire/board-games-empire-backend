@@ -250,4 +250,62 @@ describe('a key pinned to one collection entry (#1288)', () => {
     await removeCopy(key, only.id).expect(200);
     expect(await ownership(named.id)).toEqual({ deletedAt: null, owned: 1 });
   });
+
+  // A restore can remove the entry's last owned copy, as restoring the
+  // values a removal wrote does; that removes the entry, so it needs the
+  // entry's delete permission beside the update every copy write needs
+  // (#1288). A key that may only update is refused, and nothing changes; the
+  // same key restores the same revision once another copy is owned.
+  it("a key that may update but not delete an entry can't restore a revision that removes its last owned copy, and can once another is owned (#1288)", async () => {
+    const owner = await actors.user();
+    const named = await arrangeEntry(owner.user.id);
+    const key = await keyWith(owner, 'update:game_collection', named.id);
+    const copiesPath = `${COLLECTIONS_PATH}/${named.id}/copies`;
+    const [only] = await db.client.collectionCopy.findMany({ where: { entryId: named.id }, select: { id: true } });
+    if (only === undefined) {
+      throw new Error('the arranged entry holds one copy');
+    }
+
+    const revisionsPath = `${copiesPath}/${only.id}/revisions`;
+    const newestRevision = async () =>
+      (
+        await db.client.collectionCopyRevision.findFirstOrThrow({
+          where: { copyId: only.id },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          select: { id: true },
+        })
+      ).id;
+    const restore = (caller: Caller, revisionId: string) =>
+      request(baseUrl).post(`${revisionsPath}/${revisionId}/restore`).set(caller.headers);
+    const copyState = () =>
+      db.client.collectionCopy.findUniqueOrThrow({
+        where: { id: only.id },
+        select: { editedByUserAt: true, removedAt: true, removeReason: true },
+      });
+
+    // The entry's owner removes the copy, and so the entry, and restores it: the
+    // restore keeps the removal's values as the copy's newest revision.
+    await request(baseUrl)
+      .delete(`${copiesPath}/${only.id}`)
+      .query({ reason: GameRemovalReason.Sold })
+      .set(owner.headers)
+      .expect(200);
+    await restore(owner, await newestRevision()).expect(200);
+    const removal = await newestRevision();
+    expect(await ownership(named.id)).toEqual({ deletedAt: null, owned: 1 });
+    const before = await copyState();
+    const revisions = await db.client.collectionCopyRevision.count({ where: { copyId: only.id } });
+
+    await restore(key, removal).expect(403);
+    expect(await copyState()).toEqual(before);
+    expect(await db.client.collectionCopyRevision.count({ where: { copyId: only.id } })).toBe(revisions);
+    expect(await ownership(named.id)).toEqual({ deletedAt: null, owned: 1 });
+
+    // The positive control: with a second copy owned, the restored removal
+    // leaves the entry another, so the update the key holds is enough.
+    await request(baseUrl).post(copiesPath).set(owner.headers).send({}).expect(201);
+    await restore(key, removal).expect(200);
+    expect(await copyState()).toMatchObject({ removedAt: expect.any(Date), removeReason: GameRemovalReason.Sold });
+    expect(await ownership(named.id)).toEqual({ deletedAt: null, owned: 1 });
+  });
 });

@@ -1,11 +1,13 @@
 import type { GameCollection, Prisma } from '@bge/database';
 import { Action, GameMedium, GameRemovalReason, ResourceType } from '@bge/database';
+import { uniqueViolation } from '@bge/database/testing';
 import type { CollectionSupplyChange } from '@bge/event';
 import { emitCollectionSupplyChanges, syncCollectionEntrySupply } from '@bge/event';
+import { AbilityService } from '@bge/permissions';
 import type { MockDatabaseService } from '@bge/testing';
 import { createTestingModuleWithDb, rawQueryText, unwrapTransaction } from '@bge/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { CollectionWriteService } from './collection-write.service';
+import { CollectionWriteService, retryKeyedAdd } from './collection-write.service';
 
 // The supply sync has its own spec in `@bge/event`; here it is a seam, so the
 // tests below pin when a write runs it and what they pass (#1221).
@@ -42,7 +44,13 @@ describe('CollectionWriteService', () => {
     eventEmitter = { emit: jest.fn() };
 
     const ctx = await createTestingModuleWithDb({
-      providers: [CollectionWriteService, { provide: EventEmitter2, useValue: eventEmitter }],
+      providers: [
+        CollectionWriteService,
+        // The entry-owner check of `lockOwnEntryForUpdate` reads it; the copy and
+        // rating specs drive that, with the real runner (#1231).
+        { provide: AbilityService, useValue: {} },
+        { provide: EventEmitter2, useValue: eventEmitter },
+      ],
     });
 
     db = ctx.db;
@@ -517,5 +525,44 @@ describe('CollectionWriteService', () => {
         deleteReason: GameRemovalReason.Lost,
       });
     });
+  });
+});
+
+/**
+ * #1231, #252. A keyed add that trips its key's unique runs once more, in a
+ * transaction of its own, and finds the row the other request committed. An
+ * add with no key, or a violation of another unique, is rethrown.
+ */
+describe('retryKeyedAdd', () => {
+  const SPELLINGS = [['thing_entry_client_request_id_unique'], ['entryId', 'clientRequestId']] as const;
+
+  it("runs a keyed add once more when it trips the key's unique, and answers the second run", async () => {
+    const attempt = jest
+      .fn()
+      .mockRejectedValueOnce(uniqueViolation({ index: 'thing_entry_client_request_id_unique' }))
+      .mockResolvedValueOnce('found');
+
+    await expect(retryKeyedAdd(attempt, 'key-1', SPELLINGS)).resolves.toBe('found');
+    expect(attempt).toHaveBeenCalledTimes(2);
+  });
+
+  it('counts a violation whose constraint has no name, when the add was keyed', async () => {
+    const attempt = jest
+      .fn()
+      .mockRejectedValueOnce(uniqueViolation({ omitDriverAdapterError: true }))
+      .mockResolvedValueOnce('found');
+
+    await expect(retryKeyedAdd(attempt, 'key-1', SPELLINGS)).resolves.toBe('found');
+  });
+
+  it.each([
+    ['an add with no key', undefined, uniqueViolation({ index: 'thing_entry_client_request_id_unique' })],
+    ['a violation of another unique', 'key-1', uniqueViolation({ index: 'thing_upstream_key_unique' })],
+    ['an error that is no unique violation', 'key-1', new Error('boom')],
+  ])('rethrows %s, and runs it once', async (_, key, error) => {
+    const attempt = jest.fn().mockRejectedValue(error);
+
+    await expect(retryKeyedAdd(attempt, key, SPELLINGS)).rejects.toBe(error);
+    expect(attempt).toHaveBeenCalledTimes(1);
   });
 });
