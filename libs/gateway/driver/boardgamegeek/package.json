@@ -23,7 +23,7 @@
     "@boardgamesempire/gateway-driver-contract": "0.0.1",
     "@boardgamesempire/proto-gateway": "0.0.1",
     "entities": "9.0.0",
-    "fast-xml-parser": "5.12.0",
+    "fast-xml-parser": "5.12.1",
     "rxjs": "^7.8.0"
   }
 }
