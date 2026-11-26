@@ -278,6 +278,9 @@
     },
     {
       "path": "./libs/plugin/toolkit"
+    },
+    {
+      "path": "./libs/api/party-invite"
     }
   ]
 }

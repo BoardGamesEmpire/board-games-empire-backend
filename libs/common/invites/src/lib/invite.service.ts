@@ -21,12 +21,14 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { randomBytes } from 'node:crypto';
+import type { ContextualInviteType } from './constants/invite.constants';
 import {
   DEFAULT_INVITE_TTL_MS,
   INVITE_TOKEN_BYTES,
   INVITE_TOKEN_MINT_ATTEMPTS,
   INVITE_TOKEN_UNIQUE_COLUMNS,
   INVITE_TOKEN_UNIQUE_INDEX,
+  isContextualInviteType,
   OUTSTANDING_INVITE_STATUSES,
   OUTSTANDING_INVITE_UNIQUE_COLUMNS,
   OUTSTANDING_INVITE_UNIQUE_FIELDS,
@@ -50,7 +52,6 @@ import {
 } from './events/invite.events';
 import type {
   ApproveInviteParams,
-  ContextualInviteType,
   CreateInviteParams,
   ExpireOutstandingInvitesParams,
   InviteAcceptance,
@@ -324,6 +325,32 @@ export class InviteService {
 
     // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- a computed key looked up by the generic `Type` widens to a string index, which TypeScript can't relate to `InviteScopeOf<Type>` (#1321)
     return { [column]: contextId } as InviteScopeOf<Type>;
+  }
+
+  /**
+   * The type of an invite of the party's, read on the caller's transaction
+   * (#742). A party route serves every kind of invite, so it learns here which
+   * responder to hand the invite to, and a stranger meets the same 404 the
+   * transition would give rather than learning the invite exists.
+   *
+   * Bound as `findPartyScopeWithin` is. A System or Campaign invite meets the
+   * same 404: no party route handles those kinds, and answering with their
+   * type would confirm the invite to someone with no business with it.
+   */
+  async findPartyTypeWithin(
+    tx: Prisma.TransactionClient,
+    { target, actingUserId, vouchedEmail }: InvitePartyLookup,
+  ): Promise<ContextualInviteType> {
+    const row = await tx.invite.findFirst({
+      where: this.partyWhere(target, actingUserId, normalizeInviteeEmail(vouchedEmail)),
+      select: { type: true },
+    });
+
+    if (!row || !isContextualInviteType(row.type)) {
+      return this.refuseMissing(target);
+    }
+
+    return row.type;
   }
 
   /**

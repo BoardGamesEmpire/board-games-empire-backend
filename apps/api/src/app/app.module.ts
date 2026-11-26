@@ -29,6 +29,7 @@ import { MediaModule } from '@bge/media';
 import { MetricsModule } from '@bge/metrics';
 import { NotificationsModule } from '@bge/notifications';
 import { createBullMQTelemetry, DbPoolMetricsRecorderModule } from '@bge/otel';
+import { PartyInviteModule } from '@bge/party-invite';
 import { PermissionCatalogModule } from '@bge/permission-catalog';
 import { AbilityContextMiddleware, PermissionsModule } from '@bge/permissions';
 import { PluginModule } from '@bge/plugin';
@@ -223,6 +224,8 @@ import { apiPluginModuleOptions } from './plugin-module.options';
     MediaModule,
     MetricsModule,
     NotificationsModule,
+    // The party routes under /invites, for every kind of invite (#742).
+    PartyInviteModule,
     // The Owner's reads and edits of the permission catalog (#772).
     PermissionCatalogModule,
     PermissionsModule,

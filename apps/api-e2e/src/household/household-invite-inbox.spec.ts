@@ -1,4 +1,4 @@
-import { InviteStatus, SystemRole } from '@bge/database';
+import { InviteStatus, InviteType, SystemRole } from '@bge/database';
 import type { Actors, AuthenticatedActor, SessionActor } from '@bge/testing-e2e';
 import { arrangeInvite, createActors } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
@@ -141,6 +141,39 @@ describe('household invite inbox', () => {
     await verify(invitee);
 
     expect((await received(invitee)).invites.map((row) => row.id)).toEqual([invite.id]);
+  });
+
+  it('?type=Household lists the same rows (#742)', async () => {
+    const invitee = await actors.user();
+    const first = await ownedHousehold(`Typed ${randomUUID()}`);
+    const second = await ownedHousehold(`Typed ${randomUUID()}`);
+    await createdInvite(first.owner, first.household.id, { inviteeId: invitee.user.id });
+    await createdInvite(second.owner, second.household.id, { inviteeId: invitee.user.id });
+
+    const all = await received(invitee);
+    const households = receivedInvitesEnvelope(
+      await inbox(invitee).query({ type: InviteType.Household }).expect(200),
+      'GET /api/invites?type=Household',
+    );
+
+    expect(all.invites).toHaveLength(2);
+    expect(households).toEqual(all);
+    // Every row says its kind, so a client reading the unfiltered inbox can tell them apart.
+    expect(all.invites.map((invite) => invite.type)).toEqual([InviteType.Household, InviteType.Household]);
+
+    // Another kind keeps none of these rows.
+    const events = receivedInvitesEnvelope(
+      await inbox(invitee).query({ type: InviteType.Event }).expect(200),
+      'GET /api/invites?type=Event',
+    );
+    expect(events.invites).toEqual([]);
+    expect(events.pagination.total).toBe(0);
+  });
+
+  it('refuses a ?type= no party route serves with 400 (#742)', async () => {
+    const invitee = await actors.user();
+
+    await inbox(invitee).query({ type: InviteType.System }).expect(400);
   });
 
   it('refuses an anonymous guest with 403', async () => {

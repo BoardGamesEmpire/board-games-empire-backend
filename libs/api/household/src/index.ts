@@ -12,8 +12,11 @@ export { householdExists, lockExistingHousehold } from './lib/household-access.h
 export * from './lib/household.controller';
 export * from './lib/household.module';
 export * from './lib/household.service';
+export * from './lib/invite/household-invite-responder';
 export * from './lib/invite/household-invite.controller';
 export * from './lib/invite/household-invite.service';
+export { receivedHouseholdInviteWhere, vouchedEmailOf } from './lib/invite/received-invites';
+export { sentHouseholdInviteWhere } from './lib/invite/sent-invites';
 export * from './lib/member/household-member.controller';
 export * from './lib/member/household-member.service';
 export * from './lib/quota/household-quota.controller';

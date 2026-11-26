@@ -4,8 +4,9 @@ The invite lifecycle for Board Games Empire, as primitives a context owner drive
 
 The lib ships:
 
-- `InviteService` — `findForParty`, `findPartyScopeWithin`, `findAcceptableWithin`, `createWithin`, `acceptWithin`, `declineWithin`, `withdrawWithin`, `revokeWithin`, `approveWithin`, `revokeOutstandingWithin`, `revokeOutstandingOfUserWithin`, `expireOutstandingWithin`, and `emit`.
+- `InviteService` — `findForParty`, `findPartyScopeWithin`, `findPartyTypeWithin`, `findAcceptableWithin`, `createWithin`, `acceptWithin`, `declineWithin`, `withdrawWithin`, `revokeWithin`, `approveWithin`, `revokeOutstandingWithin`, `revokeOutstandingOfUserWithin`, `expireOutstandingWithin`, and `emit`.
 - `receivedInviteWhere`, the filter a listing of the invites a user has received is built on.
+- `InviteResponder`, what a context lib implements so that one party route can serve every kind of invite, and `CONTEXTUAL_INVITE_TYPES` with `isContextualInviteType`, the kinds such a route serves: those whose rows name a context (#742).
 - The read shapes every invite render goes through: `CONTEXT_INVITE_SELECT` (a context reader's view) and `PARTY_INVITE_SELECT` (a party's view).
 - The domain events a consumer announces after commit, and `effectiveInviteStatus` for lazy expiry on reads.
 - `gateInvitee`, the checks that decide who may be invited, run in the caller's transaction before anything is written: the server's invitee policy, a block between the two, and the invitee's own preference (#278). Households and events each read settings of their own, `householdInviteePolicy` and `allowHouseholdInvitesFrom` or `eventInviteePolicy` and `allowEventInvitesFrom`, named by the `InviteType` the caller passes (#546). The event routes ask it of every user they place on an event by id.
@@ -52,6 +53,8 @@ export class HouseholdService {
 
 The party view leaves the household's id out, so a consumer accepting by id or by token learns which row to lock from `findPartyScopeWithin(tx, lookup, InviteType.Household)` first. It binds the read as the transition does, so a stranger meets the same 404 before any household is named to them, and it takes no lock. A transition binds the type in its own read, so a decline or a withdraw, which locks nothing, needs no such read first (#164).
 
+**A consumer that serves every kind of invite on one route**, as `@bge/party-invite` serves `/invites` (#742), reads the type first with `findPartyTypeWithin(tx, lookup)`, in a short transaction of its own, and hands the invite to the `InviteResponder` for that kind. The responder owns what moving the invite means for its context: a household admits a household member, an event seats an attendee. The read is bound as a transition binds it, so a stranger meets the same 404 the transition would give, and so does an invite of a kind no party route serves (`System`, `Campaign`): answering with its type would confirm the invite exists. It takes no lock; the responder opens its own transaction and locks its context row before it transitions, in the order above.
+
 **A consumer that asks something of an invite before accepting it** reads it with `findAcceptableWithin(tx, lookup)`, after the lock. It refuses exactly as `acceptWithin` would and writes nothing but the expiry stamp an expired invite leaves. It hands back who sent the invite, the role it offers, and whether it was sent to wait for an approver. The household asks whether the sender could still send it, and revokes it with `revokeWithin` when not (#747). The question goes before the accept, not after it: an accept has already bound an invite by address to the acting user, and nothing later in the transaction could take that back without a trace.
 
 **A member who leaves the context** ends its invites with `revokeOutstandingOfUserWithin(tx, scope, userId)`, in the transaction that ends the membership, after locking the context row: the outstanding invites they sent, and those that name them by id (#747). Invites to their address are left open, since revoking them would tell each inviter whose address it was.
@@ -66,6 +69,7 @@ A **party** read or transition binds its `where` to the acting user, as inviter 
 | ---------------------- | ------------ | ------------------------------------------------------------------------------ | ------------ |
 | `findForParty`         | either party | `inviterId` or `inviteeId`, or for email-only the token or a vouched address   | party view   |
 | `findPartyScopeWithin` | either party | as `findForParty`, and the invite's type                                       | its context  |
+| `findPartyTypeWithin`  | either party | as `findForParty`; a System or Campaign invite is a miss                       | its type     |
 | `findAcceptableWithin` | the invitee  | as `acceptWithin`                                                              | the offer    |
 | `createWithin`         | the inviter  | `inviterId` is the caller's acting user                                        | party view   |
 | `acceptWithin`         | the invitee  | `inviteeId`, or for email-only the token or a vouched address; and the type    | party view   |

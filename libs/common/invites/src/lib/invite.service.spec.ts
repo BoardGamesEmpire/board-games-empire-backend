@@ -306,6 +306,87 @@ describe('InviteService', () => {
     });
   });
 
+  describe('findPartyTypeWithin', () => {
+    it('returns the type of an invite the acting user sent or received (#742)', async () => {
+      tx.invite.findFirst.mockResolvedValueOnce({ type: InviteType.Event } as never);
+      tx.invite.findFirst.mockResolvedValueOnce({ type: InviteType.Household } as never);
+
+      await expect(
+        service.findPartyTypeWithin(asTx(tx), { target: { inviteId: 'inv-1' }, actingUserId: INVITEE_ID }),
+      ).resolves.toBe(InviteType.Event);
+      await expect(
+        service.findPartyTypeWithin(asTx(tx), { target: { inviteId: 'inv-2' }, actingUserId: INVITER_ID }),
+      ).resolves.toBe(InviteType.Household);
+
+      expect(tx.invite.findFirst).toHaveBeenNthCalledWith(1, {
+        where: partyWhereById('inv-1', INVITEE_ID),
+        select: { type: true },
+      });
+      expect(tx.invite.findFirst).toHaveBeenNthCalledWith(2, {
+        where: partyWhereById('inv-2', INVITER_ID),
+        select: { type: true },
+      });
+      // A read for the responder the route hands to, never a lock or a write of its own.
+      expect(db.invite.findFirst).not.toHaveBeenCalled();
+      expect(tx.invite.updateManyAndReturn).not.toHaveBeenCalled();
+    });
+
+    it("answers the stranger's 404 for an invite of someone else's (#742)", async () => {
+      tx.invite.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.findPartyTypeWithin(asTx(tx), { target: { inviteId: 'inv-1' }, actingUserId: STRANGER_ID }),
+      ).rejects.toMatchObject({
+        status: 404,
+        response: expect.objectContaining({ key: 'errors.invite.not_found' }),
+      });
+    });
+
+    it.each([InviteType.System, InviteType.Campaign])(
+      'answers 404 for a %s invite, which no party route handles (#742)',
+      async (type) => {
+        tx.invite.findFirst.mockResolvedValue({ type } as never);
+
+        await expect(
+          service.findPartyTypeWithin(asTx(tx), { target: { inviteId: 'inv-1' }, actingUserId: INVITEE_ID }),
+        ).rejects.toMatchObject({
+          status: 404,
+          response: expect.objectContaining({ key: 'errors.invite.not_found' }),
+        });
+      },
+    );
+
+    it('reaches an invite by the address the consumer vouches for, as it is stored (#742)', async () => {
+      tx.invite.findFirst.mockResolvedValue({ type: InviteType.Household } as never);
+
+      await expect(
+        service.findPartyTypeWithin(asTx(tx), {
+          target: { inviteId: 'inv-1' },
+          actingUserId: ADDRESS_HOLDER_ID,
+          vouchedEmail: ' Sam@Example.TEST ',
+        }),
+      ).resolves.toBe(InviteType.Household);
+
+      expect(tx.invite.findFirst).toHaveBeenCalledWith({
+        where: partyWhereByAddress('inv-1', ADDRESS_HOLDER_ID, 'sam@example.test'),
+        select: { type: true },
+      });
+    });
+
+    it('reaches an address-only invite through its token (#742)', async () => {
+      tx.invite.findFirst.mockResolvedValue({ type: InviteType.Event } as never);
+
+      await expect(
+        service.findPartyTypeWithin(asTx(tx), { target: { token: TOKEN }, actingUserId: ADDRESS_HOLDER_ID }),
+      ).resolves.toBe(InviteType.Event);
+
+      expect(tx.invite.findFirst).toHaveBeenCalledWith({
+        where: partyWhereByToken(TOKEN, ADDRESS_HOLDER_ID),
+        select: { type: true },
+      });
+    });
+  });
+
   describe('receivedInviteWhere', () => {
     it('matches the invites addressed to the user by id, and none they sent', () => {
       expect(receivedInviteWhere(INVITEE_ID)).toEqual({

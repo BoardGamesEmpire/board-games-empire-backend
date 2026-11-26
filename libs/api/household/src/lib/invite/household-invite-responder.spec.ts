@@ -1,12 +1,9 @@
-import type { Actor } from '@bge/actor-context';
-import { AuditContextService } from '@bge/actor-context';
 import {
   Action,
   HouseholdMembershipOrigin,
   InviteStatus,
   InviteType,
   MemberInvitePolicy,
-  Prisma,
   QuotaScope,
   ResourceType,
   SystemRole,
@@ -20,17 +17,17 @@ import type {
   InviteRevocation,
   InviteWithdrawal,
 } from '@bge/invites';
-import { InviteService, PARTY_INVITE_SELECT } from '@bge/invites';
+import { InviteService } from '@bge/invites';
 import type { UserAbilityCheck } from '@bge/permissions';
 import { AbilityService, PermissionsService } from '@bge/permissions';
 import type { QuotaSoftOverageEvent } from '@bge/quota';
 import { QuotaService } from '@bge/quota';
 import type { MockDatabaseService } from '@bge/testing';
-import { batchTransactionCall, createTestingModuleWithDb, paginationQuery, unwrapTransaction } from '@bge/testing';
-import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { createTestingModuleWithDb, unwrapTransaction } from '@bge/testing';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import type { AddMemberResult, HouseholdMemberWithRelations } from '../member/household-member.service';
 import { HouseholdMemberService } from '../member/household-member.service';
-import { PartyInviteService } from './party-invite.service';
+import { HouseholdInviteResponder } from './household-invite-responder';
 
 const INVITEE_ID = 'user-invitee';
 const INVITER_ID = 'user-inviter';
@@ -38,9 +35,6 @@ const HOUSEHOLD_ID = 'hh-1';
 const ADDRESS = 'sam@example.test';
 const LATER = new Date('2099-01-01T00:00:00Z');
 const NOW = new Date('2026-10-15T12:00:00Z');
-
-const SESSION_USER: Actor = { kind: 'user', userId: INVITEE_ID } as Actor;
-const INVITER_SESSION: Actor = { kind: 'user', userId: INVITER_ID } as Actor;
 
 const partyView = (overrides: Partial<InvitePartyView> = {}): InvitePartyView => ({
   id: 'invite-1',
@@ -65,7 +59,7 @@ const OVERAGE: QuotaSoftOverageEvent = {
   limit: '8',
 };
 
-/** Prisma's delegate types want full rows; the service selects narrower ones. */
+/** Prisma's delegate types want full rows; the responder selects narrower ones. */
 const resolves = (value: unknown) => value as never;
 
 /** The membership the accept makes, as the admission seam returns it. */
@@ -87,10 +81,9 @@ const AUTHORITY = {
   members: [{ userId: INVITER_ID, role: { role: { name: SystemRole.HouseholdAdmin } } }],
 };
 
-describe('PartyInviteService', () => {
-  let service: PartyInviteService;
+describe('HouseholdInviteResponder', () => {
+  let responder: HouseholdInviteResponder;
   let db: MockDatabaseService;
-  let auditContext: jest.Mocked<Pick<AuditContextService, 'getActor'>>;
   let invites: jest.Mocked<
     Pick<
       InviteService,
@@ -137,7 +130,6 @@ describe('PartyInviteService', () => {
     };
     admission = { member: NEW_MEMBER, admitted: true, softOverages: [OVERAGE] };
 
-    auditContext = { getActor: jest.fn().mockReturnValue(SESSION_USER) };
     invites = {
       findPartyScopeWithin: jest.fn().mockResolvedValue({ householdId: HOUSEHOLD_ID }),
       findAcceptableWithin: jest.fn().mockImplementation(() => Promise.resolve(offer)),
@@ -158,8 +150,7 @@ describe('PartyInviteService', () => {
 
     const ctx = await createTestingModuleWithDb({
       providers: [
-        PartyInviteService,
-        { provide: AuditContextService, useValue: auditContext },
+        HouseholdInviteResponder,
         { provide: InviteService, useValue: invites },
         { provide: HouseholdMemberService, useValue: members },
         { provide: AbilityService, useValue: abilities },
@@ -169,65 +160,16 @@ describe('PartyInviteService', () => {
     });
 
     db = ctx.db;
-    service = ctx.module.get(PartyInviteService);
+    responder = ctx.module.get(HouseholdInviteResponder);
 
     unwrapTransaction(db);
     db.$queryRaw.mockResolvedValue([{ id: HOUSEHOLD_ID }] as never);
     db.user.findUnique.mockResolvedValue(resolves({ email: ADDRESS, emailVerified: true }));
-    db.invite.findMany.mockResolvedValue([]);
-    db.invite.count.mockResolvedValue(0);
     db.household.findUnique.mockResolvedValue(resolves(AUTHORITY));
   });
 
-  describe.each([
-    ['an API key', { kind: 'apiKey', apiKeyId: 'key-1', userId: INVITEE_ID }],
-    ['an anonymous guest', { kind: 'anonymous', userId: INVITEE_ID }],
-    ['the system', { kind: 'system', reason: 'sweep' }],
-    [
-      'a plugin',
-      {
-        kind: 'plugin',
-        pluginId: 'plugin-1',
-        unit: { scopeType: 'User', userId: INVITEE_ID },
-        trigger: { kind: 'user', userId: INVITEE_ID },
-      },
-    ],
-    ['no actor at all', null],
-  ])('for %s', (_label, actor) => {
-    beforeEach(() => auditContext.getActor.mockReturnValue(actor as Actor | null));
-
-    it('refuses an accept with 403 before reading anything', async () => {
-      await expect(service.accept({ inviteId: 'invite-1' })).rejects.toThrow(ForbiddenException);
-
-      expect(db.$transaction).not.toHaveBeenCalled();
-      expect(invites.acceptWithin).not.toHaveBeenCalled();
-    });
-
-    it('refuses the inbox with 403 before reading anything', async () => {
-      await expect(service.listReceived(paginationQuery())).rejects.toThrow(ForbiddenException);
-
-      expect(db.invite.findMany).not.toHaveBeenCalled();
-    });
-
-    it('refuses the sent list with 403 before reading anything', async () => {
-      await expect(service.listSent(paginationQuery())).rejects.toThrow(ForbiddenException);
-
-      expect(db.invite.findMany).not.toHaveBeenCalled();
-    });
-
-    it('refuses a decline with 403 before reading anything', async () => {
-      await expect(service.decline({ inviteId: 'invite-1' })).rejects.toThrow(ForbiddenException);
-
-      expect(db.$transaction).not.toHaveBeenCalled();
-      expect(invites.declineWithin).not.toHaveBeenCalled();
-    });
-
-    it('refuses a withdraw with 403 before reading anything', async () => {
-      await expect(service.withdraw('invite-1')).rejects.toThrow(ForbiddenException);
-
-      expect(db.$transaction).not.toHaveBeenCalled();
-      expect(invites.withdrawWithin).not.toHaveBeenCalled();
-    });
+  it('answers for household invites, the type the party routes pick it by (#742)', () => {
+    expect(responder.type).toBe(InviteType.Household);
   });
 
   describe('accept', () => {
@@ -242,7 +184,7 @@ describe('PartyInviteService', () => {
       invites.acceptWithin.mockImplementation(async () => (order.push('accept'), acceptance));
       members.addMemberWithin.mockImplementation(async () => (order.push('admit'), admission));
 
-      const { invite, member } = await service.accept({ inviteId: 'invite-1' });
+      const { invite, member } = await responder.accept({ inviteId: 'invite-1' }, INVITEE_ID);
 
       const lookup = {
         target: { inviteId: 'invite-1' },
@@ -273,7 +215,7 @@ describe('PartyInviteService', () => {
     it('vouches for no address that is unverified', async () => {
       db.user.findUnique.mockResolvedValue(resolves({ email: ADDRESS, emailVerified: false }));
 
-      await service.accept({ inviteId: 'invite-1' });
+      await responder.accept({ inviteId: 'invite-1' }, INVITEE_ID);
 
       expect(invites.acceptWithin).toHaveBeenCalledWith(db, {
         target: { inviteId: 'invite-1' },
@@ -284,7 +226,7 @@ describe('PartyInviteService', () => {
     });
 
     it('passes a token through as the target', async () => {
-      await service.accept({ token: 'live-accept-credential' });
+      await responder.accept({ token: 'live-accept-credential' }, INVITEE_ID);
 
       expect(invites.findPartyScopeWithin).toHaveBeenCalledWith(
         db,
@@ -302,7 +244,7 @@ describe('PartyInviteService', () => {
       }) as never);
       permissions.invalidateUser.mockImplementation(async () => expect(committed).toBe(true));
 
-      await service.accept({ inviteId: 'invite-1' });
+      await responder.accept({ inviteId: 'invite-1' }, INVITEE_ID);
 
       expect(permissions.invalidateUser).toHaveBeenCalledWith(INVITEE_ID);
       expect(invites.emit).toHaveBeenCalledWith([acceptance.event]);
@@ -315,7 +257,7 @@ describe('PartyInviteService', () => {
     it('answers 409 for someone already a member, and does nothing after the rollback', async () => {
       admission = { ...admission, admitted: false, softOverages: [] };
 
-      await expect(service.accept({ inviteId: 'invite-1' })).rejects.toMatchObject({
+      await expect(responder.accept({ inviteId: 'invite-1' }, INVITEE_ID)).rejects.toMatchObject({
         status: 409,
         response: expect.objectContaining({ key: 'errors.household.already_a_member' }),
       });
@@ -349,7 +291,7 @@ describe('PartyInviteService', () => {
           order.push('soft caps');
         });
 
-        await service.accept({ inviteId: 'invite-1' });
+        await responder.accept({ inviteId: 'invite-1' }, INVITEE_ID);
 
         expect(members.emitMemberAdmitted).toHaveBeenCalledTimes(1);
         // The row the admission wrote (its role is not the offered one), not
@@ -365,7 +307,7 @@ describe('PartyInviteService', () => {
         // is announced, and nobody was admitted.
         senderCan.mockReturnValue(false);
 
-        await expect(service.accept({ inviteId: 'invite-1' })).rejects.toMatchObject({ status: 409 });
+        await expect(responder.accept({ inviteId: 'invite-1' }, INVITEE_ID)).rejects.toMatchObject({ status: 409 });
 
         expect(invites.emit).toHaveBeenCalledWith([revocation.event]);
         expect(members.emitMemberAdmitted).not.toHaveBeenCalled();
@@ -398,7 +340,7 @@ describe('PartyInviteService', () => {
         async (_label, arrange) => {
           arrange();
 
-          await expect(service.accept({ inviteId: 'invite-1' })).rejects.toMatchObject({
+          await expect(responder.accept({ inviteId: 'invite-1' }, INVITEE_ID)).rejects.toMatchObject({
             status: 409,
             response: expect.objectContaining({ key: 'errors.household.already_a_member' }),
           });
@@ -411,7 +353,7 @@ describe('PartyInviteService', () => {
     it('admits with the seam’s default when the invite offers no role', async () => {
       acceptance = { ...acceptance, invite: partyView({ role: null }) };
 
-      await service.accept({ inviteId: 'invite-1' });
+      await responder.accept({ inviteId: 'invite-1' }, INVITEE_ID);
 
       expect(members.addMemberWithin).toHaveBeenCalledWith(db, expect.objectContaining({ role: undefined }));
     });
@@ -421,7 +363,7 @@ describe('PartyInviteService', () => {
       async (name) => {
         acceptance = { ...acceptance, invite: partyView({ role: { id: 'role-x', name } }) };
 
-        const refusal = service.accept({ inviteId: 'invite-1' });
+        const refusal = responder.accept({ inviteId: 'invite-1' }, INVITEE_ID);
 
         await expect(refusal).rejects.toThrow(`Invite invite-1 offers the role '${name}'`);
         await expect(refusal).rejects.not.toBeInstanceOf(ConflictException);
@@ -432,7 +374,7 @@ describe('PartyInviteService', () => {
     it('admits nobody when the household lock finds it gone', async () => {
       db.$queryRaw.mockResolvedValue([] as never);
 
-      await expect(service.accept({ inviteId: 'invite-1' })).rejects.toThrow(NotFoundException);
+      await expect(responder.accept({ inviteId: 'invite-1' }, INVITEE_ID)).rejects.toThrow(NotFoundException);
 
       expect(invites.acceptWithin).not.toHaveBeenCalled();
       expect(members.addMemberWithin).not.toHaveBeenCalled();
@@ -448,7 +390,7 @@ describe('PartyInviteService', () => {
       });
 
       it("asks the sender's own ability about the invite as one opened directly, with the household read under the lock", async () => {
-        await service.accept({ inviteId: 'invite-1' });
+        await responder.accept({ inviteId: 'invite-1' }, INVITEE_ID);
 
         expect(db.household.findUnique).toHaveBeenCalledWith({
           where: { id: HOUSEHOLD_ID },
@@ -466,7 +408,7 @@ describe('PartyInviteService', () => {
         offer = { ...offer, role: null };
         acceptance = { ...acceptance, invite: partyView({ role: null }) };
 
-        await service.accept({ inviteId: 'invite-1' });
+        await responder.accept({ inviteId: 'invite-1' }, INVITEE_ID);
 
         expect(senderCan).toHaveBeenCalledWith(
           Action.create,
@@ -479,7 +421,7 @@ describe('PartyInviteService', () => {
         offer = { ...offer, needsApproval: true };
         senderCan.mockReturnValueOnce(false).mockReturnValueOnce(true);
 
-        await service.accept({ inviteId: 'invite-1' });
+        await responder.accept({ inviteId: 'invite-1' }, INVITEE_ID);
 
         expect(senderCan).toHaveBeenNthCalledWith(2, Action.create, ResourceType.Invite, subject(true));
         // One graph for both questions.
@@ -491,7 +433,7 @@ describe('PartyInviteService', () => {
       it('revokes an unapproved invite its sender could now send only for approval', async () => {
         senderCan.mockReturnValueOnce(false).mockReturnValueOnce(true);
 
-        await expect(service.accept({ inviteId: 'invite-1' })).rejects.toMatchObject({ status: 409 });
+        await expect(responder.accept({ inviteId: 'invite-1' }, INVITEE_ID)).rejects.toMatchObject({ status: 409 });
 
         // An invite that never waited for an approver isn't one now.
         expect(senderCan).toHaveBeenCalledTimes(1);
@@ -508,7 +450,9 @@ describe('PartyInviteService', () => {
         }) as never);
         invites.emit.mockImplementation(() => expect(committed).toBe(true));
 
-        const refusal = await service.accept({ token: 'live-accept-credential' }).catch((error: unknown) => error);
+        const refusal = await responder
+          .accept({ token: 'live-accept-credential' }, INVITEE_ID)
+          .catch((error: unknown) => error);
 
         // Nothing beyond the envelope and the `state`: no invite id, so the
         // invitee learns nothing of why (#1114).
@@ -539,7 +483,7 @@ describe('PartyInviteService', () => {
       it('asks nothing of the sender when the lib refuses the accept first', async () => {
         invites.findAcceptableWithin.mockRejectedValue(new ConflictException('awaiting approval'));
 
-        await expect(service.accept({ inviteId: 'invite-1' })).rejects.toThrow(ConflictException);
+        await expect(responder.accept({ inviteId: 'invite-1' }, INVITEE_ID)).rejects.toThrow(ConflictException);
 
         expect(abilities.userAbilityWithin).not.toHaveBeenCalled();
         expect(invites.revokeWithin).not.toHaveBeenCalled();
@@ -557,7 +501,7 @@ describe('PartyInviteService', () => {
           }),
         );
 
-        await expect(service.accept({ inviteId: 'invite-1' })).rejects.toMatchObject({
+        await expect(responder.accept({ inviteId: 'invite-1' }, INVITEE_ID)).rejects.toMatchObject({
           status: 409,
           response: expect.objectContaining({ key: 'errors.household.already_a_member' }),
         });
@@ -570,153 +514,9 @@ describe('PartyInviteService', () => {
     });
   });
 
-  describe('listReceived', () => {
-    it("lists the user's open household invites into live households they are not in, newest first", async () => {
-      jest.useFakeTimers({ now: NOW, doNotFake: ['nextTick', 'setImmediate'] });
-
-      try {
-        db.invite.findMany.mockResolvedValue(resolves([{ id: 'invite-1' }]));
-        db.invite.count.mockResolvedValue(1);
-
-        const page = await service.listReceived(paginationQuery({ page: 2, limit: 10 }));
-
-        const where = {
-          type: InviteType.Household,
-          AND: [
-            {
-              inviterId: { not: INVITEE_ID },
-              OR: [{ inviteeId: INVITEE_ID }, { inviteeId: null, inviteeEmail: ADDRESS, withheld: false }],
-            },
-            // Pending only: one awaiting approval is not yet the household's
-            // offer, and the invitee does not see it until it is (#166).
-            { status: InviteStatus.Pending },
-            { expiresAt: { gt: NOW } },
-            { household: { is: { deletedAt: null, members: { none: { userId: INVITEE_ID } } } } },
-          ],
-        };
-        expect(db.invite.findMany).toHaveBeenCalledWith({
-          where,
-          select: { ...PARTY_INVITE_SELECT, household: { select: { id: true, name: true } } },
-          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-          skip: 10,
-          take: 10,
-        });
-        expect(db.invite.count).toHaveBeenCalledWith({ where });
-        expect(batchTransactionCall(db).options).toEqual({
-          isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
-        });
-        expect(page).toEqual({ rows: [{ id: 'invite-1' }], total: 1 });
-      } finally {
-        jest.useRealTimers();
-      }
-    });
-
-    it('matches by id alone while the address is unverified', async () => {
-      db.user.findUnique.mockResolvedValue(resolves({ email: ADDRESS, emailVerified: false }));
-
-      await service.listReceived(paginationQuery());
-
-      const [{ where }] = db.invite.findMany.mock.calls[0] as [{ where: Prisma.InviteWhereInput }];
-      expect((where.AND as Prisma.InviteWhereInput[])[0]).toEqual({
-        inviterId: { not: INVITEE_ID },
-        OR: [{ inviteeId: INVITEE_ID }],
-      });
-    });
-  });
-
-  describe('listSent (#751)', () => {
-    beforeEach(() => auditContext.getActor.mockReturnValue(INVITER_SESSION));
-
-    const withFakeNow = async (work: () => Promise<void>) => {
-      jest.useFakeTimers({ now: NOW, doNotFake: ['nextTick', 'setImmediate'] });
-
-      try {
-        await work();
-      } finally {
-        jest.useRealTimers();
-      }
-    };
-
-    /**
-     * Where the inviter is not a member, only what they can still withdraw: a
-     * server owner's invites, since leaving revoked a former member's (#747).
-     */
-    const withdrawableOrStillMember = {
-      OR: [
-        { household: { is: { members: { some: { userId: INVITER_ID } } } } },
-        { status: { in: [InviteStatus.AwaitingApproval, InviteStatus.Pending] }, expiresAt: { gt: NOW } },
-      ],
-    };
-
-    it("lists the user's outstanding and expired household invites, newest first in one snapshot", () =>
-      withFakeNow(async () => {
-        db.invite.findMany.mockResolvedValue(
-          resolves([{ id: 'invite-1', status: InviteStatus.Pending, expiresAt: LATER }]),
-        );
-        db.invite.count.mockResolvedValue(1);
-
-        const page = await service.listSent(paginationQuery({ page: 2, limit: 10 }));
-
-        const where = {
-          type: InviteType.Household,
-          inviterId: INVITER_ID,
-          // An invite into a deleted household is not listed; the delete revoked it.
-          household: { is: { deletedAt: null } },
-          AND: [
-            // Expired whether or not the sweep has stamped it, so the inviter
-            // sees it lapse and can send another.
-            { status: { in: [InviteStatus.AwaitingApproval, InviteStatus.Pending, InviteStatus.Expired] } },
-            withdrawableOrStillMember,
-          ],
-        };
-        expect(db.invite.findMany).toHaveBeenCalledWith({
-          where,
-          select: { ...PARTY_INVITE_SELECT, household: { select: { id: true, name: true } } },
-          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-          skip: 10,
-          take: 10,
-        });
-        expect(db.invite.count).toHaveBeenCalledWith({ where });
-        expect(batchTransactionCall(db).options).toEqual({
-          isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
-        });
-        expect(page).toEqual({ rows: [{ id: 'invite-1', status: InviteStatus.Pending, expiresAt: LATER }], total: 1 });
-      }));
-
-    it('filters to any one status as it stands now, still only withdrawable rows where they left', () =>
-      withFakeNow(async () => {
-        await service.listSent(Object.assign(paginationQuery(), { status: InviteStatus.Accepted }));
-        await service.listSent(Object.assign(paginationQuery(), { status: InviteStatus.Expired }));
-
-        const whereOf = (call: number) =>
-          (db.invite.findMany.mock.calls[call] as [{ where: Prisma.InviteWhereInput }])[0].where;
-        expect(whereOf(0).AND).toEqual([{ status: InviteStatus.Accepted }, withdrawableOrStillMember]);
-        expect(whereOf(1).AND).toEqual([
-          {
-            OR: [
-              { status: InviteStatus.Expired },
-              { status: { in: [InviteStatus.AwaitingApproval, InviteStatus.Pending] }, expiresAt: { lte: NOW } },
-            ],
-          },
-          withdrawableOrStillMember,
-        ]);
-      }));
-
-    it('reports an outstanding row past its expiry as Expired', () =>
-      withFakeNow(async () => {
-        const lapsed = { id: 'invite-1', status: InviteStatus.AwaitingApproval, expiresAt: new Date('2026-10-01') };
-        db.invite.findMany.mockResolvedValue(resolves([lapsed]));
-        db.invite.count.mockResolvedValue(1);
-
-        const page = await service.listSent(paginationQuery());
-
-        expect(page.rows).toEqual([{ ...lapsed, status: InviteStatus.Expired }]);
-      }));
-  });
-
   describe('decline', () => {
     it('declines a household invite of theirs, the lib binding the type in its own read, taking no lock', async () => {
-      await expect(service.decline({ inviteId: 'invite-1' })).resolves.toBe(declination.invite);
+      await expect(responder.decline({ inviteId: 'invite-1' }, INVITEE_ID)).resolves.toBe(declination.invite);
 
       expect(invites.declineWithin).toHaveBeenCalledWith(db, {
         target: { inviteId: 'invite-1' },
@@ -733,7 +533,7 @@ describe('PartyInviteService', () => {
     it('vouches for no address that is unverified', async () => {
       db.user.findUnique.mockResolvedValue(resolves({ email: ADDRESS, emailVerified: false }));
 
-      await service.decline({ inviteId: 'invite-1' });
+      await responder.decline({ inviteId: 'invite-1' }, INVITEE_ID);
 
       expect(invites.declineWithin).toHaveBeenCalledWith(db, {
         target: { inviteId: 'invite-1' },
@@ -744,7 +544,7 @@ describe('PartyInviteService', () => {
     });
 
     it('passes a token through as the target', async () => {
-      await service.decline({ token: 'live-accept-credential' });
+      await responder.decline({ token: 'live-accept-credential' }, INVITEE_ID);
 
       expect(invites.declineWithin).toHaveBeenCalledWith(
         db,
@@ -761,7 +561,7 @@ describe('PartyInviteService', () => {
       }) as never);
       invites.emit.mockImplementation(() => expect(committed).toBe(true));
 
-      await service.decline({ inviteId: 'invite-1' });
+      await responder.decline({ inviteId: 'invite-1' }, INVITEE_ID);
 
       expect(invites.emit).toHaveBeenCalledWith([declination.event]);
     });
@@ -769,17 +569,15 @@ describe('PartyInviteService', () => {
     it('announces nothing when the lib refuses, as it refuses an invite of another type', async () => {
       invites.declineWithin.mockRejectedValue(new NotFoundException());
 
-      await expect(service.decline({ inviteId: 'invite-1' })).rejects.toThrow(NotFoundException);
+      await expect(responder.decline({ inviteId: 'invite-1' }, INVITEE_ID)).rejects.toThrow(NotFoundException);
 
       expect(invites.emit).not.toHaveBeenCalled();
     });
   });
 
   describe('withdraw', () => {
-    beforeEach(() => auditContext.getActor.mockReturnValue(INVITER_SESSION));
-
     it('withdraws a household invite of theirs, the lib binding the type in its own read, taking no lock', async () => {
-      await expect(service.withdraw('invite-1')).resolves.toBe(withdrawal.invite);
+      await expect(responder.withdraw('invite-1', INVITER_ID)).resolves.toBe(withdrawal.invite);
 
       expect(invites.withdrawWithin).toHaveBeenCalledWith(db, {
         inviteId: 'invite-1',
@@ -791,7 +589,7 @@ describe('PartyInviteService', () => {
     });
 
     it('asks nothing of the inviter’s role in the household, nor of their address', async () => {
-      await service.withdraw('invite-1');
+      await responder.withdraw('invite-1', INVITER_ID);
 
       expect(db.householdMember.findMany).not.toHaveBeenCalled();
       expect(db.householdMember.findUnique).not.toHaveBeenCalled();
@@ -807,7 +605,7 @@ describe('PartyInviteService', () => {
       }) as never);
       invites.emit.mockImplementation(() => expect(committed).toBe(true));
 
-      await service.withdraw('invite-1');
+      await responder.withdraw('invite-1', INVITER_ID);
 
       expect(invites.emit).toHaveBeenCalledWith([withdrawal.event]);
     });
@@ -815,7 +613,7 @@ describe('PartyInviteService', () => {
     it('announces nothing when the lib refuses, as it refuses an invite of another type', async () => {
       invites.withdrawWithin.mockRejectedValue(new NotFoundException());
 
-      await expect(service.withdraw('invite-1')).rejects.toThrow(NotFoundException);
+      await expect(responder.withdraw('invite-1', INVITER_ID)).rejects.toThrow(NotFoundException);
 
       expect(invites.emit).not.toHaveBeenCalled();
     });

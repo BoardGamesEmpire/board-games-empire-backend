@@ -1,13 +1,14 @@
-import { InviteStatus } from '@bge/database';
+import { InviteStatus, InviteType } from '@bge/database';
+import type { HouseholdMemberWithRelations } from '@bge/household';
 import type { InvitePartyView } from '@bge/invites';
-import { paginationQuery } from '@bge/testing';
+import { boundPageQuery } from '@bge/testing';
 import 'reflect-metadata';
 import { firstValueFrom } from 'rxjs';
-import type { HouseholdMemberWithRelations } from '../member/household-member.service';
+import { ListReceivedInvitesQueryDto, ListSentInvitesQueryDto } from './dto';
 import { PartyInviteController } from './party-invite.controller';
 import type { ListedPartyInviteView, PartyInviteService } from './party-invite.service';
 
-const INVITE = { id: 'invite-1', status: InviteStatus.Accepted } as InvitePartyView;
+const INVITE = { id: 'invite-1', status: InviteStatus.Accepted, type: InviteType.Household } as InvitePartyView;
 const RECEIVED = { id: 'invite-2', household: { id: 'hh-1', name: 'Home' } } as ListedPartyInviteView;
 const SENT = { id: 'invite-3', household: { id: 'hh-1', name: 'Home' } } as ListedPartyInviteView;
 const MEMBER = { id: 'member-1', householdId: 'hh-1' } as HouseholdMemberWithRelations;
@@ -20,7 +21,7 @@ describe('PartyInviteController (delegation)', () => {
 
   beforeEach(() => {
     service = {
-      accept: jest.fn().mockResolvedValue({ invite: INVITE, member: MEMBER }),
+      accept: jest.fn().mockResolvedValue({ type: InviteType.Household, invite: INVITE, member: MEMBER }),
       listReceived: jest.fn().mockResolvedValue({ rows: [RECEIVED], total: 1 }),
       listSent: jest.fn().mockResolvedValue({ rows: [SENT], total: 1 }),
       decline: jest.fn().mockResolvedValue(DECLINED),
@@ -29,12 +30,13 @@ describe('PartyInviteController (delegation)', () => {
     controller = new PartyInviteController(service as never);
   });
 
-  it('accept forwards the id as the target, answering the invite and the membership', async () => {
+  it('accept forwards the id as the target, answering the type, the invite and the membership (#742)', async () => {
     const result = await firstValueFrom(controller.accept('invite-1'));
 
     expect(service.accept).toHaveBeenCalledWith({ inviteId: 'invite-1' });
     expect(result).toEqual({
       message: expect.objectContaining({ key: 'success.household.invite_accepted' }),
+      type: InviteType.Household,
       invite: INVITE,
       member: MEMBER,
     });
@@ -44,11 +46,11 @@ describe('PartyInviteController (delegation)', () => {
     const result = await firstValueFrom(controller.acceptByToken({ token: 'live-accept-credential' }));
 
     expect(service.accept).toHaveBeenCalledWith({ token: 'live-accept-credential' });
-    expect(result).toMatchObject({ invite: INVITE, member: MEMBER });
+    expect(result).toMatchObject({ type: InviteType.Household, invite: INVITE, member: MEMBER });
   });
 
-  it('listReceived forwards the query, wrapping the page in the envelope', async () => {
-    const query = paginationQuery({ limit: 10 });
+  it('listReceived forwards the query, ?type= included, wrapping the page in the envelope (#742)', async () => {
+    const query = boundPageQuery(ListReceivedInvitesQueryDto, { limit: 10, type: InviteType.Household });
 
     const result = await firstValueFrom(controller.listReceived(query));
 
@@ -60,7 +62,7 @@ describe('PartyInviteController (delegation)', () => {
   });
 
   it('listSent forwards the query, wrapping the page in the envelope', async () => {
-    const query = Object.assign(paginationQuery({ limit: 10 }), { status: InviteStatus.Expired });
+    const query = boundPageQuery(ListSentInvitesQueryDto, { limit: 10, status: InviteStatus.Expired });
 
     const result = await firstValueFrom(controller.listSent(query));
 

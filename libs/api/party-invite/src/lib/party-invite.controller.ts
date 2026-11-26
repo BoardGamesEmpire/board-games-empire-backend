@@ -1,13 +1,18 @@
 import { t } from '@bge/i18n';
 import type { InvitePartyView } from '@bge/invites';
-import { ApiPaginatedEnvelope, DefaultPaginationQueryDto, paginated, Unscoped } from '@bge/shared';
+import { ApiPaginatedEnvelope, paginated, Unscoped } from '@bge/shared';
 import { Body, Controller, Get, HttpCode, Param, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map } from 'rxjs/operators';
-import { InviteTokenDto, ListSentInvitesQueryDto } from '../dto';
-import type { HouseholdInviteAcceptance } from './party-invite.service';
+import {
+  InviteTokenDto,
+  ListReceivedInvitesQueryDto,
+  ListSentInvitesQueryDto,
+  PARTY_INVITE_TYPE_DESCRIPTION,
+} from './dto';
+import type { PartyAcceptance } from './party-invite.service';
 import { PartyInviteService } from './party-invite.service';
 
 /** The third case `UnscopedList` documents: bound by a rule of its own, with no ceiling to compose. */
@@ -24,14 +29,19 @@ const SENT_INVITES_SCOPE = Unscoped(
     'delegated ceiling is dropped',
 );
 
+const PAGINATION_DESCRIPTION =
+  'Paginated: `?page=` (1-based) and `?limit=`, with a `pagination` envelope carrying `total`, `totalPages` and ' +
+  '`hasMore`. See #230.';
+
 const ACCEPTED_DESCRIPTION =
-  'Joined: `{ message, invite, member }`, where `member` is the new membership, with the role the invite offered.';
+  'Accepted: `{ message, type, invite, ... }`, where `type` is the kind of invite. For a household invite, ' +
+  '`member` is the new household membership, with the role the invite offered.';
 
 const ACCEPT_CONFLICT_DESCRIPTION =
-  'Already a member of the household, in which case the invite stays open; or the invite was settled, has ' +
-  'expired, is still awaiting approval, or changed while it was being accepted';
+  'Already in the household the invite is into, in which case the invite stays open; or the invite was settled, ' +
+  'has expired, is still awaiting approval, or changed while it was being accepted';
 
-const ACCEPT_FORBIDDEN_DESCRIPTION = 'Your own invite, or not a signed-in user: API keys cannot join a household';
+const ACCEPT_FORBIDDEN_DESCRIPTION = 'Your own invite, or not a signed-in user: API keys cannot accept an invite';
 
 const DECLINED_DESCRIPTION = 'Declined: `{ message, invite }`, the invite as you see it, now `Declined`.';
 
@@ -41,8 +51,8 @@ const SETTLED_CONFLICT_DESCRIPTION =
   'The invite was already settled, has expired, or changed while it was being answered';
 
 /** Both accept routes answer alike, whichever way the invite was named. */
-function acceptedResponse({ invite, member }: HouseholdInviteAcceptance) {
-  return { message: t('success.household.invite_accepted'), invite, member };
+function acceptedResponse({ type, invite, member }: PartyAcceptance) {
+  return { message: t('success.household.invite_accepted'), type, invite, member };
 }
 
 /** Both decline routes answer alike, whichever way the invite was named. */
@@ -50,15 +60,17 @@ function declinedResponse(invite: InvitePartyView) {
   return { message: t('success.household.invite_declined'), invite };
 }
 
-// The actions a party takes on an invite of theirs, beside the household's own
-// routes under `/households/:householdId/invites`, as the invites lib splits a
-// party's primitives from a context authority's: the invitee lists, accepts or
-// declines, and the inviter lists (#751) and withdraws. Withdraw is not revoke,
-// which is the household's route for an invite someone else sent (#164).
+// The actions a party takes on an invite of theirs, of every kind, beside each
+// context's own routes (`/households/:householdId/invites`), as the invites
+// lib splits a party's primitives from a context authority's: the invitee
+// lists, accepts or declines, and the inviter lists (#751) and withdraws. The
+// route is the same for every kind; the service reads the invite's type and
+// hands it to that kind's responder (#742). Withdraw is not revoke, which is a
+// context's route for an invite someone else sent (#164).
 //
-// No API key: joining a household, or turning down or taking back an invite,
-// is the person's own act (#276), so the service refuses every actor but a
-// session user (403).
+// No API key: accepting, turning down or taking back an invite is the
+// person's own act (#276), so the service refuses every actor but a session
+// user (403).
 //
 // Must stay out of the response cache: the inbox has to drop an invite the
 // caller just accepted or declined, and a cache hit would skip the service,
@@ -70,37 +82,37 @@ export class PartyInviteController {
   constructor(private readonly partyInvites: PartyInviteService) {}
 
   @ApiOperation({
-    summary: 'List the household invites you have received',
+    summary: 'List the invites you have received',
     description:
       'The invites still open to you: sent to your user id, or to your email address once it is verified; ' +
-      '`Pending` and not expired; into a household that exists and that you are not already in. A member’s ' +
-      'invite that waits for an owner or admin to approve it is not listed until it is approved. Newest first. ' +
-      'Each carries the household that sent it, the role it offers, the inviter, and the message. Paginated: ' +
-      '`?page=` (1-based) and `?limit=`, with a `pagination` envelope carrying `total`, `totalPages` and ' +
-      '`hasMore`. See #230.',
+      '`Pending` and not expired. A household invite is listed while its household exists and you are not ' +
+      'already in it; one that waits for a household owner or household admin to approve it is not listed ' +
+      'until it is approved. Newest first. Each carries the role it offers, the inviter, and the message. ' +
+      `${PARTY_INVITE_TYPE_DESCRIPTION} ${PAGINATION_DESCRIPTION}`,
   })
   @ApiPaginatedEnvelope('invites')
+  @ApiResponse({ status: Http.BadRequest, description: 'A `?type=` no party route serves' })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Not a signed-in user: API keys cannot read an inbox' })
   @Get()
-  listReceived(@Query() query: DefaultPaginationQueryDto) {
+  listReceived(@Query() query: ListReceivedInvitesQueryDto) {
     return from(this.partyInvites.listReceived(query)).pipe(
       map((page) => paginated('invites', page, query, RECEIVED_INVITES_SCOPE)),
     );
   }
 
   @ApiOperation({
-    summary: 'List the household invites you have sent',
+    summary: 'List the invites you have sent',
     description:
       'By default, the invites still open, `Pending` or `AwaitingApproval`, and those that expired, so you can ' +
       'send another. `?status=` picks any status, judged as it stands now, so an outstanding invite past its ' +
       'expiry is `Expired`. Into a household you have left or been removed from, only the invites you can still ' +
       'withdraw are listed, whatever the filter; none into a household that was deleted. Newest first. Each ' +
-      'carries the household it is into, the role it offers, the address and the message you wrote. ' +
-      'Paginated: `?page=` (1-based) and `?limit=`, with a `pagination` envelope carrying `total`, ' +
-      '`totalPages` and `hasMore`. See #230.',
+      'carries the role it offers, the address and the message you wrote. ' +
+      `${PARTY_INVITE_TYPE_DESCRIPTION} ${PAGINATION_DESCRIPTION}`,
   })
   @ApiPaginatedEnvelope('invites')
+  @ApiResponse({ status: Http.BadRequest, description: 'A `?type=` no party route serves, or an unknown `?status=`' })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Not a signed-in user: API keys cannot read your invites' })
   @Get('sent')
@@ -111,9 +123,9 @@ export class PartyInviteController {
   }
 
   @ApiOperation({
-    summary: 'Accept a household invite by the token from its link',
+    summary: 'Accept an invite by the token from its link',
     description:
-      'The token goes in the body, never the URL. Whoever holds the link joins, whatever their address, so ' +
+      'The token goes in the body, never the URL. Whoever holds the link accepts, whatever their address, so ' +
       'treat it as a password. No email carries links yet (#173).',
   })
   @ApiResponse({ status: Http.Ok, description: ACCEPTED_DESCRIPTION })
@@ -121,7 +133,7 @@ export class PartyInviteController {
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.PaymentRequired, description: 'The household is at its member cap (#288)' })
   @ApiResponse({ status: Http.Forbidden, description: ACCEPT_FORBIDDEN_DESCRIPTION })
-  @ApiResponse({ status: Http.NotFound, description: 'No invite matches the link, or its household is gone' })
+  @ApiResponse({ status: Http.NotFound, description: 'No invite matches the link, or its context is gone' })
   @ApiResponse({ status: Http.Conflict, description: ACCEPT_CONFLICT_DESCRIPTION })
   @HttpCode(Http.Ok)
   @Post('accept')
@@ -130,7 +142,7 @@ export class PartyInviteController {
   }
 
   @ApiOperation({
-    summary: 'Accept a household invite you have received',
+    summary: 'Accept an invite you have received',
     description:
       'An invite sent to your user id, or to your email address once it is verified. Accepting one you could ' +
       'not reach is a 404, so the answer never confirms that someone else’s invite exists.',
@@ -140,7 +152,7 @@ export class PartyInviteController {
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.PaymentRequired, description: 'The household is at its member cap (#288)' })
   @ApiResponse({ status: Http.Forbidden, description: ACCEPT_FORBIDDEN_DESCRIPTION })
-  @ApiResponse({ status: Http.NotFound, description: 'No invite of yours has that id, or its household is gone' })
+  @ApiResponse({ status: Http.NotFound, description: 'No invite of yours has that id, or its context is gone' })
   @ApiResponse({ status: Http.Conflict, description: ACCEPT_CONFLICT_DESCRIPTION })
   @HttpCode(Http.Ok)
   @Post(':inviteId/accept')
@@ -149,7 +161,7 @@ export class PartyInviteController {
   }
 
   @ApiOperation({
-    summary: 'Decline a household invite by the token from its link',
+    summary: 'Decline an invite by the token from its link',
     description:
       'The token goes in the body, never the URL. An invite awaiting approval can be declined too: a refusal ' +
       'never waits on an approver.',
@@ -167,7 +179,7 @@ export class PartyInviteController {
   }
 
   @ApiOperation({
-    summary: 'Decline a household invite you have received',
+    summary: 'Decline an invite you have received',
     description:
       'An invite sent to your user id, or to your email address once it is verified. An invite awaiting ' +
       'approval can be declined too. Declining one you could not reach is a 404, so the answer never confirms ' +
@@ -186,10 +198,10 @@ export class PartyInviteController {
   }
 
   @ApiOperation({
-    summary: 'Withdraw a household invite you sent',
+    summary: 'Withdraw an invite you sent',
     description:
-      'Takes back an invite you sent, pending or awaiting approval, whatever your role in the household is ' +
-      'now. To cancel an invite someone else sent, an owner or admin revokes it: ' +
+      'Takes back an invite you sent, pending or awaiting approval, whatever your role in its context is now. ' +
+      'To cancel a household invite someone else sent, a household owner or household admin revokes it: ' +
       '`POST /households/:householdId/invites/:inviteId/revoke`.',
   })
   @ApiParam({ name: 'inviteId', type: String })

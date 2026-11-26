@@ -1,4 +1,5 @@
 import type { HouseholdBan, Invite } from '@bge/database';
+import { InviteType } from '@bge/database';
 import type { HttpResponseLike, RequestDescription, Wire } from '../support/wire';
 import { envelopeFailure, isRecord } from '../support/wire';
 import type {
@@ -180,12 +181,14 @@ export interface AcceptInviteEnvelope {
   readonly invite: InvitePartyRowWire;
   readonly member: HouseholdMemberProjection;
   readonly message: string;
+  readonly type: typeof InviteType.Household;
 }
 
 /**
  * `POST /api/invites/:inviteId/accept` and `POST /api/invites/accept`:
- * `{ message, invite, member }`. The member must name its household and
- * user, which are what a client joins on.
+ * `{ message, type, invite, member }`. The member must name its household and
+ * user, which are what a client joins on; `type` says which kind of invite the
+ * party route handed on, always `Household` here (#742).
  */
 export function acceptEnvelope(response: HttpResponseLike, request: RequestDescription): AcceptInviteEnvelope {
   const { message, invite } = inviteEnvelope(response, request);
@@ -200,7 +203,11 @@ export function acceptEnvelope(response: HttpResponseLike, request: RequestDescr
     return fail("it carried no 'member' object with string 'id', 'householdId' and 'userId'", request, response);
   }
 
-  return { message, invite, member: member as unknown as HouseholdMemberProjection };
+  if (response.body['type'] !== InviteType.Household) {
+    return fail(`its 'type' was not '${InviteType.Household}'`, request, response);
+  }
+
+  return { message, invite, member: member as unknown as HouseholdMemberProjection, type: InviteType.Household };
 }
 
 /** `GET /api/invites`: `{ invites: [...], pagination }`, each row naming its household. */
