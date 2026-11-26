@@ -131,8 +131,8 @@ export class CollectionCopyController {
   @ApiOperation({
     summary: 'Remove a copy from your collection',
     description:
-      'The copy is marked removed, dated `removedOn`, or today (UTC) when none is given, optionally with a ' +
-      'reason. Removing the last copy you own removes the game from your collection, with that reason, as ' +
+      'The copy is marked removed, dated `removedOn`, or when none is given, today (UTC), or the copy’s ' +
+      'acquisition day when it is later, optionally with a reason. Removing the last copy you own removes the game from your collection, with that reason, as ' +
       'removing the entry does: in every event that offers it, nominations of the game that await an outcome ' +
       'pause, and the game leaves the lineup of every date still ahead. That needs permission to remove the ' +
       'entry too. Only the entry’s owner can remove one: anyone else is told the entry was not found.',

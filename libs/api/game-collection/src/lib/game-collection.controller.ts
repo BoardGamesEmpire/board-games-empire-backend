@@ -65,8 +65,8 @@ export class GameCollectionController {
       'Idempotent on (user, platformGame, medium). A new entry is created with one copy, described by `copy`. ' +
       'Adding a removed entry again restores it with its play history and one new copy, described by `copy`, ' +
       'and the offers its removal paused in events count again. Adding an entry you still own updates its ' +
-      'fields, ignores `copy` and adds no copy, so a repeated request is harmless. A new entry needs ' +
-      'permission to create it; an entry you already have needs permission to update it.',
+      'fields, ignores `copy` and adds no copy, so a repeated request is harmless. Every add needs ' +
+      'permission to create an entry; an entry you already have needs permission to update it too.',
   })
   @ApiResponse({ status: Http.Created, type: GameCollectionMessageResponseDto })
   @ApiResponse({
@@ -81,8 +81,8 @@ export class GameCollectionController {
   @ApiResponse({
     status: Http.Forbidden,
     description:
-      'Insufficient permissions: no permission to create the new entry, or to update the entry you already ' +
-      'have for this platform game and medium',
+      'Insufficient permissions: no permission to create an entry, which every add needs, or to update the ' +
+      'entry you already have for this platform game and medium',
   })
   @ApiResponse({
     status: Http.NotFound,
@@ -116,8 +116,8 @@ export class GameCollectionController {
     summary: "Remove a game from the acting user's collection",
     description:
       'The entry is marked removed, optionally with a reason, so play history survives, and adding the same ' +
-      'game back restores it. Each copy you still own is removed with it, dated `removedOn`, or today (UTC) ' +
-      'when none is given, with the same reason. ' +
+      'game back restores it. Each copy you still own is removed with it, dated `removedOn`, or when none is ' +
+      'given, today (UTC), or that copy’s acquisition day when it is later, with the same reason. ' +
       'In every event that offers it, unless the event was deleted, the offer stops counting: ' +
       'nominations of the game that await an outcome pause, and the game leaves the lineup of every date still ahead. ' +
       'The offers stay, and count again when the game is added back, which resumes the paused nominations.',

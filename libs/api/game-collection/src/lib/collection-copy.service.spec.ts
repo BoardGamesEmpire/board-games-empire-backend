@@ -115,6 +115,11 @@ describe('CollectionCopyService (#1231)', () => {
       data: { lastUpdated: expect.any(Date) },
       select: { id: true },
     });
+    // Both are delegates of one mock database service, so their call orders
+    // come from one counter and compare.
+    expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      db.gameCollection.update.mock.invocationCallOrder[0] ?? 0,
+    );
     expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(
       ResourceType.GameCollection,
       Action.update,
