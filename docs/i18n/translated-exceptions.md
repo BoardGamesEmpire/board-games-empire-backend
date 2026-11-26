@@ -59,8 +59,9 @@ better-auth writes itself (below):
   row (#634).
 
 - The collection's other refusals (#1231), each with its own code:
-  - `COLLECTION_COPY_LIMIT_REACHED`: a 409 for an entry already holding its
-    most copies, removed ones included, with that number in `limit`;
+  - `COLLECTION_COPY_LIMIT_REACHED`: a 409 for an entry whose user already
+    owns its most copies, with that number in `limit`; removed and taken-back
+    copies don't count;
   - `COLLECTION_COPY_NOT_REMOVED`: a 409 for a change to the removal of a copy
     that has not been removed;
   - `COLLECTION_CONDITION_DIGITAL`: a 400 for a condition on a digital copy;

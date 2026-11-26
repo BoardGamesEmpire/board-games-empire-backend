@@ -1,5 +1,5 @@
 import type { GameCollection, Prisma } from '@bge/database';
-import { GameMedium, GameRemovalReason } from '@bge/database';
+import { Action, GameMedium, GameRemovalReason, ResourceType } from '@bge/database';
 import type { CollectionSupplyChange } from '@bge/event';
 import { emitCollectionSupplyChanges, syncCollectionEntrySupply } from '@bge/event';
 import type { MockDatabaseService } from '@bge/testing';
@@ -27,8 +27,12 @@ const SUPPLY_CHANGES: CollectionSupplyChange[] = [
 const NOW = new Date('2026-11-26T12:00:00Z');
 const REMOVED_AT = new Date('2026-11-01T00:00:00Z');
 
-/** The entry as reconcile reads it: its removal, and its number of owned copies (#1231). */
-const entryState = (deletedAt: Date | null, owned: number) => ({ deletedAt, _count: { copies: owned } });
+/** The entry as reconcile reads it: its removal and reason, and its number of owned copies (#1231). */
+const entryState = (deletedAt: Date | null, owned: number, deleteReason: GameRemovalReason | null = null) => ({
+  deleteReason,
+  deletedAt,
+  _count: { copies: owned },
+});
 
 describe('CollectionWriteService', () => {
   let service: CollectionWriteService;
@@ -75,7 +79,11 @@ describe('CollectionWriteService', () => {
 
       expect(db.gameCollection.findUniqueOrThrow).toHaveBeenCalledWith({
         where: { id: 'gc-1' },
-        select: { deletedAt: true, _count: { select: { copies: { where: { removedAt: null, retractedAt: null } } } } },
+        select: {
+          deleteReason: true,
+          deletedAt: true,
+          _count: { select: { copies: { where: { removedAt: null, retractedAt: null } } } },
+        },
       });
       // The entry is removed at NOW, so the copy removed at NOW names its reason.
       expect(db.collectionCopy.findFirst).toHaveBeenCalledWith({
@@ -165,15 +173,61 @@ describe('CollectionWriteService', () => {
       });
     });
 
-    // A reason the write gives is read only on a flip, so it never rewrites
-    // the reason of an entry that was removed already (#1231).
-    it("leaves a removed entry's reason alone when the write gives one, and reads no copy", async () => {
-      db.gameCollection.findUniqueOrThrow.mockResolvedValue(entryState(REMOVED_AT, 0) as never);
+    // A correction of the reason of any copy removed with the entry gives
+    // the entry that reason, not only one of the newest copy (#1231).
+    it('gives a removed entry the reason the write gives, and reads no copy', async () => {
+      db.gameCollection.findUniqueOrThrow.mockResolvedValue(entryState(REMOVED_AT, 0, GameRemovalReason.Sold) as never);
 
-      await expect(service.reconcileOwnership(asTx(db), 'gc-1', NOW, GameRemovalReason.Sold)).resolves.toBeNull();
+      await expect(service.reconcileOwnership(asTx(db), 'gc-1', NOW, GameRemovalReason.Gifted)).resolves.toBeNull();
 
-      expect(db.gameCollection.update.mock.calls[0]?.[0]?.data).toEqual({ lastUpdated: NOW });
+      expect(db.gameCollection.update.mock.calls[0]?.[0]?.data).toEqual({
+        deleteReason: GameRemovalReason.Gifted,
+        lastUpdated: NOW,
+      });
+      expect(db.collectionCopy.count).not.toHaveBeenCalled();
       expect(db.collectionCopy.findFirst).not.toHaveBeenCalled();
+    });
+
+    // Copies A and B were removed with the entry as Sold, and A's reason was
+    // corrected to Gifted, which the entry took. An edit of B that gives no
+    // reason must not hand the entry B's Sold back (#1231).
+    it("keeps a removed entry's reason while a copy removed with it still carries it", async () => {
+      db.gameCollection.findUniqueOrThrow.mockResolvedValue(
+        entryState(REMOVED_AT, 0, GameRemovalReason.Gifted) as never,
+      );
+      db.collectionCopy.count.mockResolvedValue(1);
+      db.collectionCopy.findFirst.mockResolvedValue({ removeReason: GameRemovalReason.Sold } as never);
+
+      await service.reconcileOwnership(asTx(db), 'gc-1', NOW);
+
+      expect(db.collectionCopy.count).toHaveBeenCalledWith({
+        where: {
+          entryId: 'gc-1',
+          removedAt: REMOVED_AT,
+          removeReason: GameRemovalReason.Gifted,
+          AND: { removedAt: { not: null }, retractedAt: null },
+        },
+      });
+      expect(db.collectionCopy.findFirst).not.toHaveBeenCalled();
+      expect(db.gameCollection.update.mock.calls[0]?.[0]?.data).toEqual({
+        deleteReason: GameRemovalReason.Gifted,
+        lastUpdated: NOW,
+      });
+    });
+
+    it('reads the reason again when no copy removed with the entry carries its reason any more', async () => {
+      db.gameCollection.findUniqueOrThrow.mockResolvedValue(
+        entryState(REMOVED_AT, 0, GameRemovalReason.Gifted) as never,
+      );
+      db.collectionCopy.count.mockResolvedValue(0);
+      db.collectionCopy.findFirst.mockResolvedValue({ removeReason: GameRemovalReason.Sold } as never);
+
+      await service.reconcileOwnership(asTx(db), 'gc-1', NOW);
+
+      expect(db.gameCollection.update.mock.calls[0]?.[0]?.data).toEqual({
+        deleteReason: GameRemovalReason.Sold,
+        lastUpdated: NOW,
+      });
     });
   });
 
@@ -245,6 +299,64 @@ describe('CollectionWriteService', () => {
       db.$queryRaw.mockResolvedValue([] as never);
 
       await expect(service.lockEntry(asTx(db), 'gc-404')).resolves.toBeNull();
+    });
+
+    // Given its owner, the lock names them, so another user's entry is never
+    // locked (#1231).
+    it("locks only the given owner's entry", async () => {
+      db.$queryRaw.mockResolvedValue([] as never);
+
+      await expect(service.lockEntry(asTx(db), 'gc-1', 'user-2')).resolves.toBeNull();
+
+      const [query] = db.$queryRaw.mock.calls[0] as unknown as [Prisma.Sql];
+      expect(rawQueryText(query)).toMatch(/WHERE id = \? AND user_id = \? FOR UPDATE$/);
+      expect(query.values).toEqual(['gc-1', 'user-2']);
+    });
+  });
+
+  describe('lockEntryUnder (#1231)', () => {
+    const COND = { userId: 'user-1' };
+    const abilityService = { getCurrentResourceConditions: jest.fn(() => [COND]) };
+    const LOCKED = { deletedAt: null, medium: GameMedium.Physical, platformGameId: 'pg-1', userId: 'user-1' };
+
+    it("reads the entry under the action's conditions, then locks it", async () => {
+      db.gameCollection.findFirst.mockResolvedValue({ id: 'gc-1' } as never);
+      db.$queryRaw.mockResolvedValue([LOCKED] as never);
+
+      await expect(service.lockEntryUnder(asTx(db), abilityService, 'gc-1', Action.delete)).resolves.toEqual(LOCKED);
+
+      expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(
+        ResourceType.GameCollection,
+        Action.delete,
+      );
+      expect(db.gameCollection.findFirst).toHaveBeenCalledWith({
+        where: { id: 'gc-1', AND: [COND] },
+        select: { id: true },
+      });
+      expect(db.gameCollection.findFirst.mock.invocationCallOrder[0]).toBeLessThan(
+        db.$queryRaw.mock.invocationCallOrder[0] ?? 0,
+      );
+    });
+
+    // A request for an entry the actor may not write locks nothing, so it
+    // can't make the owner's writes wait behind it.
+    it('answers COLLECTION_ENTRY_NOT_FOUND for an entry outside the conditions, and locks nothing', async () => {
+      db.gameCollection.findFirst.mockResolvedValue(null);
+
+      await expect(service.lockEntryUnder(asTx(db), abilityService, 'gc-1', Action.update)).rejects.toMatchObject({
+        status: 404,
+        code: 'COLLECTION_ENTRY_NOT_FOUND',
+      });
+      expect(db.$queryRaw).not.toHaveBeenCalled();
+    });
+
+    it('answers COLLECTION_ENTRY_NOT_FOUND for an entry gone before the lock', async () => {
+      db.gameCollection.findFirst.mockResolvedValue({ id: 'gc-1' } as never);
+      db.$queryRaw.mockResolvedValue([] as never);
+
+      await expect(service.lockEntryUnder(asTx(db), abilityService, 'gc-1', Action.update)).rejects.toMatchObject({
+        code: 'COLLECTION_ENTRY_NOT_FOUND',
+      });
     });
   });
 

@@ -295,3 +295,12 @@ export type GameCollectionRow = Omit<GameCollectionWithRelations, '_count' | 'co
   /** The number of copies the entry's owner still has: neither removed nor taken back (#1231). */
   quantity: number;
 };
+
+/**
+ * Whether `copy` was removed with its entry (#1231): every write that removes
+ * an entry stamps the copy's `removedAt` and the entry's `deletedAt` from one
+ * instant.
+ */
+export function removedWithEntry(copy: { removedAt: Date | null }, entry: { deletedAt: Date | null }): boolean {
+  return copy.removedAt !== null && entry.deletedAt !== null && copy.removedAt.getTime() === entry.deletedAt.getTime();
+}

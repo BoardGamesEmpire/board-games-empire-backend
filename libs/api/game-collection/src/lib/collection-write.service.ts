@@ -20,6 +20,15 @@ export interface LockedEntry {
 /** What one write of a collection entry did: its answer, and the entry whose copies it may have changed. */
 export interface EntryWrite<T> {
   entryId: string;
+
+  /**
+   * The reason the entry takes from this write, when the write learns it
+   * only under the entry's lock (#1231): a correction of the reason of a copy
+   * removed with the entry. Given, it takes the place of the `removeReason`
+   * handed to `run`.
+   */
+  removeReason?: GameRemovalReason | null;
+
   result: T;
 }
 
@@ -131,18 +140,51 @@ export class CollectionWriteService {
   /**
    * Locks the entry's row `FOR UPDATE`, and answers what a write checks it
    * against: the entry's owner, platform game and medium, and whether it is removed.
-   * Null when no entry has the id. Make it the transaction's first lock
-   * (#1221).
+   * Null when no entry has the id, or, given `ownerId`, none of that user's
+   * has it: another user's entry is then never locked (#1231). Make it the
+   * transaction's first lock (#1221).
    */
-  async lockEntry(tx: Prisma.TransactionClient, entryId: string): Promise<LockedEntry | null> {
+  async lockEntry(tx: Prisma.TransactionClient, entryId: string, ownerId?: string): Promise<LockedEntry | null> {
     const [locked] = await tx.$queryRaw<LockedEntry[]>(Prisma.sql`
       SELECT deleted_at AS "deletedAt", medium, platform_game_id AS "platformGameId", user_id AS "userId"
       FROM game_collections
-      WHERE id = ${entryId}
+      WHERE id = ${entryId}${ownerId === undefined ? Prisma.empty : Prisma.sql` AND user_id = ${ownerId}`}
       FOR UPDATE
     `);
 
     return locked ?? null;
+  }
+
+  /**
+   * Locks the entry's row as {@link lockEntry} does, once a plain read has
+   * found it inside the actor's `action` conditions (#1231). An entry the
+   * actor may not write answers `COLLECTION_ENTRY_NOT_FOUND` before anything
+   * is locked, so a request for another user's entry never makes its owner's
+   * writes wait. The read takes no lock, so the entry's is still the
+   * transaction's first (#1221); the write's own `where` still holds the
+   * entry to the conditions ({@link writeEntryUnder}).
+   */
+  async lockEntryUnder(
+    tx: Prisma.TransactionClient,
+    abilityService: Pick<AbilityService, 'getCurrentResourceConditions'>,
+    entryId: string,
+    action: Action,
+  ): Promise<LockedEntry> {
+    const writable = await tx.gameCollection.findFirst({
+      where: {
+        id: entryId,
+        // eslint-disable-next-line no-restricted-syntax -- single-row pre-read for a write by id, not a collection read
+        AND: abilityService.getCurrentResourceConditions(ResourceType.GameCollection, action),
+      },
+      select: { id: true },
+    });
+    const locked = writable === null ? null : await this.lockEntry(tx, entryId);
+
+    if (locked === null) {
+      throw collectionEntryNotFound(entryId);
+    }
+
+    return locked;
   }
 
   /**
@@ -157,10 +199,12 @@ export class CollectionWriteService {
    *   the copy that removed it ({@link entryRemovalReason}). A copy taken back
    *   is no removal, so its reason never names the entry's.
    * - **An owned copy, the entry removed:** its removal clears.
-   * - **No owned copy, the entry removed already:** it stays removed. When the
-   *   write gives no `removeReason`, as a copy edit doesn't, the entry's
-   *   reason is read again from the copy that removed it, so a corrected
-   *   removal reason on that copy reaches the entry's summary too.
+   * - **No owned copy, the entry removed already:** it stays removed. A write
+   *   that gives a `removeReason`, as a correction of the reason of a copy
+   *   removed with the entry does, gives the entry that reason, whichever of
+   *   the copies removed with it was corrected. Any other write keeps the
+   *   entry's reason while a copy removed with the entry still carries it,
+   *   and else reads it again from the copies ({@link entryRemovalReason}).
    *
    * It always sets `lastUpdated`, which bumps `updatedAt`, so the
    * `updatedSince` catch-up resends the row after any write of its copies
@@ -174,7 +218,7 @@ export class CollectionWriteService {
   ): Promise<Pick<GameCollection, 'id' | 'deletedAt'> | null> {
     const entry = await tx.gameCollection.findUniqueOrThrow({
       where: { id: entryId },
-      select: { deletedAt: true, _count: { select: { copies: { where: OWNED_COPY } } } },
+      select: { deleteReason: true, deletedAt: true, _count: { select: { copies: { where: OWNED_COPY } } } },
     });
     const owned = entry._count.copies;
 
@@ -194,9 +238,12 @@ export class CollectionWriteService {
       return { id: entryId, deletedAt: null };
     }
 
-    if (owned === 0 && entry.deletedAt !== null && removeReason === undefined) {
+    if (owned === 0 && entry.deletedAt !== null) {
       await this.writeEntry(tx, entryId, {
-        deleteReason: await this.entryRemovalReason(tx, entryId, entry.deletedAt),
+        deleteReason:
+          removeReason === undefined
+            ? await this.entryRemovalReason(tx, entryId, entry.deletedAt, entry.deleteReason)
+            : removeReason,
         lastUpdated: now,
       });
 
@@ -219,12 +266,27 @@ export class CollectionWriteService {
    * `removedAt` is not: a racing copy removal may commit a later stamp while
    * its request waits for the entry's lock. When no copy was removed at that
    * instant, the copy removed last stands in.
+   *
+   * Several copies removed with the entry may carry different reasons once
+   * one is corrected, so the entry's `current` reason, when given, stands
+   * while one of them still carries it: an edit of another of them doesn't
+   * take it back. Otherwise the copy created last among them names it.
    */
   private async entryRemovalReason(
     tx: Prisma.TransactionClient,
     entryId: string,
     deletedAt: Date,
+    current?: GameRemovalReason | null,
   ): Promise<GameRemovalReason | null> {
+    if (
+      current !== undefined &&
+      (await tx.collectionCopy.count({
+        where: { entryId, removedAt: deletedAt, removeReason: current, AND: REMOVED_COPY },
+      })) > 0
+    ) {
+      return current;
+    }
+
     const select = { removeReason: true } as const;
     const latestFirst: Prisma.CollectionCopyOrderByWithRelationInput[] = [{ removedAt: 'desc' }, { createdAt: 'desc' }];
     const removedWithEntry = await tx.collectionCopy.findFirst({
@@ -253,7 +315,12 @@ export class CollectionWriteService {
   ): Promise<T> {
     const { answered, supplyChanges } = await this.db.$transaction(async (tx) => {
       const written = await write(tx);
-      const flipped = await this.reconcileOwnership(tx, written.entryId, now, removeReason);
+      const flipped = await this.reconcileOwnership(
+        tx,
+        written.entryId,
+        now,
+        written.removeReason === undefined ? removeReason : written.removeReason,
+      );
       const synced: CollectionSupplyChange[] | null =
         flipped === null ? null : await syncCollectionEntrySupply(tx, flipped, now);
 

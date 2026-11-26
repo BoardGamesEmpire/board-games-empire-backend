@@ -957,21 +957,19 @@ describe('GameCollectionService', () => {
       });
     });
 
-    // The copy cap counts removed and taken-back copies too (#1231), so an
-    // entry's history stays bounded.
-    it('an entry at 100 copies refuses another acquisition with COLLECTION_COPY_LIMIT_REACHED', async () => {
+    // The copy cap counts only the copies the user owns (#1231): each
+    // removal and acquisition again adds a copy, and no route deletes one, so
+    // counting removed copies would one day refuse the game for good.
+    it('a removed entry is acquired again whatever copies it has removed, as the cap counts owned copies only', async () => {
       lockedAs({ id: 'gc-1', deletedAt: REMOVED_AT });
-      db.collectionCopy.count.mockResolvedValue(100);
+      db.collectionCopy.count.mockResolvedValue(0);
 
-      await expect(
-        service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical }),
-      ).rejects.toMatchObject({
-        status: 409,
-        code: 'COLLECTION_COPY_LIMIT_REACHED',
+      await service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical });
+
+      expect(db.collectionCopy.count).toHaveBeenCalledWith({
+        where: { entryId: 'gc-1', removedAt: null, retractedAt: null },
       });
-      expect(db.collectionCopy.count).toHaveBeenCalledWith({ where: { entryId: 'gc-1' } });
-      expect(db.collectionCopy.create).not.toHaveBeenCalled();
-      expect(syncSupply).not.toHaveBeenCalled();
+      expect(db.collectionCopy.create).toHaveBeenCalledTimes(1);
     });
 
     // Two first adds of one game both find no row to lock, and both insert.
@@ -1131,6 +1129,24 @@ describe('GameCollectionService', () => {
       expect(db.gameCollection.update).not.toHaveBeenCalled();
     });
 
+    // The entry is read under the update conditions before it is locked, so
+    // a patch of another user's entry never makes its owner's writes wait
+    // (#1231).
+    it('answers COLLECTION_ENTRY_NOT_FOUND for an entry outside the update conditions, and locks nothing', async () => {
+      db.gameCollection.findFirst.mockResolvedValue(null);
+
+      await expect(service.update('gc-1', { favorite: true })).rejects.toMatchObject({
+        status: 404,
+        code: 'COLLECTION_ENTRY_NOT_FOUND',
+      });
+      expect(db.gameCollection.findFirst).toHaveBeenCalledWith({
+        where: { id: 'gc-1', AND: [COND] },
+        select: { id: true },
+      });
+      expect(db.$queryRaw).not.toHaveBeenCalled();
+      expect(db.gameCollection.update).not.toHaveBeenCalled();
+    });
+
     // The rating is compared with the entry's current one under the entry's
     // lock, so two patches can't both see the old rating and append twice. It
     // changes no ownership, so it runs in a plain transaction: no reconcile,
@@ -1286,6 +1302,24 @@ describe('GameCollectionService', () => {
       // After its copies are removed the entry owns none, so the reconcile
       // removes it (#1231).
       entryReads({ deletedAt: null, owned: 0 }, entryOwning(0, { deletedAt: new Date() }));
+    });
+
+    // The entry is read under the delete conditions before it is locked, so
+    // a removal of another user's entry never makes its owner's writes wait
+    // (#1231).
+    it('answers COLLECTION_ENTRY_NOT_FOUND for an entry outside the delete conditions, and locks nothing', async () => {
+      db.gameCollection.findFirst.mockResolvedValue(null);
+
+      await expect(service.remove('gc-1', { reason: GameRemovalReason.Sold })).rejects.toMatchObject({
+        status: 404,
+        code: 'COLLECTION_ENTRY_NOT_FOUND',
+      });
+      expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(
+        ResourceType.GameCollection,
+        Action.delete,
+      );
+      expect(db.$queryRaw).not.toHaveBeenCalled();
+      expect(db.collectionCopy.updateMany).not.toHaveBeenCalled();
     });
 
     // The entry's row is the transaction's first lock, so the removal takes

@@ -434,9 +434,10 @@ export class GameCollectionService {
    * A rating that differs from the entry's current one is a change of the
    * rating, kept in its history dated today, clearing it included. The
    * current rating is read under the entry's lock, the transaction's first
-   * statement, so two patches can't both compare against the old rating and
-   * append twice (#1231). The entry is then written under the update
-   * conditions, as ever; a miss answers `COLLECTION_ENTRY_NOT_FOUND` and the
+   * lock, so two patches can't both compare against the old rating and
+   * append twice (#1231). The lock is taken only on an entry inside the
+   * update conditions (`lockEntryUnder`), and the entry is then written
+   * under them, as ever; a miss answers `COLLECTION_ENTRY_NOT_FOUND` and the
    * transaction keeps nothing.
    *
    * The patch changes no copy, so it needs no reconcile, supply sync or emit
@@ -453,9 +454,7 @@ export class GameCollectionService {
     return this.writtenRow(
       () =>
         this.db.$transaction(async (tx) => {
-          if ((await this.writes.lockEntry(tx, id)) === null) {
-            throw collectionEntryNotFound(id);
-          }
+          await this.writes.lockEntryUnder(tx, this.abilityService, id, Action.update);
 
           const current =
             data.rating === undefined
@@ -484,7 +483,8 @@ export class GameCollectionService {
    * (locations, offers) survive, and adding the game again brings it back.
    *
    * The entry's row is locked first, as the transaction's first lock
-   * (#1221), then held to the `delete` conditions and to being live, inside
+   * (#1221), and only when it is inside the `delete` conditions
+   * (`lockEntryUnder`), then held to them and to being live, inside
    * the check's `where`, so a key that may only update entries removes none
    * (#1288). A missing, foreign or already-removed entry answers
    * `COLLECTION_ENTRY_NOT_FOUND`, which a client may read as "already
@@ -507,9 +507,7 @@ export class GameCollectionService {
       () =>
         this.writes.runForRow(
           async (tx) => {
-            if ((await this.writes.lockEntry(tx, id)) === null) {
-              throw collectionEntryNotFound(id);
-            }
+            await this.writes.lockEntryUnder(tx, this.abilityService, id, Action.delete);
 
             await writeEntryUnder(
               tx,

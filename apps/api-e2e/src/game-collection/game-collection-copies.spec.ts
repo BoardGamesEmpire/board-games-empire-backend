@@ -136,22 +136,44 @@ describe('collection copies (#1231)', () => {
     ]);
   });
 
-  it('refuses the 101st copy with COLLECTION_COPY_LIMIT_REACHED', async () => {
+  it('refuses the 101st owned copy with COLLECTION_COPY_LIMIT_REACHED', async () => {
     const owner = await actors.user();
     const entryId = await arrangeCollectionEntry(db.client, owner.user.id, Reach.Private);
-    // One owned copy from the fixture, and 99 removed ones: removed copies count too.
+    // One owned copy from the fixture, and 99 more.
+    await db.client.collectionCopy.createMany({ data: Array.from({ length: 99 }, () => ({ entryId })) });
+
+    const refused = await addCopy(owner, entryId, {});
+    expectErrorEnvelope(refused, { status: 409, code: 'COLLECTION_COPY_LIMIT_REACHED' });
+    expect(refused.body.limit).toBe(100);
+    expect(await db.client.collectionCopy.count({ where: { entryId } })).toBe(100);
+  });
+
+  // Each removal and acquisition again adds a copy, and no route deletes one,
+  // so the cap counts only the copies the user owns: counting removed ones
+  // would one day refuse the game for good (#1231).
+  it('acquires a removed entry again however many copies it has removed', async () => {
+    const owner = await actors.user();
+    const { entryId, platformGameId } = await addedEntry(owner, GameMedium.Physical);
+    await removeCopy(owner, entryId, await onlyCopyOf(entryId), { reason: GameRemovalReason.Sold }).expect(200);
     await db.client.collectionCopy.createMany({
-      data: Array.from({ length: 99 }, () => ({
+      data: Array.from({ length: 100 }, () => ({
         entryId,
         removedAt: new Date(),
         removeReason: GameRemovalReason.Sold,
       })),
     });
 
-    const refused = await addCopy(owner, entryId, {});
-    expectErrorEnvelope(refused, { status: 409, code: 'COLLECTION_COPY_LIMIT_REACHED' });
-    expect(refused.body.limit).toBe(100);
-    expect(await db.client.collectionCopy.count({ where: { entryId } })).toBe(100);
+    const { collection } = readCollectionEnvelope(
+      await request(baseUrl)
+        .post(COLLECTIONS_PATH)
+        .set(owner.headers)
+        .send({ platformGameId, medium: GameMedium.Physical })
+        .expect(201),
+      'POST /api/game-collections for the removed entry',
+    );
+
+    expect(collection).toMatchObject({ id: entryId, deletedAt: null, quantity: 1 });
+    expect(await db.client.collectionCopy.count({ where: { entryId } })).toBe(102);
   });
 
   it("refuses a condition on a digital entry's copy with COLLECTION_CONDITION_DIGITAL", async () => {
@@ -257,6 +279,33 @@ describe('collection copies (#1231)', () => {
       deleteReason: GameRemovalReason.Stolen,
       quantity: 0,
     });
+  });
+
+  // An entry removal removes every owned copy at one instant. Correcting the
+  // reason of any of them, not only the newest, corrects the entry's, and an
+  // edit of another of them that gives no reason doesn't take that back (#1231).
+  it("correcting the reason of any copy removed with the entry corrects the entry's", async () => {
+    const owner = await actors.user();
+    const { entryId } = await addedEntry(owner, GameMedium.Physical);
+    const older = await onlyCopyOf(entryId);
+    const newer = copyEnvelope(
+      await addCopy(owner, entryId, {}).expect(201),
+      'POST /api/game-collections/:id/copies as the owner',
+    ).id;
+    await request(baseUrl)
+      .delete(`${COLLECTIONS_PATH}/${entryId}`)
+      .query({ reason: GameRemovalReason.Sold })
+      .set(owner.headers)
+      .expect(200);
+
+    await editCopy(owner, entryId, older, { removeReason: GameRemovalReason.Gifted }).expect(200);
+    expect(await readEntry(owner, entryId)).toMatchObject({ deleteReason: GameRemovalReason.Gifted });
+
+    await editCopy(owner, entryId, newer, { note: 'Sleeved' }).expect(200);
+    expect(await readEntry(owner, entryId)).toMatchObject({ deleteReason: GameRemovalReason.Gifted });
+
+    await editCopy(owner, entryId, newer, { removeReason: GameRemovalReason.Lost }).expect(200);
+    expect(await readEntry(owner, entryId)).toMatchObject({ deleteReason: GameRemovalReason.Lost });
   });
 
   it("a copy of another user's entry answers COLLECTION_ENTRY_NOT_FOUND on every copy route", async () => {

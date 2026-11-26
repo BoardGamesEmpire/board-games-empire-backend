@@ -108,8 +108,8 @@ describe('CollectionCopyService (#1231)', () => {
    */
   function expectLockedThenChecked(): void {
     const [lock] = db.$queryRaw.mock.calls[0] as unknown as [Prisma.Sql];
-    expect(rawQueryText(lock)).toMatch(/FROM game_collections WHERE id = \? FOR UPDATE$/);
-    expect(lock.values).toEqual(['gc-1']);
+    expect(rawQueryText(lock)).toMatch(/FROM game_collections WHERE id = \? AND user_id = \? FOR UPDATE$/);
+    expect(lock.values).toEqual(['gc-1', ME]);
     expect(db.gameCollection.update).toHaveBeenNthCalledWith(1, {
       where: { id: 'gc-1', AND: [COND] },
       data: { lastUpdated: expect.any(Date) },
@@ -185,7 +185,9 @@ describe('CollectionCopyService (#1231)', () => {
       const added = await service.add('gc-1', { note: 'Deluxe', releaseId: 'rel-1' });
 
       expectLockedThenChecked();
-      expect(db.collectionCopy.count).toHaveBeenCalledWith({ where: { entryId: 'gc-1' } });
+      expect(db.collectionCopy.count).toHaveBeenCalledWith({
+        where: { entryId: 'gc-1', removedAt: null, retractedAt: null },
+      });
       expect(db.gameRelease.findUnique).toHaveBeenCalledWith({
         where: { id: 'rel-1' },
         select: { platformGameId: true },
@@ -420,13 +422,18 @@ describe('CollectionCopyService (#1231)', () => {
       });
 
       // The entry's reason is a summary of its copies, so correcting the
-      // reason of the copy whose removal removed it corrects the entry's too.
-      it("a corrected removal reason updates the entry's reason (#1231)", async () => {
+      // reason of a copy removed with the entry corrects the entry's too,
+      // whichever of the copies removed with it that is: the correction hands
+      // the reason over, rather than the newest copy's being read back (#1231).
+      it("a corrected removal reason of a copy removed with the entry becomes the entry's reason (#1231)", async () => {
+        db.$queryRaw.mockResolvedValue([{ ...LOCKED, deletedAt: new Date('2024-07-01T00:00:00Z') }] as never);
         db.gameCollection.findUniqueOrThrow.mockResolvedValue({
+          deleteReason: GameRemovalReason.Sold,
           deletedAt: new Date('2024-07-01T00:00:00Z'),
           _count: { copies: 0 },
         } as never);
-        db.collectionCopy.findFirst.mockResolvedValue({ removeReason: GameRemovalReason.Stolen } as never);
+        // Another copy removed with the entry, created later, still says Sold.
+        db.collectionCopy.findFirst.mockResolvedValue({ removeReason: GameRemovalReason.Sold } as never);
 
         await service.update('gc-1', 'copy-1', { removeReason: GameRemovalReason.Stolen });
 
@@ -435,7 +442,29 @@ describe('CollectionCopyService (#1231)', () => {
           data: { deleteReason: GameRemovalReason.Stolen, lastUpdated: expect.any(Date) },
           select: { id: true },
         });
+        expect(db.collectionCopy.findFirst).not.toHaveBeenCalled();
         expect(syncSupply).not.toHaveBeenCalled();
+      });
+
+      // A copy removed before the entry was is not the entry's removal, so
+      // its corrected reason hands the entry nothing; the entry keeps its
+      // reason while a copy removed with it still carries it (#1231).
+      it("a corrected removal reason of a copy removed earlier leaves the entry's reason (#1231)", async () => {
+        db.$queryRaw.mockResolvedValue([{ ...LOCKED, deletedAt: new Date('2025-01-01T00:00:00Z') }] as never);
+        db.gameCollection.findUniqueOrThrow.mockResolvedValue({
+          deleteReason: GameRemovalReason.Traded,
+          deletedAt: new Date('2025-01-01T00:00:00Z'),
+          _count: { copies: 0 },
+        } as never);
+        db.collectionCopy.count.mockResolvedValue(1);
+
+        await service.update('gc-1', 'copy-1', { removeReason: GameRemovalReason.Stolen });
+
+        expect(db.gameCollection.update).toHaveBeenLastCalledWith({
+          where: { id: 'gc-1' },
+          data: { deleteReason: GameRemovalReason.Traded, lastUpdated: expect.any(Date) },
+          select: { id: true },
+        });
       });
 
       it('takes a new removal date and reason', async () => {
@@ -666,12 +695,18 @@ describe('CollectionCopyService (#1231)', () => {
     } as const;
     const methods = Object.keys(writes) as (keyof typeof writes)[];
 
+    // The lock names the acting user, so another user's entry is never
+    // locked: a request for it can't make its owner's writes wait (#1231).
     it.each(methods)(
-      '%s answers COLLECTION_ENTRY_NOT_FOUND to a reader whose grants pass the update conditions, and writes nothing',
+      '%s answers COLLECTION_ENTRY_NOT_FOUND to a reader whose grants pass the update conditions, and locks and writes nothing',
       async (method) => {
-        db.$queryRaw.mockResolvedValue([{ ...LOCKED, userId: 'user-2' }] as never);
+        // The lock finds no row of the acting user's under another user's entry id.
+        db.$queryRaw.mockResolvedValue([] as never);
 
         await expect(writes[method]()).rejects.toMatchObject({ status: 404, code: 'COLLECTION_ENTRY_NOT_FOUND' });
+        const [lock] = db.$queryRaw.mock.calls[0] as unknown as [Prisma.Sql];
+        expect(rawQueryText(lock)).toMatch(/WHERE id = \? AND user_id = \? FOR UPDATE$/);
+        expect(lock.values).toEqual(['gc-1', ME]);
         expect(db.gameCollection.update).not.toHaveBeenCalled();
         // Nothing of the entry's copies is read before the refusal either.
         expect(db.collectionCopy.findUnique).not.toHaveBeenCalled();
@@ -689,6 +724,7 @@ describe('CollectionCopyService (#1231)', () => {
       });
 
       await expect(writes[method]()).rejects.toMatchObject({ status: 404, code: 'COLLECTION_ENTRY_NOT_FOUND' });
+      expect(db.$queryRaw).not.toHaveBeenCalled();
       expect(db.gameCollection.update).not.toHaveBeenCalled();
       expect(db.collectionCopy.findUnique).not.toHaveBeenCalled();
       expect(db.collectionCopy.count).not.toHaveBeenCalled();

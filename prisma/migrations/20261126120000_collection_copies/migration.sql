@@ -14,7 +14,8 @@
 -- - a removed entry's copies are removed on its `deleted_at` date, at day
 --   precision, with its reason;
 -- - an entry with a rating gets one rating change, with an unknown date;
--- - a loan names its entry's first copy.
+-- - a loan names one of its entry's copies, any one: the backfill made them
+--   alike, from the entry.
 --
 -- One transaction. Since Prisma 7.4, migrate deploy commits each statement on
 -- its own (prisma/prisma#30640), and a failure after the backfill would leave
@@ -126,7 +127,7 @@ SELECT md5(random()::text || gc."id"), gc."id", gc."rating", gc."updated_at", gc
 FROM "game_collections" AS gc
 WHERE gc."rating" IS NOT NULL;
 
--- A loan names a copy: its entry's first.
+-- A loan names a copy: any one of its entry's, which the backfill made alike.
 ALTER TABLE "loaned_games" ADD COLUMN "copy_id" TEXT;
 
 UPDATE "loaned_games" AS lg

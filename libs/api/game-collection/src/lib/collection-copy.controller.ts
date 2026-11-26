@@ -79,7 +79,7 @@ export class CollectionCopyController {
   })
   @ApiResponse({
     status: Http.Conflict,
-    description: 'The entry already holds its most copies, removed ones included (code COLLECTION_COPY_LIMIT_REACHED)',
+    description: 'You already own the most copies the entry holds (code COLLECTION_COPY_LIMIT_REACHED)',
   })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.GameCollection))
   @Post()

@@ -248,13 +248,16 @@ describe('assertCopyRoom (#1231)', () => {
     expect(COLLECTION_COPY_LIMIT).toBe(100);
   });
 
-  // Removed and taken-back copies count too, so an entry's history stays
-  // bounded: the count has no state filter.
-  it("counts every one of the entry's copies, whatever its state", async () => {
+  // Removed and taken-back copies don't count: each removal and acquisition
+  // again adds a copy, and no route deletes one, so counting them would one
+  // day refuse the game for good.
+  it("counts only the entry's copies the user owns", async () => {
     tx.collectionCopy.count.mockResolvedValue(99);
 
     await expect(assertCopyRoom(asTx(tx), 'gc-1')).resolves.toBeUndefined();
-    expect(tx.collectionCopy.count).toHaveBeenCalledWith({ where: { entryId: 'gc-1' } });
+    expect(tx.collectionCopy.count).toHaveBeenCalledWith({
+      where: { entryId: 'gc-1', removedAt: null, retractedAt: null },
+    });
   });
 
   it('refuses a copy past the limit with COLLECTION_COPY_LIMIT_REACHED, naming the limit', async () => {
@@ -283,7 +286,9 @@ describe('addCopy (#1231)', () => {
   it("checks the room, then writes the described copy as the entry's owner reads it, keyed when a key is given", async () => {
     await addCopy(asTx(tx), { ...PHYSICAL, id: 'gc-1' }, { note: 'Deluxe' }, NOW, 'key-1');
 
-    expect(tx.collectionCopy.count).toHaveBeenCalledWith({ where: { entryId: 'gc-1' } });
+    expect(tx.collectionCopy.count).toHaveBeenCalledWith({
+      where: { entryId: 'gc-1', removedAt: null, retractedAt: null },
+    });
     expect(tx.collectionCopy.create).toHaveBeenCalledWith({
       data: { entryId: 'gc-1', ...UNKNOWN, note: 'Deluxe', clientRequestId: 'key-1' },
       select: OWNER_COPY_SELECT,

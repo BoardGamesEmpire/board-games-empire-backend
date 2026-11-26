@@ -90,11 +90,6 @@ export class GameCollectionController {
       'Platform game not found (code PLATFORM_GAME_NOT_FOUND) or release not found (code GAME_RELEASE_NOT_FOUND), ' +
       'including one deleted while the add ran',
   })
-  @ApiResponse({
-    status: Http.Conflict,
-    description:
-      'The removed entry already holds its most copies, removed ones included (code COLLECTION_COPY_LIMIT_REACHED)',
-  })
   @CheckPolicies((ability) => ability.can(Action.create, ResourceType.GameCollection))
   @Post()
   addToCollection(@Body() createGameCollectionDto: CreateGameCollectionDto) {

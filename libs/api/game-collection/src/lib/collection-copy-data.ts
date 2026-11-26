@@ -1,7 +1,7 @@
 import type { DatePrecision, GameCondition, GameRemovalReason, Prisma } from '@bge/database';
 import { foreignKeyIdentity, GameMedium, identifiesConstraint, isPrismaForeignKeyConstraintError } from '@bge/database';
 import type { OwnerCopyRow } from './collection-row';
-import { OWNER_COPY_SELECT } from './collection-row';
+import { OWNED_COPY, OWNER_COPY_SELECT } from './collection-row';
 import type { CollectionCopyDescriptionDto } from './dto/create-collection-copy.dto';
 import {
   conditionOnDigital,
@@ -21,8 +21,10 @@ import {
 } from './values/partial-date';
 
 /**
- * The most copies one collection entry holds, counting removed and
- * taken-back ones, so its history stays bounded too (#1231).
+ * The most copies one collection entry holds that the user still owns
+ * (#1231). Removed and taken-back copies don't count: each removal and
+ * acquisition again adds a copy, and no route deletes one, so counting them
+ * would one day refuse the game for good.
  */
 export const COLLECTION_COPY_LIMIT = 100;
 
@@ -156,12 +158,13 @@ export async function copyColumns(
 }
 
 /**
- * Refuses one more copy on an entry that holds {@link COLLECTION_COPY_LIMIT}
- * already, in any state (`COLLECTION_COPY_LIMIT_REACHED`, #1231). Run it under
- * the entry's lock, so two acquisitions can't both pass it.
+ * Refuses one more copy on an entry whose user owns
+ * {@link COLLECTION_COPY_LIMIT} of its copies already
+ * (`COLLECTION_COPY_LIMIT_REACHED`, #1231). Run it under the entry's lock, so
+ * two acquisitions can't both pass it.
  */
 export async function assertCopyRoom(tx: Prisma.TransactionClient, entryId: string): Promise<void> {
-  const held = await tx.collectionCopy.count({ where: { entryId } });
+  const held = await tx.collectionCopy.count({ where: { entryId, ...OWNED_COPY } });
 
   if (held >= COLLECTION_COPY_LIMIT) {
     throw copyLimitReached(COLLECTION_COPY_LIMIT);

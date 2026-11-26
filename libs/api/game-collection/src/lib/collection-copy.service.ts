@@ -21,7 +21,7 @@ import {
   writingRelease,
 } from './collection-copy-data';
 import type { OwnerCopyRow } from './collection-row';
-import { COPY_ORDER, OWNED_COPY, OWNER_COPY_SELECT, readOwnEntry } from './collection-row';
+import { COPY_ORDER, OWNED_COPY, OWNER_COPY_SELECT, readOwnEntry, removedWithEntry } from './collection-row';
 import type { LockedEntry } from './collection-write.service';
 import { CollectionWriteService, writeEntryUnder } from './collection-write.service';
 import type {
@@ -101,8 +101,9 @@ export class CollectionCopyService {
 
   /**
    * Adds a copy to the entry, described by `dto` (#1231). An entry holds at
-   * most `COLLECTION_COPY_LIMIT` copies, counting every state, checked under
-   * the entry's lock. A copy added to a removed entry acquires it again.
+   * most `COLLECTION_COPY_LIMIT` copies the user owns, checked under the
+   * entry's lock; removed and taken-back ones don't count. A copy added to a
+   * removed entry acquires it again.
    *
    * Keyed by `clientRequestId` (ADR 0002, #252): a repeat under a key the
    * entry already holds answers the copy that key made, as it stands now,
@@ -165,8 +166,9 @@ export class CollectionCopyService {
    * The removal must not end before the acquisition, as the copy will hold
    * them both (`COLLECTION_DATE_ORDER`). Each edit stamps `editedByUserAt`,
    * so a sync leaves the copy as the user left it. On a removed entry, a
-   * corrected removal reason reaches the entry's own reason through the
-   * write runner's reconcile.
+   * corrected removal reason of a copy removed with the entry becomes the
+   * entry's own reason, through the write runner's reconcile, whichever of
+   * those copies it is.
    */
   async update(entryId: string, copyId: string, dto: UpdateCollectionCopyDto): Promise<CollectionCopyDto> {
     if (Object.keys(pickDefined(dto)).length === 0) {
@@ -220,7 +222,11 @@ export class CollectionCopyService {
           }),
         );
 
-        return { entryId, result: toCollectionCopyDto(edited) };
+        return {
+          entryId,
+          result: toCollectionCopyDto(edited),
+          ...(removeReason !== undefined && removedWithEntry(copy, entry) ? { removeReason } : {}),
+        };
       },
       resolveActingUserIdOrNull(this.abilityService),
       now,
@@ -288,8 +294,9 @@ export class CollectionCopyService {
   }
 
   /**
-   * Locks the entry's row, as the transaction's first lock (#1221), checks
-   * that it is the acting user's own (#1231), and writes its `lastUpdated`
+   * Locks the entry's row, as the transaction's first lock (#1221), only when
+   * it is the acting user's own (#1231), so a request for another user's
+   * entry never makes its owner's writes wait, and writes its `lastUpdated`
    * under the actor's `update` conditions (#1288): each copy write is an
    * update of the entry. Another user's entry, or any entry for an actor that
    * is no user, answers `COLLECTION_ENTRY_NOT_FOUND` before anything is read
@@ -302,9 +309,10 @@ export class CollectionCopyService {
     entryId: string,
     now: Date,
   ): Promise<LockedEntry> {
-    const locked = await this.writes.lockEntry(tx, entryId);
+    const actingUserId = resolveActingUserIdOrNull(this.abilityService);
+    const locked = actingUserId === null ? null : await this.writes.lockEntry(tx, entryId, actingUserId);
 
-    if (locked === null || locked.userId !== resolveActingUserIdOrNull(this.abilityService)) {
+    if (locked === null) {
       throw collectionEntryNotFound(entryId);
     }
 
