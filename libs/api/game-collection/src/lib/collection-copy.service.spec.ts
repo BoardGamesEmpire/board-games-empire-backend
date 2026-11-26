@@ -1153,6 +1153,29 @@ describe('CollectionCopyService (#1231)', () => {
         });
       });
 
+      // A copy removed with the entry that stays removed hands the entry the
+      // restored reason, as a corrected reason does, whichever of the copies
+      // removed with the entry it is (#1231).
+      it('of a copy removed with the entry gives the entry the restored reason (#1231)', async () => {
+        const stamp = new Date('2025-09-01T12:00:00Z');
+        db.$queryRaw.mockResolvedValue([{ ...LOCKED, deletedAt: stamp }] as never);
+        db.collectionCopy.findUnique.mockResolvedValue(copyRow({ removedAt: stamp, retractedAt: null }) as never);
+        db.gameCollection.findUniqueOrThrow.mockResolvedValue({
+          deleteReason: GameRemovalReason.Sold,
+          deletedAt: stamp,
+          _count: { copies: 0 },
+        } as never);
+
+        await service.restore('gc-1', 'copy-1', 'rev-1');
+
+        expect(db.gameCollection.update).toHaveBeenLastCalledWith({
+          where: { id: 'gc-1' },
+          data: { deleteReason: GameRemovalReason.Traded, lastUpdated: expect.any(Date) },
+          select: { id: true },
+        });
+        expect(db.collectionCopy.findFirst).not.toHaveBeenCalled();
+      });
+
       // The write runner reads a removed entry's reason again, on every write
       // of its copies, from the copy removed at the entry's `deletedAt`. A
       // restore that removes the entry records its copy's removal at that

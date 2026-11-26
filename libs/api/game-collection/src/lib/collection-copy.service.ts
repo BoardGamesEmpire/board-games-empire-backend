@@ -348,7 +348,9 @@ export class CollectionCopyService {
    * acquires a removed entry again and resumes its offers (#1221). One that
    * removes the entry's last owned copy removes the entry, with the restored
    * reason, so it is held to the entry's `delete` permission too, as the
-   * copy removal is (#1288).
+   * copy removal is (#1288). One that leaves a copy removed with the entry
+   * removed gives the entry the restored reason, as a corrected reason does
+   * (#1231).
    *
    * A restored removal takes the revision's date and reason. When it is
    * recorded is the copy's own: now, for a copy the restore removes, and
@@ -410,8 +412,12 @@ export class CollectionCopyService {
           entryId,
           result: toCollectionCopyDto(restored),
           // The entry's removal is this restore's, so it takes the restored
-          // reason, not one read back from another copy (#1231).
-          ...(removesEntry ? { removeReason: removal.removeReason } : {}),
+          // reason, not one read back from another copy; and a copy removed
+          // with the entry that stays removed hands the entry its restored
+          // reason, as a corrected reason does (#1231).
+          ...(removesEntry || (removal.removedAt !== null && removedWithEntry(copy, entry))
+            ? { removeReason: removal.removeReason }
+            : {}),
         };
       },
       resolveActingUserIdOrNull(this.abilityService),

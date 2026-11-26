@@ -253,6 +253,34 @@ describe('copy corrections (#1231)', () => {
     });
   });
 
+  // Restoring a removed revision of a copy removed with the entry corrects
+  // the entry's reason, as an edit of the copy's reason does, though another
+  // copy removed with the entry, created later, says otherwise (#1231).
+  it("restoring the reason of a copy removed with the entry corrects the entry's reason (#1231)", async () => {
+    const owner = await actors.user();
+    const { entryId, copyId: older } = await addedEntry(owner);
+    await addedCopy(owner, entryId);
+    await request(baseUrl)
+      .delete(`${COLLECTIONS_PATH}/${entryId}`)
+      .query({ reason: GameRemovalReason.Sold })
+      .set(owner.headers)
+      .expect(200);
+    await editCopy(owner, entryId, older, { removeReason: GameRemovalReason.Gifted }).expect(200);
+    await editCopy(owner, entryId, older, { removeReason: GameRemovalReason.Lost }).expect(200);
+    expect(await readEntry(owner, entryId)).toMatchObject({ deleteReason: GameRemovalReason.Lost });
+
+    // The revision the second edit kept says Gifted.
+    const gifted = await newestRevisionOf(owner, entryId, older);
+    expect(gifted.values).toMatchObject({ removeReason: GameRemovalReason.Gifted });
+    await restored(owner, entryId, older, gifted.id);
+
+    expect(await readEntry(owner, entryId)).toMatchObject({
+      deletedAt: expect.any(String),
+      deleteReason: GameRemovalReason.Gifted,
+      quantity: 0,
+    });
+  });
+
   // Review Focus 5: an edition deleted since the revision was kept must not
   // fail the restore on a foreign key; the copy gets none (#1231).
   it('a revision whose release has since gone restores with no release (#1231)', async () => {
