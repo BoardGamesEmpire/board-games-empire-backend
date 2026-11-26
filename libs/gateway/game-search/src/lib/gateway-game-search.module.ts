@@ -1,6 +1,6 @@
 import { DatabaseModule } from '@bge/database';
 import type { Redis } from '@bge/redis';
-import { CACHE_REDIS_CLIENT, createCacheStore } from '@bge/redis';
+import { CACHE_REDIS_CLIENT, createCacheModuleStore } from '@bge/redis';
 import { CacheModule } from '@nestjs/cache-manager';
 import { Module } from '@nestjs/common';
 import { GatewayGameSearchService } from './gateway-game-search.service';
@@ -22,7 +22,7 @@ import { GatewayGameSearchService } from './gateway-game-search.service';
     CacheModule.registerAsync({
       inject: [CACHE_REDIS_CLIENT],
       useFactory: (redis: Redis) => ({
-        stores: [createCacheStore(redis, 'search:cache')],
+        stores: [createCacheModuleStore(redis, 'search:cache')],
         // cache-manager v7 interprets ttl in MILLISECONDS, so a `300` meant as
         // seconds is a 300ms default. Every consumer here passes an explicit
         // ms TTL, but the default should not be a trap for the next caller.

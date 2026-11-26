@@ -39,7 +39,9 @@ const UNENFORCED_KEYS = ['ROLES', 'ORG_ROLES', 'USER_HAS_PERMISSION', 'MEMBER_HA
  * client matching on it still matches. Its message renders from the catalog,
  * in the request's locale, and its English is still "Unauthorized".
  *
- * Gateways never run global guards; they authenticate at the handshake.
+ * It checks HTTP requests only. Nest runs global guards on a gateway's frames
+ * too, but a gateway authenticates its socket at the handshake, and its own
+ * guards check each frame (#511).
  */
 @Injectable()
 export class ActorAuthGuard implements CanActivate {
@@ -49,6 +51,10 @@ export class ActorAuthGuard implements CanActivate {
   ) {}
 
   canActivate(context: ExecutionContext): boolean {
+    if (context.getType() !== 'http') {
+      return true;
+    }
+
     const targets = [context.getHandler(), context.getClass()];
     const unenforced = UNENFORCED_KEYS.find((key) => this.reflector.getAllAndOverride(key, targets) !== undefined);
 

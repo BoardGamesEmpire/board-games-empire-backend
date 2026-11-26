@@ -1,4 +1,5 @@
 import { CodedHttpException, t } from '@bge/i18n';
+import type { ContextType, ExecutionContext } from '@nestjs/common';
 import { Injectable } from '@nestjs/common';
 import { ThrottlerGuard } from '@nestjs/throttler';
 import { Http } from '@status/codes';
@@ -18,9 +19,21 @@ import { Http } from '@status/codes';
  *
  * Registered app-wide in place of `ThrottlerGuard`, and the base of
  * `WsThrottlerGuard`, so both transports refuse alike.
+ *
+ * Each guard counts only its own {@link transport}. Nest runs global guards on
+ * a gateway's frames too, and this one would count a frame by the request IP a
+ * socket doesn't have, so every socket would share one count. A frame is
+ * `WsThrottlerGuard`'s to count, by its user or socket (#510).
  */
 @Injectable()
 export class RateLimitGuard extends ThrottlerGuard {
+  /** The transport whose requests this guard counts. */
+  protected readonly transport: ContextType = 'http';
+
+  protected override async shouldSkip(context: ExecutionContext): Promise<boolean> {
+    return context.getType() !== this.transport;
+  }
+
   protected override async throwThrottlingException(): Promise<void> {
     throw new CodedHttpException(Http.TooManyRequests, 'RATE_LIMITED', t('errors.request.rate_limited'));
   }

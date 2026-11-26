@@ -77,4 +77,24 @@ describe('RateLimitGuard (#527)', () => {
 
     expect(headers.get('Retry-After')).toEqual(expect.any(Number));
   });
+
+  // Nest runs global guards on a gateway's frames too. A socket has no request
+  // IP, so counting frames here would put every socket in one count;
+  // WsThrottlerGuard counts them by user or socket instead (#510).
+  it('leaves a gateway frame uncounted, to WsThrottlerGuard', async () => {
+    const socket = { id: 'socket-1', handshake: { headers: {} } };
+    const frame = {
+      getType: () => 'ws',
+      getClass: () => GamesController,
+      getHandler: () => GamesController.prototype.list,
+      switchToHttp: () => ({ getRequest: () => socket, getResponse: () => ({}) }),
+    } as unknown as ExecutionContext;
+
+    for (let sent = 0; sent <= LIMIT; sent++) {
+      await expect(guard.canActivate(frame)).resolves.toBe(true);
+    }
+
+    // The frames left the requests' count untouched.
+    await expect(guard.canActivate(requestContext(new Map()))).resolves.toBe(true);
+  });
 });

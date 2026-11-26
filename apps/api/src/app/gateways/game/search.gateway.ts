@@ -33,12 +33,12 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import { wrapDefaults } from '@status/defaults';
-import { I18nValidationPipe } from 'nestjs-i18n';
 import { Subscription } from 'rxjs';
 import type { Server, Socket } from 'socket.io';
 import { AuthenticatedGateway } from '../base/authenticated.gateway';
 import { WsFrameScope } from '../base/ws-frame-scope';
 import { WsTranslator } from '../base/ws-translator';
+import { WsValidationPipe } from '../base/ws-validation.pipe';
 
 /** What a rate-limited client is told to wait when the DataGateway gave no usable time. */
 const DEFAULT_RETRY_AFTER_SECONDS = 60;
@@ -77,11 +77,11 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
     this.logger.log(`WS disconnected: socketId=${client.id}`);
   }
 
-  // I18nValidationPipe, so a decorator's catalog marker reaches WsErrorFilter
-  // to be translated (#180). No nestjs-i18n context exists on a frame, so the
-  // pipe leaves the markers for the filter rather than translating them.
+  // WsValidationPipe leaves a decorator's catalog marker for WsErrorFilter to
+  // translate in the frame's locale, on every frame alike (#180). The api's
+  // global pipe leaves frames to this one (RouteValidationPipe).
   @UsePipes(
-    new I18nValidationPipe({
+    new WsValidationPipe({
       forbidNonWhitelisted: true,
       transform: true,
       whitelist: true,
@@ -164,7 +164,7 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
     this.logger.debug(`Search completed: correlationId=${correlationId}`);
   }
 
-  @UsePipes(new I18nValidationPipe({ whitelist: true }))
+  @UsePipes(new WsValidationPipe({ whitelist: true }))
   @SubscribeMessage(SearchEvents.SearchCancel)
   handleSearchCancel(@ConnectedSocket() client: Socket, @MessageBody() dto: SearchCancelDto): void {
     const search = this.getClientData(client);

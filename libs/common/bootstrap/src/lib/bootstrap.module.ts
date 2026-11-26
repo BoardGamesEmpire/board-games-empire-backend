@@ -56,7 +56,7 @@ export class BootstrapModule {
           expandVariables: true,
           validationSchema: Joi.object({ ...databaseConfigValidationSchema, ...cache?.redis.validationSchema }),
           // Names every invalid variable in one message.
-          validationOptions: { abortEarly: false, allowUnknown: true },
+          validationOptions: { libraryOptions: { abortEarly: false, allowUnknown: true } },
         }),
         DatabaseModule,
       ],

@@ -7,7 +7,13 @@ import { Action, DatabaseModule, DatabaseService, ResourceType } from '@bge/data
 import { gameListScope, GameService } from '@bge/game';
 import { GameSearchService, SearchEvents } from '@bge/game-search';
 import type { I18nTranslations, LocaleResolutionInput } from '@bge/i18n';
-import { FALLBACK_LOCALE, I18N_CATALOG_DIR, i18nValidationMessage, LocaleResolutionService } from '@bge/i18n';
+import {
+  ClsLocaleResolver,
+  FALLBACK_LOCALE,
+  I18N_CATALOG_DIR,
+  i18nValidationMessage,
+  LocaleResolutionService,
+} from '@bge/i18n';
 import type { UserWithRoles } from '@bge/permissions';
 import {
   AbilityService,
@@ -26,7 +32,7 @@ import { ThrottlerModule, ThrottlerStorageService } from '@nestjs/throttler';
 import { MessageBody, SubscribeMessage, WebSocketGateway } from '@nestjs/websockets';
 import { IsString } from 'class-validator';
 import { ClsModule } from 'nestjs-cls';
-import { I18nModule, I18nService, I18nValidationPipe } from 'nestjs-i18n';
+import { I18nModule, I18nService } from 'nestjs-i18n';
 import { randomUUID } from 'node:crypto';
 import type { IncomingHttpHeaders } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -41,6 +47,7 @@ import { AuthenticatedGateway } from './authenticated.gateway';
 import { WsFrameScope } from './ws-frame-scope';
 import { WsSessionGuard } from './ws-session';
 import { WsTranslator } from './ws-translator';
+import { WsValidationPipe } from './ws-validation.pipe';
 
 const USER_A = 'user-a';
 const USER_B = 'user-b';
@@ -216,7 +223,7 @@ class MarkedDto {
 class MarkedGateway extends AuthenticatedGateway {
   protected readonly logger = new Logger(MarkedGateway.name);
 
-  @UsePipes(new I18nValidationPipe())
+  @UsePipes(new WsValidationPipe())
   @SubscribeMessage('mark')
   mark(@MessageBody() dto: MarkedDto) {
     return { event: 'marked', data: dto };
@@ -334,6 +341,9 @@ describe('AuthenticatedGateway (over a real socket)', () => {
         I18nModule.forRoot({
           fallbackLanguage: FALLBACK_LOCALE,
           loaderOptions: { path: I18N_CATALOG_DIR, watch: false },
+          // The api's resolver (I18nConfigModule). Nest runs nestjs-i18n's global
+          // interceptor on frames too, and it resolves a frame's locale from CLS.
+          resolvers: [ClsLocaleResolver],
         }),
         ThrottlerModule.forRoot({
           throttlers: createThrottlers({ getOrThrow: <T>(key: string) => THROTTLE_CONFIG[key] as T }),
@@ -804,6 +814,36 @@ describe('AuthenticatedGateway (over a real socket)', () => {
         message: ['query must be a string'],
         pattern: 'mark',
       });
+    });
+
+    // nestjs-i18n's interceptor opens a translation context on a socket's first
+    // frame only, and keeps its locale on the socket for the rest. A gateway
+    // pipe that translated whenever a context was open would answer a copy
+    // failure on the first frame with a 500, and on the next with the filter's
+    // 400 (#180, #1260). The filter translates every frame.
+    it("answers a socket's later frames as it answers its first, even when their copy cannot render", async () => {
+      const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      const render = i18n.translate.bind(i18n);
+      const translate = jest.spyOn(i18n, 'translate').mockImplementation((key, options) => {
+        if (key === 'validation.isString') {
+          throw new Error('cannot switch from implicit to explicit numbering');
+        }
+
+        return render(key, options);
+      });
+      const socket = await connected(socketAs(USER_A, 'marked'));
+      const answers: WsErrorPayload[] = [];
+
+      for (let frame = 0; frame < 2; frame++) {
+        const refused = refusalOf(socket);
+        socket.emit('mark', { query: 42 });
+        answers.push(await refused);
+      }
+
+      const refusal = { statusCode: 400, error: 'Bad Request', message: 'Bad Request', pattern: 'mark' };
+      expect(answers).toEqual([refusal, refusal]);
+      translate.mockRestore();
+      logged.mockRestore();
     });
 
     // class-validator's own default reads the same, so the copy alone cannot

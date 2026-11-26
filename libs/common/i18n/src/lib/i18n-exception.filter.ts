@@ -1,11 +1,12 @@
 import { AuditContextService } from '@bge/actor-context';
 import type { I18nPath, I18nTranslations } from '@bge/i18n-core';
 import { t } from '@bge/i18n-core';
-import { ArgumentsHost, Catch, HttpException } from '@nestjs/common';
+import { ArgumentsHost, Catch, HttpException, Logger } from '@nestjs/common';
 import { BaseExceptionFilter } from '@nestjs/core';
 import { Http } from '@status/codes';
 import { I18nService } from 'nestjs-i18n';
 import { CodedHttpException } from './coded-http.exception';
+import { answerHttpError, mappedHttpError } from './http-error';
 import { LocaleResolutionService } from './locale-resolution.service';
 import type { EdgeLocaleSource } from './translate-exception';
 import { translateException } from './translate-exception';
@@ -37,6 +38,9 @@ interface EdgeRequest {
  *   `host.getType() !== 'http'` guard below is thus belt-and-suspenders —
  *   reachable only for an `rpc` host, which this app has no inbound transport
  *   for.
+ * - An `HttpException` Nest made from an `http-errors` error (body-parser's
+ *   413, for one) is answered as {@link answerHttpError} says, with catalog
+ *   copy in place of the parser's text (#527).
  * - Every `HttpException` leaves as the envelope, with or without a `t()`
  *   payload: a body without `error` or `statusCode` (a string body, a coded
  *   refusal's `{ code, message }`) gains them, and a custom `error` label gives
@@ -60,6 +64,9 @@ interface EdgeRequest {
  */
 @Catch(HttpException)
 export class I18nExceptionFilter extends BaseExceptionFilter {
+  // Nest's own name for the log line it writes for an unhandled error.
+  protected readonly logger = new Logger('ExceptionsHandler');
+
   constructor(
     private readonly i18n: I18nService<I18nTranslations>,
     private readonly auditContext: AuditContextService,
@@ -76,7 +83,8 @@ export class I18nExceptionFilter extends BaseExceptionFilter {
       return;
     }
 
-    this.render(exception, host);
+    const httpError = mappedHttpError(exception);
+    this.render(httpError ? answerHttpError(httpError, this.logger) : exception, host);
   }
 
   /**

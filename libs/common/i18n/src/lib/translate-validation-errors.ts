@@ -14,9 +14,11 @@ import { resolveEdgeLocale } from './translate-exception';
  *
  * Over HTTP, `I18nValidationPipe` translates the errors itself, inside the
  * request's nestjs-i18n context, and `I18nValidationExceptionFilter` only
- * flattens them. A WebSocket frame has no such context, so the pipe leaves each
- * constraint as its raw `i18nValidationMessage` marker, and the gateway's
- * filter calls this instead. It flattens as `detailedErrors: false` does.
+ * flattens them. A WebSocket frame has that context on its socket's first frame
+ * only, so a gateway validates with the api's `WsValidationPipe`, which always
+ * leaves each constraint as its raw `i18nValidationMessage` marker, and the
+ * gateway's filter calls this instead (#180). It flattens as
+ * `detailedErrors: false` does.
  */
 export function translateValidationErrors(
   exception: I18nValidationException,

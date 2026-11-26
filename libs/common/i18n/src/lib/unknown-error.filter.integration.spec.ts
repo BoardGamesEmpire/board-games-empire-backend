@@ -206,6 +206,21 @@ describe('UnknownErrorFilter (integration, #527)', () => {
       expect(warned).toHaveBeenCalledWith(expect.stringContaining('unsupported charset'));
     });
 
+    // Nest 12 maps it to a BadRequestException with the parser's error as its
+    // cause, as it does a 413. Its copy is #1261's to decide, so it is not
+    // answered as an unreadable request here.
+    it("leaves malformed JSON to Nest's own 400 (#1261)", async () => {
+      const res = await fetch(await url('/named'), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{"name":',
+      });
+
+      expect(res.status).toBe(400);
+      await expect(res.json()).resolves.not.toMatchObject({ message: UNREADABLE_COPY });
+      expect(warned).not.toHaveBeenCalled();
+    });
+
     // A 413 is no exception: only an exposed one is the coded REQUEST_TOO_LARGE (#527).
     it.each(['415', '413'])('answers a %s the thrower marked unexposed as a 500, and logs it', async (status) => {
       const res = await fetch(await url(`/http-error/${status}/false`));

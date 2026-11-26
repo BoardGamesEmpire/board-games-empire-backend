@@ -1,5 +1,5 @@
 import { actorUserId, getActorSnapshotFromCls } from '@bge/actor-context';
-import type { ExecutionContext } from '@nestjs/common';
+import type { ContextType, ExecutionContext } from '@nestjs/common';
 import { Injectable } from '@nestjs/common';
 import type { ThrottlerGuard, ThrottlerRequest } from '@nestjs/throttler';
 import type { Socket } from 'socket.io';
@@ -7,9 +7,9 @@ import { RateLimitGuard } from '../../lib/rate-limit.guard';
 
 /**
  * Rate-limits a socket's frames by the app's throttler tiers, counted per
- * gateway handler and per user (#510). The app-wide `RateLimitGuard` never
- * runs on a gateway message, so until this guard a client could send frames
- * as fast as it liked.
+ * gateway handler and per user (#510). The app-wide `RateLimitGuard` counts
+ * HTTP requests only: Nest 11 never ran it on a frame, and on Nest 12 it skips
+ * one, so without this guard a client could send frames as fast as it liked.
  *
  * The guard's HTTP assumptions do not hold for a frame, and this one replaces
  * them for every tier:
@@ -30,6 +30,8 @@ import { RateLimitGuard } from '../../lib/rate-limit.guard';
  */
 @Injectable()
 export class WsThrottlerGuard extends RateLimitGuard {
+  protected override readonly transport: ContextType = 'ws';
+
   protected override async handleRequest(requestProps: ThrottlerRequest): Promise<boolean> {
     const tracker = frameTracker(requestProps.context.switchToWs().getClient<Socket>());
 

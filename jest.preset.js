@@ -11,6 +11,8 @@ const nxPreset = require('@nx/jest/preset').default;
  */
 const ESM_PACKAGES = [
   '@better-auth',
+  // Nest 12 ships every package as pure ESM.
+  '@nestjs',
   '@paralleldrive',
   '@noble',
   // Scoped to `runtime/` on purpose: the package's entrypoints are CJS and

@@ -1,5 +1,6 @@
 import KeyvValkey from '@keyv/valkey';
 import type { Redis } from 'iovalkey';
+import type { Keyv as ImportedKeyv } from 'keyv' with { 'resolution-mode': 'import' };
 import Keyv from 'keyv';
 
 /**
@@ -29,6 +30,20 @@ export function createCacheStore(client: Redis, namespace: string, options: Cach
     useKeyPrefix: false,
     throwOnErrors: options.throwOnErrors ?? false,
   });
+}
+
+/**
+ * {@link createCacheStore}, typed for `CacheModule` from `@nestjs/cache-manager`.
+ *
+ * That package is pure ESM, so TypeScript reads keyv's `import` declarations
+ * for it, while this CommonJS code gets keyv's `require` ones. Both describe the
+ * same class at the same version, but TypeScript treats them as two classes, and
+ * their `setMany` return types differ. At runtime the module tells a Keyv store
+ * by its shape, not by `instanceof`, so the CommonJS instance works there.
+ */
+export function createCacheModuleStore(client: Redis, namespace: string): ImportedKeyv {
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- keyv's require and import declarations of the one class aren't assignable to each other; see above
+  return createCacheStore(client, namespace) as unknown as ImportedKeyv;
 }
 
 export interface CacheStoreOptions {
