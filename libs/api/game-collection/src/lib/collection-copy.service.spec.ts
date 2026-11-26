@@ -387,8 +387,9 @@ describe('CollectionCopyService (#1231)', () => {
       const edited = await service.update('gc-1', 'copy-1', { note: 'Sleeved', pricePaid: null });
 
       expectLockedThenChecked();
+      // A taken-back copy never existed, so it takes no edit (#1231).
       expect(db.collectionCopy.findUnique).toHaveBeenCalledWith({
-        where: { id: 'copy-1', entryId: 'gc-1' },
+        where: { id: 'copy-1', entryId: 'gc-1', retractedAt: null },
         select: expect.any(Object),
       });
       const now = db.gameCollection.update.mock.calls[0]?.[0]?.data.lastUpdated;
@@ -746,7 +747,7 @@ describe('CollectionCopyService (#1231)', () => {
       await service.update('gc-1', 'copy-1', { note: 'Sleeved' });
 
       expect(db.collectionCopy.findUnique).toHaveBeenCalledWith({
-        where: { id: 'copy-1', entryId: 'gc-1' },
+        where: { id: 'copy-1', entryId: 'gc-1', retractedAt: null },
         select: COPY_REVISION_SELECT,
       });
       expect(db.collectionCopyRevision.createMany).toHaveBeenCalledWith({
@@ -917,9 +918,10 @@ describe('CollectionCopyService (#1231)', () => {
       const restored = await service.restore('gc-1', 'copy-1', 'rev-1');
 
       expectLockedThenChecked();
+      // A taken-back copy never existed, so it takes no restore (#1231).
       expect(db.collectionCopy.findUnique).toHaveBeenCalledWith({
-        where: { id: 'copy-1', entryId: 'gc-1' },
-        select: { ...COPY_REVISION_SELECT, retractedAt: true },
+        where: { id: 'copy-1', entryId: 'gc-1', retractedAt: null },
+        select: COPY_REVISION_SELECT,
       });
       expect(db.collectionCopyRevision.findUnique).toHaveBeenCalledWith({
         where: { id: 'rev-1', copyId: 'copy-1' },
@@ -1231,6 +1233,187 @@ describe('CollectionCopyService (#1231)', () => {
   });
 
   /**
+   * #1231. Taking a copy back says it never existed: it counts as neither
+   * owned nor removed. It is the user's word on the copy, so it stamps the
+   * copy as edited by the user, and a sync never brings the copy back. It
+   * changes none of the values a revision holds, so it keeps none.
+   */
+  describe('takeBack', () => {
+    it('stamps the copy taken back and edited by the user, and keeps no revision', async () => {
+      db.collectionCopy.update.mockResolvedValue(copyRow({ retractedAt: new Date('2026-11-26T00:00:00Z') }) as never);
+
+      const taken = await service.takeBack('gc-1', 'copy-1');
+
+      expectLockedThenChecked();
+      expect(db.collectionCopy.findUnique).toHaveBeenCalledWith({
+        where: { id: 'copy-1', entryId: 'gc-1', retractedAt: null },
+        select: { removedAt: true },
+      });
+      const now = db.gameCollection.update.mock.calls[0]?.[0]?.data.lastUpdated;
+      expect(db.collectionCopy.update).toHaveBeenCalledWith({
+        where: { id: 'copy-1' },
+        data: { retractedAt: now, editedByUserAt: now },
+        select: OWNER_COPY_SELECT,
+      });
+      // A revision would hold the values the copy still has (#1231).
+      expect(db.collectionCopyRevision.createMany).not.toHaveBeenCalled();
+      expect(taken).toMatchObject({ id: 'copy-1', retractedAt: new Date('2026-11-26T00:00:00Z') });
+    });
+
+    // The entry keeps another owned copy, counted under the entry's lock,
+    // so it stays, and the take-back needs no delete permission.
+    it('takes back an owned copy while the entry owns another', async () => {
+      await service.takeBack('gc-1', 'copy-1');
+
+      expect(db.collectionCopy.count).toHaveBeenCalledWith({
+        where: { entryId: 'gc-1', id: { not: 'copy-1' }, removedAt: null, retractedAt: null },
+      });
+      expect(db.collectionCopy.update).toHaveBeenCalled();
+      expect(abilityService.assertCurrentActorCan).not.toHaveBeenCalled();
+    });
+
+    // A copy that never existed can't remove the entry: the user adds the
+    // right copy first, or removes the game (#1231).
+    it('taking back the last owned copy is refused with COLLECTION_LAST_COPY, and writes nothing', async () => {
+      db.collectionCopy.count.mockResolvedValue(0);
+
+      await expect(service.takeBack('gc-1', 'copy-1')).rejects.toMatchObject({
+        status: 409,
+        code: 'COLLECTION_LAST_COPY',
+      });
+      expect(db.collectionCopyRevision.createMany).not.toHaveBeenCalled();
+      expect(db.collectionCopy.update).not.toHaveBeenCalled();
+    });
+
+    // A removed copy isn't owned, so taking it back changes no ownership.
+    it('takes back a removed copy whatever the entry still owns', async () => {
+      db.collectionCopy.findUnique.mockResolvedValue(copyRow({ removedAt: new Date('2025-01-01T00:00:00Z') }) as never);
+      db.collectionCopy.count.mockResolvedValue(0);
+
+      await service.takeBack('gc-1', 'copy-1');
+
+      expect(db.collectionCopy.count).not.toHaveBeenCalled();
+      expect(db.collectionCopy.update).toHaveBeenCalled();
+    });
+
+    // A taken-back copy is no removal, so a removed entry whose only removed
+    // copy is taken back stays removed with no reason left to read (#1231).
+    it("taking back a removed entry's only removed copy leaves it removed, with no reason", async () => {
+      db.collectionCopy.findUnique.mockResolvedValue(copyRow({ removedAt: new Date('2025-01-01T00:00:00Z') }) as never);
+      db.gameCollection.findUniqueOrThrow.mockResolvedValue({
+        deletedAt: new Date('2025-01-01T00:00:00Z'),
+        _count: { copies: 0 },
+      } as never);
+      db.collectionCopy.findFirst.mockResolvedValue(null);
+
+      await service.takeBack('gc-1', 'copy-1');
+
+      expect(db.gameCollection.update).toHaveBeenLastCalledWith({
+        where: { id: 'gc-1' },
+        data: { deleteReason: null, lastUpdated: expect.any(Date) },
+        select: { id: true },
+      });
+      expect(syncSupply).not.toHaveBeenCalled();
+    });
+
+    it('taking back an already taken-back copy answers COLLECTION_COPY_NOT_FOUND', async () => {
+      db.collectionCopy.findUnique.mockResolvedValue(null);
+
+      await expect(service.takeBack('gc-1', 'copy-1')).rejects.toMatchObject({
+        status: 404,
+        code: 'COLLECTION_COPY_NOT_FOUND',
+      });
+      expect(db.collectionCopyRevision.createMany).not.toHaveBeenCalled();
+      expect(db.collectionCopy.update).not.toHaveBeenCalled();
+    });
+  });
+
+  /** #1231. Undoing a take-back makes the copy count again, as it was before. */
+  describe('undoTakeBack', () => {
+    beforeEach(() => {
+      db.collectionCopy.findUnique.mockResolvedValue(
+        copyRow({ retractedAt: new Date('2026-11-01T00:00:00Z') }) as never,
+      );
+    });
+
+    it('undoing a take-back counts the copy again, stamped edited by the user, and keeps no revision', async () => {
+      const taken = await service.undoTakeBack('gc-1', 'copy-1');
+
+      expectLockedThenChecked();
+      expect(db.collectionCopy.findUnique).toHaveBeenCalledWith({
+        where: { id: 'copy-1', entryId: 'gc-1' },
+        select: { retractedAt: true },
+      });
+      const now = db.gameCollection.update.mock.calls[0]?.[0]?.data.lastUpdated;
+      expect(db.collectionCopyRevision.createMany).not.toHaveBeenCalled();
+      expect(db.collectionCopy.update).toHaveBeenCalledWith({
+        where: { id: 'copy-1' },
+        data: { retractedAt: null, editedByUserAt: now },
+        select: OWNER_COPY_SELECT,
+      });
+      expect(taken).toMatchObject({ id: 'copy-1' });
+    });
+
+    // The copy owned again acquires the entry again, and the write runner
+    // resumes the offers its removal paused (#1221).
+    it('undoing a take-back of an owned copy on a removed entry brings the entry back and resumes its offers', async () => {
+      db.gameCollection.findUniqueOrThrow.mockResolvedValue({
+        deletedAt: new Date('2025-01-01T00:00:00Z'),
+        _count: { copies: 1 },
+      } as never);
+
+      await service.undoTakeBack('gc-1', 'copy-1');
+
+      expect(db.gameCollection.update).toHaveBeenLastCalledWith({
+        where: { id: 'gc-1' },
+        data: { deletedAt: null, deleteReason: null, lastUpdated: expect.any(Date) },
+        select: { id: true },
+      });
+      expect(syncSupply).toHaveBeenCalledWith(db, { id: 'gc-1', deletedAt: null }, expect.any(Date));
+    });
+
+    it('undoing a take-back of a removed copy changes no ownership', async () => {
+      db.collectionCopy.findUnique.mockResolvedValue(
+        copyRow({
+          removedAt: new Date('2025-01-01T00:00:00Z'),
+          retractedAt: new Date('2026-11-01T00:00:00Z'),
+        }) as never,
+      );
+      db.gameCollection.findUniqueOrThrow.mockResolvedValue({
+        deletedAt: new Date('2025-01-01T00:00:00Z'),
+        _count: { copies: 0 },
+      } as never);
+
+      await service.undoTakeBack('gc-1', 'copy-1');
+
+      expect(syncSupply).not.toHaveBeenCalled();
+      expect(abilityService.assertCurrentActorCan).not.toHaveBeenCalled();
+    });
+
+    it('answers COLLECTION_COPY_NOT_FOUND for a copy the entry does not hold, and writes nothing', async () => {
+      db.collectionCopy.findUnique.mockResolvedValue(null);
+
+      await expect(service.undoTakeBack('gc-1', 'copy-1')).rejects.toMatchObject({
+        status: 404,
+        code: 'COLLECTION_COPY_NOT_FOUND',
+      });
+      expect(db.collectionCopy.update).not.toHaveBeenCalled();
+    });
+
+    // The copy is still there, so the refusal is never the copy's 404, which
+    // a client reads as "this copy is gone" (#634, #1231).
+    it('answers COLLECTION_COPY_NOT_TAKEN_BACK for a copy the entry holds that is not taken back, and writes nothing', async () => {
+      db.collectionCopy.findUnique.mockResolvedValue(copyRow({ retractedAt: null }) as never);
+
+      await expect(service.undoTakeBack('gc-1', 'copy-1')).rejects.toMatchObject({
+        status: 409,
+        code: 'COLLECTION_COPY_NOT_TAKEN_BACK',
+      });
+      expect(db.collectionCopy.update).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
    * #1231. Each write answers the copy in the entry owner's shape, so the writes are
    * the entry owner's alone, as the list is. A role holding every permission (the
    * server's Owner) or a plugin with an update grant passes the update
@@ -1244,6 +1427,8 @@ describe('CollectionCopyService (#1231)', () => {
       update: () => service.update('gc-1', 'copy-1', { condition: GameCondition.Good }),
       remove: () => service.remove('gc-1', 'copy-1', {}),
       restore: () => service.restore('gc-1', 'copy-1', 'rev-1'),
+      takeBack: () => service.takeBack('gc-1', 'copy-1'),
+      undoTakeBack: () => service.undoTakeBack('gc-1', 'copy-1'),
     } as const;
     const methods = Object.keys(writes) as (keyof typeof writes)[];
 

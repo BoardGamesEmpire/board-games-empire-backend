@@ -41,7 +41,14 @@ import type {
   UpdateCollectionCopyDto,
 } from './dto';
 import { toCollectionCopyDto, toCollectionRevisionDto } from './dto';
-import { collectionEntryNotFound, copyNotFound, copyNotRemoved, revisionNotFound } from './game-collection.errors';
+import {
+  collectionEntryNotFound,
+  copyNotFound,
+  copyNotRemoved,
+  copyNotTakenBack,
+  lastCopy,
+  revisionNotFound,
+} from './game-collection.errors';
 import {
   assertNotInFuture,
   assertRemovalAfterAcquisition,
@@ -107,9 +114,11 @@ export class CollectionCopyService {
   ) {}
 
   /**
-   * Every copy of the acting user's own entry, removed ones included, oldest
-   * first (#1231). A copy's acquisition and price are yours alone, whatever
-   * the entry's reach, so the entry is read as your own (`readOwnEntry`).
+   * Every copy of the acting user's own entry, removed and taken-back ones
+   * included, oldest first (#1231): a taken-back copy is listed, with its
+   * `retractedAt`, so its owner can undo the take-back. A copy's acquisition
+   * and price are yours alone, whatever the entry's reach, so the entry is
+   * read as your own (`readOwnEntry`).
    */
   async list(entryId: string): Promise<CollectionCopyDto[]> {
     const entry = await readOwnEntry(this.db, this.abilityService, entryId, {
@@ -189,7 +198,8 @@ export class CollectionCopyService {
    * copy said before as a revision, which can be restored. On a removed entry,
    * a corrected removal reason of a copy removed with the entry becomes the
    * entry's own reason, through the write runner's reconcile, whichever of
-   * those copies it is.
+   * those copies it is. A taken-back copy never existed, so it takes no edit,
+   * and answers `COLLECTION_COPY_NOT_FOUND` until the take-back is undone.
    */
   async update(entryId: string, copyId: string, dto: UpdateCollectionCopyDto): Promise<CollectionCopyDto> {
     if (Object.keys(pickDefined(dto)).length === 0) {
@@ -204,7 +214,7 @@ export class CollectionCopyService {
       async (tx) => {
         const entry = await this.lockOwnEntryAndStampUpdate(tx, entryId, now);
         const copy = await tx.collectionCopy.findUnique({
-          where: { id: copyId, entryId },
+          where: { id: copyId, entryId, retractedAt: null },
           select: COPY_REVISION_SELECT,
         });
 
@@ -311,7 +321,9 @@ export class CollectionCopyService {
    * The revisions of one copy of the acting user's own entry, newest
    * first, each in the shape its owner reads the copy (#1231). Like the
    * copy's details, its history is yours alone, whatever the entry's reach,
-   * so the entry is read as your own (`readOwnEntry`).
+   * so the entry is read as your own (`readOwnEntry`). A taken-back copy's
+   * history stays readable, as the copy itself stays in the copies list: it
+   * is a read, and shows the owner what undoing the take-back brings back.
    *
    * Each revision names its edition by id; it is read as it is now, and one
    * deleted since reads as none, as restoring the revision would give the
@@ -354,7 +366,9 @@ export class CollectionCopyService {
    * the copy: what it says now is first kept as a revision of its own, and
    * the copy is stamped as edited by the user, so a sync leaves it as the
    * user left it. A revision the copy doesn't hold, or one whose stored
-   * values can't be read back, answers `COLLECTION_REVISION_NOT_FOUND`.
+   * values can't be read back, answers `COLLECTION_REVISION_NOT_FOUND`. A
+   * taken-back copy never existed, so it takes no restore, and answers
+   * `COLLECTION_COPY_NOT_FOUND` until the take-back is undone.
    *
    * The restored values are held to what an edit is: a condition on a
    * digital copy, a price in a currency ISO 4217 doesn't list, an
@@ -384,8 +398,8 @@ export class CollectionCopyService {
       async (tx) => {
         const entry = await this.lockOwnEntryAndStampUpdate(tx, entryId, now);
         const copy = await tx.collectionCopy.findUnique({
-          where: { id: copyId, entryId },
-          select: { ...COPY_REVISION_SELECT, retractedAt: true },
+          where: { id: copyId, entryId, retractedAt: null },
+          select: COPY_REVISION_SELECT,
         });
 
         if (copy === null) {
@@ -407,9 +421,10 @@ export class CollectionCopyService {
 
         const releaseId =
           values.releaseId === null ? null : await restorableRelease(tx, values.releaseId, entry.platformGameId);
-        const ownedNow = copy.removedAt === null && copy.retractedAt === null;
         const removesEntry =
-          ownedNow && removal.removedAt !== null && (await this.assertMayRemoveIfLastOwned(tx, entryId, entry));
+          copy.removedAt === null &&
+          removal.removedAt !== null &&
+          (await this.assertMayRemoveIfLastOwned(tx, entryId, entry));
 
         await recordCopyRevision(tx, copy);
         const restored = await tx.collectionCopy.update({
@@ -441,6 +456,116 @@ export class CollectionCopyService {
       resolveActingUserIdOrNull(this.abilityService),
       now,
     );
+  }
+
+  /**
+   * Takes a copy back (#1231): the user says they never had it. It counts as
+   * neither owned nor removed from now on, so it leaves the entry's quantity
+   * and its rows, and only the copies list shows it, with its `retractedAt`.
+   * A copy missing, or taken back already, answers `COLLECTION_COPY_NOT_FOUND`.
+   *
+   * A copy that never existed can't remove the game, so taking back the
+   * entry's last owned copy is refused with `COLLECTION_LAST_COPY`: the user
+   * adds the right copy first, or removes the game. The owned copies other
+   * than this one are counted under the entry's lock, which every copy write
+   * takes first, so two take-backs can't each leave the other the last. A
+   * removed copy isn't owned, so taking it back is always allowed, and
+   * changes no ownership; on a removed entry the write runner reads the
+   * entry's reason again, from the copies still removed. Taking back a
+   * removed entry's only removed copy so leaves the entry removed with no
+   * reason, and undoing the take-back gives the reason back.
+   *
+   * It is the user's word on the copy, so it stamps `editedByUserAt`: a sync
+   * never brings the copy back. It keeps no revision: it changes none of the
+   * values a revision holds, so restoring one would change nothing.
+   */
+  async takeBack(entryId: string, copyId: string): Promise<CollectionCopyDto> {
+    const now = new Date();
+
+    return this.writes.run(
+      async (tx) => {
+        await this.lockOwnEntryAndStampUpdate(tx, entryId, now);
+        const copy = await tx.collectionCopy.findUnique({
+          where: { id: copyId, entryId, retractedAt: null },
+          select: { removedAt: true },
+        });
+
+        if (copy === null) {
+          throw copyNotFound(copyId);
+        }
+
+        if (
+          copy.removedAt === null &&
+          (await tx.collectionCopy.count({ where: { entryId, id: { not: copyId }, ...OWNED_COPY } })) === 0
+        ) {
+          throw lastCopy();
+        }
+
+        return { entryId, result: await this.writeTakeBack(tx, copyId, now, now) };
+      },
+      resolveActingUserIdOrNull(this.abilityService),
+      now,
+    );
+  }
+
+  /**
+   * Undoes a copy's take-back (#1231): the copy counts again, as owned or as
+   * removed, whichever it was. A copy missing answers
+   * `COLLECTION_COPY_NOT_FOUND`; one the entry holds that isn't taken back
+   * answers `COLLECTION_COPY_NOT_TAKEN_BACK`, never the 404, which a client
+   * may read as "this copy is gone" (#634).
+   *
+   * A copy owned again on a removed entry acquires the entry again, and the
+   * write runner resumes the offers its removal paused (#1221). A removed
+   * copy changes no ownership. Neither removes the entry, so neither needs
+   * the entry's `delete` permission.
+   *
+   * Like the take-back, it stamps `editedByUserAt` and keeps no revision.
+   */
+  async undoTakeBack(entryId: string, copyId: string): Promise<CollectionCopyDto> {
+    const now = new Date();
+
+    return this.writes.run(
+      async (tx) => {
+        await this.lockOwnEntryAndStampUpdate(tx, entryId, now);
+        const copy = await tx.collectionCopy.findUnique({
+          where: { id: copyId, entryId },
+          select: { retractedAt: true },
+        });
+
+        if (copy === null) {
+          throw copyNotFound(copyId);
+        }
+
+        if (copy.retractedAt === null) {
+          throw copyNotTakenBack();
+        }
+
+        return { entryId, result: await this.writeTakeBack(tx, copyId, null, now) };
+      },
+      resolveActingUserIdOrNull(this.abilityService),
+      now,
+    );
+  }
+
+  /**
+   * Writes the copy's take-back, `retractedAt` (null undoes it), and stamps
+   * the copy as edited by the user (#1231). Answers the copy in its owner's
+   * shape.
+   */
+  private async writeTakeBack(
+    tx: Prisma.TransactionClient,
+    copyId: string,
+    retractedAt: Date | null,
+    now: Date,
+  ): Promise<CollectionCopyDto> {
+    const written = await tx.collectionCopy.update({
+      where: { id: copyId },
+      data: { retractedAt, editedByUserAt: now },
+      select: OWNER_COPY_SELECT,
+    });
+
+    return toCollectionCopyDto(written);
   }
 
   /**

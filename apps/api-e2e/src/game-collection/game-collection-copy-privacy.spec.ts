@@ -302,11 +302,18 @@ describe('copy privacy on collection rows (#1231)', () => {
       .query({ reason: GameRemovalReason.Sold })
       .set(owner.headers)
       .expect(200);
-    // No route takes a copy back yet, so the take-back is arranged.
-    const takenBack = await db.client.collectionCopy.create({
-      data: { entryId, condition: GameCondition.Poor, retractedAt: new Date() },
-      select: { id: true },
-    });
+    const takenBack = copyEnvelope(
+      await request(baseUrl)
+        .post(`${COLLECTIONS_PATH}/${entryId}/copies`)
+        .set(owner.headers)
+        .send({ condition: GameCondition.Poor })
+        .expect(201),
+      'POST /api/game-collections/:id/copies as the owner',
+    );
+    await request(baseUrl)
+      .post(`${COLLECTIONS_PATH}/${entryId}/copies/${takenBack.id}/retraction`)
+      .set(owner.headers)
+      .expect(200);
 
     for (const { row, description } of [
       await rowListed(friend, owner.user.id, entryId, 'a friend'),
@@ -336,6 +343,7 @@ describe('copy privacy on collection rows (#1231)', () => {
       removedAt: null,
       removedOn: null,
       removeReason: null,
+      retractedAt: null,
     };
 
     const listed = 'GET /api/game-collections as the owner';

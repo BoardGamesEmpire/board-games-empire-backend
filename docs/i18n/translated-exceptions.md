@@ -66,6 +66,10 @@ better-auth writes itself (below):
     copies don't count;
   - `COLLECTION_COPY_NOT_REMOVED`: a 409 for a change to the removal of a copy
     that has not been removed;
+  - `COLLECTION_LAST_COPY`: a 409 for taking back the last copy the user owns
+    of a game, which would leave the game with none;
+  - `COLLECTION_COPY_NOT_TAKEN_BACK`: a 409 for undoing the take-back of a
+    copy that exists but is not taken back;
   - `COLLECTION_CONDITION_DIGITAL`: a 400 for a condition on a digital copy;
   - `COLLECTION_DATE_IN_FUTURE`: a 400 for an acquisition or removal date on a
     day that has begun nowhere on Earth yet, judged at UTC+14, with the date

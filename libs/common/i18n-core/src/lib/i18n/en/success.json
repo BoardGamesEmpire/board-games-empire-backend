@@ -11,7 +11,9 @@
     "copy_added": "Copy added successfully",
     "copy_updated": "Copy updated successfully",
     "copy_removed": "Copy removed successfully",
-    "copy_restored": "Copy restored to what it said before"
+    "copy_restored": "Copy restored to what it said before",
+    "copy_taken_back": "Copy taken back",
+    "copy_take_back_undone": "Copy counted again"
   },
   "list": {
     "created": "List created successfully",

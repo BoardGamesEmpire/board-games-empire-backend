@@ -41,7 +41,8 @@ export class CollectionCopyController {
   @ApiOperation({
     summary: 'List the copies of one of your collection entries',
     description:
-      'Every copy, those you removed included, oldest first. Only the entry’s owner sees them here: where and when a ' +
+      'Every copy, those you removed or took back included, oldest first; a copy taken back carries `retractedAt`. ' +
+      'Only the entry’s owner sees them here: where and when a ' +
       'copy was acquired, its price, value and note are yours alone.',
   })
   @ApiParam({ name: 'id', type: String, description: 'The collection entry' })
@@ -115,7 +116,7 @@ export class CollectionCopyController {
   @ApiResponse({
     status: Http.NotFound,
     description:
-      `${ENTRY_NOT_FOUND}, the copy not found on it (code COLLECTION_COPY_NOT_FOUND), or the release not found ` +
+      `${ENTRY_NOT_FOUND}, the copy not found on it or taken back (code COLLECTION_COPY_NOT_FOUND), or the release not found ` +
       '(code GAME_RELEASE_NOT_FOUND)',
   })
   @ApiResponse({
@@ -157,7 +158,7 @@ export class CollectionCopyController {
   })
   @ApiResponse({
     status: Http.NotFound,
-    description: `${ENTRY_NOT_FOUND}, or the copy not found on it, already removed (code COLLECTION_COPY_NOT_FOUND)`,
+    description: `${ENTRY_NOT_FOUND}, or the copy not found on it, already removed or taken back (code COLLECTION_COPY_NOT_FOUND)`,
   })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.GameCollection))
   @Delete(':copyId')
@@ -168,10 +169,70 @@ export class CollectionCopyController {
   }
 
   @ApiOperation({
+    summary: 'Take back a copy you never had',
+    description:
+      'Says the copy never existed, as when it was added by mistake: it counts as neither owned nor removed, ' +
+      'leaves the entry’s quantity and its copies on the entry, and only the copies list shows it, with ' +
+      '`retractedAt`. A copy taken back can’t be corrected, removed or restored until the take-back is undone. ' +
+      'The last copy you own can’t be taken back: add the right copy first, or remove the game. Only the ' +
+      'entry’s owner can take one back: anyone else is told the entry was not found.',
+  })
+  @ApiParam({ name: 'id', type: String, description: 'The collection entry' })
+  @ApiParam({ name: 'copyId', type: String })
+  @ApiResponse({ status: Http.Ok, type: CollectionCopyMessageResponseDto })
+  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
+  @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
+  @ApiResponse({
+    status: Http.NotFound,
+    description: `${ENTRY_NOT_FOUND}, or the copy not found on it, or taken back already (code COLLECTION_COPY_NOT_FOUND)`,
+  })
+  @ApiResponse({
+    status: Http.Conflict,
+    description: 'The last copy you own of the game (code COLLECTION_LAST_COPY)',
+  })
+  @CheckPolicies((ability) => ability.can(Action.update, ResourceType.GameCollection))
+  @HttpCode(Http.Ok)
+  @Post(':copyId/retraction')
+  takeBackCopy(@Param('id') id: string, @Param('copyId') copyId: string) {
+    return from(this.copies.takeBack(id, copyId)).pipe(
+      map((copy) => ({ copy, message: t('success.game_collection.copy_taken_back') })),
+    );
+  }
+
+  @ApiOperation({
+    summary: 'Undo taking back a copy',
+    description:
+      'The copy counts again, as a copy you own or one you removed, whichever it was. A copy you own on a game ' +
+      'you had removed adds the game back to your collection, and the offers its removal paused in events count ' +
+      'again. Only the entry’s owner can undo one: anyone else is told the entry was not found.',
+  })
+  @ApiParam({ name: 'id', type: String, description: 'The collection entry' })
+  @ApiParam({ name: 'copyId', type: String })
+  @ApiResponse({ status: Http.Ok, type: CollectionCopyMessageResponseDto })
+  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
+  @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
+  @ApiResponse({
+    status: Http.NotFound,
+    description: `${ENTRY_NOT_FOUND}, or the copy not found on it (code COLLECTION_COPY_NOT_FOUND)`,
+  })
+  @ApiResponse({
+    status: Http.Conflict,
+    description: 'A copy you have not taken back (code COLLECTION_COPY_NOT_TAKEN_BACK)',
+  })
+  @CheckPolicies((ability) => ability.can(Action.update, ResourceType.GameCollection))
+  @Delete(':copyId/retraction')
+  undoTakeBackCopy(@Param('id') id: string, @Param('copyId') copyId: string) {
+    return from(this.copies.undoTakeBack(id, copyId)).pipe(
+      map((copy) => ({ copy, message: t('success.game_collection.copy_take_back_undone') })),
+    );
+  }
+
+  @ApiOperation({
     summary: 'List the revisions of a copy',
     description:
       'Each edit, removal or restore of a copy first keeps what it said before as a revision. Newest first, ' +
-      'each in the shape you read the copy. An edition deleted since reads as none. Only the ' +
+      'each in the shape you read the copy. An edition deleted since reads as none. A copy taken back keeps its ' +
+      'revisions readable. Only the ' +
       'entry’s owner sees them: anyone else is told the entry was not found.',
   })
   @ApiParam({ name: 'id', type: String, description: 'The collection entry' })
@@ -215,7 +276,7 @@ export class CollectionCopyController {
   @ApiResponse({
     status: Http.NotFound,
     description:
-      `${ENTRY_NOT_FOUND}, ${COPY_NOT_FOUND}, or the revision not found on the copy, including one whose stored ` +
+      `${ENTRY_NOT_FOUND}, ${COPY_NOT_FOUND} or taken back, or the revision not found on the copy, including one whose stored ` +
       'values can’t be read back (code COLLECTION_REVISION_NOT_FOUND)',
   })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.GameCollection))

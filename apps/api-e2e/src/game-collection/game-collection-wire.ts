@@ -171,6 +171,7 @@ export const collectionCopyWireSchema = z
     removedAt: z.string().nullable(),
     removedOn: z.string().nullable(),
     removeReason: z.enum(GameRemovalReason).nullable(),
+    retractedAt: z.string().nullable(),
   })
   .strict();
 
@@ -291,11 +292,14 @@ export function listRatingsEnvelope(
 
 /**
  * What a copy said before a correction, as its owner reads a revision
- * (#1231): the copy's shape without its id and creation time. Strict, so a
- * field the revision must never carry, such as when the user last edited the
- * copy, its upstream account or the add's client request id, fails the parse.
+ * (#1231): the copy's shape without its id, creation time and take-back.
+ * Strict, so a field the revision must never carry, such as when the user
+ * last edited the copy, whether it is taken back, its upstream account or the
+ * add's client request id, fails the parse.
  */
-export const revisionValuesWireSchema = collectionCopyWireSchema.omit({ createdAt: true, id: true }).strict();
+export const revisionValuesWireSchema = collectionCopyWireSchema
+  .omit({ createdAt: true, id: true, retractedAt: true })
+  .strict();
 
 /** A revision of a copy (#1231). Strict, as its values are. */
 export const collectionRevisionWireSchema = z

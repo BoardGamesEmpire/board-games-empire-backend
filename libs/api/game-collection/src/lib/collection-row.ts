@@ -32,8 +32,8 @@ export const REMOVED_COPY: Prisma.CollectionCopyWhereInput = { removedAt: { not:
 
 /**
  * A copy as the entry's owner reads it on the copy routes (#1231): every field that
- * describes it, its acquisition and its removal included, and its release's
- * name and year. When the user last edited it, and the upstream account that
+ * describes it, its acquisition, its removal and its take-back included, and
+ * its release's name and year. When the user last edited it, and the upstream account that
  * synced it, are never selected, so they never ship.
  */
 export const OWNER_COPY_SELECT = {
@@ -52,6 +52,7 @@ export const OWNER_COPY_SELECT = {
   removedOn: true,
   removedOnPrecision: true,
   removeReason: true,
+  retractedAt: true,
   release: { select: { id: true, editionName: true, releaseYear: true } },
 } as const satisfies Prisma.CollectionCopySelect;
 

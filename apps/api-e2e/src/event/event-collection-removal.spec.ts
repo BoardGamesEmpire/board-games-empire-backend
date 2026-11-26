@@ -361,6 +361,40 @@ describe('removing an offered game from the collection (#1221)', () => {
     expect((await offerReads(host, eventId, ownerAttendeeId)).event.ids).toContain(offered.suppliedById);
   });
 
+  // A copy taken back by mistake, while the entry's other copy was then
+  // removed: undoing the take-back makes it owned again, so the entry comes
+  // back through the same write runner and its offers resume (#1231, #1221).
+  it('undoing a take-back of an owned copy on a removed entry brings the entry back and resumes its offers (#1231)', async () => {
+    const { host, owner, eventId, ownerAttendeeId, offered, nomination } = await arrangeEvent();
+    const copiesPath = `${COLLECTIONS_PATH}/${offered.collectionId}/copies`;
+    const { id: firstId } = await db.client.collectionCopy.findFirstOrThrow({
+      where: { entryId: offered.collectionId },
+      select: { id: true },
+    });
+    const second = copyEnvelope(
+      await request(baseUrl).post(copiesPath).set(owner.headers).send({}).expect(201),
+      'POST /api/game-collections/:id/copies as the owner',
+    );
+    await request(baseUrl).post(`${copiesPath}/${second.id}/retraction`).set(owner.headers).expect(200);
+    await request(baseUrl)
+      .delete(`${copiesPath}/${firstId}`)
+      .query({ reason: GameRemovalReason.Sold })
+      .set(owner.headers)
+      .expect(200);
+    expect((await readNomination(host, eventId, nomination.id)).status).toBe(NominationStatus.Paused);
+
+    const undone = copyEnvelope(
+      await request(baseUrl).delete(`${copiesPath}/${second.id}/retraction`).set(owner.headers).expect(200),
+      'DELETE /api/game-collections/:id/copies/:copyId/retraction as the owner',
+    );
+    expect(undone).toMatchObject({ id: second.id, removedAt: null, retractedAt: null });
+
+    const reopened = await readNomination(host, eventId, nomination.id);
+    expect(reopened.status).toBe(NominationStatus.Open);
+    expect(reopened.pausedFrom).toBeNull();
+    expect((await offerReads(host, eventId, ownerAttendeeId)).event.ids).toContain(offered.suppliedById);
+  });
+
   it('takes the game off the lineup still ahead and keeps it off after the add-back (#1221)', async () => {
     const { host, owner, eventId, offered, lineupGameId } = await arrangeEvent();
     // A date that has started keeps its lineup, the game included. A date

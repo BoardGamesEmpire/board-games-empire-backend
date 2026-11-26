@@ -20,7 +20,8 @@ export function collectionEntryNotFound(id: string): CodedHttpException {
  * The refusal for a copy the route's entry doesn't hold: missing, on another
  * entry, or on an entry the actor can't write, which the 404 never tells
  * apart. Like `collectionEntryNotFound`, its code says the 404 is about this
- * row (#1231).
+ * row (#1231). A taken-back copy never existed, so it answers this on every
+ * write but the undo of its take-back.
  */
 export function copyNotFound(id: string): CodedHttpException {
   return new CodedHttpException(
@@ -57,6 +58,19 @@ export function copyLimitReached(max: number): CodedHttpException {
   );
 }
 
+/**
+ * A copy the entry holds that isn't taken back has no take-back to undo
+ * (#1231). A 409, never the copy's 404: a client reads that as "this copy is
+ * gone" (#634), and the copy is still there.
+ */
+export function copyNotTakenBack(): CodedHttpException {
+  return new CodedHttpException(
+    Http.Conflict,
+    'COLLECTION_COPY_NOT_TAKEN_BACK',
+    t('errors.game_collection.copy_not_taken_back'),
+  );
+}
+
 /** A removal's date and reason describe a removal, so a copy not removed has none to edit (#1231). */
 export function copyNotRemoved(): CodedHttpException {
   return new CodedHttpException(
@@ -64,6 +78,15 @@ export function copyNotRemoved(): CodedHttpException {
     'COLLECTION_COPY_NOT_REMOVED',
     t('errors.game_collection.copy_not_removed'),
   );
+}
+
+/**
+ * Taking back the entry's last owned copy would leave a game the user has
+ * with no copy, so it is refused: add the right copy first, or remove the
+ * game (#1231).
+ */
+export function lastCopy(): CodedHttpException {
+  return new CodedHttpException(Http.Conflict, 'COLLECTION_LAST_COPY', t('errors.game_collection.last_copy'));
 }
 
 /** A condition describes a physical object, so a digital copy has none (#1231). */
