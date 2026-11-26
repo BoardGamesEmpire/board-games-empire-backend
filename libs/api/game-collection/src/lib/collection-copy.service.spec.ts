@@ -473,4 +473,54 @@ describe('CollectionCopyService (#1231)', () => {
       expect(db.$transaction).not.toHaveBeenCalled();
     });
   });
+
+  /**
+   * #1231. Each write answers the copy in the owner's shape, so the writes are
+   * the owner's alone, as the list is. A role holding every permission (the
+   * server's Owner) or a plugin with an update grant passes the update
+   * conditions, so the entry's owner is checked beside them, under the lock,
+   * before anything is written.
+   */
+  describe("another user's entry", () => {
+    const writes = {
+      add: () => service.add('gc-1', { condition: GameCondition.Good }),
+      update: () => service.update('gc-1', 'copy-1', { condition: GameCondition.Good }),
+      remove: () => service.remove('gc-1', 'copy-1', {}),
+    } as const;
+    const methods = Object.keys(writes) as (keyof typeof writes)[];
+
+    it.each(methods)(
+      '%s answers COLLECTION_ENTRY_NOT_FOUND to a reader whose grants pass the update conditions, and writes nothing',
+      async (method) => {
+        db.$queryRaw.mockResolvedValue([{ ...LOCKED, userId: 'user-2' }] as never);
+
+        await expect(writes[method]()).rejects.toMatchObject({ status: 404, code: 'COLLECTION_ENTRY_NOT_FOUND' });
+        expect(db.gameCollection.update).not.toHaveBeenCalled();
+        expect(db.collectionCopy.create).not.toHaveBeenCalled();
+        expect(db.collectionCopy.update).not.toHaveBeenCalled();
+        expect(syncSupply).not.toHaveBeenCalled();
+      },
+    );
+
+    // A plugin, the system or an external actor has no collection of its own.
+    it.each(methods)('%s answers COLLECTION_ENTRY_NOT_FOUND to an actor that is no user', async (method) => {
+      abilityService.getActingUserId.mockImplementation(() => {
+        throw new ForbiddenException();
+      });
+
+      await expect(writes[method]()).rejects.toMatchObject({ status: 404, code: 'COLLECTION_ENTRY_NOT_FOUND' });
+      expect(db.gameCollection.update).not.toHaveBeenCalled();
+      expect(db.collectionCopy.create).not.toHaveBeenCalled();
+      expect(db.collectionCopy.update).not.toHaveBeenCalled();
+    });
+
+    // An API key acts for its owner: its acting user is the owner, so it
+    // writes the owner's copies.
+    it.each(methods)("%s lets an API key acting for the entry's owner write", async (method) => {
+      abilityService.getActingUserId.mockReturnValue('key-owner');
+      db.$queryRaw.mockResolvedValue([{ ...LOCKED, userId: 'key-owner' }] as never);
+
+      await expect(writes[method]()).resolves.toMatchObject({ id: 'copy-1' });
+    });
+  });
 });

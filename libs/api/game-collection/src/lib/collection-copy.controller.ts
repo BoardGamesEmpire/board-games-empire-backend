@@ -18,9 +18,12 @@ import {
 const ENTRY_NOT_FOUND = 'Collection entry not found, or not yours (code COLLECTION_ENTRY_NOT_FOUND)';
 
 /**
- * The copies of a collection entry, on its owner's routes (#1231). Each write
- * is an update of the entry, held to its conditions; removing the entry's
- * last owned copy removes the entry, and needs permission to remove it too
+ * The copies of a collection entry, on its owner's routes (#1231). Every
+ * route, the writes included, answers only the entry's owner: anyone else
+ * gets `COLLECTION_ENTRY_NOT_FOUND`, whatever their grants, because each
+ * answer carries the copy's price, value, acquisition and note. Each write is
+ * an update of the entry, held to its conditions; removing the entry's last
+ * owned copy removes the entry, and needs permission to remove it too
  * (#1288).
  */
 @ApiBearerAuth()
@@ -54,7 +57,8 @@ export class CollectionCopyController {
     summary: 'Add a copy to one of your collection entries',
     description:
       'A copy of a game you already have, with its own edition, condition, acquisition and price. Adding a copy ' +
-      'to an entry you removed adds the game back, and the offers its removal paused in events count again.',
+      'to an entry you removed adds the game back, and the offers its removal paused in events count again. ' +
+      'Only the owner can add one: anyone else is told the entry was not found.',
   })
   @ApiParam({ name: 'id', type: String, description: 'The collection entry' })
   @ApiResponse({ status: Http.Created, type: CollectionCopyMessageResponseDto })
@@ -84,7 +88,8 @@ export class CollectionCopyController {
     summary: 'Correct a copy (omitted fields preserved, null clears)',
     description:
       'Changes what a copy says: its edition, condition, acquisition, price, value or note, and for a copy you ' +
-      'removed, its removal date and reason.',
+      'removed, its removal date and reason. Only the owner can correct one: anyone else is told the entry was ' +
+      'not found.',
   })
   @ApiParam({ name: 'id', type: String, description: 'The collection entry' })
   @ApiParam({ name: 'copyId', type: String })
@@ -122,7 +127,7 @@ export class CollectionCopyController {
       'reason. Removing the last copy you own removes the game from your collection, with that reason, as ' +
       'removing the entry does: in every event that offers it, nominations of the game that await an outcome ' +
       'pause, and the game leaves the lineup of every date still ahead. That needs permission to remove the ' +
-      'entry too.',
+      'entry too. Only the owner can remove one: anyone else is told the entry was not found.',
   })
   @ApiParam({ name: 'id', type: String, description: 'The collection entry' })
   @ApiParam({ name: 'copyId', type: String })

@@ -25,7 +25,12 @@ import type { TestDatabase } from '../support/test-db';
 import { createTestDatabase } from '../support/test-db';
 import type { HttpResponseLike, RequestDescription } from '../support/wire';
 import type { CollectionRowPlatformGameWire, PlayerAndPlayTimeField } from './game-collection-wire';
-import { collectionRowPlatformGame, listCollectionsEnvelope, readCollectionEnvelope } from './game-collection-wire';
+import {
+  collectionRowPlatformGame,
+  listCollectionsEnvelope,
+  ownerRowCopies,
+  readCollectionEnvelope,
+} from './game-collection-wire';
 
 /**
  * What a collection row embeds of its game and platform game (#1070), against
@@ -734,6 +739,62 @@ describe('collection rows (#1070)', () => {
         { gameId: newBase.id, isStandalone: true },
       ]);
       expect(drained.map((row) => row.id)).not.toContain(untouched.entryId);
+    });
+
+    // Each owned copy's release is embedded too, and a re-import rewrites it
+    // in place without touching the entry (#1070, #1231). A removed copy is
+    // not on the row, so its release changing resends nothing: the control
+    // entry holds the renamed release on a removed copy only.
+    it('resends a row when its release changes, and not an untouched neighbor (#1070)', async () => {
+      const owner = await actors.user();
+      const released = await arrangeRow(owner.user.id, { reach: Reach.Private });
+      const untouched = await arrangeRow(owner.user.id, { reach: Reach.Private });
+      const { platformGameId } = await db.client.gameCollection.findUniqueOrThrow({
+        where: { id: released.entryId },
+        select: { platformGameId: true },
+      });
+      const release = await db.client.gameRelease.create({
+        data: { platformGameId, editionKey: `e2e edition ${token()}`, editionName: 'First edition' },
+        select: { id: true },
+      });
+      await db.client.collectionCopy.create({ data: { entryId: released.entryId, releaseId: release.id } });
+      // The same platform game in another medium: one owned copy of no
+      // edition, and the renamed release on a copy since removed.
+      const soldEdition = await db.client.gameCollection.create({
+        data: {
+          userId: owner.user.id,
+          platformGameId,
+          medium: GameMedium.Digital,
+          reach: Reach.Private,
+          copies: {
+            create: [{}, { releaseId: release.id, removedAt: new Date(), removeReason: GameRemovalReason.Sold }],
+          },
+        },
+        select: { id: true },
+      });
+
+      const since = await startOfChanges();
+      await db.client.gameRelease.update({ where: { id: release.id }, data: { editionName: 'Second edition' } });
+
+      const description = `GET ${COLLECTIONS_PATH}?updatedSince as the owner`;
+      const drained = listCollectionsEnvelope(
+        await request(baseUrl)
+          .get(COLLECTIONS_PATH)
+          .query({ updatedSince: since.toISOString() })
+          .set(owner.headers)
+          .expect(200),
+        description,
+      ).collections;
+
+      // The untouched row and the removed copy's entry are the controls: the
+      // drain is not every row, nor every entry that ever held the release.
+      expect(drained.map((row) => row.id)).toEqual([released.entryId]);
+      expect(drained.map((row) => row.id)).not.toContain(untouched.entryId);
+      expect(drained.map((row) => row.id)).not.toContain(soldEdition.id);
+      // The resent row carries the release's new name.
+      expect(ownerRowCopies(drained[0], description).map((copy) => copy.release?.editionName)).toEqual([
+        'Second edition',
+      ]);
     });
 
     // A row lists a base game only once it has a platform game on the row's

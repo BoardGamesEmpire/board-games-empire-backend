@@ -17,7 +17,7 @@ import { PaginatedRows, PaginationQueryDto, pickDefined } from '@bge/shared';
 import { BadRequestException, HttpException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { assertCopyRoom, copyCreateData } from './collection-copy-data';
 import type { GameCollectionRow, GameCollectionWithRelations } from './collection-row';
-import { changedSince, COLLECTION_INCLUDE, OWNED_COPY } from './collection-row';
+import { changedSince, COLLECTION_INCLUDE, OWNED_COPY, readOwnerCopies } from './collection-row';
 import { CollectionWriteService, writeEntryUnder } from './collection-write.service';
 import {
   CreateGameCollectionDto,
@@ -82,6 +82,8 @@ export class GameCollectionService {
    * `resolveScopeSubjectId` refuses `plugin`, `system` and `external` actors:
    * "my collection" has no meaning without a user, and the refusal must never
    * soften into an empty page. PROVISIONAL — #395.
+   *
+   * Each row carries its copies in the owner's shape (#1231).
    */
   async listOwn(query: ListGameCollectionsQueryDto): Promise<PaginatedRows<GameCollectionDto>> {
     const { includeDeleted, deletedOnly, medium, favorite, updatedSince } = query;
@@ -99,7 +101,9 @@ export class GameCollectionService {
       ],
     } satisfies Prisma.GameCollectionWhereInput;
 
-    return this.paginate(where, query);
+    const { rows, total } = await this.paginate(where, query);
+
+    return { rows: await this.rowsWithOwnerCopies(rows), total };
   }
 
   /**
@@ -116,6 +120,10 @@ export class GameCollectionService {
    * Each row also says whether its game is on the acting user's wishlist
    * (`onWishlist`, #1241), so a client can show "a friend's copy of a game you
    * want" without a round trip per page.
+   *
+   * Its copies are the public shape for every caller, the path user too: this
+   * is the route other readers read, so its rows never read the owner's
+   * (#1231).
    */
   async listForUser(
     targetUserId: string,
@@ -205,7 +213,11 @@ export class GameCollectionService {
     return { rows: await this.rowsWithBaseGames(rows), total };
   }
 
-  /** A single entry the acting user may read (owner sees own tombstones). */
+  /**
+   * A single entry the acting user may read; its owner also reads it once
+   * removed. Its copies are the owner's shape for its owner, and the public
+   * shape for every other reader (#1231).
+   */
   async getById(id: string): Promise<GameCollectionDto> {
     const collection = await this.db.gameCollection.findUnique({
       where: {
@@ -220,7 +232,40 @@ export class GameCollectionService {
       throw collectionEntryNotFound(id);
     }
 
-    return this.rowWithBaseGames(collection);
+    return this.rowWithOwnerCopies(await this.rowWithBaseGames(collection));
+  }
+
+  /**
+   * Each row with its copies in the owner's shape, for the rows the acting
+   * user owns (#1231). `readOwnerCopies` decides which those are, in one
+   * query bound to the acting user as the entries' owner; every other row
+   * keeps the public copies the include read. An actor with no user behind
+   * it owns no entry, so nothing is read for it.
+   *
+   * An API key acts for its owner, so its rows carry the owner's shape, as
+   * the copy routes already send it. The key reads only the entries its
+   * grants reach, and this read only adds to those rows.
+   */
+  private async rowsWithOwnerCopies(rows: GameCollectionRow[]): Promise<GameCollectionRow[]> {
+    const actingUserId = resolveActingUserIdOrNull(this.abilityService);
+    if (actingUserId === null || rows.length === 0) {
+      return rows;
+    }
+
+    const owned = await readOwnerCopies(
+      this.db,
+      rows.map(({ id }) => id),
+      actingUserId,
+    );
+
+    return rows.map((row) => ({ ...row, copies: owned.get(row.id) ?? row.copies }));
+  }
+
+  /** One row with its copies, as {@link rowsWithOwnerCopies} reads them. */
+  private async rowWithOwnerCopies(row: GameCollectionRow): Promise<GameCollectionRow> {
+    const [withCopies] = await this.rowsWithOwnerCopies([row]);
+
+    return withCopies;
   }
 
   /**
@@ -515,9 +560,10 @@ export class GameCollectionService {
   }
 
   /**
-   * The row a write returns, with its game's base games (#1070). `toError`
-   * maps the write's own failure. The link read runs after that mapping,
-   * never inside it, so a failed link read reaches the client as itself.
+   * The row a write returns, with its game's base games (#1070), and the
+   * owner's copies for the owner (#1231). `toError` maps the write's own
+   * failure. The reads run after that mapping, never inside it, so a failed
+   * read reaches the client as itself.
    */
   private async writtenRow(
     write: () => Promise<GameCollectionWithRelations>,
@@ -530,7 +576,7 @@ export class GameCollectionService {
       throw toError(error);
     }
 
-    return this.rowWithBaseGames(row);
+    return this.rowWithOwnerCopies(await this.rowWithBaseGames(row));
   }
 
   /**

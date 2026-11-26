@@ -1,8 +1,12 @@
 import type { GameCollection } from '@bge/database';
-import { ContentType, GameMedium, GameRemovalReason, PlatformType, Reach } from '@bge/database';
+import { ContentType, GameCondition, GameMedium, GameRemovalReason, PlatformType, Reach } from '@bge/database';
 import { ExpansionLinkDto } from '@bge/shared';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import type { GameCollectionRow } from '../collection-row';
+import type { GameCollectionRow, PublicCopyRow } from '../collection-row';
+import type { Money } from '../values/money';
+import type { CollectionCopyDto } from './collection-copy.dto';
+import { CollectionReleaseSummaryDto } from './collection-copy.dto';
+import { MoneyDto } from './money.dto';
 
 type CollectionPlatformGame = GameCollectionRow['platformGame'];
 type CollectionPlatform = CollectionPlatformGame['platform'];
@@ -130,6 +134,103 @@ export class CollectionPlatformGameSummaryDto implements CollectionPlatformGame 
   game!: CollectionGameSummaryDto;
 }
 
+/**
+ * `Partial<T>` when `Row` names exactly the fields of `T`. Otherwise a type
+ * naming the fields on one side only, so a class that implements it fails the
+ * typecheck and names them (#1231).
+ */
+type EveryFieldOf<T, Row> = [Exclude<keyof T, keyof Row>, Exclude<keyof Row, keyof T>] extends [never, never]
+  ? Partial<T>
+  : { fieldsOnOneSideOnly: [Exclude<keyof T, keyof Row>, Exclude<keyof Row, keyof T>] };
+
+/**
+ * A copy on a collection row (#1231). Every reader of the entry gets its id,
+ * edition and condition. The owner, reading their own entries, also gets
+ * every other field the copy routes send; no one else ever does.
+ *
+ * It implements the include's public copy, and names every field of the
+ * owner's copy, so a field added to either without this class fails the
+ * typecheck.
+ */
+export class CollectionRowCopyDto implements PublicCopyRow, EveryFieldOf<CollectionCopyDto, CollectionRowCopyDto> {
+  @ApiProperty({ description: 'Unique copy identifier' })
+  id!: string;
+
+  @ApiProperty({ type: CollectionReleaseSummaryDto, nullable: true, description: "The copy's edition" })
+  release!: CollectionReleaseSummaryDto | null;
+
+  @ApiProperty({ enum: GameCondition, nullable: true, description: 'The condition of a physical copy' })
+  condition!: GameCondition | null;
+
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    description:
+      'Sent to the owner only. When the copy was acquired, as exactly as known: a year (`2019`), a month ' +
+      '(`2019-03`) or a day (`2019-03-02`). Null when unknown.',
+    example: '2019-03',
+  })
+  acquiredOn?: string | null;
+
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    description: 'Sent to the owner only. Where the copy came from, in your own words',
+  })
+  acquiredFrom?: string | null;
+
+  @ApiPropertyOptional({
+    type: MoneyDto,
+    nullable: true,
+    description: 'Sent to the owner only. What was paid for the copy',
+  })
+  pricePaid?: Money | null;
+
+  @ApiPropertyOptional({
+    type: MoneyDto,
+    nullable: true,
+    description: 'Sent to the owner only. What the copy is worth now, as you value it',
+  })
+  currentValue?: Money | null;
+
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    description: 'Sent to the owner only. A note about the copy, kept as written, in Markdown',
+  })
+  note?: string | null;
+
+  @ApiPropertyOptional({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description:
+      'Sent to the owner only. When the removal was recorded: always null on a row, which lists owned copies',
+  })
+  removedAt?: Date | null;
+
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    description: 'Sent to the owner only. When the copy left your collection: always null on a row',
+  })
+  removedOn?: string | null;
+
+  @ApiPropertyOptional({
+    enum: GameRemovalReason,
+    nullable: true,
+    description: 'Sent to the owner only. Why the copy left your collection: always null on a row',
+  })
+  removeReason?: GameRemovalReason | null;
+
+  @ApiPropertyOptional({
+    type: String,
+    format: 'date-time',
+    description: 'Sent to the owner only. When the copy was recorded',
+  })
+  createdAt?: Date;
+}
+
 export class GameCollectionDto implements Pick<
   GameCollection,
   | 'id'
@@ -163,6 +264,16 @@ export class GameCollectionDto implements Pick<
 
   @ApiProperty({ description: 'Number of copies the owner still has', readOnly: true })
   quantity!: number;
+
+  @ApiProperty({
+    type: [CollectionRowCopyDto],
+    readOnly: true,
+    description:
+      'The copies the owner still has, oldest first. Every reader sees each one’s id, edition and condition. The ' +
+      'owner also gets the rest on `GET /game-collections`, `GET /game-collections/:id` and the answers to their ' +
+      'writes; `GET /users/:userId/game-collections` sends every caller the first three only.',
+  })
+  copies!: CollectionRowCopyDto[];
 
   @ApiProperty({
     enum: Reach,

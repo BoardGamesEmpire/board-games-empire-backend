@@ -26,9 +26,17 @@ import { assertRemovalAfterAcquisition, partialDateFromColumns, removalDate } fr
  * and whose sync then pauses or resumes the entry's offers in events (#1221).
  * Its first statement locks the entry's row, so it takes turns with every
  * other write that changes what the entry supplies. The entry is then held to
- * the actor's `update` conditions, as `PATCH /game-collections/:id` is: each
- * copy write is an update of the entry (#1288). A miss answers
- * `COLLECTION_ENTRY_NOT_FOUND`, as an entry that doesn't exist does (#634).
+ * its owner, and to the actor's `update` conditions, as
+ * `PATCH /game-collections/:id` is: each copy write is an update of the entry
+ * (#1288). A miss answers `COLLECTION_ENTRY_NOT_FOUND`, as an entry that
+ * doesn't exist does (#634).
+ *
+ * Every route here is the owner's alone, the writes as much as the list: each
+ * write answers the copy in the owner's shape, its price, value, acquisition
+ * and note, which no one else may read, whatever their grants (#1231). A role
+ * holding every permission, or a plugin with an update grant, still writes
+ * no one's copies but its own user's. An API key acts for its owner, so it
+ * writes its owner's.
  */
 @Injectable()
 export class CollectionCopyService {
@@ -227,13 +235,17 @@ export class CollectionCopyService {
 
   /**
    * Locks the entry's row, as the transaction's first lock (#1221), then
-   * holds it to the actor's `update` conditions (#1288). Answers what the
-   * copy is checked against: the entry's medium and platform game.
+   * holds it to its owner (#1231) and to the actor's `update` conditions
+   * (#1288). Another user's entry, or any entry for an actor that is no
+   * user, answers `COLLECTION_ENTRY_NOT_FOUND` before anything is written,
+   * as the list does: the write's answer is the owner's shape of the copy.
+   * Answers what the copy is checked against: the entry's medium and
+   * platform game.
    */
   private async lockedForUpdate(tx: Prisma.TransactionClient, entryId: string, now: Date): Promise<LockedEntry> {
     const locked = await this.writes.lockEntry(tx, entryId);
 
-    if (locked === null) {
+    if (locked === null || locked.userId !== resolveActingUserIdOrNull(this.abilityService)) {
       throw collectionEntryNotFound(entryId);
     }
 

@@ -146,6 +146,12 @@ export function readCollectionEnvelope(
 /** A price on the wire: whole minor units and an ISO 4217 code (#1231). */
 const moneyWireSchema = z.object({ amount: z.number().int(), currency: z.string() }).strict();
 
+/** A copy's edition on the wire: the release's id, name and year (#1231). */
+const copyReleaseWireSchema = z
+  .object({ editionName: z.string().nullable(), id: z.string().min(1), releaseYear: z.number().nullable() })
+  .strict()
+  .nullable();
+
 /**
  * A copy as its owner reads it (#1231). Strict, so a field the owner's shape
  * doesn't name, such as when the user last edited it or its upstream
@@ -161,10 +167,7 @@ export const collectionCopyWireSchema = z
     id: z.string().min(1),
     note: z.string().nullable(),
     pricePaid: moneyWireSchema.nullable(),
-    release: z
-      .object({ editionName: z.string().nullable(), id: z.string().min(1), releaseYear: z.number().nullable() })
-      .strict()
-      .nullable(),
+    release: copyReleaseWireSchema,
     removedAt: z.string().nullable(),
     removedOn: z.string().nullable(),
     removeReason: z.enum(GameRemovalReason).nullable(),
@@ -172,6 +175,53 @@ export const collectionCopyWireSchema = z
   .strict();
 
 export type CollectionCopyWire = z.infer<typeof collectionCopyWireSchema>;
+
+/**
+ * A copy as every reader but its owner sees it on a collection row (#1231):
+ * its id, edition and condition, and nothing else. Strict, so a private field
+ * on the wire fails the parse.
+ */
+export const publicCopyWireSchema = z
+  .object({
+    condition: z.enum(GameCondition).nullable(),
+    id: z.string().min(1),
+    release: copyReleaseWireSchema,
+  })
+  .strict();
+
+export type PublicCopyWire = z.infer<typeof publicCopyWireSchema>;
+
+/**
+ * A collection row's `copies` (#1231), each parsed with `schema`: the owner's
+ * shape or the public one. A row without the array fails here, not as an
+ * assertion against `undefined`.
+ */
+function rowCopies<T>(
+  row: GameCollectionWire,
+  request: RequestDescription,
+  schema: z.ZodType<T>,
+  shape: string,
+): readonly T[] {
+  const parsed = z.array(schema).safeParse((row as unknown as Record<string, unknown>)['copies']);
+  if (!parsed.success) {
+    throw new Error(
+      `${request}: collection row ${row.id} carried no 'copies' array of ${shape} (${parsed.error.message}). ` +
+        'Update apps/api-e2e/src/game-collection/game-collection-wire.ts if the row changed on purpose.',
+    );
+  }
+
+  return parsed.data;
+}
+
+/** A row's copies as every reader but the owner sees them: no private field (#1231). */
+export function publicRowCopies(row: GameCollectionWire, request: RequestDescription): readonly PublicCopyWire[] {
+  return rowCopies(row, request, publicCopyWireSchema, 'public copies');
+}
+
+/** A row's copies as their owner reads them: every field the copy routes send (#1231). */
+export function ownerRowCopies(row: GameCollectionWire, request: RequestDescription): readonly CollectionCopyWire[] {
+  return rowCopies(row, request, collectionCopyWireSchema, "the owner's copies");
+}
 
 const copyEnvelopeSchema = z.object({ copy: collectionCopyWireSchema });
 

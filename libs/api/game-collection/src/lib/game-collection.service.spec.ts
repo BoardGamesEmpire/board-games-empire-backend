@@ -26,7 +26,7 @@ import {
 } from '@bge/testing';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { COLLECTION_INCLUDE } from './collection-row';
+import { COLLECTION_INCLUDE, OWNER_COPY_SELECT } from './collection-row';
 import { CollectionWriteService } from './collection-write.service';
 import { GameCollectionService } from './game-collection.service';
 
@@ -348,8 +348,7 @@ describe('GameCollectionService', () => {
       // The catch-up drain resends a row when the entry changed or a value it
       // embeds did: the platform game, its platform, the game, the game's links
       // as an expansion, and those links' base games and their platform games
-      // (#1391). The entry embeds no release since its copies hold them
-      // (#1231). Written out rather than built from the code under test, so a
+      // (#1391), and each owned copy's release (#1231). Written out rather than built from the code under test, so a
       // dropped arm fails here.
       const changedSinceShape = {
         OR: [
@@ -386,6 +385,9 @@ describe('GameCollectionService', () => {
               },
             },
           },
+          // Each owned copy's release is embedded, and a re-import renames it
+          // in place without touching the entry (#1231).
+          { copies: { some: { removedAt: null, retractedAt: null, release: { is: { updatedAt: { gte: since } } } } } },
         ],
       };
 
@@ -1162,7 +1164,7 @@ describe('GameCollectionService', () => {
     // A copy can't be removed before it was acquired. Each owned copy is
     // checked against the removal's date, under the entry's lock (#1231).
     it('refuses a removal dated before an owned copy was acquired with COLLECTION_DATE_ORDER', async () => {
-      db.collectionCopy.findMany.mockResolvedValue([
+      db.collectionCopy.findMany.mockResolvedValueOnce([
         { acquiredOn: null, acquiredOnPrecision: null },
         { acquiredOn: new Date('2020-05-01T00:00:00Z'), acquiredOnPrecision: DatePrecision.Month },
       ] as never);
@@ -1181,7 +1183,7 @@ describe('GameCollectionService', () => {
 
     // The last day of "2020" is after a May 2020 acquisition (#1231).
     it('takes a removal whose period ends on or after the acquisition', async () => {
-      db.collectionCopy.findMany.mockResolvedValue([
+      db.collectionCopy.findMany.mockResolvedValueOnce([
         { acquiredOn: new Date('2020-05-01T00:00:00Z'), acquiredOnPrecision: DatePrecision.Month },
       ] as never);
 
@@ -1426,5 +1428,188 @@ describe('GameCollectionService', () => {
         await expect(singleRowReads[method]()).rejects.toBe(failure);
       },
     );
+  });
+
+  /**
+   * #1231. A row carries the entry's owned copies. Every reader gets each
+   * copy's id, edition and condition, from the include; the owner gets the
+   * copy as the copy routes send it, read in a query of its own whose `where`
+   * names the acting user as the entry's owner. That bound, not a branch on
+   * who is reading, keeps the private fields to the owner.
+   */
+  describe('copies on collection rows (#1231)', () => {
+    const PUBLIC_COPY = { condition: GameCondition.Good, id: 'copy-1', release: null };
+
+    /** `copy-1` as the owner's query reads it: every field the copy routes send, and its entry. */
+    const ownersCopyRow = (entryId = 'gc-1', id = 'copy-1') => ({
+      entryId,
+      id,
+      createdAt: new Date('2026-01-02T00:00:00Z'),
+      condition: GameCondition.Good,
+      acquiredOn: new Date('2020-06-01T00:00:00Z'),
+      acquiredOnPrecision: DatePrecision.Month,
+      acquiredFrom: 'A friend',
+      pricePaidAmount: 2500,
+      pricePaidCurrency: 'USD',
+      currentValueAmount: null,
+      currentValueCurrency: null,
+      note: 'Sleeved',
+      removedAt: null,
+      removedOn: null,
+      removedOnPrecision: null,
+      removeReason: null,
+      release: null,
+    });
+
+    /** `copy-1` as the owner is sent it. */
+    const ownersCopy = (id = 'copy-1') => ({
+      id,
+      createdAt: new Date('2026-01-02T00:00:00Z'),
+      condition: GameCondition.Good,
+      acquiredOn: '2020-06',
+      acquiredFrom: 'A friend',
+      pricePaid: { amount: 2500, currency: 'USD' },
+      currentValue: null,
+      note: 'Sleeved',
+      removedAt: null,
+      removedOn: null,
+      removeReason: null,
+      release: null,
+    });
+
+    /** The owner's query for `entryIds`, bound to `userId` as their owner. */
+    const ownerCopyQuery = (entryIds: string[], userId = ME) => ({
+      where: { entryId: { in: entryIds }, entry: { userId }, removedAt: null, retractedAt: null },
+      select: { ...OWNER_COPY_SELECT, entryId: true },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    });
+
+    /** An entry as the include returns it, with its owned copies in the public shape. */
+    const withPublicCopies = (overrides: Partial<GameCollection> = {}) =>
+      ({ ...entry(overrides), copies: [PUBLIC_COPY] }) as GameCollection;
+
+    it('the include selects each owned copy in its public shape alone, oldest first', () => {
+      expect(COLLECTION_INCLUDE.copies).toEqual({
+        where: { removedAt: null, retractedAt: null },
+        select: { condition: true, id: true, release: { select: { editionName: true, id: true, releaseYear: true } } },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      });
+    });
+
+    it('getById sends the owner their own copies, read in a query of its own bound to them', async () => {
+      db.gameCollection.findUnique.mockResolvedValue(withPublicCopies());
+      db.collectionCopy.findMany.mockResolvedValue([ownersCopyRow()] as never);
+
+      const row = await service.getById('gc-1');
+
+      expect(db.collectionCopy.findMany).toHaveBeenCalledTimes(1);
+      expect(db.collectionCopy.findMany).toHaveBeenCalledWith(ownerCopyQuery(['gc-1']));
+      expect(row.copies).toEqual([ownersCopy()]);
+    });
+
+    // The review's third focus: a friend may read the entry, and the owner's
+    // query, bound to the friend, finds no copy of it (#1231).
+    it("getById of another user's entry keeps the public copies: the query bound to the reader finds none", async () => {
+      db.gameCollection.findUnique.mockResolvedValue(withPublicCopies({ userId: 'user-2' }));
+
+      const row = await service.getById('gc-1');
+
+      expect(db.collectionCopy.findMany).toHaveBeenCalledWith(ownerCopyQuery(['gc-1']));
+      expect(row.copies).toEqual([PUBLIC_COPY]);
+    });
+
+    // A plugin, the system or an external actor has no user behind it, so it
+    // owns no entry, and nothing is read for it (#1231).
+    it('reads no owner copies for an actor with no user behind it', async () => {
+      abilityService.getActingUserId.mockImplementation(() => {
+        throw new ForbiddenException();
+      });
+      db.gameCollection.findUnique.mockResolvedValue(withPublicCopies());
+
+      const row = await service.getById('gc-1');
+
+      expect(db.collectionCopy.findMany).not.toHaveBeenCalled();
+      expect(row.copies).toEqual([PUBLIC_COPY]);
+    });
+
+    // An API key acts for its owner: its acting user is the owner, and the
+    // key reads the entry only within its own grants. The copy routes already
+    // send the key the owner's shape, so a row it may read carries the same
+    // fields; a reader the key can't be is never the owner (#1231).
+    it("sends an API key acting for its owner the owner's copies, bound to that owner", async () => {
+      abilityService.getActingUserId.mockReturnValue('key-owner');
+      db.gameCollection.findUnique.mockResolvedValue(withPublicCopies({ userId: 'key-owner' }));
+      db.collectionCopy.findMany.mockResolvedValue([ownersCopyRow()] as never);
+
+      const row = await service.getById('gc-1');
+
+      expect(db.collectionCopy.findMany).toHaveBeenCalledWith(ownerCopyQuery(['gc-1'], 'key-owner'));
+      expect(row.copies).toEqual([ownersCopy()]);
+    });
+
+    it("listOwn reads the page's owner copies in one query, each row getting its own", async () => {
+      db.gameCollection.findMany.mockResolvedValue([
+        withPublicCopies({ id: 'gc-1' }),
+        withPublicCopies({ id: 'gc-2' }),
+      ]);
+      db.collectionCopy.findMany.mockResolvedValue([
+        ownersCopyRow('gc-1', 'copy-1'),
+        ownersCopyRow('gc-2', 'copy-2'),
+        ownersCopyRow('gc-2', 'copy-3'),
+      ] as never);
+
+      const page = await service.listOwn(paginationQuery({ limit: 20 }));
+
+      expect(db.collectionCopy.findMany).toHaveBeenCalledTimes(1);
+      expect(db.collectionCopy.findMany).toHaveBeenCalledWith(ownerCopyQuery(['gc-1', 'gc-2']));
+      expect(page.rows.map((row) => row.copies)).toEqual([
+        [ownersCopy('copy-1')],
+        [ownersCopy('copy-2'), ownersCopy('copy-3')],
+      ]);
+    });
+
+    it('reads no owner copies for an empty page', async () => {
+      db.gameCollection.findMany.mockResolvedValue([]);
+      db.gameCollection.count.mockResolvedValue(0);
+
+      await service.listOwn(paginationQuery({ limit: 20 }));
+
+      expect(db.collectionCopy.findMany).not.toHaveBeenCalled();
+    });
+
+    // Another user's collection is the route other readers read, so its rows
+    // are the public shape for every caller, its owner too (#1231).
+    it("listForUser never reads owner copies, even of the acting user's own collection", async () => {
+      db.gameCollection.findMany.mockResolvedValue([withPublicCopies()]);
+      db.collectionCopy.findMany.mockResolvedValue([ownersCopyRow()] as never);
+
+      const page = await service.listForUser(ME, paginationQuery({ limit: 20 }));
+
+      expect(db.collectionCopy.findMany).not.toHaveBeenCalled();
+      expect(page.rows[0]?.copies).toEqual([PUBLIC_COPY]);
+    });
+
+    describe("a write's answer", () => {
+      beforeEach(() => {
+        db.platformGame.findUnique.mockResolvedValue({ id: 'pg-1' } as PlatformGame);
+        db.gameCollection.update.mockResolvedValue(withPublicCopies());
+        db.$queryRaw.mockResolvedValue([
+          { id: 'gc-1', deletedAt: null, medium: GameMedium.Physical, platformGameId: 'pg-1', userId: ME },
+        ] as never);
+        entryReads({ deletedAt: null, owned: 1 }, withPublicCopies());
+      });
+
+      it.each([
+        ['addToCollection', () => service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical })],
+        ['update', () => service.update('gc-1', { rating: 7 })],
+      ] as const)('%s sends the owner their own copies', async (_method, write) => {
+        db.collectionCopy.findMany.mockResolvedValue([ownersCopyRow()] as never);
+
+        const row = await write();
+
+        expect(db.collectionCopy.findMany).toHaveBeenLastCalledWith(ownerCopyQuery(['gc-1']));
+        expect(row.copies).toEqual([ownersCopy()]);
+      });
+    });
   });
 });
