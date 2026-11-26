@@ -2,6 +2,7 @@ import type { PluginUnit } from '@bge/actor-context';
 import type { Permission, PermissionSlug, PluginUnitGrantScope, RoleScope } from '@bge/database';
 import {
   Action,
+  InviteStatus,
   MemberInvitePolicy,
   PERMISSION_CATALOG,
   PermissionOwner,
@@ -2134,6 +2135,169 @@ describe('AbilityFactory', () => {
       expect(ability.can(Action.create, ResourceType.Invite)).toBe(true);
       expect(ability.can(Action.create, inviteInto('hh-1', []))).toBe(false);
       expect(ability.can(Action.read, ResourceType.Invite)).toBe(false);
+    });
+  });
+
+  describe('event invites (#742)', () => {
+    // The whole shipped role, as the pass that serves it renders it: an event
+    // role per attendance of `ev-1`, a household role per membership of
+    // `hh-1`, and `User` through the roles pass.
+    const shipped = (roleName: SystemRole) =>
+      makeRole(roleName, [...ROLE_PERMISSION_CATALOG[roleName]].map(catalogPermission));
+    const attending = (roleName: SystemRole) =>
+      factory.createForUser(makeUser({ id: 'user-1', eventsAttended: [{ eventId: 'ev-1', role: shipped(roleName) }] }));
+    const holding = (roleName: SystemRole) =>
+      factory.createForUser(
+        makeUser({ id: 'user-1', householdMember: [{ householdId: 'hh-1', role: shipped(roleName) }] }),
+      );
+    const signedIn = () => factory.createForUser(makeUser({ id: 'user-1', roles: [shipped(SystemRole.User)] }));
+
+    // The list and revoke routes ask about an invite carrying its event's
+    // roster with roles, because the host's role clause sits in the condition.
+    const inviteTo = (
+      eventId: string,
+      roster: { role: SystemRole; userId: string }[],
+      householdId: string | null = null,
+    ) =>
+      subject(ResourceType.Invite, {
+        id: 'invite-1',
+        eventId,
+        event: {
+          householdId,
+          attendees: roster.map(({ userId, role }) => ({ userId, role: { role: { name: role } } })),
+        },
+      });
+
+    it.each([SystemRole.EventHost, SystemRole.EventCoHost])(
+      "lets the %s read and revoke the event's invites, and no other event's",
+      (roleName) => {
+        const ability = attending(roleName);
+        const own = inviteTo('ev-1', [{ userId: 'user-1', role: roleName }]);
+
+        expect(accessibleBy(ability, Action.read).ofType('Invite')).toEqual({
+          OR: [
+            {
+              eventId: 'ev-1',
+              event: {
+                is: {
+                  attendees: {
+                    some: {
+                      userId: 'user-1',
+                      role: { is: { role: { is: { name: { in: ['EventHost', 'EventCoHost'] } } } } },
+                    },
+                  },
+                },
+              },
+            },
+          ],
+        });
+        expect(ability.can(Action.read, own)).toBe(true);
+        expect(ability.can(Action.update, own, 'status')).toBe(true);
+        // Revoking writes the status alone, so the grant passes no other column.
+        expect(ability.can(Action.update, own, 'role')).toBe(false);
+        expect(ability.can(Action.read, inviteTo('ev-2', [{ userId: 'user-1', role: roleName }]))).toBe(false);
+        expect(ability.can(Action.update, inviteTo('ev-2', [{ userId: 'user-1', role: roleName }]), 'status')).toBe(
+          false,
+        );
+        // Demoted since: the role read with the invite decides, not the one
+        // the ability was built from.
+        const demoted = inviteTo('ev-1', [{ userId: 'user-1', role: SystemRole.EventParticipant }]);
+        expect(ability.can(Action.read, demoted)).toBe(false);
+        expect(ability.can(Action.update, demoted, 'status')).toBe(false);
+      },
+    );
+
+    it.each([
+      SystemRole.EventParticipant,
+      SystemRole.EventOrganizer,
+      SystemRole.EventModerator,
+      SystemRole.EventGuest,
+      SystemRole.EventSpectator,
+    ])("lets an %s neither read nor revoke the event's invites", (roleName) => {
+      const ability = attending(roleName);
+      const own = inviteTo('ev-1', [{ userId: 'user-1', role: roleName }]);
+
+      expect(ability.can(Action.read, ResourceType.Invite)).toBe(false);
+      expect(ability.can(Action.update, ResourceType.Invite, 'status')).toBe(false);
+      expect(ability.can(Action.read, own)).toBe(false);
+      expect(ability.can(Action.update, own, 'status')).toBe(false);
+    });
+
+    it.each([SystemRole.HouseholdOwner, SystemRole.HouseholdAdmin])(
+      "lets a %s reach a household event's invites through the household variant, attending or not",
+      (roleName) => {
+        const ability = holding(roleName);
+        const ofHouseholdEvent = inviteTo('ev-1', [], 'hh-1');
+
+        expect(accessibleBy(ability, Action.read).ofType('Invite')).toEqual({
+          OR: expect.arrayContaining([{ event: { is: { householdId: 'hh-1' } } }]),
+        });
+        expect(ability.can(Action.read, ofHouseholdEvent)).toBe(true);
+        expect(ability.can(Action.update, ofHouseholdEvent, 'status')).toBe(true);
+        for (const elsewhere of [inviteTo('ev-2', [], 'hh-2'), inviteTo('ev-3', [], null)]) {
+          expect(ability.can(Action.read, elsewhere)).toBe(false);
+          expect(ability.can(Action.update, elsewhere, 'status')).toBe(false);
+        }
+      },
+    );
+
+    it.each([SystemRole.HouseholdMember, SystemRole.HouseholdGuest])(
+      "lets a %s neither read nor revoke a household event's invites",
+      (roleName) => {
+        const ability = holding(roleName);
+        const ofHouseholdEvent = inviteTo('ev-1', [], 'hh-1');
+
+        expect(ability.can(Action.read, ofHouseholdEvent)).toBe(false);
+        expect(ability.can(Action.update, ofHouseholdEvent, 'status')).toBe(false);
+      },
+    );
+
+    describe('an invitee reading the event', () => {
+      const openInviteTo = (inviteeId: string) => ({ inviteeId, status: InviteStatus.Pending, withheld: false });
+      const privateEventWith = (invite: Record<string, unknown>) =>
+        asEntity('Event', { id: 'ev-1', reach: 'Private', householdId: null, invites: [invite] });
+
+      it('reads the event, its dates and its policy while the invite is open, through the query builder', () => {
+        const ability = signedIn();
+        const open = { invites: { some: { inviteeId: 'user-1', status: 'Pending', withheld: false } } };
+
+        expect(accessibleBy(ability, Action.read).ofType('Event')).toEqual({ OR: expect.arrayContaining([open]) });
+        expect(accessibleBy(ability, Action.read).ofType('EventOccurrence')).toEqual({
+          OR: expect.arrayContaining([{ event: { is: open } }]),
+        });
+        expect(accessibleBy(ability, Action.read).ofType('EventPolicy')).toEqual({
+          OR: expect.arrayContaining([{ event: { is: open } }]),
+        });
+      });
+
+      it('reads a private event they hold an open invite to', () => {
+        expect(signedIn().can(Action.read, privateEventWith(openInviteTo('user-1')))).toBe(true);
+      });
+
+      it.each(Object.values(InviteStatus).filter((status) => status !== InviteStatus.Pending))(
+        'does not read it once the invite is %s',
+        (status) => {
+          expect(signedIn().can(Action.read, privateEventWith({ ...openInviteTo('user-1'), status }))).toBe(false);
+        },
+      );
+
+      it('does not read it through a withheld invite, or through an invite to someone else', () => {
+        const ability = signedIn();
+
+        expect(ability.can(Action.read, privateEventWith({ ...openInviteTo('user-1'), withheld: true }))).toBe(false);
+        expect(ability.can(Action.read, privateEventWith(openInviteTo('user-2')))).toBe(false);
+      });
+
+      it("gives no attendee read: the event's attendee embed is filtered through that grant", () => {
+        const ability = signedIn();
+
+        expect(PERMISSION_CATALOG.find(({ slug }) => slug === 'read:event:invitee')).toMatchObject({
+          action: Action.read,
+          subject: ResourceType.Event,
+        });
+        expect(ability.can(Action.read, ResourceType.EventAttendee)).toBe(false);
+        expect(accessibleBy(ability, Action.read).ofType('EventAttendee')).toEqual({ OR: [] });
+      });
     });
   });
 

@@ -1,14 +1,11 @@
-import type { Prisma } from '@bge/database';
-import { InviteStatus, InviteType } from '@bge/database';
-import { effectiveInviteStatusWhere, OUTSTANDING_INVITE_STATUSES, unexpiredInviteWhere } from '@bge/invites';
-
-/**
- * What the sent list shows by default (#751): the invites still open, and
- * those that expired, whether or not the sweep has marked them so, so an
- * inviter sees an invite lapse and can send another. Every outstanding row is
- * in it whatever its date, and is reported `Expired` once past it.
- */
-const SENT_DEFAULT_STATUSES = [...OUTSTANDING_INVITE_STATUSES, InviteStatus.Expired] as const;
+import type { InviteStatus, Prisma } from '@bge/database';
+import { InviteType } from '@bge/database';
+import {
+  effectiveInviteStatusWhere,
+  LISTED_BY_DEFAULT_INVITE_STATUSES,
+  OUTSTANDING_INVITE_STATUSES,
+  unexpiredInviteWhere,
+} from '@bge/invites';
 
 /**
  * The household invites this user has sent (#751): how a household member
@@ -22,7 +19,7 @@ const SENT_DEFAULT_STATUSES = [...OUTSTANDING_INVITE_STATUSES, InviteStatus.Expi
  *
  * Into a household the inviter is not a member of, only the invites they
  * can still withdraw are listed, outstanding and unexpired, whatever the
- * filter asks: a server owner may invite into any household without a seat
+ * filter asks: the Owner may invite into any household without a seat
  * in it. A former member has nothing left to withdraw there, since leaving
  * or being removed revoked it (#747), and a settled invite there would go on
  * telling them who joined. An invite into a deleted household is never
@@ -36,7 +33,9 @@ const SENT_DEFAULT_STATUSES = [...OUTSTANDING_INVITE_STATUSES, InviteStatus.Expi
  */
 export function sentHouseholdInviteWhere(userId: string, now: Date, status?: InviteStatus): Prisma.InviteWhereInput {
   const statusWhere: Prisma.InviteWhereInput =
-    status === undefined ? { status: { in: [...SENT_DEFAULT_STATUSES] } } : effectiveInviteStatusWhere(status, now);
+    status === undefined
+      ? { status: { in: [...LISTED_BY_DEFAULT_INVITE_STATUSES] } }
+      : effectiveInviteStatusWhere(status, now);
 
   return {
     type: InviteType.Household,

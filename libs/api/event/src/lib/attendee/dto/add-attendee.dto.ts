@@ -1,7 +1,7 @@
 import { EventParticipationStatus, SystemRole } from '@bge/database';
 import { i18nValidationMessage } from '@bge/i18n';
-import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEmail, IsEnum, IsIn, IsOptional, IsString, ValidateIf } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsEmail, IsEnum, IsIn, IsNotEmpty, IsOptional, IsString, ValidateIf } from 'class-validator';
 
 /**
  * The roles an attendee can be added with: the event roles, less `EventHost`,
@@ -25,24 +25,46 @@ export const ASSIGNABLE_ATTENDEE_ROLES = [
 
 export type AssignableAttendeeRole = (typeof ASSIGNABLE_ATTENDEE_ROLES)[number];
 
+/**
+ * Whether the body names a user. One that does is refused by the service with
+ * its own code, ATTENDEE_USER_NEEDS_INVITE (#742), so the name and email
+ * checks stand aside for it rather than answer with a missing name.
+ *
+ * `null` and `''` name nobody, as an absent field doesn't: `@IsOptional` lets
+ * `null` through, and a client that writes an unset field as `null` or `''`
+ * is adding a person by name (#742). The DTO and the service ask this one
+ * question, so the two can't disagree about a body.
+ */
+export function namesUser(dto: Pick<AddAttendeeDto, 'userId'>): boolean {
+  return typeof dto.userId === 'string' && dto.userId !== '';
+}
+
+const namesNoUser = (o: AddAttendeeDto) => !namesUser(o);
+
+/**
+ * A person added to the event directly, by name: someone without an account
+ * (#742). Every registered user is invited instead
+ * (`POST /events/:eventId/invites`) and becomes an attendee by accepting.
+ */
 export class AddAttendeeDto {
-  @ApiPropertyOptional({ description: 'ID of a registered user. Omit for guest attendees.' })
+  @ApiPropertyOptional({
+    description:
+      'Refused with 400, code `ATTENDEE_USER_NEEDS_INVITE`: a registered user is invited instead, ' +
+      'with `POST /events/:eventId/invites`, and becomes an attendee by accepting.',
+  })
   @IsString({ message: i18nValidationMessage('validation.isString') })
   @IsOptional()
   userId?: string;
 
-  @ApiPropertyOptional({
-    description: 'Name of the guest. Intended for non-registered users. Required when userId is not provided',
-  })
+  @ApiProperty({ description: 'Name of the person, who has no account' })
   @IsString({ message: i18nValidationMessage('validation.isString') })
-  @ValidateIf((o: AddAttendeeDto) => !o.userId)
+  @IsNotEmpty({ message: i18nValidationMessage('validation.isNotEmpty') })
+  @ValidateIf(namesNoUser)
   guestName?: string;
 
-  @ApiPropertyOptional({
-    description: 'Email of the guest. Intended for non-registered users. Required when userId is not provided',
-  })
+  @ApiProperty({ description: 'Email address of the person, who has no account' })
   @IsEmail(undefined, { message: i18nValidationMessage('validation.isEmail') })
-  @ValidateIf((o: AddAttendeeDto) => !o.userId)
+  @ValidateIf(namesNoUser)
   guestEmail?: string;
 
   @ApiPropertyOptional({ enum: ASSIGNABLE_ATTENDEE_ROLES, default: SystemRole.EventParticipant })

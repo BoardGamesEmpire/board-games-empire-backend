@@ -1,12 +1,16 @@
 import type { Game, PlatformGame } from '@bge/database';
 import {
   EventParticipationStatus,
+  InviteStatus,
+  InviteType,
   NominationStatus,
   NotificationType,
   OccurrenceStatus,
   ScheduledGameRole,
   SystemRole,
 } from '@bge/database';
+import type { InviteSnapshot } from '@bge/invites';
+import { InviteAcceptedEvent, InviteCreatedEvent, InviteDeclinedEvent } from '@bge/invites';
 import { LineupRemovalReason, NotificationsService } from '@bge/notifications-service';
 import type { MockDatabaseService } from '@bge/testing';
 import {
@@ -17,12 +21,10 @@ import {
   makePlatformGame,
 } from '@bge/testing';
 import { Logger } from '@nestjs/common';
-import {
-  AttendeeAddedEvent,
-  AttendeeRemovedEvent,
-  AttendeeStatusUpdatedEvent,
-} from '../attendee/events/attendee.events';
+import { AttendeeEvents } from '../attendee/constants';
+import { AttendeeRemovedEvent, AttendeeStatusUpdatedEvent } from '../attendee/events/attendee.events';
 import { EventCreatedEvent, EventDeletedEvent } from '../events/event.events';
+import { receivedEventInviteWhere } from '../invite/received-event-invites';
 import { EventCancelledEvent, EventReopenedEvent } from '../lifecycle/events/event-lifecycle.events';
 import {
   GameAddedToEventEvent,
@@ -65,16 +67,11 @@ describe('EventNotificationListener', () => {
   afterEach(() => jest.clearAllMocks());
 
   describe('onEventCreated', () => {
-    it('sends invite notifications even for venue-based events (no householdId)', async () => {
+    it('sends no EventInviteReceived for a venue-based event: the invites announce themselves (#742)', async () => {
       await listener.onEventCreated(makeCreatedEvent({ householdId: null }, ['user-friend-1']));
 
       expect(db.householdMember.findMany).not.toHaveBeenCalled();
-      expect(notifications.createMany).toHaveBeenCalledWith([
-        expect.objectContaining({
-          userId: 'user-friend-1',
-          type: NotificationType.EventInviteReceived,
-        }),
-      ]);
+      expect(notifications.createMany).not.toHaveBeenCalled();
     });
 
     it('notifies household members excluding the creator and invited users', async () => {
@@ -114,46 +111,22 @@ describe('EventNotificationListener', () => {
       expect(notifications.createMany).not.toHaveBeenCalled();
     });
 
-    it('sends EventInviteReceived to explicitly invited users', async () => {
-      db.householdMember.findMany.mockResolvedValue([]);
-
-      await listener.onEventCreated(makeCreatedEvent({}, ['user-friend-1', 'user-friend-2']));
-
-      expect(notifications.createMany).toHaveBeenCalledWith(
-        expect.arrayContaining([
-          expect.objectContaining({
-            userId: 'user-friend-1',
-            type: NotificationType.EventInviteReceived,
-            payload: expect.objectContaining({
-              eventId: 'ev-1',
-              eventTitle: 'Game Night',
-            }),
-          }),
-          expect.objectContaining({
-            userId: 'user-friend-2',
-            type: NotificationType.EventInviteReceived,
-          }),
-        ]),
-      );
-    });
-
-    it('excludes invited users from household EventCreated notifications to avoid double-notifying', async () => {
+    it('leaves invited users out of the household fan-out and tells them nothing itself (#742)', async () => {
       db.householdMember.findMany.mockResolvedValue([
-        makeHouseholdMember({ userId: 'user-a', householdId: 'hh-1' }), // not invited — should get EventCreated
+        makeHouseholdMember({ userId: 'user-a', householdId: 'hh-1' }), // not invited, so told of the event
       ]);
 
-      // user-b is invited — should get EventInviteReceived only
       await listener.onEventCreated(makeCreatedEvent({}, ['user-b']));
 
-      const allNotifications = notifications.createMany.mock.calls[0][0] as Array<{
-        type: string;
-        userId: string;
-      }>;
-
-      // user-a gets EventCreated, user-b gets EventInviteReceived
-      expect(allNotifications).toHaveLength(2);
-      expect(allNotifications.find((n) => n.userId === 'user-a')?.type).toBe(NotificationType.EventCreated);
-      expect(allNotifications.find((n) => n.userId === 'user-b')?.type).toBe(NotificationType.EventInviteReceived);
+      // The invitee hears of the event from invite.created, once; the
+      // household's fan-out must not tell them as a household member as well.
+      expect(db.householdMember.findMany).toHaveBeenCalledWith({
+        where: { householdId: 'hh-1', userId: { notIn: ['user-creator', 'user-b'] } },
+        select: { userId: true },
+      });
+      expect(notifications.createMany).toHaveBeenCalledWith([
+        expect.objectContaining({ userId: 'user-a', type: NotificationType.EventCreated }),
+      ]);
     });
 
     it('skips when no other household members exist and no invitees', async () => {
@@ -171,40 +144,160 @@ describe('EventNotificationListener', () => {
     });
   });
 
-  describe('onAttendeeAdded', () => {
-    it('notifies the invited user', async () => {
-      db.event.findUnique.mockResolvedValue(makeEvent({ title: 'Strategy Night' }));
-
-      const event = new AttendeeAddedEvent(
-        null,
-        makeEventAttendee({ id: 'att-1', eventId: 'ev-1', userId: 'user-invited' }),
-        new Date(),
+  describe('AttendeeAdded', () => {
+    it('sends no invite notice: an add is by name or an accepted invite, and the invite told its invitee (#742)', () => {
+      // `@OnEvent` records each handler's event names on the method. None may
+      // be the attendee add, which once announced an invite the add no longer is.
+      const listened = Object.getOwnPropertyNames(EventNotificationListener.prototype).flatMap(
+        (name): string[] =>
+          Reflect.getMetadata('EVENT_LISTENER_METADATA', Reflect.get(EventNotificationListener.prototype, name)) ?? [],
       );
 
-      await listener.onAttendeeAdded(event);
+      expect(listened).not.toHaveLength(0);
+      expect(JSON.stringify(listened)).not.toContain(AttendeeEvents.AttendeeAdded);
+    });
+  });
 
-      expect(notifications.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          userId: 'user-invited',
-          type: NotificationType.EventInviteReceived,
-          payload: expect.objectContaining({
-            eventId: 'ev-1',
-            eventTitle: 'Strategy Night',
-          }),
-        }),
-      );
+  describe('event invites (#742)', () => {
+    const NOW = new Date('2026-11-25T12:00:00Z');
+    const INVITER_ID = 'user-riley';
+    const INVITEE_ID = 'user-sam';
+
+    /** An event invite to Sam by id, from Riley, as the lib's events carry it. */
+    const snapshot = (overrides: Partial<InviteSnapshot> = {}): InviteSnapshot => ({
+      id: 'invite-1',
+      type: InviteType.Event,
+      status: InviteStatus.Pending,
+      inviterId: INVITER_ID,
+      inviteeId: INVITEE_ID,
+      inviteeName: 'Sam',
+      inviteeEmail: null,
+      householdId: null,
+      eventId: 'ev-1',
+      roleId: 'role-participant',
+      expiresAt: new Date('2026-12-25T12:00:00Z'),
+      respondedAt: null,
+      ...overrides,
     });
 
-    it('skips guest attendees (no userId)', async () => {
-      const event = new AttendeeAddedEvent(
-        null,
-        makeEventAttendee({ id: 'att-1', eventId: 'ev-1', userId: null, guestName: 'Alice' }),
-        new Date(),
-      );
+    const created = (overrides: Partial<InviteSnapshot> = {}) => new InviteCreatedEvent(snapshot(overrides), NOW);
 
-      await listener.onAttendeeAdded(event);
+    const responded = (status: InviteStatus, overrides: Partial<InviteSnapshot> = {}) =>
+      [snapshot(overrides), snapshot({ ...overrides, status, respondedAt: NOW }), NOW] as const;
 
-      expect(notifications.create).not.toHaveBeenCalled();
+    const accepted = (overrides: Partial<InviteSnapshot> = {}) =>
+      new InviteAcceptedEvent(...responded(InviteStatus.Accepted, overrides));
+
+    const declined = (overrides: Partial<InviteSnapshot> = {}) =>
+      new InviteDeclinedEvent(...responded(InviteStatus.Declined, overrides));
+
+    /** The user rows the names are read from. */
+    const knowUsers = () =>
+      db.user.findUnique.mockImplementation((async ({ where }: { where: { id: string } }) =>
+        where.id === INVITER_ID
+          ? { username: 'riley', profile: { displayName: 'Riley' } }
+          : { username: 'sam', profile: { displayName: '' } }) as never);
+
+    beforeEach(() => {
+      db.event.findUnique.mockResolvedValue(makeEvent({ id: 'ev-1', title: 'Game Night' }));
+      knowUsers();
+    });
+
+    afterEach(() => jest.useRealTimers());
+
+    describe('invite.created', () => {
+      it('tells the invitee, when their inbox lists the invite, naming the event and the inviter (#742)', async () => {
+        db.invite.count.mockResolvedValue(1);
+        jest.useFakeTimers({ now: NOW, doNotFake: ['nextTick', 'setImmediate', 'setTimeout', 'queueMicrotask'] });
+
+        await listener.onInviteCreated(created());
+
+        // The inbox's own predicate is asked about this one invite.
+        expect(db.invite.count).toHaveBeenCalledWith({
+          where: { id: 'invite-1', AND: [receivedEventInviteWhere(INVITEE_ID, NOW)] },
+        });
+        expect(notifications.create).toHaveBeenCalledWith({
+          userId: INVITEE_ID,
+          type: NotificationType.EventInviteReceived,
+          payload: { eventId: 'ev-1', eventTitle: 'Game Night', inviteId: 'invite-1', inviterName: 'Riley' },
+        });
+      });
+
+      it('tells nobody of an invite their inbox does not list, such as one to an event they already attend, or one already answered (#742)', async () => {
+        db.invite.count.mockResolvedValue(0);
+
+        await listener.onInviteCreated(created());
+
+        expect(notifications.create).not.toHaveBeenCalled();
+      });
+
+      it("tells nobody of a household invite, which is the household listener's (#742)", async () => {
+        await listener.onInviteCreated(created({ type: InviteType.Household, householdId: 'hh-1', eventId: null }));
+
+        expect(db.invite.count).not.toHaveBeenCalled();
+        expect(notifications.create).not.toHaveBeenCalled();
+      });
+
+      it('tells nobody of an event invite that names no user (#742)', async () => {
+        await listener.onInviteCreated(created({ inviteeId: null }));
+
+        expect(notifications.create).not.toHaveBeenCalled();
+      });
+
+      it('never throws when the write fails, and logs it (#742)', async () => {
+        const error = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+        db.invite.count.mockRejectedValue(new Error('db down'));
+
+        await expect(listener.onInviteCreated(created())).resolves.toBeUndefined();
+
+        expect(error).toHaveBeenCalled();
+      });
+    });
+
+    describe('invite.accepted and invite.declined', () => {
+      it('tells the inviter of an accept, naming the invitee (#742)', async () => {
+        await listener.onInviteAccepted(accepted());
+
+        expect(notifications.create).toHaveBeenCalledWith({
+          userId: INVITER_ID,
+          type: NotificationType.EventInviteAccepted,
+          payload: { eventId: 'ev-1', eventTitle: 'Game Night', inviteId: 'invite-1', inviteeName: 'sam' },
+        });
+      });
+
+      it('tells the inviter of a decline, naming the invitee (#742)', async () => {
+        await listener.onInviteDeclined(declined());
+
+        expect(notifications.create).toHaveBeenCalledWith({
+          userId: INVITER_ID,
+          type: NotificationType.EventInviteDeclined,
+          payload: { eventId: 'ev-1', eventTitle: 'Game Night', inviteId: 'invite-1', inviteeName: 'sam' },
+        });
+      });
+
+      it('does not tell the inviter of their own answer (#742)', async () => {
+        await listener.onInviteAccepted(accepted({ inviterId: INVITEE_ID }));
+        await listener.onInviteDeclined(declined({ inviterId: INVITEE_ID }));
+
+        expect(notifications.create).not.toHaveBeenCalled();
+      });
+
+      it('tells nobody of a household invite answered (#742)', async () => {
+        const household = { type: InviteType.Household, householdId: 'hh-1', eventId: null };
+
+        await listener.onInviteAccepted(accepted(household));
+        await listener.onInviteDeclined(declined(household));
+
+        expect(notifications.create).not.toHaveBeenCalled();
+      });
+
+      it('tells nobody once the event is gone, and never throws (#742)', async () => {
+        db.event.findUnique.mockResolvedValue(null);
+
+        await expect(listener.onInviteAccepted(accepted())).resolves.toBeUndefined();
+
+        expect(notifications.create).not.toHaveBeenCalled();
+      });
     });
   });
 
@@ -454,6 +547,19 @@ describe('EventNotificationListener', () => {
     it('names the attendee by their username when they have no display name (#802)', async () => {
       db.eventAttendee.findMany.mockResolvedValue([{ userId: 'u-host' }] as never);
       db.user.findUnique.mockResolvedValue({ username: 'ada', profile: null } as never);
+
+      await listener.onAttendeeRsvp(rsvp('u-a', 'u-a'));
+
+      expect(notifications.createMany).toHaveBeenCalledWith([
+        expect.objectContaining({ userId: 'u-host', payload: expect.objectContaining({ attendeeName: 'ada' }) }),
+      ]);
+    });
+
+    // One name rule for every notification this listener sends, the invite
+    // ones included: a blank display name is no name (#742).
+    it('names the attendee by their username when their display name is blank (#742)', async () => {
+      db.eventAttendee.findMany.mockResolvedValue([{ userId: 'u-host' }] as never);
+      db.user.findUnique.mockResolvedValue({ username: 'ada', profile: { displayName: '' } } as never);
 
       await listener.onAttendeeRsvp(rsvp('u-a', 'u-a'));
 

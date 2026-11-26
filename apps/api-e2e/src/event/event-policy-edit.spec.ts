@@ -17,6 +17,7 @@ import { expectErrorEnvelope } from '../support/error-envelope';
 import type { TestDatabase } from '../support/test-db';
 import { createTestDatabase } from '../support/test-db';
 import { isRecord } from '../support/wire';
+import { inviteAndAccept } from './event-join';
 import { createEventClient, eventPolicyPath, EVENTS_PATH } from './event-request';
 import { eventDetailEnvelope, eventEnvelope, eventPolicyEnvelope, eventReplayEnvelope } from './event-wire';
 
@@ -74,9 +75,6 @@ describe("changing an event's policy (#796)", () => {
       await request(baseUrl).get(`${EVENTS_PATH}/${eventId}`).set(actor.headers).expect(200),
       'GET /api/events/:id',
     );
-
-  const addAttendee = (actor: AuthenticatedActor, eventId: string, body: Record<string, unknown>) =>
-    request(baseUrl).post(`${EVENTS_PATH}/${eventId}/attendees`).set(actor.headers).send(body);
 
   const storedPolicy = (eventId: string) => db.client.eventPolicy.findUniqueOrThrow({ where: { eventId } });
 
@@ -213,7 +211,7 @@ describe("changing an event's policy (#796)", () => {
       const organizer = await actors.user();
       const eventId = await createdEventId(host);
       const ownEventId = await createdEventId(organizer);
-      await addAttendee(host, eventId, { userId: organizer.user.id, role: SystemRole.EventOrganizer }).expect(201);
+      await inviteAndAccept(baseUrl, host, organizer, eventId, SystemRole.EventOrganizer);
 
       // Control: the organizer changes the policy of the event they host.
       await updatePolicy(organizer, ownEventId, { gameAdditionMode: GameAdditionMode.RequiresVote }).expect(200);

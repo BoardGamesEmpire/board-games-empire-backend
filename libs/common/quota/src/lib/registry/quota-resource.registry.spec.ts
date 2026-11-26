@@ -20,6 +20,7 @@ describe('QuotaResourceRegistry', () => {
       expect(registry.has('household_member_count')).toBe(true);
       expect(registry.has('webhook_subscription_count')).toBe(true);
       expect(registry.has('household_invite_daily_count')).toBe(true);
+      expect(registry.has('event_invite_daily_count')).toBe(true);
       expect(registry.has('not_a_resource')).toBe(false);
     });
 
@@ -31,6 +32,7 @@ describe('QuotaResourceRegistry', () => {
           'storage_bytes',
           'plugin_install_count',
           'household_invite_daily_count',
+          'event_invite_daily_count',
         ]),
       );
     });
@@ -54,6 +56,7 @@ describe('QuotaResourceRegistry', () => {
       expect(typeof registry.requireUsage('webhook_subscription_count')).toBe('function');
       expect(typeof registry.requireUsage('storage_bytes')).toBe('function');
       expect(typeof registry.requireUsage('household_invite_daily_count')).toBe('function');
+      expect(typeof registry.requireUsage('event_invite_daily_count')).toBe('function');
     });
 
     it('throws for registered-but-pending resources', () => {
@@ -177,6 +180,53 @@ describe('QuotaResourceRegistry', () => {
           /not defined for scope/,
         );
       });
+    });
+
+    describe('event invites over the last 24 hours', () => {
+      const NOW = new Date('2026-10-14T12:00:00Z');
+      const DAY_BEFORE = new Date('2026-10-13T12:00:00Z');
+
+      beforeEach(() => {
+        jest.useFakeTimers({ now: NOW });
+      });
+
+      afterEach(() => {
+        jest.useRealTimers();
+      });
+
+      it('counts the event invites a user sent in the last 24 hours, and no household invites (#742)', async () => {
+        db.invite.count.mockResolvedValue(3);
+
+        const usage = await registry.requireUsage('event_invite_daily_count')(QuotaScope.User, 'user_1');
+
+        expect(db.invite.count).toHaveBeenCalledWith({
+          where: { type: InviteType.Event, inviterId: 'user_1', createdAt: { gt: DAY_BEFORE } },
+        });
+        expect(usage).toBe(3n);
+      });
+
+      it('is measured per inviter only (#742)', () => {
+        expect(registry.require('event_invite_daily_count').applicableScopes).toEqual([QuotaScope.User]);
+      });
+
+      it('counts on the transaction it is handed (#742)', async () => {
+        const tx = createMockDatabaseService();
+        tx.invite.count.mockResolvedValue(1);
+
+        await registry.requireUsage('event_invite_daily_count')(QuotaScope.User, 'user_1', tx as never);
+
+        expect(tx.invite.count).toHaveBeenCalledTimes(1);
+        expect(db.invite.count).not.toHaveBeenCalled();
+      });
+
+      it.each([QuotaScope.Server, QuotaScope.Household, QuotaScope.HouseholdMember])(
+        'throws for a scope other than User: %s (#742)',
+        async (scope) => {
+          await expect(registry.requireUsage('event_invite_daily_count')(scope, 'id_1')).rejects.toThrow(
+            /not defined for scope/,
+          );
+        },
+      );
     });
   });
 });

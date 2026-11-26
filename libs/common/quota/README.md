@@ -162,10 +162,13 @@ Shipped resources:
 | `storage_bytes`                | `Server`, `User`      | **pending #58** (no usage provider) |
 | `plugin_install_count`         | `Server`, `Household` | **pending #59**                     |
 | `household_invite_daily_count` | `User`, `Household`   | enforceable                         |
+| `event_invite_daily_count`     | `User`                | enforceable                         |
 
 `webhook_subscription_count` counts the webhook subscriptions a user created that are neither deleted nor off (#1253). One disabled by its owner, or by failed deliveries, frees its place; reactivating it takes the place back, and past a hard quota is refused like a create.
 
 `household_invite_daily_count` is a rate kept as a count over the **last 24 hours**. At `User` scope it counts the invites the inviter sent. At `Household` scope it counts the invites the household made: one sent directly counts from when it was sent, and a member's invite that waits for approval (#166) counts from its approval, so proposals an owner never approves take none of the household's allowance, and an approval past a hard cap is refused. The window is fixed in code; a row sets only how many invites fit in it. A counted invite counts whatever its status since, so revoking one frees no slot. A withheld invite (#278) counts too: leave it out and the inviter's remaining allowance would show which of their invites were withheld.
+
+`event_invite_daily_count` is the same kind of rate for event invites (#742), at `User` scope only: it counts the event invites the user sent in the last 24 hours, whatever their status since, so revoking one frees no slot. A withheld invite would count too (none exist for events, since event invites are sent by id). The window is fixed in code; a row sets only how many invites fit in it.
 
 A **pending** resource has no `usage` provider: caps can be pre-provisioned through `setQuota`, but `check()` against it throws until the underlying model exists. `requireUsage(resource)` is what enforces this.
 

@@ -3,16 +3,15 @@ import {
   Action,
   ContentType,
   EventParticipationStatus,
-  FriendshipStatus,
-  HUMAN_USER_WHERE,
   liveEventWhere,
   NominationStatus,
   Prisma,
-  Reach,
   ResourceType,
   SystemRole,
 } from '@bge/database';
 import { CodedHttpException, t } from '@bge/i18n';
+import type { OutstandingInviteRevocation } from '@bge/invites';
+import { InviteService } from '@bge/invites';
 import { LineupRemovalReason } from '@bge/notifications-service';
 import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
 import type { MockAbilityService, MockDatabaseService } from '@bge/testing';
@@ -40,6 +39,7 @@ import { makeOfferedGameEntry } from '../offered-game/offered-game.fixture';
 import { OFFERED_GAME_ORDER, OFFERED_GAME_SELECT } from '../offered-game/offered-game.select';
 import { OfferedGameService } from '../offered-game/offered-game.service';
 import { lineupStillAhead } from './attendance';
+import type { AddAttendeeDto } from './dto/add-attendee.dto';
 import { EventAttendeeService } from './event-attendee.service';
 import {
   AttendeeAddedEvent,
@@ -58,6 +58,7 @@ describe('EventAttendeeService', () => {
   let abilityService: MockAbilityService;
   let permissions: jest.Mocked<Pick<PermissionsService, 'invalidateUser'>>;
   let emitter: { emit: jest.Mock };
+  let invites: jest.Mocked<Pick<InviteService, 'revokeOutstandingOfUserWithin' | 'emit'>>;
   let compose: jest.SpyInstance;
   let forAttendees: jest.SpyInstance;
 
@@ -66,6 +67,10 @@ describe('EventAttendeeService', () => {
     abilityService.getCurrentResourceConditions.mockReturnValue([COND]);
     permissions = { invalidateUser: jest.fn().mockResolvedValue(undefined) };
     emitter = { emit: jest.fn() };
+    invites = {
+      revokeOutstandingOfUserWithin: jest.fn().mockResolvedValue({ count: 0, events: [] }),
+      emit: jest.fn(),
+    };
 
     const ctx = await createTestingModuleWithDb({
       providers: [
@@ -79,6 +84,7 @@ describe('EventAttendeeService', () => {
         { provide: EventEmitter2, useValue: emitter },
         { provide: AbilityService, useValue: abilityService },
         { provide: PermissionsService, useValue: permissions },
+        { provide: InviteService, useValue: invites },
       ],
     });
 
@@ -219,10 +225,10 @@ describe('EventAttendeeService', () => {
       abilityService.getActingUserId.mockReturnValue('user-host');
       db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-host' } as EventAttendee);
       db.eventAttendee.create.mockResolvedValue(
-        makeEventAttendee({ id: 'att-1', eventId: 'event-1', userId: 'user-2', invitedById: 'att-host' }),
+        makeEventAttendee({ id: 'att-1', eventId: 'event-1', userId: null, guestName: 'Pat', invitedById: 'att-host' }),
       );
 
-      await service.addAttendee('event-1', { userId: 'user-2' });
+      await service.addAttendee('event-1', { guestName: 'Pat' });
 
       const [name, emitted] = emitter.emit.mock.calls[0];
       expect(name).toBe(AttendeeAddedEvent.eventName);
@@ -231,7 +237,13 @@ describe('EventAttendeeService', () => {
       expect(emitted.subjectId).toBe('att-1');
       expect(emitted.before).toBeNull();
       expect(emitted.after).toEqual(
-        expect.objectContaining({ id: 'att-1', eventId: 'event-1', userId: 'user-2', invitedById: 'att-host' }),
+        expect.objectContaining({
+          id: 'att-1',
+          eventId: 'event-1',
+          userId: null,
+          guestName: 'Pat',
+          invitedById: 'att-host',
+        }),
       );
     });
 
@@ -240,11 +252,11 @@ describe('EventAttendeeService', () => {
       abilityService.getActingUserId.mockReturnValue('user-host');
       db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-host' } as EventAttendee);
       db.eventAttendee.create.mockResolvedValue(
-        makeEventAttendee({ id: 'att-1', eventId: 'event-1', userId: 'user-2' }),
+        makeEventAttendee({ id: 'att-1', eventId: 'event-1', userId: null, guestName: 'Pat' }),
       );
 
-      await service.addAttendee('event-1', { userId: 'user-2', status: EventParticipationStatus.Maybe });
-      await service.addAttendee('event-1', { userId: 'user-3' });
+      await service.addAttendee('event-1', { guestName: 'Pat', status: EventParticipationStatus.Maybe });
+      await service.addAttendee('event-1', { guestName: 'Sam' });
 
       const [answered, invited] = db.eventAttendee.create.mock.calls.map(([args]) => args.data);
       expect(answered.rsvpDate).toBeInstanceOf(Date);
@@ -383,6 +395,54 @@ describe('EventAttendeeService', () => {
           GameRemovedFromEventEvent.eventName,
           expect.any(GameRemovedFromEventEvent),
         );
+      });
+
+      // Their invites end with the standing that sent them (#742). The
+      // invite rows are locked after the event's row and the attendee's, the
+      // order every invite transition on the event takes.
+      it('removeAttendee revokes the invites the removed person sent, after their role goes, announcing them after commit (#742)', async () => {
+        const revocation: OutstandingInviteRevocation = {
+          count: 1,
+          events: [{ eventName: 'invite.revoked', subjectId: 'invite-1' } as never],
+        };
+        // Recorded by hand: the mocked client and the invites mock keep
+        // separate call counters, so `invocationCallOrder` cannot compare them.
+        const order: string[] = [];
+        db.eventAttendeeRole.deleteMany.mockImplementation((async () => (order.push('role'), { count: 1 })) as never);
+        invites.revokeOutstandingOfUserWithin.mockImplementation(async () => (order.push('revoke'), revocation));
+        let committed = false;
+        db.$transaction.mockImplementation((async (work: (tx: MockDatabaseService) => Promise<unknown>) => {
+          const result = await work(db);
+          committed = true;
+
+          return result;
+        }) as never);
+        invites.emit.mockImplementation(() => expect(committed).toBe(true));
+
+        await service.removeAttendee('event-1', 'att-1');
+
+        expect(invites.revokeOutstandingOfUserWithin).toHaveBeenCalledWith(db, { eventId: 'event-1' }, 'user-1');
+        expect(order).toEqual(['role', 'revoke']);
+        expect(invites.emit).toHaveBeenCalledWith(revocation.events);
+      });
+
+      it('removeAttendee revokes no invites for an attendee added by name, who can send none (#742)', async () => {
+        db.eventAttendee.findUniqueOrThrow.mockResolvedValue(
+          attendeeRow({ userId: null, guestName: 'Pat', removedAt }),
+        );
+
+        await service.removeAttendee('event-1', 'att-1');
+
+        expect(invites.revokeOutstandingOfUserWithin).not.toHaveBeenCalled();
+      });
+
+      it('removeAttendee revokes nothing, and announces nothing, when the removal is refused (#742)', async () => {
+        db.eventAttendee.update.mockRejectedValue(recordNotFound());
+
+        await expect(service.removeAttendee('event-1', 'att-1')).rejects.toThrow(ForbiddenException);
+
+        expect(invites.revokeOutstandingOfUserWithin).not.toHaveBeenCalled();
+        expect(invites.emit).not.toHaveBeenCalled();
       });
 
       it('reports the games it deleted as left with the supplier, by the host who removed them (#769)', async () => {
@@ -889,77 +949,74 @@ describe('EventAttendeeService', () => {
     });
   });
 
-  describe('whom addAttendee may place on the event (#546)', () => {
+  // Every registered user is invited instead, and becomes an attendee by
+  // accepting (#742). The direct add keeps placing a person without one, by
+  // name.
+  describe('the direct add, for people without an account (#742)', () => {
     beforeEach(() => {
       abilityService.getActingUserId.mockReturnValue('user-actor');
       db.event.findUnique.mockResolvedValue({ id: 'event-1', householdId: null } as Event);
       db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-actor' } as EventAttendee);
       db.eventAttendee.create.mockResolvedValue(
-        makeEventAttendee({ id: 'att-new', eventId: 'event-1', userId: 'user-2' }),
+        makeEventAttendee({ id: 'att-new', eventId: 'event-1', userId: null, guestName: 'Pat' }),
       );
     });
 
-    it('answers 404 for an id that names no person, and writes nothing', async () => {
-      db.user.findUnique.mockResolvedValue(null);
+    it('the direct add refuses a userId with ATTENDEE_USER_NEEDS_INVITE', async () => {
+      const attempt = service.addAttendee('event-1', { userId: 'user-2', guestName: 'Pat' });
 
-      await expect(service.addAttendee('event-1', { userId: 'ghost' })).rejects.toThrow(NotFoundException);
-      expect(db.user.findUnique).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { id: 'ghost', ...HUMAN_USER_WHERE } }),
+      await expect(attempt).rejects.toThrow(
+        new CodedHttpException(Http.BadRequest, 'ATTENDEE_USER_NEEDS_INVITE', t('errors.attendee.user_needs_invite')),
       );
-      expect(db.eventAttendee.create).not.toHaveBeenCalled();
-    });
-
-    it('answers 403 for a user who blocked the caller, or was blocked by them, and writes nothing', async () => {
-      db.friendship.findFirst.mockResolvedValue({ status: FriendshipStatus.Blocked } as never);
-
-      await expect(service.addAttendee('event-1', { userId: 'user-2' })).rejects.toThrow(ForbiddenException);
-      expect(db.eventAttendee.create).not.toHaveBeenCalled();
-    });
-
-    it("reads the user's preference for events, not for households", async () => {
-      db.userPreferences.findFirst.mockResolvedValue({
-        allowHouseholdInvitesFrom: Reach.Private,
-        allowEventInvitesFrom: Reach.Public,
-      } as never);
-
-      await service.addAttendee('event-1', { userId: 'user-2' });
-
-      expect(db.eventAttendee.create).toHaveBeenCalled();
-
-      db.userPreferences.findFirst.mockResolvedValue({
-        allowHouseholdInvitesFrom: Reach.Public,
-        allowEventInvitesFrom: Reach.Private,
-      } as never);
-
-      await expect(service.addAttendee('event-1', { userId: 'user-2' })).rejects.toThrow(ForbiddenException);
-    });
-
-    // Already on the event is the answer, whatever the checks would say now.
-    it('answers 409 for a user already on the event, before asking whether they may be placed', async () => {
-      db.eventAttendee.findFirst.mockResolvedValue({
-        id: 'att-2',
-        status: EventParticipationStatus.Attending,
-        invitedById: null,
-        removedAt: null,
-      } as EventAttendee);
-
-      await expect(service.addAttendee('event-1', { userId: 'user-2' })).rejects.toThrow(ConflictException);
+      await expect(attempt).rejects.toMatchObject({ code: 'ATTENDEE_USER_NEEDS_INVITE', status: Http.BadRequest });
+      // Refused for its shape, before anything is read about the event or the user.
+      expect(db.event.findUnique).not.toHaveBeenCalled();
       expect(db.user.findUnique).not.toHaveBeenCalled();
+      expect(db.$transaction).not.toHaveBeenCalled();
       expect(db.eventAttendee.create).not.toHaveBeenCalled();
       expect(db.eventAttendee.update).not.toHaveBeenCalled();
     });
 
-    it('asks nothing about the caller adding themselves', async () => {
-      await service.addAttendee('event-1', { userId: 'user-actor' });
-
-      expect(db.user.findUnique).not.toHaveBeenCalled();
-      expect(db.eventAttendee.create).toHaveBeenCalled();
+    it("refuses the caller's own userId the same way", async () => {
+      await expect(service.addAttendee('event-1', { userId: 'user-actor' })).rejects.toMatchObject({
+        code: 'ATTENDEE_USER_NEEDS_INVITE',
+      });
+      expect(db.eventAttendee.create).not.toHaveBeenCalled();
     });
 
-    it('asks nothing about an attendee added by name, without an account', async () => {
+    // A client that writes an unset field as null or '' names nobody, so the
+    // body adds a person by name rather than meeting the invite refusal (#742).
+    it.each([null, ''])('adds by name when userId is %p', async (userId) => {
+      await service.addAttendee('event-1', { userId, guestName: 'Pat' } as unknown as AddAttendeeDto);
+
+      expect(db.eventAttendee.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ guestName: 'Pat' }) }),
+      );
+    });
+
+    it('requires a name, with 400', async () => {
+      await expect(service.addAttendee('event-1', { guestName: '' })).rejects.toThrow(
+        new BadRequestException(t('errors.attendee.name_required')),
+      );
+      expect(db.eventAttendee.create).not.toHaveBeenCalled();
+    });
+
+    it('asks nothing about a person added by name', async () => {
       await service.addAttendee('event-1', { guestName: 'Pat' });
 
       expect(db.user.findUnique).not.toHaveBeenCalled();
+      expect(db.eventAttendee.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ guestName: 'Pat', invitedBy: { connect: { id: 'att-actor' } } }),
+        }),
+      );
+    });
+
+    // Someone added by name has no account, so no cached graph to evict.
+    it('evicts nobody', async () => {
+      await service.addAttendee('event-1', { guestName: 'Pat' });
+
+      expect(permissions.invalidateUser).not.toHaveBeenCalled();
     });
   });
 
@@ -969,7 +1026,7 @@ describe('EventAttendeeService', () => {
       db.event.findUnique.mockResolvedValue({ id: 'event-1', householdId: 'hh-1' } as Event);
       db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-actor' } as EventAttendee);
       db.eventAttendee.create.mockResolvedValue(
-        makeEventAttendee({ id: 'att-new', eventId: 'event-1', userId: 'user-2' }),
+        makeEventAttendee({ id: 'att-new', eventId: 'event-1', userId: null, guestName: 'Pat' }),
       );
     });
 
@@ -979,7 +1036,7 @@ describe('EventAttendeeService', () => {
     // are what the grants bind to. Which roles each grant gives out is the
     // catalog's, and the ability factory's spec holds it to that.
     it('checks the create against the event it adds to and the role it writes', async () => {
-      await service.addAttendee('event-1', { userId: 'user-2', role: SystemRole.EventCoHost });
+      await service.addAttendee('event-1', { guestName: 'Pat', role: SystemRole.EventCoHost });
 
       expect(abilityService.assertCurrentActorCan).toHaveBeenCalledWith(Action.create, ResourceType.EventAttendee, {
         eventId: 'event-1',
@@ -989,7 +1046,7 @@ describe('EventAttendeeService', () => {
     });
 
     it('checks, and writes, the participant role when the request names none', async () => {
-      await service.addAttendee('event-1', { userId: 'user-2' });
+      await service.addAttendee('event-1', { guestName: 'Pat' });
 
       expect(abilityService.assertCurrentActorCan).toHaveBeenCalledWith(
         Action.create,
@@ -1010,118 +1067,10 @@ describe('EventAttendeeService', () => {
         throw new ForbiddenException();
       });
 
-      await expect(
-        service.addAttendee('event-1', { userId: 'user-actor', role: SystemRole.EventCoHost }),
-      ).rejects.toThrow(ForbiddenException);
-      expect(db.eventAttendee.create).not.toHaveBeenCalled();
-    });
-
-    // The added user's graph was cached without this event: their role here
-    // would otherwise reach them only when the cache expires.
-    it("evicts the added user's cached permission graph", async () => {
-      await service.addAttendee('event-1', { userId: 'user-2' });
-
-      expect(permissions.invalidateUser).toHaveBeenCalledWith('user-2');
-    });
-  });
-
-  // A removed user keeps their row, and the (event, user) key with it, so
-  // adding them again revives the row rather than answering 409.
-  describe('addAttendee for a user a host removed', () => {
-    const removedAt = new Date('2026-10-15T12:00:00Z');
-
-    beforeEach(() => {
-      abilityService.getActingUserId.mockReturnValue('user-actor');
-      db.event.findUnique.mockResolvedValue({ id: 'event-1', householdId: null } as Event);
-      db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-actor' } as EventAttendee);
-      db.eventAttendee.findFirst.mockResolvedValue({
-        id: 'att-2',
-        status: EventParticipationStatus.Attending,
-        invitedById: null,
-        removedAt,
-      } as EventAttendee);
-      db.eventAttendee.update.mockResolvedValue(
-        makeEventAttendee({ id: 'att-2', eventId: 'event-1', userId: 'user-2', invitedById: 'att-actor' }),
-      );
-    });
-
-    it('revives the removed row with a fresh role, and creates none', async () => {
-      await service.addAttendee('event-1', { userId: 'user-2', role: SystemRole.EventSpectator });
-
-      expect(db.eventAttendee.findFirst).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { eventId: 'event-1', userId: 'user-2' } }),
-      );
-      expect(db.eventAttendee.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { id: 'att-2', removedAt: { not: null } },
-          data: expect.objectContaining({
-            removedAt: null,
-            rsvpDate: null,
-            status: EventParticipationStatus.Invited,
-            invitedBy: { connect: { id: 'att-actor' } },
-            role: { create: { role: { connect: { name: SystemRole.EventSpectator } } } },
-          }),
-        }),
+      await expect(service.addAttendee('event-1', { guestName: 'Pat', role: SystemRole.EventCoHost })).rejects.toThrow(
+        ForbiddenException,
       );
       expect(db.eventAttendee.create).not.toHaveBeenCalled();
-    });
-
-    it('emits an AttendeeAddedEvent as an update of the removed row', async () => {
-      await service.addAttendee('event-1', { userId: 'user-2' });
-
-      const [name, emitted] = emitter.emit.mock.calls[0];
-      expect(name).toBe(AttendeeAddedEvent.eventName);
-      expect(emitted.action).toBe('update');
-      expect(emitted.subjectId).toBe('att-2');
-      expect(emitted.before).toEqual(expect.objectContaining({ id: 'att-2', removedAt }));
-      expect(emitted.after).toEqual(expect.objectContaining({ id: 'att-2', removedAt: null }));
-    });
-
-    // Back in the event, their paused nominations resume.
-    it('resumes the nominations supplied from their list', async () => {
-      await service.addAttendee('event-1', { userId: 'user-2' });
-
-      expect(db.eventGameNomination.updateManyAndReturn).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            suppliedFrom: { is: { attendeeId: 'att-2', collection: { is: { deletedAt: null } } } },
-            status: NominationStatus.Paused,
-          }),
-        }),
-      );
-    });
-
-    it('reports a game it took off as left with the supplier, by the user who added them back (#769)', async () => {
-      db.eventAttendee.update.mockResolvedValue(
-        makeEventAttendee({
-          id: 'att-2',
-          eventId: 'event-1',
-          userId: 'user-2',
-          status: EventParticipationStatus.NotAttending,
-        }),
-      );
-      db.eventGame.findMany.mockResolvedValue([{ id: 'eg-1' } as EventGame]);
-
-      await service.addAttendee('event-1', { userId: 'user-2', status: EventParticipationStatus.NotAttending });
-
-      const removedGame = emitter.emit.mock.calls.find(([name]) => name === GameRemovedFromEventEvent.eventName)?.[1];
-      expect(removedGame.reason).toBe(LineupRemovalReason.SupplierLeft);
-      expect(removedGame.actingUserId).toBe('user-actor');
-    });
-
-    it('a revived row takes the date of the status it is revived with (#1027)', async () => {
-      await service.addAttendee('event-1', { userId: 'user-2', status: EventParticipationStatus.Attending });
-      await service.addAttendee('event-1', { userId: 'user-2', status: EventParticipationStatus.Invited });
-
-      const [attending, invited] = db.eventAttendee.update.mock.calls.map(([args]) => args.data);
-      expect(attending.rsvpDate).toBeInstanceOf(Date);
-      expect(invited.rsvpDate).toBeNull();
-    });
-
-    it("evicts the revived user's cached permission graph", async () => {
-      await service.addAttendee('event-1', { userId: 'user-2' });
-
-      expect(permissions.invalidateUser).toHaveBeenCalledWith('user-2');
     });
   });
 
@@ -1550,10 +1499,10 @@ describe('EventAttendeeService', () => {
       db.event.findUnique.mockResolvedValue({ id: 'event-1', householdId: null } as Event);
       db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-actor' } as EventAttendee);
       db.eventAttendee.create.mockResolvedValue(
-        makeEventAttendee({ id: 'att-new', eventId: 'event-1', userId: 'user-2' }),
+        makeEventAttendee({ id: 'att-new', eventId: 'event-1', userId: null, guestName: 'Pat' }),
       );
 
-      const added = await service.addAttendee('event-1', { userId: 'user-2' });
+      const added = await service.addAttendee('event-1', { guestName: 'Pat' });
 
       expect(db.eventAttendee.create).toHaveBeenCalledWith(
         expect.objectContaining({ include: ATTENDEE_USER_AND_ROLE_INCLUDE }),
@@ -1596,7 +1545,7 @@ describe('EventAttendeeService', () => {
       db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-actor' } as EventAttendee);
       db.eventAttendee.create.mockResolvedValue(makeEventAttendee({ id: 'att-new', eventId: 'event-1' }));
       forAttendees.mockRejectedValueOnce(unique);
-      await expect(service.addAttendee('event-1', { userId: 'user-2' })).rejects.toBe(unique);
+      await expect(service.addAttendee('event-1', { guestName: 'Pat' })).rejects.toBe(unique);
       expect(db.eventAttendee.create).toHaveBeenCalledTimes(1);
 
       db.event.count.mockResolvedValue(1);

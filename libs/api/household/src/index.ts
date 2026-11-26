@@ -21,3 +21,4 @@ export * from './lib/member/household-member.controller';
 export * from './lib/member/household-member.service';
 export * from './lib/quota/household-quota.controller';
 export * from './lib/read-shapes';
+export { SHOWN_NAME_SELECT, shownName } from './lib/shown-name';

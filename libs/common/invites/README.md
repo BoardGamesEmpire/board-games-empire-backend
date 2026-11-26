@@ -1,10 +1,10 @@
 # @bge/invites
 
-The invite lifecycle for Board Games Empire, as primitives a context owner drives inside its own transaction. One service covers every kind of invite the `Invite` model knows (household, event, system, campaign); the module that owns the context (households today, events and campaigns later) injects it and decides who may call what.
+The invite lifecycle for Board Games Empire, as primitives a context owner drives inside its own transaction. One service covers every kind of invite the `Invite` model knows (household, event, system, campaign); the module that owns the context (households and events today, campaigns later) injects it and decides who may call what.
 
 The lib ships:
 
-- `InviteService` — `findForParty`, `findPartyScopeWithin`, `findPartyTypeWithin`, `findAcceptableWithin`, `createWithin`, `acceptWithin`, `declineWithin`, `withdrawWithin`, `revokeWithin`, `approveWithin`, `revokeOutstandingWithin`, `revokeOutstandingOfUserWithin`, `expireOutstandingWithin`, and `emit`.
+- `InviteService` — `findForParty`, `findPartyScopeWithin`, `findPartyTypeWithin`, `findAcceptableWithin`, `createWithin`, `acceptWithin`, `declineWithin`, `withdrawWithin`, `revokeWithin`, `approveWithin`, `revokeOutstandingWithin`, `revokeOutstandingToHouseholdEventsWithin`, `revokeOutstandingOfUserWithin`, `expireOutstandingWithin`, and `emit`.
 - `receivedInviteWhere`, the filter a listing of the invites a user has received is built on.
 - `InviteResponder`, what a context lib implements so that one party route can serve every kind of invite, and `CONTEXTUAL_INVITE_TYPES` with `isContextualInviteType`, the kinds such a route serves: those whose rows name a context (#742).
 - The read shapes every invite render goes through: `CONTEXT_INVITE_SELECT` (a context reader's view) and `PARTY_INVITE_SELECT` (a party's view).

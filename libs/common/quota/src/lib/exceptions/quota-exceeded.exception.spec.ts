@@ -15,6 +15,7 @@ const EXPECTED_MESSAGE: [QuotaResource, I18nPath][] = [
   ['storage_bytes', 'errors.quota.exceeded.storage_bytes'],
   ['plugin_install_count', 'errors.quota.exceeded.plugin_install_count'],
   ['household_invite_daily_count', 'errors.quota.exceeded.household_invite_daily_count'],
+  ['event_invite_daily_count', 'errors.quota.exceeded.event_invite_daily_count'],
 ];
 
 describe('QuotaExceededException', () => {

@@ -17,6 +17,8 @@ import {
 } from '@bge/database';
 import { lockExistingHousehold } from '@bge/household';
 import { CodedHttpException, t } from '@bge/i18n';
+import type { InviteDomainEvent } from '@bge/invites';
+import { InviteService } from '@bge/invites';
 import {
   AbilityService,
   PermissionsService,
@@ -24,6 +26,8 @@ import {
   resolveScopeSubjectId,
   ScopeComposer,
 } from '@bge/permissions';
+import type { QuotaSoftOverageEvent } from '@bge/quota';
+import { QuotaService } from '@bge/quota';
 import type { DefaultPaginationQueryDto, PaginatedRows } from '@bge/shared';
 import { webhookEnvelope, WebhookEventType } from '@bge/webhooks';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
@@ -31,7 +35,6 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Http } from '@status/codes';
 import assert from 'node:assert';
 import { isDeepStrictEqual } from 'node:util';
-import { assertInvitable } from './attendee/invitable';
 import { browseEventScope } from './browse-event-scope';
 import { ATTENDEE_ORDER } from './constants/attendee-order.constant';
 import { ATTENDEE_USER_AND_ROLE_INCLUDE } from './constants/attendee-user-and-role.constant';
@@ -43,6 +46,8 @@ import type { CreateEventDto } from './dto/create-event.dto';
 import type { ListEventsQueryDto } from './dto/list-events.query.dto';
 import type { UpdateEventDto } from './dto/update-event.dto';
 import { EventCreatedEvent, EventDeletedEvent, EventUpdatedEvent } from './events/event.events';
+import type { EventInviteCreation } from './invite/event-invite.service';
+import { EventInviteService } from './invite/event-invite.service';
 import { countLiveDates } from './occurrence/live-dates.util';
 import { assertValidCreatedVotingPolicy } from './policy/effective-policy';
 import {
@@ -63,7 +68,7 @@ import {
 } from './utils/event-attendance.util';
 import type { EventWithStatus } from './utils/event-status.util';
 import { EVENT_STATUS_DATE_SELECT, withEventStatus } from './utils/event-status.util';
-import { lockLiveEvent } from './utils/lock-live-event.util';
+import { lockLiveEvent, shareLiveEvent } from './utils/lock-live-event.util';
 import { rsvpDateFor } from './utils/rsvp-date.util';
 import { pageUpcomingEvents } from './utils/upcoming-events.util';
 
@@ -77,6 +82,9 @@ export class EventService {
     private readonly abilityService: AbilityService,
     private readonly permissions: PermissionsService,
     private readonly scopeComposer: ScopeComposer,
+    private readonly invites: InviteService,
+    private readonly eventInvites: EventInviteService,
+    private readonly quotas: QuotaService,
   ) {}
 
   /**
@@ -86,8 +94,10 @@ export class EventService {
    * The scope is the endpoint's own: events with an attendee row for the
    * caller, hosts included, since creating an event makes its host an
    * attendee (#512, #365). The row counts whatever its RSVP status, so an
-   * invitation or a declined event is listed too. An RSVP changes only the
-   * row's status, not any event role attached to it, so filtering on status
+   * event the caller declined is listed too. An open invite is no row, so an
+   * event the caller is only invited to is not listed until they accept
+   * (#742). An RSVP changes only the row's status, not any event role
+   * attached to it, so filtering on status
    * here would hide events the caller can still read and answer. A row a host
    * removed does not count: it keeps no role, so the event is no longer the
    * caller's to answer (#551). Before this the caller's ceiling WAS the scope, so
@@ -393,6 +403,12 @@ export class EventService {
     } = dto;
     const clientRequestId = normalizeClientRequestId(rawClientRequestId);
     const uniqueInviteIds = Array.from(new Set(inviteUserIds.filter((id) => id !== userId)));
+    // What the create's invites announce once it commits (#742). A replay
+    // sends none, so it leaves these empty.
+    const sent: { events: InviteDomainEvent[]; softOverages: QuotaSoftOverageEvent[] } = {
+      events: [],
+      softOverages: [],
+    };
 
     // A retried create finds the event its first attempt made before any
     // check below runs (#252). The checks judged the original; a household
@@ -429,8 +445,6 @@ export class EventService {
           if (householdId !== null) {
             await lockExistingHousehold(tx, householdId);
           }
-
-          await assertInvitable(tx, userId, uniqueInviteIds);
 
           // An unknown id answers 400 with its own code, where the nested
           // connect would fail inside Prisma (#1268).
@@ -510,15 +524,6 @@ export class EventService {
                       },
                     },
                   },
-                  ...uniqueInviteIds.map((inviteId) => ({
-                    user: { connect: { id: inviteId } },
-                    status: EventParticipationStatus.Invited,
-                    role: {
-                      create: {
-                        role: { connect: { name: SystemRole.EventParticipant } },
-                      },
-                    },
-                  })),
                 ],
               },
             },
@@ -526,18 +531,50 @@ export class EventService {
             include: EVENT_CREATE_INCLUDE,
           });
 
-          return { ...row, policy: toEventPolicyViewOrNull(row.policy) };
+          // Each invitee is sent an invite, not an attendee row: they hold
+          // no role on the event until they accept (#742). Each runs the
+          // invite route's checks on the invitee, and one refused fails the
+          // whole create, 404 or 403 as before (#546). Each takes one of the
+          // creator's event invites for the day, so a create with more
+          // invitees than the day has left is refused whole. The creator's
+          // authority is the create's own grant: their ability, built before
+          // this event existed, has no rule for it.
+          //
+          // The event's share is taken after the household's, as every invite
+          // write takes it before the invite rows (`shareLiveEvent`).
+          if (uniqueInviteIds.length > 0) {
+            await shareLiveEvent(tx, row.id);
+          }
+
+          const invited: EventInviteCreation[] = [];
+
+          for (const inviteeId of uniqueInviteIds) {
+            invited.push(
+              await this.eventInvites.inviteWithin(tx, {
+                eventId: row.id,
+                inviterId: userId,
+                userId: inviteeId,
+                role: SystemRole.EventParticipant,
+              }),
+            );
+          }
+
+          return { event: { ...row, policy: toEventPolicyViewOrNull(row.policy) }, invited };
         });
 
+        sent.events = created.invited.flatMap(({ events }) => events);
+        sent.softOverages = created.invited.flatMap(({ softOverages }) => softOverages);
+
         // The create read back every date it made, with no ceiling.
-        return withEventStatus(created, created.occurrences, initiatedAt);
+        return withEventStatus(created.event, created.event.occurrences, initiatedAt);
       },
     });
 
     if (replayed) {
       // A replay emits nothing (#252): the original emitted once it
-      // committed, and a second round would notify its invitees and fire its
-      // webhook twice. It has already evicted, in `findReplayedEvent`.
+      // committed, and a second round would notify its invitees, announce
+      // its invites (#742) and fire its webhook twice. It has already
+      // evicted, in `findReplayedEvent`.
       //
       // Known residual: an original that committed but crashed before its
       // emits leaves its invitees unnotified, and the replay does not make up
@@ -547,13 +584,14 @@ export class EventService {
     }
 
     // The creator's graph was cached by this request, before the host row
-    // existed, and each invitee's predates their participant row. Without the
-    // eviction none of them holds a role on the event until the cache expires.
+    // existed. Without the eviction they hold no role on the event until the
+    // cache expires. The invitees gain none until they accept (#742), so
+    // theirs stay as they are.
     //
-    // The eviction is for these users' own next requests. The webhook
+    // The eviction is for the creator's own next requests. The webhook
     // dispatcher reads each subscriber's graph from the database, so it doesn't
     // depend on this running before the emits (#732).
-    await this.permissions.invalidateUsers([userId, ...uniqueInviteIds]);
+    await this.permissions.invalidateUsers([userId]);
 
     this.eventEmitter.emit(
       EventCreatedEvent.eventName,
@@ -580,6 +618,11 @@ export class EventService {
         data: eventWebhookIds(event),
       }),
     );
+
+    // The invites, after the event they invite to: any expired rivals the
+    // lib stamped, then each invite, then the soft quotas they went past.
+    this.invites.emit(sent.events);
+    this.quotas.emitSoftOverages(sent.softOverages);
 
     // Here rather than in the controller, which cannot tell a replay from a
     // create: a retried create made nothing, and must not log that it did.
@@ -619,11 +662,13 @@ export class EventService {
     // A replay evicts, as the original did: eviction is idempotent, and it
     // heals an original that committed but crashed before its own eviction
     // ran. Nothing records which attendee rows the create made, so it evicts
-    // every user with a row on the event now: the original's host and
-    // invitees, and anyone added or removed since, whose own add or removal
-    // evicted them already and costs one graph rebuild here. The retry's
-    // invitees were never added. Read unscoped, unlike the parts below: whose
-    // graph is stale does not depend on whom the creator may see.
+    // every user with a row on the event now: the original's host, and anyone
+    // who accepted, was added or was removed since, whose own accept, add or
+    // removal evicted them already and costs one graph rebuild here. Invitees
+    // hold no row until they accept, and a replay sends no invite again, not
+    // even for the retry's own invitees (#742). Read unscoped, unlike the
+    // parts below: whose graph is stale does not depend on whom the creator
+    // may see.
     const rows = await this.db.eventAttendee.findMany({ where: { eventId: event.id }, select: { userId: true } });
 
     await this.permissions.invalidateUsers(
@@ -775,10 +820,19 @@ export class EventService {
       // one that didn't. A delete that loses a race to another finds the row
       // deleted under the lock and answers 404, as a request arriving after the
       // first delete would (#731).
-      const { occurrences: dates, ...event } = await this.db.$transaction(async (tx) => {
+      //
+      // The event's outstanding invites are revoked in the same transaction,
+      // after the event's lock, which is the lock order the invites lib sets:
+      // the context row, then invites (#742). An invite create takes the row
+      // FOR SHARE first, so none is inserted after the revoke on an event
+      // being deleted, and an accept queued behind the delete finds it gone.
+      const {
+        deleted: { occurrences: dates, ...event },
+        revoked,
+      } = await this.db.$transaction(async (tx) => {
         await lockLiveEvent(tx, id);
 
-        return tx.event.update({
+        const deleted = await tx.event.update({
           where: {
             id,
             ...liveEventWhere(),
@@ -791,7 +845,13 @@ export class EventService {
           },
           include: { occurrences: { select: EVENT_STATUS_DATE_SELECT } },
         });
+
+        return { deleted, revoked: await this.invites.revokeOutstandingWithin(tx, { eventId: id }) };
       });
+
+      // Each invitee hears their invite was revoked only once the delete has
+      // committed (#742).
+      this.invites.emit(revoked.events);
 
       this.eventEmitter.emit(
         EventDeletedEvent.eventName,

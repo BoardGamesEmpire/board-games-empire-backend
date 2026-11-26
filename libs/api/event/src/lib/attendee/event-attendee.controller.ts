@@ -97,16 +97,27 @@ export class EventAttendeeController {
     return from(this.attendeeService.getAttendee(eventId, attendeeId)).pipe(map((attendee) => ({ attendee })));
   }
 
-  @ApiOperation({ summary: 'Add an attendee to an event' })
+  @ApiOperation({
+    summary: 'Add a person without an account to an event, by name',
+    description:
+      'A registered user is invited instead, with `POST /events/:eventId/invites`, and becomes an attendee ' +
+      'by accepting (#742). A body naming a `userId` is refused.',
+  })
   @ApiParam({ name: 'eventId', type: String })
   @ApiResponse({ status: Http.Created, description: 'Attendee added' })
+  @ApiResponse({
+    status: Http.BadRequest,
+    description:
+      'An invalid field, a missing name, or a `userId` (code `ATTENDEE_USER_NEEDS_INVITE`): a registered ' +
+      'user is invited instead',
+  })
   @ApiResponse({
     status: Http.Forbidden,
     description:
       'No attendee grant on this event, or a co-host, organizer or moderator role from an organizer or moderator: ' +
       "only the event's host or co-host, or an owner or admin of its household, gives those out",
   })
-  @ApiResponse({ status: Http.Conflict, description: 'User is already an attendee' })
+  @ApiResponse({ status: Http.NotFound, description: 'Event not found or deleted' })
   @CheckPolicies((ability) => ability.can(Action.create, ResourceType.EventAttendee))
   @Post()
   addAttendee(@Param('eventId') eventId: string, @Body() dto: AddAttendeeDto) {

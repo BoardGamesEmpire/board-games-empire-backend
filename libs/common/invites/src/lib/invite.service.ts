@@ -616,6 +616,38 @@ export class InviteService {
   }
 
   /**
+   * Closes every outstanding invite into the events of one household, as the
+   * household's soft delete does beside {@link revokeOutstandingWithin} for
+   * its own (#742). A household's events go when it goes: no event read
+   * reaches one (`liveEventWhere`), and accepting an invite to one answers
+   * 404. Left open, each would count as its invitee's outstanding invite to
+   * that event until the sweep stamped it `Expired`, telling an audit reader
+   * and a webhook "expired" when the delete is what ended it.
+   *
+   * Expired-but-unstamped rows are revoked with the rest, for the reason
+   * {@link revokeOutstandingWithin} gives. The caller has locked the
+   * household's row by the time this runs, so the lock order is household
+   * row, then invites. No write that locks an event invite first goes on to
+   * lock its household's row: an accept locks the event's row and then the
+   * invite, and reads the household without a lock.
+   */
+  async revokeOutstandingToHouseholdEventsWithin(
+    tx: Prisma.TransactionClient,
+    householdId: string,
+  ): Promise<OutstandingInviteRevocation> {
+    const now = new Date();
+    const { events } = await this.settleOutstandingWithin(
+      tx,
+      { type: InviteType.Event, event: { is: { householdId } } },
+      { status: InviteStatus.Revoked, respondedAt: now },
+      InviteRevokedEvent,
+      now,
+    );
+
+    return { count: events.length, events };
+  }
+
+  /**
    * Closes the outstanding invites into a context that one user sent, or that
    * name them by id, as their leaving it does (#747). Their invites end with
    * the authority that sent them, and an invite to them would let them back

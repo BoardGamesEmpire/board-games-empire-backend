@@ -274,7 +274,7 @@ export class HouseholdController {
     description:
       'Stamps `deletedAt` and hides the household from every read but `GET /households/restorable`, which ' +
       'lists it to the household owners who can still restore it; the roster and game shares are kept, and ' +
-      'pending invites are revoked. When one of the household’s owners deletes it, every owner can restore it ' +
+      'pending invites to the household and to its events are revoked. When one of the household’s owners deletes it, every owner can restore it ' +
       `until \`restorableUntil\` (ISO timestamp, ${HOUSEHOLD_RESTORE_WINDOW_DAYS} days on) through ` +
       '`POST /households/:id/restore`, and server staff can at any time. `restorableUntil` is `null` when the ' +
       'delete opened no undo for the caller: a delete by server staff is moderation, and only staff can undo it, ' +

@@ -1,5 +1,17 @@
-import { InviteType } from '@bge/database';
-import { CONTEXTUAL_INVITE_TYPES, isContextualInviteType } from './invite.constants';
+import { InviteStatus, InviteType } from '@bge/database';
+import {
+  CONTEXTUAL_INVITE_TYPES,
+  isContextualInviteType,
+  LISTED_BY_DEFAULT_INVITE_STATUSES,
+  OUTSTANDING_INVITE_STATUSES,
+} from './invite.constants';
+
+describe('LISTED_BY_DEFAULT_INVITE_STATUSES', () => {
+  // Every invite list's default, so an inviter sees an invite lapse and can send another (#751, #742).
+  it('is the outstanding statuses and Expired, nothing settled by an answer', () => {
+    expect([...LISTED_BY_DEFAULT_INVITE_STATUSES]).toEqual([...OUTSTANDING_INVITE_STATUSES, InviteStatus.Expired]);
+  });
+});
 
 describe('isContextualInviteType', () => {
   it.each(CONTEXTUAL_INVITE_TYPES)('admits %s, whose rows name a context a party route serves (#742)', (type) => {

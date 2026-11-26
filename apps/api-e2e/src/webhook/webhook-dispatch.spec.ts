@@ -6,6 +6,7 @@ import type { Actors, AuthenticatedActor } from '@bge/testing-e2e';
 import { createActors } from '@bge/testing-e2e';
 import { WebhookEventType } from '@bge/webhooks';
 import request from 'supertest';
+import { inviteAndAccept } from '../event/event-join';
 import { createEventClient, EVENTS_PATH } from '../event/event-request';
 import { createMemberClient } from '../household/household-request';
 import { permissionsCacheHas } from '../support/api-cache';
@@ -266,9 +267,10 @@ describe('webhook dispatch from the API (#538)', () => {
     // The emit follows the soft delete, so this is the case that needs the
     // deleted row checked: a live-row check refuses every subscriber.
     const host = await actors.user();
-    const guest = await actors.user();
-    const eventId = await events.createdEventId(host, { inviteUserIds: [guest.user.id] });
-    const subscriptionId = await subscribe(guest, {
+    const attendee = await actors.user();
+    const eventId = await events.createdEventId(host);
+    await inviteAndAccept(baseUrl, host, attendee, eventId);
+    const subscriptionId = await subscribe(attendee, {
       resourceType: ResourceType.Event,
       resourceId: eventId,
       eventTypes: [WebhookEventType.EventDeleted],

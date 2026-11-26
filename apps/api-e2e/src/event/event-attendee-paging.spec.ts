@@ -1,3 +1,4 @@
+import { EventParticipationStatus, SystemRole } from '@bge/database';
 import type { Actors, AuthenticatedActor } from '@bge/testing-e2e';
 import { createActors } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
@@ -53,15 +54,35 @@ describe('GET /api/events/:eventId/attendees pages (#373)', () => {
       'POST /api/events/:eventId/attendees as the host',
     ).id;
 
-  // The create adds the host and the users it invites in one write, so they
-  // share a `createdAt`; only the id then keeps a row on the same page between
-  // requests. The tie is asserted, so the test cannot go on passing without
-  // one. A page past the end is an empty page with the true total, not a 404.
-  it("pages attendees who joined in the same write once each, in the event detail's order", async () => {
+  // Attendees can share a `createdAt`; only the id then keeps a row on the
+  // same page between requests. The create seats only its host, and each
+  // invitee joins by accepting, at a time of their own (#742), so the tie is
+  // written in the database: two attendees seated at the host's own instant.
+  // The tie is asserted, so the test cannot go on passing without one. A page
+  // past the end is an empty page with the true total, not a 404.
+  it("pages attendees who joined at the same instant once each, in the event detail's order", async () => {
     const host = await actors.user();
     const first = await actors.user();
     const second = await actors.user();
-    const eventId = await createdEventId(host, { inviteUserIds: [first.user.id, second.user.id] });
+    const eventId = await createdEventId(host);
+    const { createdAt } = await db.client.eventAttendee.findUniqueOrThrow({
+      where: { eventId_userId: { eventId, userId: host.user.id } },
+      select: { createdAt: true },
+    });
+    for (const attendee of [first, second]) {
+      await db.client.eventAttendee.create({
+        data: {
+          createdAt,
+          // What an accepted invite writes: a registered user is Attending,
+          // dated, never left at the schema's Invited (#742).
+          status: EventParticipationStatus.Attending,
+          rsvpDate: createdAt,
+          event: { connect: { id: eventId } },
+          user: { connect: { id: attendee.user.id } },
+          role: { create: { role: { connect: { name: SystemRole.EventParticipant } } } },
+        },
+      });
+    }
 
     const pages = [];
     for (const page of [1, 2, 3, 4]) {

@@ -19,10 +19,10 @@ import { expectLockWaiter, withBarrier } from '../support/lock-barrier';
 import type { TestDatabase } from '../support/test-db';
 import { createTestDatabase } from '../support/test-db';
 import { arrangeOfferedGame } from './event-fixtures';
+import { inviteAndAccept } from './event-join';
 import { attendeeGamesPath, attendeesPath, createEventClient, EVENTS_PATH, offerGamesPath } from './event-request';
 import type { NominationWire, OfferedGameWire, OfferResultWire } from './event-wire';
 import {
-  attendeeEnvelope,
   listAttendeeGamesEnvelope,
   listAttendeesEnvelope,
   listLineupEnvelope,
@@ -88,17 +88,9 @@ describe('removing an offered game from the collection (#1221)', () => {
     return { collectionId, platformGameId, suppliedById: entryId };
   };
 
-  const addAttendee = (actor: AuthenticatedActor, eventId: string, body: Record<string, unknown>) =>
-    request(baseUrl).post(attendeesPath(eventId)).set(actor.headers).send(body);
-
-  /** Adds `actor` to the event as attending, as its host, and answers their attendee id. */
+  /** Seats `actor` on the event as attending, by accepting its host's invite (#742), and answers their attendee id. */
   const addAttending = async (host: AuthenticatedActor, eventId: string, actor: AuthenticatedActor) =>
-    attendeeEnvelope(
-      await addAttendee(host, eventId, { userId: actor.user.id, status: EventParticipationStatus.Attending }).expect(
-        201,
-      ),
-      'POST /api/events/:eventId/attendees as the host',
-    ).id;
+    (await inviteAndAccept(baseUrl, host, actor, eventId)).attendeeId;
 
   const rsvp = (actor: AuthenticatedActor, eventId: string, attendeeId: string, status: EventParticipationStatus) =>
     request(baseUrl)

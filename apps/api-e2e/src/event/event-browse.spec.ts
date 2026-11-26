@@ -15,9 +15,10 @@ import { mintApiKey, mintApiKeyWithArrangedScopes } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import type { TestDatabase } from '../support/test-db';
 import { createTestDatabase } from '../support/test-db';
+import { createEventInviteClient, inviteAndAccept } from './event-join';
 import { BROWSE_PATH, createEventClient, EVENTS_PATH } from './event-request';
 import type { ListEventsEnvelope } from './event-wire';
-import { attendeeEnvelope, listEventsEnvelope } from './event-wire';
+import { listEventsEnvelope } from './event-wire';
 
 /**
  * `GET /api/events/browse` over the real route (#962): the upcoming events
@@ -50,6 +51,7 @@ describe('browsing upcoming events (#962)', () => {
   });
 
   const { createdEventId } = createEventClient(baseUrl);
+  const { sentInvite } = createEventInviteClient(baseUrl);
 
   /** `hours` from now, as the wire sends a date. */
   const soon = (hours: number) => new Date(Date.now() + hours * 3_600_000).toISOString();
@@ -70,9 +72,6 @@ describe('browsing upcoming events (#962)', () => {
 
   const readEvent = (actor: AuthenticatedActor, eventId: string) =>
     request(baseUrl).get(`${EVENTS_PATH}/${eventId}`).set(actor.headers);
-
-  const addAttendee = (actor: AuthenticatedActor, eventId: string, body: Record<string, unknown>) =>
-    request(baseUrl).post(`${EVENTS_PATH}/${eventId}/attendees`).set(actor.headers).send(body);
 
   it("lists a stranger's upcoming Public event, and leaves out a Friends one", async () => {
     const [host, viewer] = await Promise.all([actors.user(), actors.user()]);
@@ -151,8 +150,9 @@ describe('browsing upcoming events (#962)', () => {
 
   // Any row keeps the event out, a removed one included, so a host's removal
   // doesn't put the event back on the removed person's home page.
-  it('leaves out an event the acting user hosts, is invited to, has declined, or was removed from', async () => {
-    const [host, invited, decliner, removed, stranger] = await Promise.all([
+  it('leaves out an event the acting user hosts, attends, has declined, or was removed from', async () => {
+    const [host, attendee, decliner, removed, invitee, stranger] = await Promise.all([
+      actors.user(),
       actors.user(),
       actors.user(),
       actors.user(),
@@ -161,28 +161,29 @@ describe('browsing upcoming events (#962)', () => {
     ]);
     const eventId = await createdEventId(host, { reach: Reach.Public, ...dated(2) });
 
-    await addAttendee(host, eventId, { userId: invited.user.id }).expect(201);
-    const declined = attendeeEnvelope(
-      await addAttendee(host, eventId, { userId: decliner.user.id }).expect(201),
-      'POST /api/events/:eventId/attendees for the decliner',
-    );
+    // Each joins by accepting the host's invite (#742).
+    await inviteAndAccept(baseUrl, host, attendee, eventId);
+    const declined = await inviteAndAccept(baseUrl, host, decliner, eventId);
     await request(baseUrl)
-      .patch(`${EVENTS_PATH}/${eventId}/attendees/${declined.id}/status`)
+      .patch(`${EVENTS_PATH}/${eventId}/attendees/${declined.attendeeId}/status`)
       .set(decliner.headers)
       .send({ status: EventParticipationStatus.NotAttending })
       .expect(200);
-    const removedRow = attendeeEnvelope(
-      await addAttendee(host, eventId, { userId: removed.user.id }).expect(201),
-      'POST /api/events/:eventId/attendees for the removed attendee',
-    );
-    await request(baseUrl).delete(`${EVENTS_PATH}/${eventId}/attendees/${removedRow.id}`).set(host.headers).expect(200);
+    const removedRow = await inviteAndAccept(baseUrl, host, removed, eventId);
+    await request(baseUrl)
+      .delete(`${EVENTS_PATH}/${eventId}/attendees/${removedRow.attendeeId}`)
+      .set(host.headers)
+      .expect(200);
 
-    // The control: someone with no row sees it listed.
+    // The controls: someone with no row sees it listed, and so does someone
+    // invited who hasn't accepted, who has no row until they do (#742).
+    await sentInvite(host, eventId, { userId: invitee.user.id });
     expect(await browse(stranger)).toContain(eventId);
+    expect(await browse(invitee)).toContain(eventId);
 
     const attendees = [
       ['its host', host],
-      ['an invited attendee', invited],
+      ['an attendee', attendee],
       ['an attendee who declined', decliner],
       ['an attendee the host removed', removed],
     ] as const;

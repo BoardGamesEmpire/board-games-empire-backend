@@ -1690,6 +1690,35 @@ describe('InviteService', () => {
     });
   });
 
+  describe('revokeOutstandingToHouseholdEventsWithin', () => {
+    it("revokes the outstanding invites into the household's events, AwaitingApproval first (#742)", async () => {
+      const pending = { ...rowWithToken({ id: 'inv-e' }), status: InviteStatus.Revoked, respondedAt: FUTURE };
+      tx.invite.updateManyAndReturn.mockResolvedValueOnce([] as never).mockResolvedValueOnce([pending] as never);
+
+      const { count, events } = await service.revokeOutstandingToHouseholdEventsWithin(asTx(tx), 'hh-1');
+
+      const toItsEvents = { type: InviteType.Event, event: { is: { householdId: 'hh-1' } } };
+      expect(tx.invite.updateManyAndReturn).toHaveBeenNthCalledWith(1, {
+        where: { ...toItsEvents, status: InviteStatus.AwaitingApproval },
+        data: { status: InviteStatus.Revoked, respondedAt: expect.any(Date) },
+        select: INVITE_SNAPSHOT_SELECT,
+      });
+      expect(tx.invite.updateManyAndReturn).toHaveBeenNthCalledWith(2, {
+        where: { ...toItsEvents, status: InviteStatus.Pending },
+        data: { status: InviteStatus.Revoked, respondedAt: expect.any(Date) },
+        select: INVITE_SNAPSHOT_SELECT,
+      });
+
+      expect(count).toBe(1);
+      expect(events.map((event) => event.subjectId)).toEqual(['inv-e']);
+      expect(events[0]).toBeInstanceOf(InviteRevokedEvent);
+      expect(events[0].before.status).toBe(InviteStatus.Pending);
+      events.forEach(expectNoToken);
+      // Handed back, not announced: the caller emits after commit.
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+  });
+
   describe('revokeOutstandingOfUserWithin', () => {
     const DEPARTED_ID = 'user-departed';
     const ofDeparted = { OR: [{ inviterId: DEPARTED_ID }, { inviteeId: DEPARTED_ID }] };

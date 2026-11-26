@@ -16,15 +16,11 @@ import { requireBaseUrl } from '../support/e2e-env';
 import type { TestDatabase } from '../support/test-db';
 import { createTestDatabase } from '../support/test-db';
 import { arrangeListEntry } from './event-fixtures';
+import type { AssignableAttendeeRole } from './event-join';
+import { inviteAndAccept } from './event-join';
 import { createEventClient, EVENTS_PATH } from './event-request';
 import type { NominationWire } from './event-wire';
-import {
-  attendeeEnvelope,
-  availabilitySummaryEnvelope,
-  nominationEnvelope,
-  occurrenceEnvelope,
-  resolutionEnvelope,
-} from './event-wire';
+import { availabilitySummaryEnvelope, nominationEnvelope, occurrenceEnvelope, resolutionEnvelope } from './event-wire';
 
 /**
  * Who counts as a voter, and what a resolve stores, over the real routes.
@@ -59,21 +55,17 @@ describe('vote eligibility', () => {
   const addAttendee = (actor: AuthenticatedActor, eventId: string, body: Record<string, unknown>) =>
     request(baseUrl).post(`${EVENTS_PATH}/${eventId}/attendees`).set(actor.headers).send(body);
 
-  /** The attendee id of a user `host` adds to the event, attending, with the role given. */
+  /**
+   * The attendee id of a user `host` invites to the event with the role
+   * given, once they accept: accepting seats them attending, and revives the
+   * row of someone removed (#742, #551).
+   */
   const addedAttending = async (
     host: AuthenticatedActor,
     eventId: string,
     actor: AuthenticatedActor,
-    role: SystemRole = SystemRole.EventParticipant,
-  ) =>
-    attendeeEnvelope(
-      await addAttendee(host, eventId, {
-        userId: actor.user.id,
-        role,
-        status: EventParticipationStatus.Attending,
-      }).expect(201),
-      'POST /api/events/:eventId/attendees as the host',
-    ).id;
+    role: AssignableAttendeeRole = SystemRole.EventParticipant,
+  ) => (await inviteAndAccept(baseUrl, host, actor, eventId, role)).attendeeId;
 
   const removeAttendee = (actor: AuthenticatedActor, eventId: string, attendeeId: string) =>
     request(baseUrl).delete(`${EVENTS_PATH}/${eventId}/attendees/${attendeeId}`).set(actor.headers);

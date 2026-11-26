@@ -825,9 +825,9 @@ export class HouseholdService {
    * read — `getHouseholdById`, `getHouseholdsForUser` and `updateHousehold` all
    * filter `deletedAt: null` — except {@link getRestorableHouseholdsForUser},
    * which lists it to the household owners who can still restore it (not to
-   * staff, who can restore any). Outstanding invites to the household are
-   * revoked in the same transaction so a stale token can never be accepted into
-   * a dead household. Members and game-collection shares are intentionally left in
+   * staff, who can restore any). Outstanding invites to the household, and to
+   * its events (#742), are revoked in the same transaction so a stale token can
+   * never be accepted into a dead household or one of its events. Members and game-collection shares are intentionally left in
    * place — a soft delete is reversible ({@link restoreHousehold}) and reads
    * already exclude the household; hard cascade/cleanup is deferred to the
    * purge path (#543).
@@ -892,10 +892,14 @@ export class HouseholdService {
           data: { deletedAt: new Date() },
         });
 
-        // Outstanding invites to a dead household can never be accepted. The
-        // lib is the only writer of an invite's status (#161); its events
-        // ride back here and go out once the delete is committed.
-        const revocation = await this.invites.revokeOutstandingWithin(tx, { householdId: id });
+        // Outstanding invites to a dead household can never be accepted, nor
+        // can invites to its events, which go with it (#742). The lib is the
+        // only writer of an invite's status (#161); its events ride back here
+        // and go out once the delete is committed.
+        const revocation = [
+          ...(await this.invites.revokeOutstandingWithin(tx, { householdId: id })).events,
+          ...(await this.invites.revokeOutstandingToHouseholdEventsWithin(tx, id)).events,
+        ];
 
         // Member rows survive the soft delete; capture them so their cached
         // ability graphs can be evicted (the household just left their surface).
@@ -926,7 +930,7 @@ export class HouseholdService {
 
       // Committed, so the revoked invites can be announced. `emit` logs a
       // failing listener rather than throwing it into this request.
-      this.invites.emit(revocation.events);
+      this.invites.emit(revocation);
 
       // The owners given a restore window go in the audit entry only (#245).
       this.publisher.publish(

@@ -8,6 +8,7 @@ import { requireBaseUrl } from '../support/e2e-env';
 import type { TestDatabase } from '../support/test-db';
 import { createTestDatabase } from '../support/test-db';
 import { arrangeOfferedGame, platformOfType } from './event-fixtures';
+import { inviteAndAccept } from './event-join';
 import { attendeesPath, createEventClient, offerGamesPath } from './event-request';
 import type { OfferResultWire } from './event-wire';
 import { attendeeEnvelope, listOfferedGamesEnvelope, offerResultsEnvelope } from './event-wire';
@@ -257,14 +258,13 @@ describe('POST /api/events/:eventId/attendees/:attendeeId/games/batch (#1188)', 
   it('refuses a spectator with 403', async () => {
     const { host, eventId } = await arrangeEvent();
     const spectator = await actors.user();
-    const spectatorAttendeeId = attendeeEnvelope(
-      await request(baseUrl)
-        .post(attendeesPath(eventId))
-        .set(host.headers)
-        .send({ userId: spectator.user.id, role: SystemRole.EventSpectator })
-        .expect(201),
-      'POST /api/events/:eventId/attendees as the host',
-    ).id;
+    const { attendeeId: spectatorAttendeeId } = await inviteAndAccept(
+      baseUrl,
+      host,
+      spectator,
+      eventId,
+      SystemRole.EventSpectator,
+    );
     const collectionId = await arrangeCollectionEntry(db.client, spectator.user.id, Reach.Private);
 
     await offerGames(spectator, eventId, spectatorAttendeeId, [{ collectionId }]).expect(403);

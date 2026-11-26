@@ -17,6 +17,7 @@ import { expectBackendsQueuedBehind, expectLockWaiter, withBarrier } from '../su
 import type { TestDatabase } from '../support/test-db';
 import { createTestDatabase } from '../support/test-db';
 import { arrangeListEntry, hoursFromNow } from './event-fixtures';
+import { inviteAndAccept } from './event-join';
 import { createEventClient, EVENTS_PATH } from './event-request';
 import { nominationEnvelope } from './event-wire';
 
@@ -353,12 +354,9 @@ describe('status changes racing on one date or nomination (#621)', () => {
     it("tells the attendee of a host's change queued behind their own RSVP", async () => {
       const host = await actors.user();
       const invitee = await actors.user();
-      const eventId = await createdEventId(host, { inviteUserIds: [invitee.user.id] });
-      const { id: attendeeId } = await db.client.eventAttendee.findUniqueOrThrow({
-        where: { eventId_userId: { eventId, userId: invitee.user.id } },
-        select: { id: true },
-      });
-      await setStatus(invitee, eventId, attendeeId, EventParticipationStatus.Attending).expect(200);
+      const eventId = await createdEventId(host);
+      // Accepting the invite leaves them Attending (#742).
+      const { attendeeId } = await inviteAndAccept(baseUrl, host, invitee, eventId);
 
       const statuses = await race(
         ATTENDEE_ROW,
@@ -392,15 +390,12 @@ describe('status changes racing on one date or nomination (#621)', () => {
         .set(actor.headers)
         .send({ status });
 
-    /** An event with one invitee, and the invitee's attendee row. */
+    /** An event with one attendee who joined by accepting an invite (#742), and their attendee row. */
     const arrange = async () => {
       const host = await actors.user();
       const invitee = await actors.user();
-      const eventId = await createdEventId(host, { inviteUserIds: [invitee.user.id] });
-      const { id: attendeeId } = await db.client.eventAttendee.findUniqueOrThrow({
-        where: { eventId_userId: { eventId, userId: invitee.user.id } },
-        select: { id: true },
-      });
+      const eventId = await createdEventId(host);
+      const { attendeeId } = await inviteAndAccept(baseUrl, host, invitee, eventId);
 
       return { host, invitee, eventId, attendeeId };
     };
@@ -430,7 +425,7 @@ describe('status changes racing on one date or nomination (#621)', () => {
         REMOVED_ATTENDEE_ROW,
         attendeeId,
         () => removeAttendee(host, eventId, attendeeId),
-        () => setStatus(invitee, eventId, attendeeId, EventParticipationStatus.Attending),
+        () => setStatus(invitee, eventId, attendeeId, EventParticipationStatus.Maybe),
       );
 
       expect(statuses).toEqual([200, 404]);
@@ -438,7 +433,7 @@ describe('status changes racing on one date or nomination (#621)', () => {
         where: { id: attendeeId },
         select: { status: true, removedAt: true },
       });
-      expect(row.status).toBe(EventParticipationStatus.Invited);
+      expect(row.status).toBe(EventParticipationStatus.Attending);
       expect(row.removedAt).not.toBeNull();
     });
   });

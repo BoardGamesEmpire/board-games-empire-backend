@@ -27,8 +27,9 @@ export class EventController {
     summary: 'List events the caller is an attendee of',
     description:
       'Attendance-scoped: events the caller holds an attendee row for, hosts included, and nothing else — the ' +
-      'same kind of result for every caller. The row counts whatever its RSVP status, so events the caller is ' +
-      'only invited to, or has declined, are listed too. Newest first, soft-deleted events excluded. ' +
+      'same kind of result for every caller. The row counts whatever its RSVP status, so an event the caller has ' +
+      'declined is listed too. An open invite is no row, so an event the caller is only invited to is not ' +
+      'listed until they accept the invite (#742). Newest first, soft-deleted events excluded. ' +
       'Archived events are left out unless `?includeArchived=true`, and stay readable by id (#795). Each event ' +
       'carries a `status` worked out from its cancel, archive and confirmed dates. Each event carries `attendance`, ' +
       'the acting user\u2019s own attendee row: `attendeeId`, `status` (their RSVP), `role` and `rsvpDate`. It is ' +
@@ -116,14 +117,30 @@ export class EventController {
     return from(this.eventService.getEventById(id)).pipe(map((event) => ({ event })));
   }
 
-  @ApiOperation({ summary: 'Create an event' })
+  @ApiOperation({
+    summary: 'Create an event',
+    description:
+      'The creator joins as its host. Each of `inviteUserIds` is sent an invite and becomes an attendee only by ' +
+      'accepting it (#742), so the event answers with the host as its one attendee.',
+  })
   @ApiResponse({ status: Http.Created, description: 'Event created successfully' })
   @ApiResponse({
     status: Http.BadRequest,
     description: 'Invalid body, or a Fixed event sent with more than one date (code EVENT_FIXED_MODE_TOO_MANY_DATES)',
   })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
-  @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
+  @ApiResponse({
+    status: Http.PaymentRequired,
+    description: 'The invites would use up the daily event invite quota; nothing is written',
+  })
+  @ApiResponse({
+    status: Http.Forbidden,
+    description: "Insufficient permissions, or an invitee the server's or the user's invite settings refuse",
+  })
+  @ApiResponse({
+    status: Http.NotFound,
+    description: 'Household not found or deleted, or an invitee id that names no person',
+  })
   @CheckPolicies((ability) => ability.can(Action.create, ResourceType.Event))
   @Post()
   createEvent(@Body() createEventDto: CreateEventDto) {

@@ -1,9 +1,10 @@
 import { USER_REMOVAL_BLOCKERS } from '@bge/auth';
-import { EventParticipationStatus, GameAdditionMode, ResourceType } from '@bge/database';
+import { GameAdditionMode, ResourceType } from '@bge/database';
 import type { Actors, SessionActor } from '@bge/testing-e2e';
 import { createActors, prepareSignup, SIGN_UP_EMAIL_PATH } from '@bge/testing-e2e';
 import request from 'supertest';
 import { arrangeListEntry } from '../event/event-fixtures';
+import { inviteAndAccept } from '../event/event-join';
 import { createEventClient, EVENTS_PATH } from '../event/event-request';
 import { createEnvelope } from '../household/household-wire';
 import { mintApiKey } from '../support/api-key';
@@ -187,11 +188,8 @@ describe('removing a user', () => {
     const target = await actors.user();
     const userId = target.user.id;
     const eventId = await createdEventId(host, { policy: { gameAdditionMode: GameAdditionMode.RequiresVote } });
-    await request(baseUrl)
-      .post(`${EVENTS_PATH}/${eventId}/attendees`)
-      .set(host.headers)
-      .send({ userId, status: EventParticipationStatus.Attending })
-      .expect(201);
+    // Accepting the host's invite seats them Attending (#742).
+    await inviteAndAccept(baseUrl, host, target, eventId);
     await offer(eventId, await arrangeListEntry(db.client, eventId, userId), host);
 
     const response = await postToAuth(baseUrl, REMOVE_USER_PATH).set(headers).send({ userId });

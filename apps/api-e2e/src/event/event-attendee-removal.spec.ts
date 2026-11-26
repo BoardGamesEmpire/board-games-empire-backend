@@ -16,10 +16,10 @@ import { expectBackendsQueuedBehind, expectLockWaiter, withBarrier } from '../su
 import type { TestDatabase } from '../support/test-db';
 import { createTestDatabase } from '../support/test-db';
 import { arrangeListEntry } from './event-fixtures';
+import { inviteAndAccept } from './event-join';
 import { createEventClient, EVENTS_PATH } from './event-request';
 import type { NominationWire } from './event-wire';
 import {
-  attendeeEnvelope,
   availabilitySummaryEnvelope,
   eventGameEnvelope,
   listAttendeesEnvelope,
@@ -63,9 +63,6 @@ describe('leaving an event', () => {
   });
 
   const { createdEventId, listAttendees } = createEventClient(baseUrl);
-
-  const addAttendee = (actor: AuthenticatedActor, eventId: string, body: Record<string, unknown>) =>
-    request(baseUrl).post(`${EVENTS_PATH}/${eventId}/attendees`).set(actor.headers).send(body);
 
   const removeAttendee = (actor: AuthenticatedActor, eventId: string, attendeeId: string) =>
     request(baseUrl).delete(`${EVENTS_PATH}/${eventId}/attendees/${attendeeId}`).set(actor.headers);
@@ -160,13 +157,9 @@ describe('leaving an event', () => {
     const stayer = await actors.user();
     const eventId = await createdEventId(host, { policy: { gameAdditionMode: GameAdditionMode.RequiresVote } });
 
+    // Accepting the host's invite seats them attending (#742).
     const addAttending = async (actor: AuthenticatedActor) =>
-      attendeeEnvelope(
-        await addAttendee(host, eventId, { userId: actor.user.id, status: EventParticipationStatus.Attending }).expect(
-          201,
-        ),
-        'POST /api/events/:eventId/attendees as the host',
-      ).id;
+      (await inviteAndAccept(baseUrl, host, actor, eventId)).attendeeId;
 
     const leaverId = await addAttending(leaver);
     const stayerId = await addAttending(stayer);
@@ -339,20 +332,17 @@ describe('leaving an event', () => {
       await removeAttendee(host, eventId, leaverId).expect(404);
     });
 
-    it('revives their row when they are added again: their votes count and their nominations reopen, their games stay off the lineup', async () => {
+    it('revives their row when they accept a new invite: their votes count and their nominations reopen, their games stay off the lineup', async () => {
       const { host, leaver, eventId, leaverId, ofOthersGame, ofLeaversGame, scheduledGameId } = await arrangeEvent();
       await removeAttendee(host, eventId, leaverId).expect(200);
 
-      const readded = attendeeEnvelope(
-        await addAttendee(host, eventId, {
-          userId: leaver.user.id,
-          status: EventParticipationStatus.Attending,
-        }).expect(201),
-        'POST /api/events/:eventId/attendees for a removed user',
-      );
+      // Accepting a new invite revives the row (#551, #742).
+      const readded = await inviteAndAccept(baseUrl, host, leaver, eventId);
 
-      expect(readded.id).toBe(leaverId);
-      expect(readded.removedAt).toBeNull();
+      expect(readded.attendeeId).toBe(leaverId);
+      await expect(
+        db.client.eventAttendee.findUniqueOrThrow({ where: { id: leaverId }, select: { removedAt: true } }),
+      ).resolves.toEqual({ removedAt: null });
       expect(voteOf(await readNomination(host, eventId, ofOthersGame.id), leaverId)?.eligible).toBe(true);
       expect((await readNomination(host, eventId, ofLeaversGame.id)).status).toBe(NominationStatus.Open);
       expect(await scheduledGameExists(scheduledGameId)).toBe(false);
@@ -558,13 +548,7 @@ describe('leaving an event', () => {
         const host = await actors.user();
         const leaver = await actors.user();
         const eventId = await createdEventId(host);
-        const leaverId = attendeeEnvelope(
-          await addAttendee(host, eventId, {
-            userId: leaver.user.id,
-            status: EventParticipationStatus.Attending,
-          }).expect(201),
-          'POST /api/events/:eventId/attendees as the host',
-        ).id;
+        const { attendeeId: leaverId } = await inviteAndAccept(baseUrl, host, leaver, eventId);
         const occurrenceId = await confirmedDate(eventId, new Date(Date.now() - DAY));
         const entry = await arrangeListEntry(db.client, eventId, leaver.user.id);
 
@@ -637,8 +621,11 @@ describe('leaving an event', () => {
       const host = await actors.user();
       const invitees = [await actors.user(), await actors.user()];
       const eventId = await createdEventId(host, { policy: { gameAdditionMode: GameAdditionMode.RequiresVote } });
+      // Each accepts, then moves their answer back to Invited, which
+      // ConfirmedOnly doesn't count (#742).
       for (const invitee of invitees) {
-        await addAttendee(host, eventId, { userId: invitee.user.id }).expect(201);
+        const { attendeeId } = await inviteAndAccept(baseUrl, host, invitee, eventId);
+        await rsvp(invitee, eventId, attendeeId, EventParticipationStatus.Invited).expect(200);
       }
 
       const { id: nominationId } = nominationEnvelope(

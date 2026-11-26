@@ -20,6 +20,7 @@ import type { TestDatabase } from '../support/test-db';
 import { createTestDatabase } from '../support/test-db';
 import { isRecord } from '../support/wire';
 import { arrangeListEntry } from './event-fixtures';
+import { inviteAndAccept } from './event-join';
 import { createEventClient, eventPolicyPath, EVENTS_PATH, occurrencePolicyPath } from './event-request';
 import type { OccurrencePolicyWire } from './event-wire';
 import {
@@ -137,9 +138,6 @@ describe("a date's own policy and the allowed lists (#796)", () => {
       await request(baseUrl).get(`${EVENTS_PATH}/${eventId}/occurrences/${dateId}`).set(caller.headers).expect(200),
       'GET /api/events/:eventId/occurrences/:occurrenceId',
     );
-
-  const addAttendee = (actor: AuthenticatedActor, eventId: string, body: Record<string, unknown>) =>
-    request(baseUrl).post(`${EVENTS_PATH}/${eventId}/attendees`).set(actor.headers).send(body);
 
   const nominate = (actor: AuthenticatedActor, eventId: string, body: Record<string, unknown>) =>
     request(baseUrl).post(`${EVENTS_PATH}/${eventId}/nominations`).set(actor.headers).send(body);
@@ -305,7 +303,7 @@ describe("a date's own policy and the allowed lists (#796)", () => {
         eventId: ownEventId,
         dateIds: [ownDateId],
       } = await createdWithDates(organizer);
-      await addAttendee(host, eventId, { userId: organizer.user.id, role: SystemRole.EventOrganizer }).expect(201);
+      await inviteAndAccept(baseUrl, host, organizer, eventId, SystemRole.EventOrganizer);
 
       // Control: the organizer sets a date's policy on the event they host.
       await updateDatePolicy(organizer, ownEventId, ownDateId, { allowSpectators: false }).expect(200);

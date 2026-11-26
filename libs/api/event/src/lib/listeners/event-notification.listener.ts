@@ -1,17 +1,17 @@
-import { DatabaseService, NominationStatus, NotificationType } from '@bge/database';
+import { DatabaseService, InviteType, NominationStatus, NotificationType } from '@bge/database';
+import { SHOWN_NAME_SELECT, shownName } from '@bge/household';
+import type { InviteAcceptedEvent, InviteCreatedEvent, InviteDeclinedEvent, InviteSnapshot } from '@bge/invites';
+import { InviteEvents } from '@bge/invites';
 import type { CreateNotificationInput } from '@bge/notifications-service';
 import { NotificationsService } from '@bge/notifications-service';
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { AttendeeEvents } from '../attendee/constants';
-import type {
-  AttendeeAddedEvent,
-  AttendeeRemovedEvent,
-  AttendeeStatusUpdatedEvent,
-} from '../attendee/events/attendee.events';
+import type { AttendeeRemovedEvent, AttendeeStatusUpdatedEvent } from '../attendee/events/attendee.events';
 import { EventEvents } from '../constants/event-events.constant';
 import { NOT_REMOVED } from '../constants/not-removed.constant';
 import type { EventCreatedEvent, EventDeletedEvent } from '../events/event.events';
+import { receivedEventInviteWhere } from '../invite/received-event-invites';
 import type { EventCancelledEvent, EventReopenedEvent } from '../lifecycle/events/event-lifecycle.events';
 import { NominationEvent } from '../nomination/constants';
 import type {
@@ -23,6 +23,18 @@ import type {
 import { OccurrenceEvents } from '../occurrence/constants/index';
 import type { OccurrenceStatusChangedEvent } from '../occurrence/events/occurrence.events';
 import { hostUserIds, usersNotRemoved, usersStillComing, withoutActor } from './notification-audience';
+
+/** An event invite's snapshot, which therefore names its event. */
+type EventInviteSnapshot = InviteSnapshot & { readonly eventId: string };
+
+/**
+ * Whether the snapshot is an event invite, the only kind this listener tells
+ * anyone about. Household invites are announced under the same `invite.*`
+ * names, and are the household listener's (#742).
+ */
+function isEventInvite(invite: InviteSnapshot): invite is EventInviteSnapshot {
+  return invite.type === InviteType.Event && invite.eventId !== null;
+}
 
 @Injectable()
 export class EventNotificationListener {
@@ -38,6 +50,9 @@ export class EventNotificationListener {
     const { id: eventId, title, householdId, createdById } = event.after;
 
     try {
+      // The creator's invitees are told by their invites' own `invite.created`
+      // (#742), so the household's fan-out leaves them out rather than tell
+      // them twice.
       const notificationInputs: CreateNotificationInput[] = [];
 
       if (householdId) {
@@ -61,25 +76,11 @@ export class EventNotificationListener {
         }
       }
 
-      for (const inviteeId of event.invitedUserIds) {
-        notificationInputs.push({
-          userId: inviteeId,
-          type: NotificationType.EventInviteReceived,
-          payload: {
-            eventId,
-            eventTitle: title,
-          },
-        });
-      }
-
       if (notificationInputs.length > 0) {
         await this.notifications.createMany(notificationInputs);
       }
 
-      this.logger.debug(
-        `EventCreated notifications: ${notificationInputs.length} sent for event ${eventId} ` +
-          `(${event.invitedUserIds.length} invites)`,
-      );
+      this.logger.debug(`EventCreated notifications: ${notificationInputs.length} sent for event ${eventId}`);
     } catch (err) {
       this.logger.error(
         `Failed to notify on EventCreated eventId=${event.subjectId}`,
@@ -88,38 +89,102 @@ export class EventNotificationListener {
     }
   }
 
-  @OnEvent(AttendeeEvents.AttendeeAdded, { async: true })
-  async onAttendeeAdded(event: AttendeeAddedEvent): Promise<void> {
-    const { id: attendeeId, eventId, userId } = event.after;
+  /**
+   * An event invite is told to its invitee (#742), exactly when their inbox
+   * would list it: the inbox's own predicate is asked about this one invite,
+   * so nobody hears of an invite they cannot see (one to an event they
+   * already attend, or one already answered). An event invite names its
+   * invitee by id and is never withheld. A household invite is the household
+   * listener's.
+   */
+  @OnEvent(InviteEvents.Created, { async: true })
+  async onInviteCreated(event: InviteCreatedEvent): Promise<void> {
+    const invite = event.after;
 
-    if (!userId) {
-      // Guest attendees — no user to notify
-      return this.logger.debug(
-        `Attendee added without userId, skipping notification: eventId=${eventId}, attendeeId=${attendeeId}`,
-      );
+    if (!isEventInvite(invite) || invite.inviteeId === null) {
+      return;
     }
 
     try {
-      const eventRecord = await this.db.event.findUnique({
-        where: { id: eventId },
-        select: { title: true },
+      const inviteeId = invite.inviteeId;
+      const listed = await this.db.invite.count({
+        where: { id: invite.id, AND: [receivedEventInviteWhere(inviteeId, new Date())] },
       });
 
-      if (!eventRecord) {
-        return this.logger.warn(`Event not found for AttendeeAdded notification, eventId=${eventId}`);
+      if (listed !== 1) {
+        return this.logger.debug(`Inbox lists no invite, skipping EventInviteReceived inviteId=${invite.id}`);
+      }
+
+      const [eventRecord, inviterName] = await Promise.all([
+        this.db.event.findUnique({ where: { id: invite.eventId }, select: { title: true } }),
+        this.nameOf(invite.inviterId),
+      ]);
+
+      if (!eventRecord || inviterName === null) {
+        return this.logger.debug(`Event or inviter gone, skipping EventInviteReceived inviteId=${invite.id}`);
       }
 
       await this.notifications.create({
-        userId,
+        userId: inviteeId,
         type: NotificationType.EventInviteReceived,
-        payload: {
-          eventId,
-          eventTitle: eventRecord.title,
-        },
+        payload: { eventId: invite.eventId, eventTitle: eventRecord.title, inviteId: invite.id, inviterName },
       });
     } catch (err) {
       this.logger.error(
-        `Failed to notify on AttendeeAdded eventId=${eventId}`,
+        `Failed to notify on InviteCreated inviteId=${invite.id}`,
+        err instanceof Error ? err.stack : String(err),
+      );
+    }
+  }
+
+  /** The invitee accepted and attends now (#742): the inviter is told who. */
+  @OnEvent(InviteEvents.Accepted, { async: true })
+  async onInviteAccepted(event: InviteAcceptedEvent): Promise<void> {
+    await this.notifyInviterOfAnswer(event.after, NotificationType.EventInviteAccepted);
+  }
+
+  /** The invitee declined (#742): the inviter is told who. */
+  @OnEvent(InviteEvents.Declined, { async: true })
+  async onInviteDeclined(event: InviteDeclinedEvent): Promise<void> {
+    await this.notifyInviterOfAnswer(event.after, NotificationType.EventInviteDeclined);
+  }
+
+  /**
+   * Tells the inviter of an event invite how it was answered (#742), naming
+   * the invitee as they are shown, never by an address. The invitee is the one
+   * answering, so an inviter who is also the invitee is told nothing.
+   *
+   * Unlike the household twin, nothing checks that the inviter still stands:
+   * an accept already passed the sender check, a removal revoked the sender's
+   * invites, and an inviter holding only the household variant attends
+   * nothing, so a check on a live attendee row would wrongly silence them.
+   */
+  private async notifyInviterOfAnswer(
+    invite: InviteSnapshot,
+    type: typeof NotificationType.EventInviteAccepted | typeof NotificationType.EventInviteDeclined,
+  ): Promise<void> {
+    if (!isEventInvite(invite) || invite.inviteeId === null || invite.inviteeId === invite.inviterId) {
+      return;
+    }
+
+    try {
+      const [eventRecord, inviteeName] = await Promise.all([
+        this.db.event.findUnique({ where: { id: invite.eventId }, select: { title: true } }),
+        this.nameOf(invite.inviteeId),
+      ]);
+
+      if (!eventRecord || inviteeName === null) {
+        return this.logger.debug(`Event or invitee gone, skipping ${type} inviteId=${invite.id}`);
+      }
+
+      await this.notifications.create({
+        userId: invite.inviterId,
+        type,
+        payload: { eventId: invite.eventId, eventTitle: eventRecord.title, inviteId: invite.id, inviteeName },
+      });
+    } catch (err) {
+      this.logger.error(
+        `Failed to notify the inviter on ${type} inviteId=${invite.id}`,
         err instanceof Error ? err.stack : String(err),
       );
     }
@@ -164,8 +229,8 @@ export class EventNotificationListener {
       }
 
       const [attendeeName, changedByName] = await Promise.all([
-        userId === null ? null : this.displayNameOf(userId),
-        rsvpChangedFor === null || actingUserId === null ? null : this.displayNameOf(actingUserId),
+        userId === null ? null : this.nameOf(userId),
+        rsvpChangedFor === null || actingUserId === null ? null : this.nameOf(actingUserId),
       ]);
 
       // Every user has a username, so a missing name is a user deleted since
@@ -234,13 +299,15 @@ export class EventNotificationListener {
     }
   }
 
-  private async displayNameOf(userId: string): Promise<string | null> {
-    const user = await this.db.user.findUnique({
-      where: { id: userId },
-      select: { username: true, profile: { select: { displayName: true } } },
-    });
+  /**
+   * A user's name as it is shown, or null once the user is deleted. One rule
+   * for every notification here, the household's `shownName`, so an invite
+   * and an RSVP name the same person the same way (#742).
+   */
+  private async nameOf(userId: string): Promise<string | null> {
+    const user = await this.db.user.findUnique({ where: { id: userId }, select: SHOWN_NAME_SELECT });
 
-    return user?.profile?.displayName ?? user?.username ?? null;
+    return user ? shownName(user) : null;
   }
 
   @OnEvent(NominationEvent.NominationCreated, { async: true })
