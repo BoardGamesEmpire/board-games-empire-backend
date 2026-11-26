@@ -1,6 +1,6 @@
 // One change to a collection entry's personal rating, appended each time the
-// rating changes, so the owner can see how it moved (#1231). The history is
-// the owner's alone. Correcting it never changes the entry's current rating.
+// rating changes, so the entry's owner can see how it moved (#1231). The history is
+// the entry owner's alone. Correcting it never changes the entry's current rating.
 //
 // The migration's CHECK constraints keep a rating from 1 to 10, set a date
 // and its precision together at the first day of its period, and give an

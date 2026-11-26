@@ -9,7 +9,7 @@ export type RatingChangeRow = Pick<
 >;
 
 /**
- * One change of an entry's rating, as its owner reads it (#1231). A change
+ * One change of an entry's rating, as the entry's owner reads it (#1231). A change
  * with no `rating` is the rating being cleared.
  */
 export class CollectionRatingChangeDto {
@@ -39,7 +39,7 @@ export class CollectionRatingChangeDto {
   createdAt!: Date;
 }
 
-/** The owner's shape of a rating change: its date at its own precision (#1231). */
+/** The entry owner's shape of a rating change: its date at its own precision (#1231). */
 export function toCollectionRatingChangeDto(row: RatingChangeRow): CollectionRatingChangeDto {
   const occurred = partialDateFromColumns(row.occurredOn, row.occurredOnPrecision);
 

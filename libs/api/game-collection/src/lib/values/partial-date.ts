@@ -1,4 +1,5 @@
 import { DatePrecision } from '@bge/database';
+import type { CopyDateField } from '../game-collection.errors';
 import { dateInFuture, dateOrder } from '../game-collection.errors';
 
 /**
@@ -96,7 +97,12 @@ export function lastDayOf({ on, precision }: PartialDate): Date {
   }
 }
 
-/** The UTC day `now` falls on. The server's zone never decides what "today" is (#1231). */
+/**
+ * The UTC day `now` falls on: the date a removal with no date, or a change of
+ * the rating, records. The server's zone never decides what "today" is
+ * (#1231). It is not what a refusal of the future judges by: see
+ * {@link latestToday}.
+ */
 export function todayUtc(now: Date): PartialDate {
   return {
     on: utcDay(now.getUTCFullYear(), now.getUTCMonth() + 1, now.getUTCDate()),
@@ -104,13 +110,28 @@ export function todayUtc(now: Date): PartialDate {
   };
 }
 
+/** The earliest zone on Earth, UTC+14 (Kiritimati), which reaches each calendar day first (#1231). */
+const EARLIEST_ZONE_OFFSET_MS = 14 * 60 * 60 * 1000;
+
 /**
- * Refuses a date that begins after today (UTC). A year or month that has
- * begun passes, because its first day is not in the future (#1231).
+ * The latest calendar day that is today somewhere on Earth: the day at
+ * UTC+14 (#1231). No user's time zone is stored, so a date is in the future
+ * only when it is after this day. Judged by UTC instead, a user east of UTC
+ * would be refused their own today: in Tokyo until 09:00, in Sydney until
+ * 11:00.
  */
-export function assertNotInFuture(date: PartialDate, now: Date): void {
-  if (date.on.getTime() > todayUtc(now).on.getTime()) {
-    throw dateInFuture();
+export function latestToday(now: Date): PartialDate {
+  return todayUtc(new Date(now.getTime() + EARLIEST_ZONE_OFFSET_MS));
+}
+
+/**
+ * Refuses a date that begins after {@link latestToday}, a day that is today
+ * nowhere yet, naming `field` in the refusal. A year or month that has begun
+ * passes, because its first day is not in the future (#1231).
+ */
+export function assertNotInFuture(date: PartialDate, now: Date, field: CopyDateField): void {
+  if (date.on.getTime() > latestToday(now).on.getTime()) {
+    throw dateInFuture(field);
   }
 }
 
@@ -130,13 +151,34 @@ export function assertRemovalAfterAcquisition(acquired: PartialDate | null, remo
 }
 
 /**
- * The date a removal records (#1231): `removedOn` as the user gave it, which
- * the DTO's `@IsPartialDate()` has already passed, or today in UTC when they
- * gave none. A date after today is refused.
+ * The date the user gave a removal (#1231): `removedOn` as sent, which the
+ * DTO's `@IsPartialDate()` has already passed, or null when they gave none.
+ * A date that is today nowhere yet is refused.
  */
-export function removalDate(removedOn: string | undefined, now: Date): PartialDate {
-  const removal = (removedOn === undefined ? null : parsePartialDate(removedOn)) ?? todayUtc(now);
-  assertNotInFuture(removal, now);
+export function givenRemovalDate(removedOn: string | undefined, now: Date): PartialDate | null {
+  const removal = removedOn === undefined ? null : parsePartialDate(removedOn);
+
+  if (removal !== null) {
+    assertNotInFuture(removal, now, 'removedOn');
+  }
 
   return removal;
+}
+
+/**
+ * The date a removal with no date records (#1231): today in UTC, or, for a
+ * copy acquired on a later day, the acquisition's day. A copy can be acquired
+ * on a day that is today somewhere on Earth ({@link latestToday}) and
+ * tomorrow in UTC, and its removal may not end before it began. At Day
+ * precision either way; `acquired` is the copy's own, so each copy of an
+ * entry is dated by itself.
+ */
+export function defaultRemovalDate(acquired: PartialDate | null, now: Date): PartialDate {
+  const today = todayUtc(now);
+
+  if (acquired !== null && acquired.on.getTime() > today.on.getTime()) {
+    return { on: acquired.on, precision: DatePrecision.Day };
+  }
+
+  return today;
 }

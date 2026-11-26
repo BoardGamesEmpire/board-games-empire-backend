@@ -10,12 +10,21 @@ import {
   readWishlistedPlatformGames,
   ResourceType,
 } from '@bge/database';
+import type { CodedHttpException } from '@bge/i18n';
 import { t } from '@bge/i18n';
 import { AbilityService, resolveActingUserIdOrNull, resolveScopeSubjectId, ScopeComposer } from '@bge/permissions';
 import { PaginatedRows, PaginationQueryDto, pickDefined } from '@bge/shared';
-import { BadRequestException, HttpException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { assertCopyRoom, copyCreateData } from './collection-copy-data';
-import { appendRatingChange } from './collection-rating.service';
+import { BadRequestException, HttpException, Injectable, Logger } from '@nestjs/common';
+import {
+  addCopy,
+  assertRemovableOn,
+  copyCreateData,
+  copyRemovalData,
+  isCopyReleaseViolation,
+  REMOVAL_CHECK_SELECT,
+  removalOf,
+} from './collection-copy-data';
+import { appendRatingChangeIfChanged } from './collection-rating.service';
 import type { GameCollectionRow, GameCollectionWithRelations } from './collection-row';
 import { changedSince, COLLECTION_INCLUDE, OWNED_COPY, readOwnerCopies } from './collection-row';
 import { CollectionWriteService, writeEntryUnder } from './collection-write.service';
@@ -27,8 +36,9 @@ import {
   RemoveGameCollectionQueryDto,
   UpdateGameCollectionDto,
 } from './dto';
-import { collectionEntryNotFound } from './game-collection.errors';
-import { assertRemovalAfterAcquisition, partialDateFromColumns, removalDate } from './values/partial-date';
+import { collectionEntryNotFound, platformGameNotFound, releaseNotFound } from './game-collection.errors';
+import type { PartialDate } from './values/partial-date';
+import { defaultRemovalDate, givenRemovalDate } from './values/partial-date';
 
 /**
  * The unique that keeps a user to one entry per platform game and medium, in
@@ -51,6 +61,26 @@ function isEntryIdentityViolation(error: unknown): boolean {
   const identity = constraintIdentity(error);
 
   return identity.source === 'unknown' || identifiesConstraint(identity, ...ENTRY_IDENTITY_SPELLINGS);
+}
+
+/**
+ * The refusal for a new entry's insert that failed on a foreign key (#1231):
+ * a row read before the insert went since. The copy's release, named by its
+ * trigger or its foreign key, answers `GAME_RELEASE_NOT_FOUND`; anything else
+ * answers `PLATFORM_GAME_NOT_FOUND`, as the add's only other reference is its
+ * platform game. That includes a failure whose constraint can't be named,
+ * which is the answer this insert gave before it could tell them apart.
+ */
+function vanishedReference(
+  error: unknown,
+  platformGameId: string,
+  releaseId: string | null | undefined,
+): CodedHttpException {
+  if (releaseId != null && isCopyReleaseViolation(error)) {
+    return releaseNotFound(releaseId);
+  }
+
+  return platformGameNotFound(platformGameId);
 }
 
 /**
@@ -83,7 +113,7 @@ export class GameCollectionService {
    * "my collection" has no meaning without a user, and the refusal must never
    * soften into an empty page. PROVISIONAL — #395.
    *
-   * Each row carries its copies in the owner's shape (#1231).
+   * Each row carries its copies in the entry owner's shape (#1231).
    */
   async listOwn(query: ListGameCollectionsQueryDto): Promise<PaginatedRows<GameCollectionDto>> {
     const { includeDeleted, deletedOnly, medium, favorite, updatedSince } = query;
@@ -122,8 +152,8 @@ export class GameCollectionService {
    * want" without a round trip per page.
    *
    * Its copies are the public shape for every caller, the path user too: this
-   * is the route other readers read, so its rows never read the owner's
-   * (#1231).
+   * is the route other readers read, so its rows never read the entry
+   * owner's (#1231).
    */
   async listForUser(
     targetUserId: string,
@@ -214,8 +244,8 @@ export class GameCollectionService {
   }
 
   /**
-   * A single entry the acting user may read; its owner also reads it once
-   * removed. Its copies are the owner's shape for its owner, and the public
+   * A single entry the acting user may read; the entry's owner also reads it once
+   * removed. Its copies are the entry owner's shape for its owner, and the public
    * shape for every other reader (#1231).
    */
   async getById(id: string): Promise<GameCollectionDto> {
@@ -236,13 +266,13 @@ export class GameCollectionService {
   }
 
   /**
-   * Each row with its copies in the owner's shape, for the rows the acting
+   * Each row with its copies in the entry owner's shape, for the rows the acting
    * user owns (#1231). `readOwnerCopies` decides which those are, in one
    * query bound to the acting user as the entries' owner; every other row
    * keeps the public copies the include read. An actor with no user behind
    * it owns no entry, so nothing is read for it.
    *
-   * An API key acts for its owner, so its rows carry the owner's shape, as
+   * An API key acts for the user who made it, so its rows carry the entry owner's shape, as
    * the copy routes already send it. The key reads only the entries its
    * grants reach, and this read only adds to those rows.
    */
@@ -301,9 +331,10 @@ export class GameCollectionService {
    * existing entry only when it differs from the rating the locked row holds,
    * so a replayed add appends nothing (#1231).
    *
-   * The platform game is read without a lock, so it can go before the insert
-   * commits; the insert's foreign key then fails, and answers the same 404 as
-   * a platform game that was never there.
+   * The platform game and the copy's release are read without a lock, so
+   * either can go before the insert commits. The insert's foreign key then
+   * fails, and answers the same 404 as a platform game or release that was
+   * never there: `PLATFORM_GAME_NOT_FOUND` or `GAME_RELEASE_NOT_FOUND`.
    */
   async addToCollection(dto: CreateGameCollectionDto): Promise<GameCollectionDto> {
     const userId = this.abilityService.getActingUserId();
@@ -314,7 +345,7 @@ export class GameCollectionService {
       select: { id: true },
     });
     if (!platformGame) {
-      throw new NotFoundException(t('errors.platform_game.not_found', { id: platformGameId }));
+      throw platformGameNotFound(platformGameId);
     }
 
     const identity = { userId, platformGameId, medium };
@@ -347,17 +378,15 @@ export class GameCollectionService {
               createdId = created.id;
             } catch (error) {
               if (isPrismaForeignKeyConstraintError(error)) {
-                throw new NotFoundException(t('errors.platform_game.not_found', { id: platformGameId }));
+                throw vanishedReference(error, platformGameId, described.releaseId);
               }
 
               throw error;
             }
 
-            // A null rating is no rating: an entry that never had one has
-            // nothing to clear, so its history starts empty (#1231).
-            if (provided.rating !== undefined && provided.rating !== null) {
-              await appendRatingChange(tx, createdId, provided.rating, now);
-            }
+            // A new entry had no rating, so a null sends nothing to clear and
+            // its history starts empty (#1231).
+            await appendRatingChangeIfChanged(tx, createdId, provided.rating, null, now);
 
             return createdId;
           }
@@ -376,15 +405,10 @@ export class GameCollectionService {
             { ...provided, lastUpdated: now },
           );
 
-          if (provided.rating !== undefined && provided.rating !== locked.rating) {
-            await appendRatingChange(tx, locked.id, provided.rating, now);
-          }
+          await appendRatingChangeIfChanged(tx, locked.id, provided.rating, locked.rating, now);
 
           if (locked.deletedAt !== null) {
-            await assertCopyRoom(tx, locked.id);
-            await tx.collectionCopy.create({
-              data: { entryId: locked.id, ...(await copyCreateData(tx, described, identity, now)) },
-            });
+            await addCopy(tx, { ...identity, id: locked.id }, described, now);
           }
 
           return locked.id;
@@ -440,9 +464,7 @@ export class GameCollectionService {
 
           await writeEntryUnder(tx, this.abilityService, id, Action.update, {}, { ...data, lastUpdated: now });
 
-          if (current !== null && data.rating !== undefined && data.rating !== current.rating) {
-            await appendRatingChange(tx, id, data.rating, now);
-          }
+          await appendRatingChangeIfChanged(tx, id, data.rating, current?.rating ?? null, now);
 
           return tx.gameCollection.findUniqueOrThrow({ where: { id }, include: COLLECTION_INCLUDE });
         }),
@@ -453,7 +475,8 @@ export class GameCollectionService {
   /**
    * Remove a game from the collection: "I no longer own this", not "never
    * played" (#1231). Each copy the user still owns is removed, dated
-   * `removedOn`, or today in UTC when the user gives no date, with the
+   * `removedOn`, or, when the user gives no date, today in UTC, or the copy's
+   * acquisition day when that is later (`removalOf`), with the
    * reason, and stamped as edited by the user so a sync never undoes it;
    * copies already removed or taken back keep what they have. The
    * write runner then removes the entry with its last owned copy, with that
@@ -465,20 +488,20 @@ export class GameCollectionService {
    * the check's `where`, so a key that may only update entries removes none
    * (#1288). A missing, foreign or already-removed entry answers
    * `COLLECTION_ENTRY_NOT_FOUND`, which a client may read as "already
-   * removed" (#634). A removal dated after today, or before an owned copy was
-   * acquired, is refused (#1231).
+   * removed" (#634). A removal dated on a day that is today nowhere yet, or
+   * before an owned copy was acquired, is refused (#1231).
    *
    * Every live event that offers the entry stops counting it as supplied
    * (`syncCollectionEntrySupply`, #1221): the nominations of its game that
    * await an outcome pause, and it leaves the lineup of every date still
    * ahead. The offers themselves stay, and resume supplying when the game is
-   * acquired again. The owner's answer is the removed entry, whatever the
+   * acquired again. The answer, to the entry's owner, is the removed entry, whatever the
    * sync changed.
    */
   async remove(id: string, { reason, removedOn }: RemoveGameCollectionQueryDto): Promise<GameCollectionDto> {
     const now = new Date();
     const actingUserId = resolveActingUserIdOrNull(this.abilityService);
-    const removal = removalDate(removedOn, now);
+    const given = givenRemovalDate(removedOn, now);
 
     return this.writtenRow(
       () =>
@@ -499,22 +522,41 @@ export class GameCollectionService {
 
             const owned = await tx.collectionCopy.findMany({
               where: { entryId: id, ...OWNED_COPY },
-              select: { acquiredOn: true, acquiredOnPrecision: true },
+              select: { id: true, ...REMOVAL_CHECK_SELECT },
             });
-            for (const { acquiredOn, acquiredOnPrecision } of owned) {
-              assertRemovalAfterAcquisition(partialDateFromColumns(acquiredOn, acquiredOnPrecision), removal);
+
+            // Each copy is dated by itself, so a copy acquired tomorrow in
+            // UTC is not removed before it was acquired (#1231).
+            const removals = new Map<string, { copyIds: string[]; removal: PartialDate }>();
+            for (const copy of owned) {
+              const removal = removalOf(copy, given, now);
+              assertRemovableOn(copy, removal);
+
+              const key = `${removal.on.toISOString()}/${removal.precision}`;
+              const group = removals.get(key) ?? { copyIds: [], removal };
+              group.copyIds.push(copy.id);
+              removals.set(key, group);
             }
 
-            await tx.collectionCopy.updateMany({
-              where: { entryId: id, ...OWNED_COPY },
-              data: {
-                removedAt: now,
-                removedOn: removal.on,
-                removedOnPrecision: removal.precision,
-                removeReason: reason ?? null,
-                editedByUserAt: now,
-              },
-            });
+            // Every copy on one date, which is every removal that names a
+            // date and nearly every other, is one statement over the entry's
+            // owned copies, as the entry's lock holds them still. Only copies
+            // that differ are written apart, each date by its copies' ids.
+            const dated = [...removals.values()];
+            if (dated.length <= 1) {
+              const removal = dated[0]?.removal ?? given ?? defaultRemovalDate(null, now);
+              await tx.collectionCopy.updateMany({
+                where: { entryId: id, ...OWNED_COPY },
+                data: copyRemovalData(removal, reason, now),
+              });
+            } else {
+              for (const { copyIds, removal } of dated) {
+                await tx.collectionCopy.updateMany({
+                  where: { id: { in: copyIds }, entryId: id, ...OWNED_COPY },
+                  data: copyRemovalData(removal, reason, now),
+                });
+              }
+            }
 
             return id;
           },
@@ -604,7 +646,7 @@ export class GameCollectionService {
 
   /**
    * The row a write returns, with its game's base games (#1070), and the
-   * owner's copies for the owner (#1231). `toError` maps the write's own
+   * entry owner's copies for the entry's owner (#1231). `toError` maps the write's own
    * failure. The reads run after that mapping, never inside it, so a failed
    * read reaches the client as itself.
    */

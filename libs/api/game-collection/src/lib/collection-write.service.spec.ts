@@ -67,7 +67,7 @@ describe('CollectionWriteService', () => {
     // The entry's removal is a summary of its copies: removed with its last
     // owned copy, with that copy's reason. A copy taken back is not a
     // removal, so its reason never names the entry's.
-    it('removes a live entry that owns no copy, with the reason of the copy removed last, and answers it removed', async () => {
+    it('removes a live entry that owns no copy, with the reason of the copy removed now, and answers it removed', async () => {
       db.gameCollection.findUniqueOrThrow.mockResolvedValue(entryState(null, 0) as never);
       db.collectionCopy.findFirst.mockResolvedValue({ removeReason: GameRemovalReason.Traded } as never);
 
@@ -77,8 +77,9 @@ describe('CollectionWriteService', () => {
         where: { id: 'gc-1' },
         select: { deletedAt: true, _count: { select: { copies: { where: { removedAt: null, retractedAt: null } } } } },
       });
+      // The entry is removed at NOW, so the copy removed at NOW names its reason.
       expect(db.collectionCopy.findFirst).toHaveBeenCalledWith({
-        where: { entryId: 'gc-1', removedAt: { not: null }, retractedAt: null },
+        where: { entryId: 'gc-1', removedAt: NOW, AND: { removedAt: { not: null }, retractedAt: null } },
         orderBy: [{ removedAt: 'desc' }, { createdAt: 'desc' }],
         select: { removeReason: true },
       });
@@ -150,8 +151,8 @@ describe('CollectionWriteService', () => {
     });
 
     // The entry's reason is a summary of its copies, so a corrected reason on
-    // the copy removed last reaches it, though the entry doesn't flip (#1231).
-    it("reads a removed entry's reason again from the copy removed last, and answers null", async () => {
+    // the copy that removed it reaches it, though the entry doesn't flip (#1231).
+    it("reads a removed entry's reason again from the copy that removed it, and answers null", async () => {
       db.gameCollection.findUniqueOrThrow.mockResolvedValue(entryState(REMOVED_AT, 0) as never);
       db.collectionCopy.findFirst.mockResolvedValue({ removeReason: GameRemovalReason.Stolen } as never);
 
@@ -173,6 +174,56 @@ describe('CollectionWriteService', () => {
 
       expect(db.gameCollection.update.mock.calls[0]?.[0]?.data).toEqual({ lastUpdated: NOW });
       expect(db.collectionCopy.findFirst).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * #1231. The flip and the re-read take the entry's reason from one
+   * definition: the copy removed at the entry's `deletedAt`, which every
+   * removal stamps from the same instant. A copy removal that raced the
+   * entry's and committed a later `removedAt` while it waited for the lock is
+   * not the one that removed the entry, so it lends the entry no reason.
+   */
+  describe("the entry's removal reason after a race (#1231)", () => {
+    it("re-reads the reason of the copy removed at the entry's deletedAt, not the copy removed last", async () => {
+      db.gameCollection.findUniqueOrThrow.mockResolvedValue(entryState(REMOVED_AT, 0) as never);
+      db.collectionCopy.findFirst.mockImplementation((async (args: { where: { removedAt?: unknown } }) =>
+        // The copy removed at the entry's instant, or one a racing removal
+        // stamped later, which a "latest first" read alone would pick.
+        args.where.removedAt === REMOVED_AT
+          ? { removeReason: GameRemovalReason.Sold }
+          : { removeReason: GameRemovalReason.Lost }) as never);
+
+      await service.reconcileOwnership(asTx(db), 'gc-1', NOW);
+
+      expect(db.collectionCopy.findFirst).toHaveBeenCalledTimes(1);
+      expect(db.collectionCopy.findFirst.mock.calls[0]?.[0]?.where).toMatchObject({ removedAt: REMOVED_AT });
+      expect(db.gameCollection.update.mock.calls[0]?.[0]?.data).toEqual({
+        deleteReason: GameRemovalReason.Sold,
+        lastUpdated: NOW,
+      });
+    });
+
+    // An entry removed before copies existed, or by a write that stamped
+    // them apart, has no copy removed at its instant: the copy removed last
+    // stands in.
+    it('falls back to the copy removed last when none was removed at deletedAt', async () => {
+      db.gameCollection.findUniqueOrThrow.mockResolvedValue(entryState(REMOVED_AT, 0) as never);
+      db.collectionCopy.findFirst
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ removeReason: GameRemovalReason.Traded } as never);
+
+      await service.reconcileOwnership(asTx(db), 'gc-1', NOW);
+
+      expect(db.collectionCopy.findFirst).toHaveBeenNthCalledWith(2, {
+        where: { entryId: 'gc-1', AND: { removedAt: { not: null }, retractedAt: null } },
+        orderBy: [{ removedAt: 'desc' }, { createdAt: 'desc' }],
+        select: { removeReason: true },
+      });
+      expect(db.gameCollection.update.mock.calls[0]?.[0]?.data).toEqual({
+        deleteReason: GameRemovalReason.Traded,
+        lastUpdated: NOW,
+      });
     });
   });
 

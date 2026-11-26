@@ -19,9 +19,11 @@ import { IsPartialDate } from './partial-date.decorator';
 /**
  * A correction of one copy (#1231). Standard REST PATCH semantics: a field
  * left out keeps its value, and `null` clears it, back to unknown. Each field
- * of `CreateCollectionCopyDto` is here, under the same rules. `removedOn` and
- * `removeReason` describe a removal, so only a removed copy takes them; a
- * removal always has a date, so `removedOn` can't be cleared.
+ * of `CollectionCopyDescriptionDto` is here, under the same rules. `removedOn`
+ * and `removeReason` describe a removal, so only a removed copy takes them; a
+ * removal always has a date, so `removedOn` can't be cleared. A correction
+ * takes no `clientRequestId`: one that rewrote the key would strand the add's
+ * retry into a second copy (ADR 0002, #534).
  */
 export class UpdateCollectionCopyDto {
   @ApiPropertyOptional({
@@ -48,7 +50,8 @@ export class UpdateCollectionCopyDto {
     nullable: true,
     description:
       'When the copy was acquired, as exactly as known: a year (`2019`), a month (`2019-03`) or a day ' +
-      '(`2019-03-02`); null makes it unknown. A day after today is refused (code COLLECTION_DATE_IN_FUTURE), and ' +
+      '(`2019-03-02`); null makes it unknown. A day that hasn’t begun anywhere on Earth yet is refused ' +
+      '(code COLLECTION_DATE_IN_FUTURE), and ' +
       "so is a date after the copy's removal (code COLLECTION_DATE_ORDER).",
     example: '2019-03',
   })
@@ -104,7 +107,7 @@ export class UpdateCollectionCopyDto {
   @ApiPropertyOptional({
     description:
       'When a removed copy left your collection, as exactly as known: a year, a month or a day. A copy you still ' +
-      'own has no removal to change (code COLLECTION_COPY_OWNED). A day after today is refused ' +
+      'own has no removal to change (code COLLECTION_COPY_NOT_REMOVED). A day that hasn’t begun anywhere on Earth yet is refused ' +
       '(code COLLECTION_DATE_IN_FUTURE), and so is a date before the copy was acquired (code COLLECTION_DATE_ORDER).',
     example: '2024-06',
   })
@@ -117,7 +120,7 @@ export class UpdateCollectionCopyDto {
     nullable: true,
     description:
       'Why a removed copy left your collection; null clears it. A copy you still own has no removal to change ' +
-      '(code COLLECTION_COPY_OWNED).',
+      '(code COLLECTION_COPY_NOT_REMOVED).',
   })
   @IsOptional()
   @IsEnum(GameRemovalReason, { message: i18nValidationMessage('validation.isEnum') })

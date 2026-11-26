@@ -15,7 +15,7 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
-import { CreateCollectionCopyDto } from './create-collection-copy.dto';
+import { CollectionCopyDescriptionDto } from './create-collection-copy.dto';
 
 const COLLECTION_REACHES = [
   Reach.Private,
@@ -84,7 +84,7 @@ export class CreateGameCollectionDto {
   reach?: CollectionReach;
 
   @ApiPropertyOptional({
-    type: CreateCollectionCopyDto,
+    type: CollectionCopyDescriptionDto,
     description:
       'The copy this add acquires: the one copy of a new entry, or the new copy of an entry you removed. ' +
       'An entry you still own gets no copy, so this is not read; add another copy through its copies instead.',
@@ -92,6 +92,6 @@ export class CreateGameCollectionDto {
   @IsOptional()
   @IsObject({ message: i18nValidationMessage('validation.isObject') })
   @ValidateNested()
-  @Type(() => CreateCollectionCopyDto)
-  copy?: CreateCollectionCopyDto;
+  @Type(() => CollectionCopyDescriptionDto)
+  copy?: CollectionCopyDescriptionDto;
 }

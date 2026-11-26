@@ -49,4 +49,10 @@ describe('UpdateCollectionCopyDto (#1231)', () => {
   it('refuses a field it does not know', async () => {
     await expect(propertiesWithErrors({ quantity: 2 })).resolves.toEqual(['quantity']);
   });
+
+  // A correction that rewrote the add's key would strand its retry into a
+  // second copy, so the key is the add's alone (ADR 0002, #1231).
+  it('refuses a clientRequestId', async () => {
+    await expect(propertiesWithErrors({ clientRequestId: 'key-1' })).resolves.toEqual(['clientRequestId']);
+  });
 });

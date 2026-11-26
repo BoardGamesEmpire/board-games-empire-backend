@@ -140,5 +140,7 @@ describe('collection rating history (#1231)', () => {
     await patchEntry(entryOwner, entryId, { rating: 8 }).expect(200);
 
     expectErrorEnvelope(await listRatings(serverOwner, entryId), { status: 404, code: 'COLLECTION_ENTRY_NOT_FOUND' });
+    // The control: the entry's owner reads the change.
+    expect(await historyOf(entryOwner, entryId)).toEqual([{ occurredOn: expect.any(String), rating: 8 }]);
   });
 });

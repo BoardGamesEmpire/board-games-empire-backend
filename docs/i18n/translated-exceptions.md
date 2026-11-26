@@ -61,14 +61,21 @@ better-auth writes itself (below):
 - The collection's other refusals (#1231), each with its own code:
   - `COLLECTION_COPY_LIMIT_REACHED`: a 409 for an entry already holding its
     most copies, removed ones included, with that number in `limit`;
-  - `COLLECTION_COPY_OWNED`: a 409 for a change to the removal of a copy that
-    is still owned;
+  - `COLLECTION_COPY_NOT_REMOVED`: a 409 for a change to the removal of a copy
+    that has not been removed;
   - `COLLECTION_CONDITION_DIGITAL`: a 400 for a condition on a digital copy;
-  - `COLLECTION_DATE_IN_FUTURE`: a 400 for an acquisition or removal date that
-    has not come yet;
+  - `COLLECTION_DATE_IN_FUTURE`: a 400 for an acquisition or removal date on a
+    day that has begun nowhere on Earth yet, judged at UTC+14, with the date
+    it refused in `field` (`acquiredOn` or `removedOn`);
   - `COLLECTION_DATE_ORDER`: a 400 for a removal before the acquisition;
   - `COLLECTION_CURRENCY_UNKNOWN`: a 400 for a price whose currency is not an
-    ISO 4217 code.
+    ISO 4217 code;
+  - `COLLECTION_RELEASE_PLATFORM_MISMATCH`: a 400 for a copy's edition that is
+    a release of another platform game than its entry's.
+
+  A copy's release, or an add's platform game, that doesn't exist answers the
+  404 the list routes give the same row, `GAME_RELEASE_NOT_FOUND` or
+  `PLATFORM_GAME_NOT_FOUND`, and so does one deleted while the write ran.
 
 - Any other field (a quota's `limit`, a permission catalog refusal's `problems`) sits
   beside these. No field can override `statusCode`, `error` or `message`. A

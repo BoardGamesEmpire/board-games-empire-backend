@@ -1,4 +1,5 @@
-import { isPrismaUniqueConstraintError } from './prisma-errors';
+import type { Prisma } from '../client';
+import { isPrismaForeignKeyConstraintError, isPrismaUniqueConstraintError } from './prisma-errors';
 
 /**
  * Sources, in the order they are tried. Grouped by provenance: both driver-adapter
@@ -59,6 +60,16 @@ export interface NotAUniqueViolation {
 }
 
 export type ConstraintIdentity = IdentifiedConstraint | UnidentifiedConstraint | NotAUniqueViolation;
+
+/**
+ * Not a foreign key violation at all: {@link NotAUniqueViolation}'s counterpart
+ * for {@link foreignKeyIdentity}, kept apart from `unknown` for the same reason.
+ */
+export interface NotAForeignKeyViolation {
+  readonly source: 'not-a-foreign-key-violation';
+}
+
+export type ForeignKeyIdentity = IdentifiedConstraint | UnidentifiedConstraint | NotAForeignKeyViolation;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -175,6 +186,30 @@ export function constraintIdentity(error: unknown): ConstraintIdentity {
     return { source: 'not-a-unique-violation' };
   }
 
+  return identityOf(error);
+}
+
+/**
+ * Normalizes a P2003 to the identity of the constraint that fired, as
+ * {@link constraintIdentity} does a P2002, under the same terms: non-public
+ * API, never read for correctness, and `unknown` is the caller's to answer.
+ *
+ * `@prisma/adapter-pg@7.10` maps SQLSTATE 23503 the same way it maps 23505:
+ * the column under `constraint.fields` when Postgres names one, else the
+ * constraint's name under `constraint.index`. A trigger that raises
+ * `foreign_key_violation` names whatever its `RAISE ... USING CONSTRAINT`
+ * says, or nothing (#1231).
+ */
+export function foreignKeyIdentity(error: unknown): ForeignKeyIdentity {
+  if (!isPrismaForeignKeyConstraintError(error)) {
+    return { source: 'not-a-foreign-key-violation' };
+  }
+
+  return identityOf(error);
+}
+
+/** The identity a known request error's driver payload reports, for either reader above. */
+function identityOf(error: Prisma.PrismaClientKnownRequestError): IdentifiedConstraint | UnidentifiedConstraint {
   const meta = error.meta;
   if (!isRecord(meta)) {
     return unidentified(undefined);
@@ -206,8 +241,14 @@ export function constraintIdentity(error: unknown): ConstraintIdentity {
 }
 
 /** Narrows to the branch that carries names. */
-export function isIdentifiedConstraint(identity: ConstraintIdentity): identity is IdentifiedConstraint {
-  return identity.source !== 'unknown' && identity.source !== 'not-a-unique-violation';
+export function isIdentifiedConstraint(
+  identity: ConstraintIdentity | ForeignKeyIdentity,
+): identity is IdentifiedConstraint {
+  return (
+    identity.source !== 'unknown' &&
+    identity.source !== 'not-a-unique-violation' &&
+    identity.source !== 'not-a-foreign-key-violation'
+  );
 }
 
 /**
@@ -227,7 +268,7 @@ export function isIdentifiedConstraint(identity: ConstraintIdentity): identity i
  * order-sensitive check would let a harmless schema edit change a status code.
  */
 export function identifiesConstraint(
-  identity: ConstraintIdentity,
+  identity: ConstraintIdentity | ForeignKeyIdentity,
   ...spellings: readonly (readonly string[])[]
 ): boolean {
   if (!isIdentifiedConstraint(identity)) {

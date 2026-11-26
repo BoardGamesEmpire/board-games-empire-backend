@@ -1,11 +1,27 @@
 import type { Prisma } from '@bge/database';
-import { Action, DatabaseService, ResourceType } from '@bge/database';
+import {
+  Action,
+  constraintIdentity,
+  DatabaseService,
+  identifiesConstraint,
+  normalizeClientRequestId,
+  ResourceType,
+} from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService, resolveActingUserIdOrNull } from '@bge/permissions';
 import { pickDefined } from '@bge/shared';
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { assertCopyRoom, copyColumns, copyCreateData } from './collection-copy-data';
-import { OWNED_COPY, OWNER_COPY_SELECT } from './collection-row';
+import {
+  addCopy,
+  assertRemovableOn,
+  copyColumns,
+  copyRemovalData,
+  REMOVAL_CHECK_SELECT,
+  removalOf,
+  writingRelease,
+} from './collection-copy-data';
+import type { OwnerCopyRow } from './collection-row';
+import { COPY_ORDER, OWNED_COPY, OWNER_COPY_SELECT, readOwnEntry } from './collection-row';
 import type { LockedEntry } from './collection-write.service';
 import { CollectionWriteService, writeEntryUnder } from './collection-write.service';
 import type {
@@ -15,28 +31,52 @@ import type {
   UpdateCollectionCopyDto,
 } from './dto';
 import { toCollectionCopyDto } from './dto';
-import { collectionEntryNotFound, copyNotFound, copyStillOwned } from './game-collection.errors';
-import { assertRemovalAfterAcquisition, partialDateFromColumns, removalDate } from './values/partial-date';
+import { collectionEntryNotFound, copyNotFound, copyNotRemoved } from './game-collection.errors';
+import { assertRemovalAfterAcquisition, givenRemovalDate, partialDateFromColumns } from './values/partial-date';
 
 /**
- * The copies of a collection entry, on its owner's routes (#1231).
+ * The unique that keeps one copy per client request id on an entry, in every
+ * spelling a P2002 identity reports it (see `identifiesConstraint`): the index
+ * name, the raw columns, and the Prisma fields (#1231, #252).
+ */
+const COPY_KEY_SPELLINGS = [
+  ['collection_copy_entry_client_request_id_unique'],
+  ['entry_id', 'client_request_id'],
+  ['entryId', 'clientRequestId'],
+] as const;
+
+/**
+ * Whether `error` is a unique violation on a copy's client request id: a
+ * repeat of the add that committed first (#252). One whose constraint can't
+ * be named counts, when the add was keyed: a copy's only other unique is its
+ * upstream account's key, which no add on these routes sets.
+ */
+function isCopyKeyViolation(error: unknown): boolean {
+  const identity = constraintIdentity(error);
+
+  return identity.source === 'unknown' || identifiesConstraint(identity, ...COPY_KEY_SPELLINGS);
+}
+
+/**
+ * The copies of a collection entry, on the routes only the entry's owner
+ * uses (#1231).
  *
  * Each write runs through `CollectionWriteService`, whose reconcile removes
  * the entry with its last owned copy and acquires it again with a new one,
  * and whose sync then pauses or resumes the entry's offers in events (#1221).
  * Its first statement locks the entry's row, so it takes turns with every
- * other write that changes what the entry supplies. The entry is then held to
- * its owner, and to the actor's `update` conditions, as
+ * other write that changes what the entry supplies. The entry must then be
+ * the acting user's own, and is held to the actor's `update` conditions, as
  * `PATCH /game-collections/:id` is: each copy write is an update of the entry
  * (#1288). A miss answers `COLLECTION_ENTRY_NOT_FOUND`, as an entry that
  * doesn't exist does (#634).
  *
- * Every route here is the owner's alone, the writes as much as the list: each
- * write answers the copy in the owner's shape, its price, value, acquisition
- * and note, which no one else may read, whatever their grants (#1231). A role
- * holding every permission, or a plugin with an update grant, still writes
- * no one's copies but its own user's. An API key acts for its owner, so it
- * writes its owner's.
+ * Every route here is the entry owner's alone, the writes as much as the
+ * list: each write answers the copy as the entry's owner reads it, its price,
+ * value, acquisition and note, which no one else may read, whatever their
+ * grants (#1231). A role holding every permission still writes no one's
+ * copies but its own user's. A plugin has no user, so it writes no copies at
+ * all. An API key acts for the user who made it, so it writes that user's.
  */
 @Injectable()
 export class CollectionCopyService {
@@ -48,31 +88,13 @@ export class CollectionCopyService {
 
   /**
    * Every copy of the acting user's own entry, removed ones included, oldest
-   * first (#1231). A copy's acquisition and price are the owner's alone,
-   * whatever the entry's reach, so the entry is read as the actor's own, under
-   * their read conditions: anyone else, and an actor that is no user, gets
-   * `COLLECTION_ENTRY_NOT_FOUND`.
+   * first (#1231). A copy's acquisition and price are yours alone, whatever
+   * the entry's reach, so the entry is read as your own (`readOwnEntry`).
    */
   async list(entryId: string): Promise<CollectionCopyDto[]> {
-    const userId = resolveActingUserIdOrNull(this.abilityService);
-
-    if (userId === null) {
-      throw collectionEntryNotFound(entryId);
-    }
-
-    const entry = await this.db.gameCollection.findUnique({
-      where: {
-        id: entryId,
-        userId,
-        // eslint-disable-next-line no-restricted-syntax -- single-row fetch by id, not a collection read
-        AND: this.abilityService.getCurrentResourceConditions(ResourceType.GameCollection, Action.read),
-      },
-      select: { copies: { select: OWNER_COPY_SELECT, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] } },
+    const entry = await readOwnEntry(this.db, this.abilityService, entryId, {
+      copies: { select: OWNER_COPY_SELECT, orderBy: COPY_ORDER },
     });
-
-    if (entry === null) {
-      throw collectionEntryNotFound(entryId);
-    }
 
     return entry.copies.map(toCollectionCopyDto);
   }
@@ -81,31 +103,65 @@ export class CollectionCopyService {
    * Adds a copy to the entry, described by `dto` (#1231). An entry holds at
    * most `COLLECTION_COPY_LIMIT` copies, counting every state, checked under
    * the entry's lock. A copy added to a removed entry acquires it again.
+   *
+   * Keyed by `clientRequestId` (ADR 0002, #252): a repeat under a key the
+   * entry already holds answers the copy that key made, as it stands now,
+   * removed or taken back since included, whatever the repeat's body says.
+   * It adds nothing, so it never meets the cap. The key is looked up under
+   * the entry's lock and after the checks that it is your entry and that you
+   * may update it, the route's own checks, so a key is no way past them.
+   *
+   * Two repeats wait for the entry's lock in turn, and the second finds the
+   * first's copy. Should a repeat still trip the key's unique, the add runs
+   * once more, in a transaction of its own, and finds the copy the other
+   * committed, as `createOrReplay` does: Postgres aborts the transaction the
+   * violation happened in, so nothing inside it can look again.
    */
   async add(entryId: string, dto: CreateCollectionCopyDto): Promise<CollectionCopyDto> {
+    const { clientRequestId: sentKey, ...description } = dto;
+    const clientRequestId = normalizeClientRequestId(sentKey);
     const now = new Date();
 
-    return this.writes.run(
-      async (tx) => {
-        const entry = await this.lockedForUpdate(tx, entryId, now);
-        await assertCopyRoom(tx, entryId);
+    const attempt = () =>
+      this.writes.run(
+        async (tx) => {
+          const entry = await this.lockOwnEntryAndStampUpdate(tx, entryId, now);
+          const replayed = clientRequestId === undefined ? null : await this.copyUnderKey(tx, entryId, clientRequestId);
+          const copy = replayed ?? (await addCopy(tx, { ...entry, id: entryId }, description, now, clientRequestId));
 
-        const copy = await tx.collectionCopy.create({
-          data: { entryId, ...(await copyCreateData(tx, dto, entry, now)) },
-          select: OWNER_COPY_SELECT,
-        });
+          return { entryId, result: toCollectionCopyDto(copy) };
+        },
+        resolveActingUserIdOrNull(this.abilityService),
+        now,
+      );
 
-        return { entryId, result: toCollectionCopyDto(copy) };
-      },
-      resolveActingUserIdOrNull(this.abilityService),
-      now,
-    );
+    try {
+      return await attempt();
+    } catch (error) {
+      if (clientRequestId === undefined || !isCopyKeyViolation(error)) {
+        throw error;
+      }
+
+      return attempt();
+    }
+  }
+
+  /** The copy the entry's add under `clientRequestId` made, in any state, or null (#252). */
+  private async copyUnderKey(
+    tx: Prisma.TransactionClient,
+    entryId: string,
+    clientRequestId: string,
+  ): Promise<OwnerCopyRow | null> {
+    return tx.collectionCopy.findUnique({
+      where: { entryId_clientRequestId: { entryId, clientRequestId } },
+      select: OWNER_COPY_SELECT,
+    });
   }
 
   /**
    * Corrects one copy of the entry (#1231): the fields `dto` names, under the
    * add's rules, and `null` clears a field. `removedOn` and `removeReason`
-   * change a removal, so only a removed copy takes them (`COLLECTION_COPY_OWNED`).
+   * change a removal, so only a removed copy takes them (`COLLECTION_COPY_NOT_REMOVED`).
    * The removal must not end before the acquisition, as the copy will hold
    * them both (`COLLECTION_DATE_ORDER`). Each edit stamps `editedByUserAt`,
    * so a sync leaves the copy as the user left it. On a removed entry, a
@@ -119,11 +175,11 @@ export class CollectionCopyService {
 
     const { removedOn, removeReason, ...described } = dto;
     const now = new Date();
-    const newRemoval = removedOn === undefined ? null : removalDate(removedOn, now);
+    const newRemoval = givenRemovalDate(removedOn, now);
 
     return this.writes.run(
       async (tx) => {
-        const entry = await this.lockedForUpdate(tx, entryId, now);
+        const entry = await this.lockOwnEntryAndStampUpdate(tx, entryId, now);
         const copy = await tx.collectionCopy.findUnique({
           where: { id: copyId, entryId },
           select: {
@@ -140,7 +196,7 @@ export class CollectionCopyService {
         }
 
         if ((removedOn !== undefined || removeReason !== undefined) && copy.removedAt === null) {
-          throw copyStillOwned();
+          throw copyNotRemoved();
         }
 
         const columns = await copyColumns(tx, described, entry, now);
@@ -151,16 +207,18 @@ export class CollectionCopyService {
             : partialDateFromColumns(columns.acquiredOn, columns.acquiredOnPrecision ?? null);
         assertRemovalAfterAcquisition(acquisition, removal);
 
-        const edited = await tx.collectionCopy.update({
-          where: { id: copyId },
-          data: {
-            ...columns,
-            ...(newRemoval === null ? {} : { removedOn: newRemoval.on, removedOnPrecision: newRemoval.precision }),
-            ...(removeReason !== undefined ? { removeReason } : {}),
-            editedByUserAt: now,
-          },
-          select: OWNER_COPY_SELECT,
-        });
+        const edited = await writingRelease(described.releaseId, () =>
+          tx.collectionCopy.update({
+            where: { id: copyId },
+            data: {
+              ...columns,
+              ...(newRemoval === null ? {} : { removedOn: newRemoval.on, removedOnPrecision: newRemoval.precision }),
+              ...(removeReason !== undefined ? { removeReason } : {}),
+              editedByUserAt: now,
+            },
+            select: OWNER_COPY_SELECT,
+          }),
+        );
 
         return { entryId, result: toCollectionCopyDto(edited) };
       },
@@ -170,8 +228,9 @@ export class CollectionCopyService {
   }
 
   /**
-   * Removes one copy the user still owns, dated `removedOn`, or today in UTC
-   * when the user gives no date, with the reason (#1231). A copy missing,
+   * Removes one copy the user still owns, dated `removedOn`, or when the user
+   * gives no date, today in UTC, or the copy's acquisition day when that is
+   * later (`removalOf`), with the reason (#1231). A copy missing,
    * already removed or taken back answers `COLLECTION_COPY_NOT_FOUND`.
    *
    * Removing the entry's last owned copy removes the entry, so it is also
@@ -181,8 +240,8 @@ export class CollectionCopyService {
    * can't lend the entry its own; and it pauses the entry's offers in events,
    * as `DELETE /game-collections/:id` does (#1221).
    *
-   * A removal is the user's word on the copy, so it stamps `editedByUserAt`,
-   * and a sync leaves the removed copy as it is (#1231).
+   * A removal is the user's word on the copy, so it stamps `editedByUserAt`
+   * (`copyRemovalData`), and a sync leaves the removed copy as it is (#1231).
    */
   async remove(
     entryId: string,
@@ -190,14 +249,14 @@ export class CollectionCopyService {
     { reason, removedOn }: RemoveCollectionCopyQueryDto,
   ): Promise<CollectionCopyDto> {
     const now = new Date();
-    const removal = removalDate(removedOn, now);
+    const given = givenRemovalDate(removedOn, now);
 
     return this.writes.run(
       async (tx) => {
-        const entry = await this.lockedForUpdate(tx, entryId, now);
+        const entry = await this.lockOwnEntryAndStampUpdate(tx, entryId, now);
         const copy = await tx.collectionCopy.findUnique({
           where: { id: copyId, entryId, AND: OWNED_COPY },
-          select: { acquiredOn: true, acquiredOnPrecision: true },
+          select: REMOVAL_CHECK_SELECT,
         });
 
         if (copy === null) {
@@ -211,17 +270,12 @@ export class CollectionCopyService {
           });
         }
 
-        assertRemovalAfterAcquisition(partialDateFromColumns(copy.acquiredOn, copy.acquiredOnPrecision), removal);
+        const removal = removalOf(copy, given, now);
+        assertRemovableOn(copy, removal);
 
         const removed = await tx.collectionCopy.update({
           where: { id: copyId },
-          data: {
-            removedAt: now,
-            removedOn: removal.on,
-            removedOnPrecision: removal.precision,
-            removeReason: reason ?? null,
-            editedByUserAt: now,
-          },
+          data: copyRemovalData(removal, reason, now),
           select: OWNER_COPY_SELECT,
         });
 
@@ -234,15 +288,20 @@ export class CollectionCopyService {
   }
 
   /**
-   * Locks the entry's row, as the transaction's first lock (#1221), then
-   * holds it to its owner (#1231) and to the actor's `update` conditions
-   * (#1288). Another user's entry, or any entry for an actor that is no
-   * user, answers `COLLECTION_ENTRY_NOT_FOUND` before anything is written,
-   * as the list does: the write's answer is the owner's shape of the copy.
-   * Answers what the copy is checked against: the entry's medium and
-   * platform game.
+   * Locks the entry's row, as the transaction's first lock (#1221), checks
+   * that it is the acting user's own (#1231), and writes its `lastUpdated`
+   * under the actor's `update` conditions (#1288): each copy write is an
+   * update of the entry. Another user's entry, or any entry for an actor that
+   * is no user, answers `COLLECTION_ENTRY_NOT_FOUND` before anything is read
+   * or written, as the list does: the write's answer is the copy as the
+   * entry's owner reads it. Answers what the copy is checked against: the
+   * entry's medium and platform game.
    */
-  private async lockedForUpdate(tx: Prisma.TransactionClient, entryId: string, now: Date): Promise<LockedEntry> {
+  private async lockOwnEntryAndStampUpdate(
+    tx: Prisma.TransactionClient,
+    entryId: string,
+    now: Date,
+  ): Promise<LockedEntry> {
     const locked = await this.writes.lockEntry(tx, entryId);
 
     if (locked === null || locked.userId !== resolveActingUserIdOrNull(this.abilityService)) {

@@ -827,7 +827,7 @@ _Avoid_: delete, tombstone, resurrection
 
 **Taken back**:
 A copy or rating change the user says never happened. It counts as neither owned nor removed, and can be restored.
-_Avoid_: deleted, retracted, on its own
+_Avoid_: deleted, or retracted, in prose. Code names it `retractedAt` and the `retraction` routes.
 
 **Revision**:
 An earlier state kept when something changes: a house rule's earlier wording, and the earlier values of a copy or rating change the user edited.

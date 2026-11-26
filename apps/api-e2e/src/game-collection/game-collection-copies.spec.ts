@@ -1,4 +1,11 @@
-import { GameCondition, GameMedium, GameRemovalReason, Reach } from '@bge/database';
+import {
+  foreignKeyIdentity,
+  GameCondition,
+  GameMedium,
+  GameRemovalReason,
+  isPrismaForeignKeyConstraintError,
+  Reach,
+} from '@bge/database';
 import type { Actors, SessionActor } from '@bge/testing-e2e';
 import { createActors } from '@bge/testing-e2e';
 import request from 'supertest';
@@ -294,5 +301,89 @@ describe('collection copies (#1231)', () => {
 
     expect(edited).toMatchObject({ id: copyId, note: 'Sleeved', acquiredOn: '2019' });
     expect(await stamp()).toEqual(expect.any(Date));
+  });
+
+  // ADR 0002: a client queues the add offline and may send it again, so the
+  // add takes a client request id, and a repeat answers the copy the first
+  // made, as it stands now, whatever the repeat's body says (#1231).
+  it('a repeated POST of a copy with the same clientRequestId adds one copy (#1231)', async () => {
+    const owner = await actors.user();
+    const entryId = await arrangeCollectionEntry(db.client, owner.user.id, Reach.Private);
+    const otherEntryId = await arrangeCollectionEntry(db.client, owner.user.id, Reach.Private);
+    const keyed = (body: Record<string, unknown>, entry = entryId) =>
+      addCopy(owner, entry, { clientRequestId: 'e2e-copy-key', ...body });
+    const held = (entry: string) => db.client.collectionCopy.count({ where: { entryId: entry } });
+
+    const first = copyEnvelope(
+      await keyed({ note: 'The first' }).expect(201),
+      'POST /api/game-collections/:id/copies with a key',
+    );
+    const repeat = copyEnvelope(
+      await keyed({ note: 'A different body' }).expect(201),
+      'POST /api/game-collections/:id/copies repeated with the same key',
+    );
+
+    expect(repeat).toEqual(first);
+    expect(repeat.note).toBe('The first');
+    expect(await held(entryId)).toBe(2);
+
+    // A repeat after the copy was removed still answers that copy, as it
+    // stands, and adds none.
+    await removeCopy(owner, entryId, first.id).expect(200);
+    const afterRemoval = copyEnvelope(
+      await keyed({}).expect(201),
+      'POST /api/game-collections/:id/copies repeated after the removal',
+    );
+    expect(afterRemoval).toMatchObject({ id: first.id, removedAt: expect.any(String) });
+    expect(await held(entryId)).toBe(2);
+
+    // The controls: another key adds a copy, and the same key on another
+    // entry is that entry's own.
+    await addCopy(owner, entryId, { clientRequestId: 'e2e-copy-key-2' }).expect(201);
+    expect(await held(entryId)).toBe(3);
+    await keyed({}, otherEntryId).expect(201);
+    expect(await held(otherEntryId)).toBe(2);
+  });
+
+  // The api reads a release that went before a copy's write by the name its
+  // trigger gives the failure (#1231). This pins that name, and the shape of
+  // the P2003 that carries it, against the real database: a release that
+  // never existed fails the same way.
+  it("a copy whose release doesn't exist fails on the trigger the api names (#1231)", async () => {
+    const owner = await actors.user();
+    const entryId = await arrangeCollectionEntry(db.client, owner.user.id, Reach.Private);
+    let failure: unknown;
+
+    try {
+      await db.client.collectionCopy.create({ data: { entryId, releaseId: 'e2e-no-such-release' } });
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(isPrismaForeignKeyConstraintError(failure)).toBe(true);
+    expect(foreignKeyIdentity(failure)).toMatchObject({
+      names: ['collection_copies_release_match'],
+      sqlState: '23503',
+    });
+  });
+
+  it("refuses a release of another platform game with COLLECTION_RELEASE_PLATFORM_MISMATCH, and one that doesn't exist with GAME_RELEASE_NOT_FOUND", async () => {
+    const owner = await actors.user();
+    const entryId = await arrangeCollectionEntry(db.client, owner.user.id, Reach.Private);
+    const { platformGameId: otherPlatformGameId } = await arrangePlatformGame(db.client);
+    const otherRelease = await db.client.gameRelease.create({
+      data: { platformGameId: otherPlatformGameId, editionKey: 'e2e-other', editionName: 'Other' },
+      select: { id: true },
+    });
+
+    expectErrorEnvelope(await addCopy(owner, entryId, { releaseId: otherRelease.id }), {
+      status: 400,
+      code: 'COLLECTION_RELEASE_PLATFORM_MISMATCH',
+    });
+    expectErrorEnvelope(await addCopy(owner, entryId, { releaseId: 'e2e-no-such-release' }), {
+      status: 404,
+      code: 'GAME_RELEASE_NOT_FOUND',
+    });
+    expect(await db.client.collectionCopy.count({ where: { entryId } })).toBe(1);
   });
 });

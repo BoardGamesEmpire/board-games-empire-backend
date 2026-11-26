@@ -1,10 +1,10 @@
 import type { Prisma } from '@bge/database';
-import { Action, DatabaseService, ResourceType } from '@bge/database';
-import { AbilityService, resolveActingUserIdOrNull } from '@bge/permissions';
+import { DatabaseService } from '@bge/database';
+import { AbilityService } from '@bge/permissions';
 import { Injectable } from '@nestjs/common';
+import { readOwnEntry } from './collection-row';
 import type { CollectionRatingChangeDto } from './dto';
 import { toCollectionRatingChangeDto } from './dto';
-import { collectionEntryNotFound } from './game-collection.errors';
 import { todayUtc } from './values/partial-date';
 
 /** What the rating history reads of each change (#1231). */
@@ -37,7 +37,28 @@ export async function appendRatingChange(
 }
 
 /**
- * The history of an entry's rating, on its owner's route (#1231). Each change
+ * Appends a change of the entry's rating when a write sends one that differs
+ * from `current`, the rating the locked row holds (#1231): `sent` undefined
+ * is no rating sent, and null clears it. A new entry's `current` is null, so
+ * its first rating appends one and a null appends none. A write that repeats
+ * the rating appends nothing, so a replayed add or PATCH leaves the history
+ * as it was.
+ */
+export async function appendRatingChangeIfChanged(
+  tx: Prisma.TransactionClient,
+  entryId: string,
+  sent: number | null | undefined,
+  current: number | null,
+  now: Date,
+): Promise<void> {
+  if (sent !== undefined && sent !== current) {
+    await appendRatingChange(tx, entryId, sent, now);
+  }
+}
+
+/**
+ * The history of an entry's rating, on the entry owner's route: the entry's owner
+ * alone reads it (#1231). Each change
  * of the rating the entry's own routes make is appended by
  * {@link appendRatingChange}, under the entry's lock.
  */
@@ -51,36 +72,17 @@ export class CollectionRatingService {
   /**
    * Every change of the acting user's own entry's rating, oldest first
    * (#1231): the changes with no known date, then by date, then by when each
-   * was recorded, and the id breaks the last tie. The history is the owner's
-   * alone, whatever the entry's reach, so the entry is read as the actor's
-   * own, under their read conditions: anyone else, and an actor that is no
-   * user, gets `COLLECTION_ENTRY_NOT_FOUND`.
+   * was recorded, and the id breaks the last tie. The history is yours alone,
+   * whatever the entry's reach, so the entry is read as your own
+   * (`readOwnEntry`).
    */
   async list(entryId: string): Promise<CollectionRatingChangeDto[]> {
-    const userId = resolveActingUserIdOrNull(this.abilityService);
-
-    if (userId === null) {
-      throw collectionEntryNotFound(entryId);
-    }
-
-    const entry = await this.db.gameCollection.findUnique({
-      where: {
-        id: entryId,
-        userId,
-        // eslint-disable-next-line no-restricted-syntax -- single-row fetch by id, not a collection read
-        AND: this.abilityService.getCurrentResourceConditions(ResourceType.GameCollection, Action.read),
-      },
-      select: {
-        ratingChanges: {
-          select: RATING_CHANGE_SELECT,
-          orderBy: [{ occurredOn: { sort: 'asc', nulls: 'first' } }, { createdAt: 'asc' }, { id: 'asc' }],
-        },
+    const entry = await readOwnEntry(this.db, this.abilityService, entryId, {
+      ratingChanges: {
+        select: RATING_CHANGE_SELECT,
+        orderBy: [{ occurredOn: { sort: 'asc', nulls: 'first' } }, { createdAt: 'asc' }, { id: 'asc' }],
       },
     });
-
-    if (entry === null) {
-      throw collectionEntryNotFound(entryId);
-    }
 
     return entry.ratingChanges.map(toCollectionRatingChangeDto);
   }

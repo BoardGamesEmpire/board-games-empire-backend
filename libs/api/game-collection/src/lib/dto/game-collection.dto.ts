@@ -145,11 +145,11 @@ type EveryFieldOf<T, Row> = [Exclude<keyof T, keyof Row>, Exclude<keyof Row, key
 
 /**
  * A copy on a collection row (#1231). Every reader of the entry gets its id,
- * edition and condition. The owner, reading their own entries, also gets
+ * edition and condition. The entry's owner, reading their own entries, also gets
  * every other field the copy routes send; no one else ever does.
  *
  * It implements the include's public copy, and names every field of the
- * owner's copy, so a field added to either without this class fails the
+ * entry owner's copy, so a field added to either without this class fails the
  * typecheck.
  */
 export class CollectionRowCopyDto implements PublicCopyRow, EveryFieldOf<CollectionCopyDto, CollectionRowCopyDto> {
@@ -166,7 +166,7 @@ export class CollectionRowCopyDto implements PublicCopyRow, EveryFieldOf<Collect
     type: String,
     nullable: true,
     description:
-      'Sent to the owner only. When the copy was acquired, as exactly as known: a year (`2019`), a month ' +
+      'Sent to the entry’s owner only. When the copy was acquired, as exactly as known: a year (`2019`), a month ' +
       '(`2019-03`) or a day (`2019-03-02`). Null when unknown.',
     example: '2019-03',
   })
@@ -175,28 +175,28 @@ export class CollectionRowCopyDto implements PublicCopyRow, EveryFieldOf<Collect
   @ApiPropertyOptional({
     type: String,
     nullable: true,
-    description: 'Sent to the owner only. Where the copy came from, in your own words',
+    description: 'Sent to the entry’s owner only. Where the copy came from, in your own words',
   })
   acquiredFrom?: string | null;
 
   @ApiPropertyOptional({
     type: MoneyDto,
     nullable: true,
-    description: 'Sent to the owner only. What was paid for the copy',
+    description: 'Sent to the entry’s owner only. What was paid for the copy',
   })
   pricePaid?: Money | null;
 
   @ApiPropertyOptional({
     type: MoneyDto,
     nullable: true,
-    description: 'Sent to the owner only. What the copy is worth now, as you value it',
+    description: 'Sent to the entry’s owner only. What the copy is worth now, as you value it',
   })
   currentValue?: Money | null;
 
   @ApiPropertyOptional({
     type: String,
     nullable: true,
-    description: 'Sent to the owner only. A note about the copy, kept as written, in Markdown',
+    description: 'Sent to the entry’s owner only. A note about the copy, kept as written, in Markdown',
   })
   note?: string | null;
 
@@ -205,28 +205,28 @@ export class CollectionRowCopyDto implements PublicCopyRow, EveryFieldOf<Collect
     format: 'date-time',
     nullable: true,
     description:
-      'Sent to the owner only. When the removal was recorded: always null on a row, which lists owned copies',
+      'Sent to the entry’s owner only. When the removal was recorded: always null on a row, which lists owned copies',
   })
   removedAt?: Date | null;
 
   @ApiPropertyOptional({
     type: String,
     nullable: true,
-    description: 'Sent to the owner only. When the copy left your collection: always null on a row',
+    description: 'Sent to the entry’s owner only. When the copy left your collection: always null on a row',
   })
   removedOn?: string | null;
 
   @ApiPropertyOptional({
     enum: GameRemovalReason,
     nullable: true,
-    description: 'Sent to the owner only. Why the copy left your collection: always null on a row',
+    description: 'Sent to the entry’s owner only. Why the copy left your collection: always null on a row',
   })
   removeReason?: GameRemovalReason | null;
 
   @ApiPropertyOptional({
     type: String,
     format: 'date-time',
-    description: 'Sent to the owner only. When the copy was recorded',
+    description: 'Sent to the entry’s owner only. When the copy was recorded',
   })
   createdAt?: Date;
 }
@@ -262,15 +262,15 @@ export class GameCollectionDto implements Pick<
   @ApiProperty({ enum: GameMedium, description: 'Medium of the owned copy' })
   medium!: GameMedium;
 
-  @ApiProperty({ description: 'Number of copies the owner still has', readOnly: true })
+  @ApiProperty({ description: 'Number of copies the entry’s owner still has', readOnly: true })
   quantity!: number;
 
   @ApiProperty({
     type: [CollectionRowCopyDto],
     readOnly: true,
     description:
-      'The copies the owner still has, oldest first. Every reader sees each one’s id, edition and condition. The ' +
-      'owner also gets the rest on `GET /game-collections`, `GET /game-collections/:id` and the answers to their ' +
+      'The copies the entry’s owner still has, oldest first. Every reader sees each one’s id, edition and condition. ' +
+      'The entry’s owner also gets the rest on `GET /game-collections`, `GET /game-collections/:id` and the answers to their ' +
       'writes; `GET /users/:userId/game-collections` sends every caller the first three only.',
   })
   copies!: CollectionRowCopyDto[];

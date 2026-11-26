@@ -6,7 +6,7 @@ import type { AbilityService } from '@bge/permissions';
 import { Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { GameCollectionWithRelations } from './collection-row';
-import { COLLECTION_INCLUDE, OWNED_COPY } from './collection-row';
+import { COLLECTION_INCLUDE, OWNED_COPY, REMOVED_COPY } from './collection-row';
 import { collectionEntryNotFound } from './game-collection.errors';
 
 /** A collection entry as {@link CollectionWriteService.lockEntry} holds it. */
@@ -130,7 +130,7 @@ export class CollectionWriteService {
 
   /**
    * Locks the entry's row `FOR UPDATE`, and answers what a write checks it
-   * against: its owner, platform game and medium, and whether it is removed.
+   * against: the entry's owner, platform game and medium, and whether it is removed.
    * Null when no entry has the id. Make it the transaction's first lock
    * (#1221).
    */
@@ -153,13 +153,13 @@ export class CollectionWriteService {
    *   is `removeReason` when the write gives one, as an entry removal does,
    *   an explicit `null` included: the entry's removal is that request's, and
    *   a copy removal that committed while it waited for the entry's lock may
-   *   carry a later `removedAt` than its own. Otherwise, after a copy's own
-   *   removal, it is the reason of the copy removed last. A copy taken back
+   *   carry a later `removedAt` than its own. Otherwise it is the reason of
+   *   the copy that removed it ({@link entryRemovalReason}). A copy taken back
    *   is no removal, so its reason never names the entry's.
    * - **An owned copy, the entry removed:** its removal clears.
    * - **No owned copy, the entry removed already:** it stays removed. When the
    *   write gives no `removeReason`, as a copy edit doesn't, the entry's
-   *   reason is read again from the copy removed last, so a corrected
+   *   reason is read again from the copy that removed it, so a corrected
    *   removal reason on that copy reaches the entry's summary too.
    *
    * It always sets `lastUpdated`, which bumps `updatedAt`, so the
@@ -181,7 +181,7 @@ export class CollectionWriteService {
     if (owned === 0 && entry.deletedAt === null) {
       await this.writeEntry(tx, entryId, {
         deletedAt: now,
-        deleteReason: removeReason === undefined ? await this.lastRemovalReason(tx, entryId) : removeReason,
+        deleteReason: removeReason === undefined ? await this.entryRemovalReason(tx, entryId, now) : removeReason,
         lastUpdated: now,
       });
 
@@ -195,7 +195,10 @@ export class CollectionWriteService {
     }
 
     if (owned === 0 && entry.deletedAt !== null && removeReason === undefined) {
-      await this.writeEntry(tx, entryId, { deleteReason: await this.lastRemovalReason(tx, entryId), lastUpdated: now });
+      await this.writeEntry(tx, entryId, {
+        deleteReason: await this.entryRemovalReason(tx, entryId, entry.deletedAt),
+        lastUpdated: now,
+      });
 
       return null;
     }
@@ -205,15 +208,35 @@ export class CollectionWriteService {
     return null;
   }
 
-  /** The reason of the entry's copy removed last, or null when it gave none (#1231). */
-  private async lastRemovalReason(tx: Prisma.TransactionClient, entryId: string): Promise<GameRemovalReason | null> {
-    const lastRemoved = await tx.collectionCopy.findFirst({
-      where: { entryId, removedAt: { not: null }, retractedAt: null },
-      orderBy: [{ removedAt: 'desc' }, { createdAt: 'desc' }],
-      select: { removeReason: true },
+  /**
+   * The reason of the copy whose removal removed the entry at `deletedAt`, or
+   * null when it gave none (#1231): the one definition both the flip and the
+   * re-read use, so they agree.
+   *
+   * Every write that removes an entry stamps the copy's `removedAt` and the
+   * entry's `deletedAt` from the same `now`, and so does the migration's
+   * backfill, so that copy is the one removed at `deletedAt`. The latest
+   * `removedAt` is not: a racing copy removal may commit a later stamp while
+   * its request waits for the entry's lock. When no copy was removed at that
+   * instant, the copy removed last stands in.
+   */
+  private async entryRemovalReason(
+    tx: Prisma.TransactionClient,
+    entryId: string,
+    deletedAt: Date,
+  ): Promise<GameRemovalReason | null> {
+    const select = { removeReason: true } as const;
+    const latestFirst: Prisma.CollectionCopyOrderByWithRelationInput[] = [{ removedAt: 'desc' }, { createdAt: 'desc' }];
+    const removedWithEntry = await tx.collectionCopy.findFirst({
+      where: { entryId, removedAt: deletedAt, AND: REMOVED_COPY },
+      orderBy: latestFirst,
+      select,
     });
+    const removing =
+      removedWithEntry ??
+      (await tx.collectionCopy.findFirst({ where: { entryId, AND: REMOVED_COPY }, orderBy: latestFirst, select }));
 
-    return lastRemoved?.removeReason ?? null;
+    return removing?.removeReason ?? null;
   }
 
   /**

@@ -4,7 +4,7 @@
 // back, and an entry is removed with its last owned copy.
 //
 // The price paid, current value, where and when the copy was acquired, and the
-// note are the owner's alone, whatever the entry's reach (#1231).
+// note are the entry owner's alone, whatever the entry's reach (#1231).
 //
 // The migration's CHECK constraints hold the columns together: an amount and
 // its currency are set together, and an amount is zero or more; a date and its
@@ -58,12 +58,20 @@ model CollectionCopy {
   upstreamKey       String?          @map("upstream_key")
   editedByUserAt    DateTime?        @map("edited_by_user_at") @db.Timestamptz(3)
 
+  // The key a client chose for the add that made this copy, so a retried
+  // `POST /game-collections/:id/copies` answers this copy again rather than
+  // adding a second (#1231, #252). Scoped to the entry, which is one user's:
+  // a copy has no user of its own. NULLs are distinct, so copies added without
+  // a key, and those every other path makes, are unaffected.
+  clientRequestId String? @map("client_request_id")
+
   loans GameLoan[]
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@unique([upstreamAccountId, upstreamKey])
+  @@unique([entryId, clientRequestId], map: "collection_copy_entry_client_request_id_unique")
   @@index([entryId])
   @@index([releaseId])
   @@map("collection_copies")

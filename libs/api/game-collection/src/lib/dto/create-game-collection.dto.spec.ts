@@ -38,6 +38,18 @@ describe.each([
   });
 });
 
+// The entry add is safe to repeat already, as an entry still owned gets no
+// copy from it, so its `copy` takes no key of its own (#1231).
+it("POST refuses a clientRequestId in the entry's copy (#1231)", async () => {
+  await expect(
+    propertiesWithErrors(CreateGameCollectionDto, {
+      platformGameId: 'pg-1',
+      medium: GameMedium.Physical,
+      copy: { clientRequestId: 'key-1' },
+    }),
+  ).resolves.toEqual(['copy']);
+});
+
 describe.each([
   ['CreateGameCollectionDto', CreateGameCollectionDto, { platformGameId: 'pg-1', medium: GameMedium.Physical }],
   ['UpdateGameCollectionDto', UpdateGameCollectionDto, {}],

@@ -3,8 +3,10 @@ import type { PartialDate } from './partial-date';
 import {
   assertNotInFuture,
   assertRemovalAfterAcquisition,
+  defaultRemovalDate,
   formatPartialDate,
   lastDayOf,
+  latestToday,
   parsePartialDate,
   partialDateFromColumns,
   todayUtc,
@@ -33,6 +35,9 @@ function dateOf(text: string): PartialDate {
 }
 
 const DATE_IN_FUTURE = { status: 400, code: 'COLLECTION_DATE_IN_FUTURE' };
+
+/** The refusal's envelope fields, where it names the date it refused (#1231). */
+const fieldsOf = (error: unknown) => (error as { getResponse(): Record<string, unknown> }).getResponse();
 const DATE_ORDER = { status: 400, code: 'COLLECTION_DATE_ORDER' };
 
 // A copy's acquisition and removal dates are as exact as the user knows them:
@@ -110,17 +115,49 @@ describe('todayUtc (#1231)', () => {
   });
 });
 
-// A user may not record a day that has not come yet. A year or a month that has
-// begun may be recorded, because its first day is not in the future.
-describe('assertNotInFuture (#1231)', () => {
-  const now = new Date('2026-11-26T23:30:00Z');
+describe('latestToday (#1231)', () => {
+  // UTC+14 reaches each day first, so at 10:00 UTC it is already tomorrow there.
+  it('is the day at UTC+14', () => {
+    expect(latestToday(new Date('2026-11-26T09:59:59Z'))).toEqual(dateOf('2026-11-26'));
+    expect(latestToday(new Date('2026-11-26T10:00:00Z'))).toEqual(dateOf('2026-11-27'));
+  });
+});
 
-  it.each(['2026', '2026-11', '2026-11-26', '2019-03-02'])('accepts %s', (text) => {
-    expect(() => assertNotInFuture(dateOf(text), now)).not.toThrow();
+// A user may not record a day that has not come yet anywhere on Earth. No
+// user's zone is stored, so a day that is today somewhere passes: judged by
+// UTC, a user east of it would be refused their own today. A year or a month
+// that has begun may be recorded, because its first day is not in the future.
+describe('assertNotInFuture (#1231)', () => {
+  describe('late in the UTC day, when UTC+14 is a day ahead', () => {
+    const now = new Date('2026-11-26T23:30:00Z');
+
+    it.each(['2026', '2026-11', '2026-11-26', '2026-11-27', '2019-03-02'])('accepts %s', (text) => {
+      expect(() => assertNotInFuture(dateOf(text), now, 'acquiredOn')).not.toThrow();
+    });
+
+    it.each(['2026-11-28', '2027', '2026-12'])('refuses %s with COLLECTION_DATE_IN_FUTURE', (text) => {
+      expect(refusal(() => assertNotInFuture(dateOf(text), now, 'acquiredOn'))).toMatchObject(DATE_IN_FUTURE);
+    });
   });
 
-  it.each(['2026-11-27', '2027', '2026-12'])('refuses %s with COLLECTION_DATE_IN_FUTURE', (text) => {
-    expect(refusal(() => assertNotInFuture(dateOf(text), now))).toMatchObject(DATE_IN_FUTURE);
+  // At 05:00 UTC it is 19:00 at UTC+14, still the same day.
+  describe('early in the UTC day, when UTC+14 is the same day', () => {
+    const now = new Date('2026-11-26T05:00:00Z');
+
+    it('accepts today', () => {
+      expect(() => assertNotInFuture(dateOf('2026-11-26'), now, 'acquiredOn')).not.toThrow();
+    });
+
+    it('refuses tomorrow with COLLECTION_DATE_IN_FUTURE', () => {
+      expect(refusal(() => assertNotInFuture(dateOf('2026-11-27'), now, 'acquiredOn'))).toMatchObject(DATE_IN_FUTURE);
+    });
+  });
+
+  // A PATCH may send both dates, so the refusal says which (#1231).
+  it.each(['acquiredOn', 'removedOn'] as const)('names %s in the refusal', (field) => {
+    const refused = refusal(() => assertNotInFuture(dateOf('2099'), new Date('2026-11-26T00:00:00Z'), field));
+
+    expect(fieldsOf(refused)).toMatchObject({ code: 'COLLECTION_DATE_IN_FUTURE', field });
   });
 });
 
@@ -152,5 +189,34 @@ describe('assertRemovalAfterAcquisition (#1231)', () => {
         removed === null ? null : dateOf(removed),
       ),
     ).not.toThrow();
+  });
+});
+
+// A removal sent with no date is dated today in UTC, unless the copy was
+// acquired on a later day: the latest today on Earth lets a copy be acquired
+// on a day that is tomorrow in UTC, and the removal can't end before it began
+// (#1231).
+describe('defaultRemovalDate (#1231)', () => {
+  const NOW = new Date('2026-11-26T23:30:00Z');
+
+  it('is today in UTC, at Day precision, when the acquisition is unknown', () => {
+    expect(defaultRemovalDate(null, NOW)).toEqual(dateOf('2026-11-26'));
+  });
+
+  it.each(['2026-11-20', '2026-11-26', '2026-11', '2026', '2019-03'])(
+    'is today in UTC for an acquisition of %s, which begins no later than today',
+    (acquired) => {
+      expect(defaultRemovalDate(dateOf(acquired), NOW)).toEqual(dateOf('2026-11-26'));
+    },
+  );
+
+  it('is the acquisition day when the copy was acquired on a day later than today in UTC', () => {
+    expect(defaultRemovalDate(dateOf('2026-11-27'), NOW)).toEqual(dateOf('2026-11-27'));
+  });
+
+  // "2026-12" has begun at UTC+14 on 2026-11-30 at 10:00 UTC or later; its
+  // first day is the day the removal is dated, at Day precision.
+  it('is the first day of a later month, at Day precision', () => {
+    expect(defaultRemovalDate(dateOf('2026-12'), new Date('2026-11-30T23:30:00Z'))).toEqual(dateOf('2026-12-01'));
   });
 });

@@ -43,9 +43,13 @@ export function copyLimitReached(max: number): CodedHttpException {
   );
 }
 
-/** A removal's date, reason and note describe a removal, so a copy still owned has none to edit (#1231). */
-export function copyStillOwned(): CodedHttpException {
-  return new CodedHttpException(Http.Conflict, 'COLLECTION_COPY_OWNED', t('errors.game_collection.copy_owned'));
+/** A removal's date and reason describe a removal, so a copy not removed has none to edit (#1231). */
+export function copyNotRemoved(): CodedHttpException {
+  return new CodedHttpException(
+    Http.Conflict,
+    'COLLECTION_COPY_NOT_REMOVED',
+    t('errors.game_collection.copy_not_removed'),
+  );
 }
 
 /** A condition describes a physical object, so a digital copy has none (#1231). */
@@ -57,13 +61,24 @@ export function conditionOnDigital(): CodedHttpException {
   );
 }
 
-/** A copy's acquisition or removal is dated on a day that has not come yet (#1231). */
-export function dateInFuture(): CodedHttpException {
-  return new CodedHttpException(
-    Http.BadRequest,
-    'COLLECTION_DATE_IN_FUTURE',
-    t('errors.game_collection.date_in_future'),
-  );
+/** The dates of a copy a request may set, by their wire names (#1231). */
+export type CopyDateField = 'acquiredOn' | 'removedOn';
+
+/** What each copy date's refusal says, so a PATCH sending both names the one refused (#1231). */
+const DATE_IN_FUTURE_MESSAGES = {
+  acquiredOn: 'errors.game_collection.acquired_on_in_future',
+  removedOn: 'errors.game_collection.removed_on_in_future',
+} as const satisfies Record<CopyDateField, string>;
+
+/**
+ * A copy's acquisition or removal is dated on a day that has not come yet
+ * anywhere on Earth (#1231). `field` names which date, in the message and in
+ * the envelope's `field`, so a client can mark the right input.
+ */
+export function dateInFuture(field: CopyDateField): CodedHttpException {
+  return new CodedHttpException(Http.BadRequest, 'COLLECTION_DATE_IN_FUTURE', t(DATE_IN_FUTURE_MESSAGES[field]), {
+    fields: { field },
+  });
 }
 
 /** A copy can't be removed before it was acquired (#1231). */
@@ -77,5 +92,30 @@ export function currencyUnknown(code: string): CodedHttpException {
     Http.BadRequest,
     'COLLECTION_CURRENCY_UNKNOWN',
     t('errors.game_collection.currency_unknown', { code }),
+  );
+}
+
+/**
+ * The platform game an add names is missing, read so or gone before the
+ * entry's insert, under the code the list routes give the same row (#1231).
+ */
+export function platformGameNotFound(id: string): CodedHttpException {
+  return new CodedHttpException(Http.NotFound, 'PLATFORM_GAME_NOT_FOUND', t('errors.platform_game.not_found', { id }));
+}
+
+/**
+ * The release a copy names as its edition is missing, read so or gone before
+ * the copy's write, under the code the list routes give the same row (#1231).
+ */
+export function releaseNotFound(id: string): CodedHttpException {
+  return new CodedHttpException(Http.NotFound, 'GAME_RELEASE_NOT_FOUND', t('errors.game_release.not_found', { id }));
+}
+
+/** The release a copy names is a release of another platform game than its entry's (#1231). */
+export function releasePlatformMismatch(releaseId: string, platformGameId: string): CodedHttpException {
+  return new CodedHttpException(
+    Http.BadRequest,
+    'COLLECTION_RELEASE_PLATFORM_MISMATCH',
+    t('errors.game_collection.release_platform_mismatch', { releaseId, platformGameId }),
   );
 }

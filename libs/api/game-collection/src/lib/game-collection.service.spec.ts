@@ -1,4 +1,4 @@
-import type { GameCollection, PlatformGame } from '@bge/database';
+import type { GameCollection, GameRelease, PlatformGame } from '@bge/database';
 import {
   Action,
   ContentType,
@@ -11,7 +11,7 @@ import {
   Reach,
   ResourceType,
 } from '@bge/database';
-import { uniqueViolation, uniqueViolationWithoutMeta } from '@bge/database/testing';
+import { foreignKeyViolation, uniqueViolation, uniqueViolationWithoutMeta } from '@bge/database/testing';
 import type { CollectionSupplyChange } from '@bge/event';
 import { emitCollectionSupplyChanges, syncCollectionEntrySupply } from '@bge/event';
 import { t } from '@bge/i18n';
@@ -24,7 +24,7 @@ import {
   rawQueryText,
   unwrapTransaction,
 } from '@bge/testing';
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { COLLECTION_INCLUDE, OWNER_COPY_SELECT } from './collection-row';
 import { CollectionWriteService } from './collection-write.service';
@@ -52,9 +52,11 @@ const dependentRecordNotFound = () =>
 /** What a second insert of one entry identity raises, once the first has committed (#1231). */
 const identityViolation = () => uniqueViolation({ index: 'game_collections_user_id_platform_game_id_medium_key' });
 
-/** What an insert raises when a row it names went before it committed (#1231). */
-const foreignKeyViolation = () =>
-  new Prisma.PrismaClientKnownRequestError('Foreign key constraint violated', { code: 'P2003', clientVersion: 'test' });
+/** What an add's insert raises when the platform game it names went before it committed (#1231). */
+const platformGameGone = () => foreignKeyViolation({ index: 'game_collections_platform_game_id_fkey' });
+
+/** What a copy's insert raises when the release it names went first: its trigger names itself (#1231). */
+const releaseGone = () => foreignKeyViolation({ index: 'collection_copies_release_match' });
 
 /** A copy with nothing known about it: what an add with no `copy` records (#1231). */
 const UNKNOWN_COPY = {
@@ -636,12 +638,12 @@ describe('GameCollectionService', () => {
       entryReads({ deletedAt: null, owned: 1 });
     });
 
-    it('404s when the platform game does not exist', async () => {
+    it('answers PLATFORM_GAME_NOT_FOUND when the platform game does not exist (#1231)', async () => {
       db.platformGame.findUnique.mockResolvedValue(null);
 
-      await expect(service.addToCollection({ platformGameId: 'pg-404', medium: GameMedium.Physical })).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(
+        service.addToCollection({ platformGameId: 'pg-404', medium: GameMedium.Physical }),
+      ).rejects.toMatchObject({ status: 404, code: 'PLATFORM_GAME_NOT_FOUND' });
       expect(db.$transaction).not.toHaveBeenCalled();
     });
 
@@ -827,6 +829,7 @@ describe('GameCollectionService', () => {
 
       expect(db.collectionCopy.create).toHaveBeenCalledWith({
         data: { entryId: 'gc-1', ...UNKNOWN_COPY, condition: GameCondition.LikeNew, acquiredFrom: 'A friend' },
+        select: OWNER_COPY_SELECT,
       });
       const lastUpdated = db.gameCollection.update.mock.calls[0]?.[0]?.data.lastUpdated;
       expect(syncSupply).toHaveBeenCalledWith(db, { id: 'gc-1', deletedAt: null }, lastUpdated);
@@ -1037,13 +1040,58 @@ describe('GameCollectionService', () => {
     // The platform game is read without a lock, so it can go before the
     // insert commits; the insert then fails on its foreign key, and the
     // client hears the 404 it would have heard a moment earlier (#1231).
-    it('a platform game deleted mid-add answers its 404, not a 500 (#1231)', async () => {
-      db.gameCollection.create.mockRejectedValue(foreignKeyViolation());
+    it('a platform game deleted mid-add answers PLATFORM_GAME_NOT_FOUND, not a 500 (#1231)', async () => {
+      db.gameCollection.create.mockRejectedValue(platformGameGone());
 
-      await expect(service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical })).rejects.toThrow(
-        new NotFoundException(t('errors.platform_game.not_found', { id: 'pg-1' })),
-      );
+      await expect(
+        service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical }),
+      ).rejects.toMatchObject({ status: 404, code: 'PLATFORM_GAME_NOT_FOUND' });
       expect(db.$transaction).toHaveBeenCalledTimes(1);
+    });
+
+    // A failure that names no constraint keeps the answer the insert gave
+    // before it could tell the two apart (#1231).
+    it('a foreign key failure naming no constraint answers PLATFORM_GAME_NOT_FOUND (#1231)', async () => {
+      db.gameRelease.findUnique.mockResolvedValue({ platformGameId: 'pg-1' } as GameRelease);
+      db.gameCollection.create.mockRejectedValue(foreignKeyViolation({ omitConstraint: true }));
+
+      await expect(
+        service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical, copy: { releaseId: 'rel-1' } }),
+      ).rejects.toMatchObject({ status: 404, code: 'PLATFORM_GAME_NOT_FOUND' });
+    });
+
+    // The copy's release is read without a lock too. Gone before the insert,
+    // its trigger fails the copy, which is told apart from a platform game
+    // gone (#1231).
+    it("a new entry's release deleted mid-add answers GAME_RELEASE_NOT_FOUND (#1231)", async () => {
+      db.gameRelease.findUnique.mockResolvedValue({ platformGameId: 'pg-1' } as GameRelease);
+      db.gameCollection.create.mockRejectedValue(releaseGone());
+
+      await expect(
+        service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical, copy: { releaseId: 'rel-1' } }),
+      ).rejects.toMatchObject({ status: 404, code: 'GAME_RELEASE_NOT_FOUND' });
+    });
+
+    it("a removed entry's new copy whose release went mid-add answers GAME_RELEASE_NOT_FOUND (#1231)", async () => {
+      lockedAs({ id: 'gc-1', deletedAt: REMOVED_AT });
+      db.gameRelease.findUnique.mockResolvedValue({ platformGameId: 'pg-1' } as GameRelease);
+      db.collectionCopy.create.mockRejectedValue(releaseGone());
+
+      await expect(
+        service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical, copy: { releaseId: 'rel-1' } }),
+      ).rejects.toMatchObject({ status: 404, code: 'GAME_RELEASE_NOT_FOUND' });
+    });
+
+    it.each([
+      ['missing', null, 'GAME_RELEASE_NOT_FOUND', 404],
+      ['of another platform game', { platformGameId: 'pg-2' }, 'COLLECTION_RELEASE_PLATFORM_MISMATCH', 400],
+    ])("refuses a new entry's copy whose release is %s with %s (#1231)", async (_, release, code, status) => {
+      db.gameRelease.findUnique.mockResolvedValue(release as GameRelease | null);
+
+      await expect(
+        service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical, copy: { releaseId: 'rel-1' } }),
+      ).rejects.toMatchObject({ status, code });
+      expect(db.gameCollection.create).not.toHaveBeenCalled();
     });
 
     // A new entry and one still owned have no paused offers to resume, so
@@ -1375,12 +1423,101 @@ describe('GameCollectionService', () => {
       });
     });
 
+    // A copy may be acquired on a day that is today east of UTC but tomorrow
+    // in UTC, so a removal with no date, dated today in UTC, would end before
+    // it began. The date is decided per copy (#1231).
+    describe('a removal with no date, with the clock at 23:30 UTC on 2026-11-26', () => {
+      const TODAY = {
+        removedOn: new Date('2026-11-26T00:00:00Z'),
+        removedOnPrecision: DatePrecision.Day,
+      };
+      const TOMORROW = {
+        removedOn: new Date('2026-11-27T00:00:00Z'),
+        removedOnPrecision: DatePrecision.Day,
+      };
+
+      beforeEach(() => {
+        jest.useFakeTimers({ now: new Date('2026-11-26T23:30:00Z'), doNotFake: ['nextTick', 'setImmediate'] });
+      });
+
+      afterEach(() => {
+        jest.useRealTimers();
+      });
+
+      it('a removal with no date of a copy acquired later than today in UTC is dated its acquisition day (#1231)', async () => {
+        db.collectionCopy.findMany.mockResolvedValueOnce([
+          { id: 'copy-1', acquiredOn: new Date('2026-11-27T00:00:00Z'), acquiredOnPrecision: DatePrecision.Day },
+        ] as never);
+
+        await service.remove('gc-1', {});
+
+        expect(db.collectionCopy.updateMany).toHaveBeenCalledTimes(1);
+        expect(db.collectionCopy.updateMany.mock.calls[0]?.[0]?.data).toMatchObject(TOMORROW);
+      });
+
+      it.each([
+        ['no acquisition date', null, null],
+        ['an earlier acquisition', new Date('2026-11-20T00:00:00Z'), DatePrecision.Day],
+        ['a Month acquisition that has begun', new Date('2026-11-01T00:00:00Z'), DatePrecision.Month],
+        ['a Year acquisition that has begun', new Date('2026-01-01T00:00:00Z'), DatePrecision.Year],
+      ])(
+        'dates every owned copy today in UTC, as one statement, for %s',
+        async (_, acquiredOn, acquiredOnPrecision) => {
+          db.collectionCopy.findMany.mockResolvedValueOnce([
+            { id: 'copy-1', acquiredOn, acquiredOnPrecision },
+            { id: 'copy-2', acquiredOn, acquiredOnPrecision },
+          ] as never);
+
+          await service.remove('gc-1', {});
+
+          expect(db.collectionCopy.updateMany).toHaveBeenCalledTimes(1);
+          expect(db.collectionCopy.updateMany).toHaveBeenCalledWith({
+            where: { entryId: 'gc-1', removedAt: null, retractedAt: null },
+            data: expect.objectContaining(TODAY),
+          });
+        },
+      );
+
+      // The copies of one entry can differ: each is dated by its own
+      // acquisition, so the one acquired tomorrow is written apart.
+      it('dates each copy by its own acquisition, one statement per date', async () => {
+        db.collectionCopy.findMany.mockResolvedValueOnce([
+          { id: 'copy-1', acquiredOn: new Date('2026-11-20T00:00:00Z'), acquiredOnPrecision: DatePrecision.Day },
+          { id: 'copy-2', acquiredOn: new Date('2026-11-27T00:00:00Z'), acquiredOnPrecision: DatePrecision.Day },
+          { id: 'copy-3', acquiredOn: null, acquiredOnPrecision: null },
+        ] as never);
+
+        await service.remove('gc-1', { reason: GameRemovalReason.Sold });
+
+        expect(db.collectionCopy.updateMany).toHaveBeenCalledTimes(2);
+        expect(db.collectionCopy.updateMany).toHaveBeenCalledWith({
+          where: { id: { in: ['copy-1', 'copy-3'] }, entryId: 'gc-1', removedAt: null, retractedAt: null },
+          data: expect.objectContaining({ ...TODAY, removeReason: GameRemovalReason.Sold }),
+        });
+        expect(db.collectionCopy.updateMany).toHaveBeenCalledWith({
+          where: { id: { in: ['copy-2'] }, entryId: 'gc-1', removedAt: null, retractedAt: null },
+          data: expect.objectContaining({ ...TOMORROW, removeReason: GameRemovalReason.Sold }),
+        });
+      });
+
+      it('still refuses a removal date the user sent that ends before an acquisition', async () => {
+        db.collectionCopy.findMany.mockResolvedValueOnce([
+          { id: 'copy-1', acquiredOn: new Date('2026-11-27T00:00:00Z'), acquiredOnPrecision: DatePrecision.Day },
+        ] as never);
+
+        await expect(service.remove('gc-1', { removedOn: '2026-11-26' })).rejects.toMatchObject({
+          code: 'COLLECTION_DATE_ORDER',
+        });
+        expect(db.collectionCopy.updateMany).not.toHaveBeenCalled();
+      });
+    });
+
     // A copy can't be removed before it was acquired. Each owned copy is
     // checked against the removal's date, under the entry's lock (#1231).
     it('refuses a removal dated before an owned copy was acquired with COLLECTION_DATE_ORDER', async () => {
       db.collectionCopy.findMany.mockResolvedValueOnce([
-        { acquiredOn: null, acquiredOnPrecision: null },
-        { acquiredOn: new Date('2020-05-01T00:00:00Z'), acquiredOnPrecision: DatePrecision.Month },
+        { id: 'copy-1', acquiredOn: null, acquiredOnPrecision: null },
+        { id: 'copy-2', acquiredOn: new Date('2020-05-01T00:00:00Z'), acquiredOnPrecision: DatePrecision.Month },
       ] as never);
 
       await expect(service.remove('gc-1', { removedOn: '2019' })).rejects.toMatchObject({
@@ -1389,7 +1526,7 @@ describe('GameCollectionService', () => {
       });
       expect(db.collectionCopy.findMany).toHaveBeenCalledWith({
         where: { entryId: 'gc-1', removedAt: null, retractedAt: null },
-        select: { acquiredOn: true, acquiredOnPrecision: true },
+        select: { id: true, acquiredOn: true, acquiredOnPrecision: true },
       });
       expect(db.collectionCopy.updateMany).not.toHaveBeenCalled();
       expect(syncSupply).not.toHaveBeenCalled();
@@ -1646,15 +1783,15 @@ describe('GameCollectionService', () => {
 
   /**
    * #1231. A row carries the entry's owned copies. Every reader gets each
-   * copy's id, edition and condition, from the include; the owner gets the
+   * copy's id, edition and condition, from the include; the entry's owner gets the
    * copy as the copy routes send it, read in a query of its own whose `where`
    * names the acting user as the entry's owner. That bound, not a branch on
-   * who is reading, keeps the private fields to the owner.
+   * who is reading, keeps the private fields to the entry's owner.
    */
   describe('copies on collection rows (#1231)', () => {
     const PUBLIC_COPY = { condition: GameCondition.Good, id: 'copy-1', release: null };
 
-    /** `copy-1` as the owner's query reads it: every field the copy routes send, and its entry. */
+    /** `copy-1` as the entry owner's query reads it: every field the copy routes send, and its entry. */
     const ownersCopyRow = (entryId = 'gc-1', id = 'copy-1') => ({
       entryId,
       id,
@@ -1675,7 +1812,7 @@ describe('GameCollectionService', () => {
       release: null,
     });
 
-    /** `copy-1` as the owner is sent it. */
+    /** `copy-1` as the entry's owner is sent it. */
     const ownersCopy = (id = 'copy-1') => ({
       id,
       createdAt: new Date('2026-01-02T00:00:00Z'),
@@ -1691,7 +1828,7 @@ describe('GameCollectionService', () => {
       release: null,
     });
 
-    /** The owner's query for `entryIds`, bound to `userId` as their owner. */
+    /** The entry owner's query for `entryIds`, bound to `userId` as their owner. */
     const ownerCopyQuery = (entryIds: string[], userId = ME) => ({
       where: { entryId: { in: entryIds }, entry: { userId }, removedAt: null, retractedAt: null },
       select: { ...OWNER_COPY_SELECT, entryId: true },
@@ -1710,7 +1847,7 @@ describe('GameCollectionService', () => {
       });
     });
 
-    it('getById sends the owner their own copies, read in a query of its own bound to them', async () => {
+    it("getById sends the entry's owner their own copies, read in a query of its own bound to them", async () => {
       db.gameCollection.findUnique.mockResolvedValue(withPublicCopies());
       db.collectionCopy.findMany.mockResolvedValue([ownersCopyRow()] as never);
 
@@ -1721,8 +1858,8 @@ describe('GameCollectionService', () => {
       expect(row.copies).toEqual([ownersCopy()]);
     });
 
-    // The review's third focus: a friend may read the entry, and the owner's
-    // query, bound to the friend, finds no copy of it (#1231).
+    // The review's third focus: a friend may read the entry, and the entry
+    // owner's query, bound to the friend, finds no copy of it (#1231).
     it("getById of another user's entry keeps the public copies: the query bound to the reader finds none", async () => {
       db.gameCollection.findUnique.mockResolvedValue(withPublicCopies({ userId: 'user-2' }));
 
@@ -1746,11 +1883,11 @@ describe('GameCollectionService', () => {
       expect(row.copies).toEqual([PUBLIC_COPY]);
     });
 
-    // An API key acts for its owner: its acting user is the owner, and the
+    // An API key acts for the user who made it, the entry's owner here, and the
     // key reads the entry only within its own grants. The copy routes already
-    // send the key the owner's shape, so a row it may read carries the same
-    // fields; a reader the key can't be is never the owner (#1231).
-    it("sends an API key acting for its owner the owner's copies, bound to that owner", async () => {
+    // send the key the entry owner's shape, so a row it may read carries the same
+    // fields; a reader the key can't be is never the entry's owner (#1231).
+    it("sends an API key acting for the entry's owner that owner's copies, bound to them", async () => {
       abilityService.getActingUserId.mockReturnValue('key-owner');
       db.gameCollection.findUnique.mockResolvedValue(withPublicCopies({ userId: 'key-owner' }));
       db.collectionCopy.findMany.mockResolvedValue([ownersCopyRow()] as never);
@@ -1792,7 +1929,7 @@ describe('GameCollectionService', () => {
     });
 
     // Another user's collection is the route other readers read, so its rows
-    // are the public shape for every caller, its owner too (#1231).
+    // are the public shape for every caller, the entry's owner too (#1231).
     it("listForUser never reads owner copies, even of the acting user's own collection", async () => {
       db.gameCollection.findMany.mockResolvedValue([withPublicCopies()]);
       db.collectionCopy.findMany.mockResolvedValue([ownersCopyRow()] as never);
@@ -1816,7 +1953,7 @@ describe('GameCollectionService', () => {
       it.each([
         ['addToCollection', () => service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical })],
         ['update', () => service.update('gc-1', { rating: 7 })],
-      ] as const)('%s sends the owner their own copies', async (_method, write) => {
+      ] as const)("%s sends the entry's owner their own copies", async (_method, write) => {
         db.collectionCopy.findMany.mockResolvedValue([ownersCopyRow()] as never);
 
         const row = await write();

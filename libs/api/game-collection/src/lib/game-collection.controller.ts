@@ -72,9 +72,10 @@ export class GameCollectionController {
   @ApiResponse({
     status: Http.BadRequest,
     description:
-      'A condition on a digital copy (code COLLECTION_CONDITION_DIGITAL), an acquisition after today ' +
-      '(code COLLECTION_DATE_IN_FUTURE), a price in a currency that is not an ISO 4217 code ' +
-      '(code COLLECTION_CURRENCY_UNKNOWN), a release of another platform game, or a malformed body',
+      'A condition on a digital copy (code COLLECTION_CONDITION_DIGITAL), an acquisition on a day that hasn’t begun anywhere on Earth yet ' +
+      '(code COLLECTION_DATE_IN_FUTURE, with `field`), a price in a currency that is not an ISO 4217 code ' +
+      '(code COLLECTION_CURRENCY_UNKNOWN), a release of another platform game ' +
+      '(code COLLECTION_RELEASE_PLATFORM_MISMATCH), or a malformed body',
   })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({
@@ -85,7 +86,9 @@ export class GameCollectionController {
   })
   @ApiResponse({
     status: Http.NotFound,
-    description: 'Platform game or release not found, including a platform game deleted while the add ran',
+    description:
+      'Platform game not found (code PLATFORM_GAME_NOT_FOUND) or release not found (code GAME_RELEASE_NOT_FOUND), ' +
+      'including one deleted while the add ran',
   })
   @ApiResponse({
     status: Http.Conflict,
@@ -129,8 +132,8 @@ export class GameCollectionController {
   @ApiResponse({
     status: Http.BadRequest,
     description:
-      'A removal date after today (code COLLECTION_DATE_IN_FUTURE), or before a copy you own was acquired ' +
-      '(code COLLECTION_DATE_ORDER)',
+      'A removal date on a day that hasn’t begun anywhere on Earth yet (code COLLECTION_DATE_IN_FUTURE, with `field`), or before a copy ' +
+      'you own was acquired (code COLLECTION_DATE_ORDER)',
   })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })

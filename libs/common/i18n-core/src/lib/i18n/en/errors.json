@@ -35,12 +35,13 @@
     "not_found": "Collection entry with ID {id} not found",
     "copy_not_found": "Copy with ID {id} not found",
     "copy_limit_reached": "This game already has {max} copies, the most it can hold. Copies you no longer own count too.",
-    "copy_owned": "This copy is still owned, so it has no removal to change. Remove the copy first.",
+    "copy_not_removed": "This copy hasn't been removed, so it has no removal to change. Remove the copy first.",
     "condition_digital": "A digital copy has no condition. Leave the condition out.",
-    "date_in_future": "That date is in the future.",
+    "acquired_on_in_future": "The date the copy was acquired (acquiredOn) hasn't come yet.",
+    "removed_on_in_future": "The removal date (removedOn) hasn't come yet.",
     "date_order": "A copy can't be removed before it was acquired.",
     "currency_unknown": "{code} is not a currency code we know. Use a three-letter code such as EUR or USD.",
-    "release_platform_mismatch": "Release {releaseId} does not belong to platform game {platformGameId}"
+    "release_platform_mismatch": "Release {releaseId} is an edition of another game or platform, not of platform game {platformGameId}."
   },
   "list": {
     "not_found": "List with ID {id} not found",

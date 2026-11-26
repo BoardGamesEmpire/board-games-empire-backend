@@ -8,6 +8,7 @@ import {
   Prisma,
   ResourceType,
 } from '@bge/database';
+import { foreignKeyViolation, uniqueViolation } from '@bge/database/testing';
 import { syncCollectionEntrySupply } from '@bge/event';
 import { AbilityService } from '@bge/permissions';
 import type { MockDatabaseService } from '@bge/testing';
@@ -121,7 +122,7 @@ describe('CollectionCopyService (#1231)', () => {
   }
 
   describe('list', () => {
-    // A copy's acquisition and price are the owner's alone, whatever the
+    // A copy's acquisition and price are the entry owner's alone, whatever the
     // entry's reach, so the entry is read as the acting user's own (#1231).
     it("reads the acting user's own entry under the read conditions, every copy oldest first", async () => {
       db.gameCollection.findUnique.mockResolvedValue({
@@ -246,6 +247,96 @@ describe('CollectionCopyService (#1231)', () => {
     });
   });
 
+  /**
+   * #1231, ADR 0002. A client queues the add offline and may send it again,
+   * so it carries a `clientRequestId`: a repeat answers the copy the key
+   * made, as it stands now, whatever the repeat says. The lookup runs under
+   * the entry's lock, after the entry is found to be the actor's own and
+   * within their update conditions, so a key is no way past those checks.
+   */
+  describe('add with a clientRequestId', () => {
+    const KEY = 'key-1';
+    const byKey = {
+      where: { entryId_clientRequestId: { entryId: 'gc-1', clientRequestId: KEY } },
+      select: OWNER_COPY_SELECT,
+    };
+
+    beforeEach(() => {
+      db.collectionCopy.findUnique.mockResolvedValue(null);
+      db.collectionCopy.create.mockResolvedValue(copyRow({ id: 'copy-2' }) as never);
+    });
+
+    it('stores the key on the copy it adds', async () => {
+      await service.add('gc-1', { note: 'Deluxe', clientRequestId: KEY });
+
+      expectLockedThenChecked();
+      expect(db.collectionCopy.findUnique).toHaveBeenCalledWith(byKey);
+      expect(db.collectionCopy.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ entryId: 'gc-1', note: 'Deluxe', clientRequestId: KEY }),
+        select: OWNER_COPY_SELECT,
+      });
+    });
+
+    // A repeat answers the original, removed since included, and adds
+    // nothing, so it never meets the cap, whatever its own body says.
+    it('a repeat answers the copy the key made, as it stands, and adds none, even at the cap', async () => {
+      db.collectionCopy.findUnique.mockResolvedValue(
+        copyRow({
+          id: 'copy-2',
+          note: 'Deluxe',
+          removedAt: new Date('2026-11-20T00:00:00Z'),
+          removedOn: new Date('2026-11-20T00:00:00Z'),
+          removedOnPrecision: DatePrecision.Day,
+        }) as never,
+      );
+      db.collectionCopy.count.mockResolvedValue(100);
+
+      const replayed = await service.add('gc-1', { note: 'Something else', clientRequestId: KEY });
+
+      expectLockedThenChecked();
+      expect(replayed).toMatchObject({ id: 'copy-2', note: 'Deluxe', removedOn: '2026-11-20' });
+      expect(db.collectionCopy.count).not.toHaveBeenCalled();
+      expect(db.collectionCopy.create).not.toHaveBeenCalled();
+      expect(db.gameRelease.findUnique).not.toHaveBeenCalled();
+    });
+
+    // Two repeats take the entry's lock in turn, so the second finds the
+    // first's copy. Should one still trip the key's unique, its transaction
+    // is aborted, so the add runs once more and finds the copy the other
+    // committed, as `createOrReplay` does.
+    it("a concurrent repeat that trips the key's unique finds the other's copy", async () => {
+      db.collectionCopy.findUnique
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(copyRow({ id: 'copy-other' }) as never);
+      db.collectionCopy.create.mockRejectedValueOnce(
+        uniqueViolation({ index: 'collection_copy_entry_client_request_id_unique' }),
+      );
+
+      const added = await service.add('gc-1', { clientRequestId: KEY });
+
+      expect(added).toMatchObject({ id: 'copy-other' });
+      expect(db.$transaction).toHaveBeenCalledTimes(2);
+      expect(db.collectionCopy.create).toHaveBeenCalledTimes(1);
+      expect(db.collectionCopy.findUnique).toHaveBeenNthCalledWith(2, byKey);
+    });
+
+    it('rethrows a unique violation of an add with no key, and runs it once', async () => {
+      const violation = uniqueViolation({ index: 'collection_copy_entry_client_request_id_unique' });
+      db.collectionCopy.create.mockRejectedValue(violation);
+
+      await expect(service.add('gc-1', {})).rejects.toBe(violation);
+      expect(db.$transaction).toHaveBeenCalledTimes(1);
+    });
+
+    it("rethrows a keyed add's violation of another unique, and runs it once", async () => {
+      const violation = uniqueViolation({ index: 'collection_copies_upstream_account_id_upstream_key_key' });
+      db.collectionCopy.create.mockRejectedValue(violation);
+
+      await expect(service.add('gc-1', { clientRequestId: KEY })).rejects.toBe(violation);
+      expect(db.$transaction).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('update', () => {
     it('refuses an edit that names no field', async () => {
       await expect(service.update('gc-1', 'copy-1', {})).rejects.toThrow(BadRequestException);
@@ -282,6 +373,18 @@ describe('CollectionCopyService (#1231)', () => {
       expect(db.collectionCopy.update).not.toHaveBeenCalled();
     });
 
+    // The release is read without a lock, so it can go before the edit
+    // writes it; the copy's trigger then fails, and the edit answers the 404
+    // of a release never there (#1231).
+    it('answers GAME_RELEASE_NOT_FOUND for a release gone before the edit wrote it', async () => {
+      db.collectionCopy.update.mockRejectedValue(foreignKeyViolation({ index: 'collection_copies_release_match' }));
+
+      await expect(service.update('gc-1', 'copy-1', { releaseId: 'rel-1' })).rejects.toMatchObject({
+        status: 404,
+        code: 'GAME_RELEASE_NOT_FOUND',
+      });
+    });
+
     it('answers COLLECTION_ENTRY_NOT_FOUND for an entry outside the update conditions', async () => {
       db.gameCollection.update.mockRejectedValueOnce(dependentRecordNotFound());
 
@@ -294,10 +397,10 @@ describe('CollectionCopyService (#1231)', () => {
     it.each([
       ['removedOn', { removedOn: '2024' }],
       ['removeReason', { removeReason: GameRemovalReason.Lost }],
-    ])('refuses %s on a copy still owned with COLLECTION_COPY_OWNED', async (_, dto) => {
+    ])('refuses %s on a copy not removed with COLLECTION_COPY_NOT_REMOVED', async (_, dto) => {
       await expect(service.update('gc-1', 'copy-1', dto)).rejects.toMatchObject({
         status: 409,
-        code: 'COLLECTION_COPY_OWNED',
+        code: 'COLLECTION_COPY_NOT_REMOVED',
       });
       expect(db.collectionCopy.update).not.toHaveBeenCalled();
     });
@@ -454,6 +557,79 @@ describe('CollectionCopyService (#1231)', () => {
       expect(syncSupply).toHaveBeenCalledWith(db, { id: 'gc-1', deletedAt: expect.any(Date) }, expect.any(Date));
     });
 
+    // A copy may be acquired on a day that is today east of UTC but tomorrow
+    // in UTC (the latest today on Earth), so a removal with no date, dated
+    // today in UTC, would end before it began (#1231).
+    describe('a removal with no date, with the clock at 23:30 UTC on 2026-11-26', () => {
+      const removedOnOf = () => db.collectionCopy.update.mock.calls[0]?.[0]?.data;
+
+      beforeEach(() => {
+        jest.useFakeTimers({ now: new Date('2026-11-26T23:30:00Z'), doNotFake: ['nextTick', 'setImmediate'] });
+      });
+
+      afterEach(() => {
+        jest.useRealTimers();
+      });
+
+      it('a removal with no date of a copy acquired later than today in UTC is dated its acquisition day (#1231)', async () => {
+        db.collectionCopy.findUnique.mockResolvedValue({
+          acquiredOn: new Date('2026-11-27T00:00:00Z'),
+          acquiredOnPrecision: DatePrecision.Day,
+        } as never);
+
+        await service.remove('gc-1', 'copy-1', {});
+
+        expect(removedOnOf()).toMatchObject({
+          removedOn: new Date('2026-11-27T00:00:00Z'),
+          removedOnPrecision: DatePrecision.Day,
+        });
+      });
+
+      it('dates the removal at Day precision when a month that has begun in UTC+14 only is the acquisition', async () => {
+        jest.setSystemTime(new Date('2026-11-30T23:30:00Z'));
+        db.collectionCopy.findUnique.mockResolvedValue({
+          acquiredOn: new Date('2026-12-01T00:00:00Z'),
+          acquiredOnPrecision: DatePrecision.Month,
+        } as never);
+
+        await service.remove('gc-1', 'copy-1', {});
+
+        expect(removedOnOf()).toMatchObject({
+          removedOn: new Date('2026-12-01T00:00:00Z'),
+          removedOnPrecision: DatePrecision.Day,
+        });
+      });
+
+      it.each([
+        ['no acquisition date', null, null],
+        ['an earlier acquisition', new Date('2026-11-20T00:00:00Z'), DatePrecision.Day],
+        ['a Month acquisition that has begun', new Date('2026-11-01T00:00:00Z'), DatePrecision.Month],
+        ['a Year acquisition that has begun', new Date('2026-01-01T00:00:00Z'), DatePrecision.Year],
+        ['an acquisition today in UTC', new Date('2026-11-26T00:00:00Z'), DatePrecision.Day],
+      ])('dates the removal today in UTC for %s', async (_, acquiredOn, acquiredOnPrecision) => {
+        db.collectionCopy.findUnique.mockResolvedValue({ acquiredOn, acquiredOnPrecision } as never);
+
+        await service.remove('gc-1', 'copy-1', {});
+
+        expect(removedOnOf()).toMatchObject({
+          removedOn: new Date('2026-11-26T00:00:00Z'),
+          removedOnPrecision: DatePrecision.Day,
+        });
+      });
+
+      it('still refuses a removal date the user sent that ends before the acquisition', async () => {
+        db.collectionCopy.findUnique.mockResolvedValue({
+          acquiredOn: new Date('2026-11-27T00:00:00Z'),
+          acquiredOnPrecision: DatePrecision.Day,
+        } as never);
+
+        await expect(service.remove('gc-1', 'copy-1', { removedOn: '2026-11-26' })).rejects.toMatchObject({
+          code: 'COLLECTION_DATE_ORDER',
+        });
+        expect(db.collectionCopy.update).not.toHaveBeenCalled();
+      });
+    });
+
     it('refuses a removal dated before the copy was acquired with COLLECTION_DATE_ORDER', async () => {
       db.collectionCopy.findUnique.mockResolvedValue({
         acquiredOn: new Date('2020-05-01T00:00:00Z'),
@@ -466,7 +642,7 @@ describe('CollectionCopyService (#1231)', () => {
       expect(db.collectionCopy.update).not.toHaveBeenCalled();
     });
 
-    it('refuses a removal dated after today with COLLECTION_DATE_IN_FUTURE, before any write', async () => {
+    it('refuses a removal dated on a day that is today nowhere yet with COLLECTION_DATE_IN_FUTURE, before any write', async () => {
       await expect(service.remove('gc-1', 'copy-1', { removedOn: '9999' })).rejects.toMatchObject({
         code: 'COLLECTION_DATE_IN_FUTURE',
       });
@@ -475,15 +651,16 @@ describe('CollectionCopyService (#1231)', () => {
   });
 
   /**
-   * #1231. Each write answers the copy in the owner's shape, so the writes are
-   * the owner's alone, as the list is. A role holding every permission (the
+   * #1231. Each write answers the copy in the entry owner's shape, so the writes are
+   * the entry owner's alone, as the list is. A role holding every permission (the
    * server's Owner) or a plugin with an update grant passes the update
    * conditions, so the entry's owner is checked beside them, under the lock,
    * before anything is written.
    */
   describe("another user's entry", () => {
     const writes = {
-      add: () => service.add('gc-1', { condition: GameCondition.Good }),
+      // Keyed, so the refusal is shown to come before the key's lookup too.
+      add: () => service.add('gc-1', { condition: GameCondition.Good, clientRequestId: 'key-1' }),
       update: () => service.update('gc-1', 'copy-1', { condition: GameCondition.Good }),
       remove: () => service.remove('gc-1', 'copy-1', {}),
     } as const;
@@ -496,6 +673,9 @@ describe('CollectionCopyService (#1231)', () => {
 
         await expect(writes[method]()).rejects.toMatchObject({ status: 404, code: 'COLLECTION_ENTRY_NOT_FOUND' });
         expect(db.gameCollection.update).not.toHaveBeenCalled();
+        // Nothing of the entry's copies is read before the refusal either.
+        expect(db.collectionCopy.findUnique).not.toHaveBeenCalled();
+        expect(db.collectionCopy.count).not.toHaveBeenCalled();
         expect(db.collectionCopy.create).not.toHaveBeenCalled();
         expect(db.collectionCopy.update).not.toHaveBeenCalled();
         expect(syncSupply).not.toHaveBeenCalled();
@@ -510,12 +690,14 @@ describe('CollectionCopyService (#1231)', () => {
 
       await expect(writes[method]()).rejects.toMatchObject({ status: 404, code: 'COLLECTION_ENTRY_NOT_FOUND' });
       expect(db.gameCollection.update).not.toHaveBeenCalled();
+      expect(db.collectionCopy.findUnique).not.toHaveBeenCalled();
+      expect(db.collectionCopy.count).not.toHaveBeenCalled();
       expect(db.collectionCopy.create).not.toHaveBeenCalled();
       expect(db.collectionCopy.update).not.toHaveBeenCalled();
     });
 
-    // An API key acts for its owner: its acting user is the owner, so it
-    // writes the owner's copies.
+    // An API key acts for the user who made it: here the entry's owner, so it
+    // writes that user's copies.
     it.each(methods)("%s lets an API key acting for the entry's owner write", async (method) => {
       abilityService.getActingUserId.mockReturnValue('key-owner');
       db.$queryRaw.mockResolvedValue([{ ...LOCKED, userId: 'key-owner' }] as never);

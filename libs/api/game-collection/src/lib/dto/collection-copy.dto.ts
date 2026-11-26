@@ -19,7 +19,7 @@ export class CollectionReleaseSummaryDto {
 }
 
 /**
- * One copy of a game, as its owner reads it (#1231): its edition and
+ * One copy of a game, as the entry's owner reads it (#1231): its edition and
  * condition, its acquisition, what it is worth, a note, and its removal. Dates
  * are sent at their own precision, prices as minor units and a currency.
  */
@@ -78,7 +78,7 @@ export class CollectionCopyDto {
   createdAt!: Date;
 }
 
-/** The owner's shape of a copy row: each date at its precision, each price as one value (#1231). */
+/** The entry owner's shape of a copy row: each date at its precision, each price as one value (#1231). */
 export function toCollectionCopyDto(row: OwnerCopyRow): CollectionCopyDto {
   const acquired = partialDateFromColumns(row.acquiredOn, row.acquiredOnPrecision);
   const removed = partialDateFromColumns(row.removedOn, row.removedOnPrecision);

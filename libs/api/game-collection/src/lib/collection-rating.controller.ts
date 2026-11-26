@@ -9,7 +9,7 @@ import { CollectionRatingService } from './collection-rating.service';
 import { CollectionRatingListResponseDto } from './dto';
 
 /**
- * The history of a collection entry's rating, on its owner's route (#1231).
+ * The history of a collection entry's rating, on the entry owner's route (#1231).
  * The entry's own routes append to it: each change of the rating, and
  * clearing it, is kept.
  */
@@ -27,7 +27,7 @@ export class CollectionRatingController {
     summary: 'List the changes of the rating of one of your collection entries',
     description:
       'Every change of the rating, oldest first, the ones with no known date before the rest. Each time the ' +
-      'rating changes, or you clear it, a change is kept, dated today. Only the owner sees the history, ' +
+      'rating changes, or you clear it, a change is kept, dated today. Only the entry’s owner sees the history, ' +
       'whatever the entry’s reach.',
   })
   @ApiParam({ name: 'id', type: String, description: 'The collection entry' })

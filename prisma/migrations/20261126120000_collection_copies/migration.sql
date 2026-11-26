@@ -51,6 +51,7 @@ CREATE TABLE "collection_copies" (
     "upstream_account_id" TEXT,
     "upstream_key" TEXT,
     "edited_by_user_at" TIMESTAMPTZ(3),
+    "client_request_id" TEXT,
     "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMPTZ(3) NOT NULL,
 
@@ -82,6 +83,9 @@ CREATE INDEX "collection_copies_release_id_idx" ON "collection_copies"("release_
 
 -- CreateIndex
 CREATE UNIQUE INDEX "collection_copies_upstream_account_id_upstream_key_key" ON "collection_copies"("upstream_account_id", "upstream_key");
+
+-- A retried copy add answers the copy its key made (#252), per entry.
+CREATE UNIQUE INDEX "collection_copy_entry_client_request_id_unique" ON "collection_copies"("entry_id", "client_request_id");
 
 -- CreateIndex
 CREATE INDEX "collection_rating_changes_entry_id_occurred_on_idx" ON "collection_rating_changes"("entry_id", "occurred_on");
@@ -158,7 +162,9 @@ ALTER TABLE "loaned_games" DROP COLUMN "collection_id";
 -- so its trigger reads the entry's. The copies above took their entry's
 -- release, which that trigger had already checked. That trigger also fired when
 -- an entry's platform game changed; nothing writes that column, so the copy
--- trigger checks only the copy's own writes.
+-- trigger checks only the copy's own writes. It names itself as the
+-- constraint that failed, so the api can tell a release gone mid-request from
+-- the entry's platform game gone (#1231).
 DROP TRIGGER "game_collections_release_match" ON "game_collections";
 
 CREATE FUNCTION assert_collection_copy_release_matches_entry()
@@ -174,7 +180,7 @@ BEGIN
     RAISE EXCEPTION
       'Integrity violation in %: release_id % does not belong to the platform game of entry %',
       TG_TABLE_NAME, NEW.release_id, NEW.entry_id
-      USING ERRCODE = 'foreign_key_violation';
+      USING ERRCODE = 'foreign_key_violation', CONSTRAINT = 'collection_copies_release_match';
   END IF;
 
   RETURN NEW;

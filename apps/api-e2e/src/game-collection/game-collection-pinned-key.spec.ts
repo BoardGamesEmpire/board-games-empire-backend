@@ -218,4 +218,36 @@ describe('a key pinned to one collection entry (#1288)', () => {
     // The control: the owner's session removes the other entry.
     await remove(owner, other.id).expect(200);
   });
+
+  // Removing an entry's last owned copy removes the entry, so it needs the
+  // entry's delete permission beside the update every copy write needs
+  // (#1288). A key that may only update is refused it, and nothing changes;
+  // the same key removes a copy that isn't the last.
+  it("a key that may update but not delete an entry can't remove its last owned copy, and can remove another (#1288)", async () => {
+    const owner = await actors.user();
+    const named = await arrangeEntry(owner.user.id);
+    const key = await keyWith(owner, 'update:game_collection', named.id);
+    const removeCopy = (caller: Caller, copyId: string) =>
+      request(baseUrl).delete(`${COLLECTIONS_PATH}/${named.id}/copies/${copyId}`).set(caller.headers);
+    const copiesOf = () =>
+      db.client.collectionCopy.findMany({
+        where: { entryId: named.id },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true, removedAt: true },
+      });
+    const [only] = await copiesOf();
+    if (only === undefined) {
+      throw new Error('the arranged entry holds one copy');
+    }
+
+    await removeCopy(key, only.id).expect(403);
+    expect(await copiesOf()).toEqual([{ id: only.id, removedAt: null }]);
+    expect(await ownership(named.id)).toEqual({ deletedAt: null, owned: 1 });
+
+    // The positive control: with a second copy owned, the first is no longer
+    // the last, so the update the key holds is enough.
+    await request(baseUrl).post(`${COLLECTIONS_PATH}/${named.id}/copies`).set(owner.headers).send({}).expect(201);
+    await removeCopy(key, only.id).expect(200);
+    expect(await ownership(named.id)).toEqual({ deletedAt: null, owned: 1 });
+  });
 });

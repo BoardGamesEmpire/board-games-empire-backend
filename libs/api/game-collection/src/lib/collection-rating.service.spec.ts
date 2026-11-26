@@ -3,7 +3,12 @@ import { AbilityService } from '@bge/permissions';
 import type { MockDatabaseService } from '@bge/testing';
 import { createTestingModuleWithDb } from '@bge/testing';
 import { ForbiddenException } from '@nestjs/common';
-import { appendRatingChange, CollectionRatingService, RATING_CHANGE_SELECT } from './collection-rating.service';
+import {
+  appendRatingChange,
+  appendRatingChangeIfChanged,
+  CollectionRatingService,
+  RATING_CHANGE_SELECT,
+} from './collection-rating.service';
 
 const COND = { id: 'sentinel-condition' };
 const ME = 'user-1';
@@ -36,6 +41,31 @@ describe('appendRatingChange (#1231)', () => {
   });
 });
 
+// The one guard every write of the entry's rating shares: a rating sent that
+// differs from the locked row's is a change, and nothing else is (#1231).
+describe('appendRatingChangeIfChanged (#1231)', () => {
+  it.each([
+    ['a new rating', 7, 6, 1],
+    ['a cleared rating', null, 6, 1],
+    ['the first rating of an entry with none', 7, null, 1],
+    ['the same rating', 6, 6, 0],
+    ['no rating on an entry with none', null, null, 0],
+    ['no rating sent', undefined, 6, 0],
+  ])('appends for %s: %s over %s', async (_, sent, current, appended) => {
+    const create = jest.fn().mockResolvedValue({});
+
+    await appendRatingChangeIfChanged(
+      { collectionRatingChange: { create } } as never,
+      'gc-1',
+      sent,
+      current,
+      new Date(),
+    );
+
+    expect(create).toHaveBeenCalledTimes(appended);
+  });
+});
+
 describe('CollectionRatingService (#1231)', () => {
   let service: CollectionRatingService;
   let db: MockDatabaseService;
@@ -58,7 +88,7 @@ describe('CollectionRatingService (#1231)', () => {
   afterEach(() => jest.clearAllMocks());
 
   describe('list', () => {
-    // The history is the owner's alone, whatever the entry's reach, so the
+    // The history is the entry owner's alone, whatever the entry's reach, so the
     // entry is read as the actor's own, under their read conditions. Unknown
     // dates come first, then the day the change was written, then the id, so
     // the order never moves between reads (#1231).
