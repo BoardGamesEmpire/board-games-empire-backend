@@ -1,8 +1,9 @@
-import type { Action, GameCollection, GameMedium, GameRemovalReason } from '@bge/database';
-import { DatabaseService, isPrismaDependentRecordNotFoundError, Prisma, ResourceType } from '@bge/database';
+import type { GameCollection, GameMedium, GameRemovalReason } from '@bge/database';
+import { Action, DatabaseService, isPrismaDependentRecordNotFoundError, Prisma, ResourceType } from '@bge/database';
 import type { CollectionSupplyChange } from '@bge/event';
 import { emitCollectionSupplyChanges, syncCollectionEntrySupply } from '@bge/event';
 import type { AbilityService } from '@bge/permissions';
+import { resolveActingUserIdOrNull } from '@bge/permissions';
 import { Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { OWNED_COPY, REMOVED_COPY } from './collection-row';
@@ -155,6 +156,35 @@ export class CollectionWriteService {
     `);
 
     return locked ?? null;
+  }
+
+  /**
+   * Locks the entry's row, as the transaction's first lock (#1221), only when
+   * it is the acting user's own (#1231), so a request for another user's
+   * entry never makes its owner's writes wait, and writes its `lastUpdated`
+   * under the actor's `update` conditions (#1288): the start of every write
+   * only the entry's owner makes, which is an update of the entry, as the copy
+   * routes' and the rating change routes' are. Another user's entry, or any
+   * entry for an actor that is no user, answers `COLLECTION_ENTRY_NOT_FOUND`
+   * before anything is read or written, as the owner's reads do. Answers what
+   * the write is checked against: the entry's medium and platform game.
+   */
+  async lockOwnEntryForUpdate(
+    tx: Prisma.TransactionClient,
+    abilityService: AbilityService,
+    entryId: string,
+    now: Date,
+  ): Promise<LockedEntry> {
+    const actingUserId = resolveActingUserIdOrNull(abilityService);
+    const locked = actingUserId === null ? null : await this.lockEntry(tx, entryId, actingUserId);
+
+    if (locked === null) {
+      throw collectionEntryNotFound(entryId);
+    }
+
+    await writeEntryUnder(tx, abilityService, entryId, Action.update, {}, { lastUpdated: now });
+
+    return locked;
   }
 
   /**

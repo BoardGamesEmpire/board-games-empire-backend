@@ -55,9 +55,11 @@ better-auth writes itself (below):
   `COLLECTION_ENTRY_NOT_FOUND` for a collection entry the user can't see
   (missing, already removed, or not theirs, which the 404 never tells apart),
   `COLLECTION_COPY_NOT_FOUND` for a copy the same way, and
-  `COLLECTION_REVISION_NOT_FOUND` for a revision of a copy: missing, a
-  revision of another copy, or one whose stored values can't be read back
-  (#1231). A 404 without such a code, `ROUTE_NOT_FOUND` above all, says
+  `COLLECTION_REVISION_NOT_FOUND` for a revision of a copy or of a rating
+  change: missing, a revision of another one, or one whose stored values can't
+  be read back, and `COLLECTION_RATING_NOT_FOUND` for a rating change the same
+  way as a copy, one taken back included on every route but the undo of its
+  take-back (#1231). A 404 without such a code, `ROUTE_NOT_FOUND` above all, says
   nothing about any row (#634).
 
 - The collection's other refusals (#1231), each with its own code:
@@ -70,10 +72,13 @@ better-auth writes itself (below):
     of a game, which would leave the game with none;
   - `COLLECTION_COPY_NOT_TAKEN_BACK`: a 409 for undoing the take-back of a
     copy that exists but is not taken back;
+  - `COLLECTION_RATING_NOT_TAKEN_BACK`: a 409 for undoing the take-back of a
+    rating change that exists but is not taken back;
   - `COLLECTION_CONDITION_DIGITAL`: a 400 for a condition on a digital copy;
-  - `COLLECTION_DATE_IN_FUTURE`: a 400 for an acquisition or removal date on a
-    day that has begun nowhere on Earth yet, judged at UTC+14, with the date
-    it refused in `field` (`acquiredOn` or `removedOn`);
+  - `COLLECTION_DATE_IN_FUTURE`: a 400 for an acquisition, removal or rating
+    change date on a day that has begun nowhere on Earth yet, judged at
+    UTC+14, with the date it refused in `field` (`acquiredOn`, `occurredOn` or
+    `removedOn`);
   - `COLLECTION_DATE_ORDER`: a 400 for a removal before the acquisition;
   - `COLLECTION_CURRENCY_UNKNOWN`: a 400 for a price whose currency is not an
     ISO 4217 code;

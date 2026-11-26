@@ -109,6 +109,7 @@ export function createMockDatabaseService(): MockDatabaseService {
     collectionCopy: mockDelegate(),
     collectionCopyRevision: mockDelegate(),
     collectionRatingChange: mockDelegate(),
+    collectionRatingRevision: mockDelegate(),
     designer: mockDelegate(),
     designerGatewayAlias: mockDelegate(),
     event: mockDelegate(),

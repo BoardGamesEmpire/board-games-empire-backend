@@ -1,5 +1,5 @@
 import { DatePrecision } from '@bge/database';
-import type { CopyDateField } from '../game-collection.errors';
+import type { CollectionDateField } from '../game-collection.errors';
 import { dateInFuture, dateOrder } from '../game-collection.errors';
 
 /**
@@ -129,7 +129,7 @@ export function latestToday(now: Date): PartialDate {
  * nowhere yet, naming `field` in the refusal. A year or month that has begun
  * passes, because its first day is not in the future (#1231).
  */
-export function assertNotInFuture(date: PartialDate, now: Date, field: CopyDateField): void {
+export function assertNotInFuture(date: PartialDate, now: Date, field: CollectionDateField): void {
   if (date.on.getTime() > latestToday(now).on.getTime()) {
     throw dateInFuture(field);
   }

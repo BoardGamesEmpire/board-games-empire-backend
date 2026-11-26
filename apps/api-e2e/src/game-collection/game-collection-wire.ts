@@ -266,10 +266,27 @@ export const ratingChangeWireSchema = z
     id: z.string().min(1),
     occurredOn: z.string().nullable(),
     rating: z.number().int().nullable(),
+    retractedAt: z.string().nullable(),
   })
   .strict();
 
 export type RatingChangeWire = z.infer<typeof ratingChangeWireSchema>;
+
+const ratingChangeEnvelopeSchema = z.object({ ratingChange: ratingChangeWireSchema });
+
+/** `POST`, `PATCH`, `DELETE` on `/api/game-collections/:id/ratings…`: `{ ratingChange, message }` (#1231). */
+export function ratingChangeEnvelope(response: HttpResponseLike, request: RequestDescription): RatingChangeWire {
+  const parsed = ratingChangeEnvelopeSchema.safeParse(response.body);
+  if (!parsed.success) {
+    return fail(
+      `its 'ratingChange' is not a rating change as its owner reads it (${parsed.error.message})`,
+      request,
+      response,
+    );
+  }
+
+  return parsed.data.ratingChange;
+}
 
 const listRatingsEnvelopeSchema = z.object({ ratings: z.array(ratingChangeWireSchema) });
 
@@ -319,6 +336,41 @@ export function listRevisionsEnvelope(
   if (!parsed.success) {
     return fail(
       `its 'revisions' is not a list of a copy's revisions as its owner reads them (${parsed.error.message})`,
+      request,
+      response,
+    );
+  }
+
+  return parsed.data.revisions;
+}
+
+/**
+ * A revision of a rating change, as its owner reads it (#1231): what the
+ * change said before a correction, its rating and its date. Strict, so a
+ * field the revision must never carry, such as whether the change is taken
+ * back or when the user last edited it, fails the parse.
+ */
+export const ratingRevisionWireSchema = z
+  .object({
+    createdAt: z.string(),
+    id: z.string().min(1),
+    values: z.object({ occurredOn: z.string().nullable(), rating: z.number().int().nullable() }).strict(),
+  })
+  .strict();
+
+export type RatingRevisionWire = z.infer<typeof ratingRevisionWireSchema>;
+
+const listRatingRevisionsEnvelopeSchema = z.object({ revisions: z.array(ratingRevisionWireSchema) });
+
+/** `GET /api/game-collections/:id/ratings/:ratingId/revisions`: `{ revisions: [...] }` (#1231). */
+export function listRatingRevisionsEnvelope(
+  response: HttpResponseLike,
+  request: RequestDescription,
+): readonly RatingRevisionWire[] {
+  const parsed = listRatingRevisionsEnvelopeSchema.safeParse(response.body);
+  if (!parsed.success) {
+    return fail(
+      `its 'revisions' is not a list of a rating change's revisions as its owner reads them (${parsed.error.message})`,
       request,
       response,
     );

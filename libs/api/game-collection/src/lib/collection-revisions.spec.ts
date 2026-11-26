@@ -2,14 +2,25 @@ import type { Prisma } from '@bge/database';
 import { DatePrecision, GameCondition, GameRemovalReason } from '@bge/database';
 import type { MockDatabaseService } from '@bge/testing';
 import { createMockDatabaseService } from '@bge/testing';
-import type { CopyRevisionSource, CopyRevisionValues } from './collection-revisions';
+import { Logger } from '@nestjs/common';
+import type {
+  CopyRevisionSource,
+  CopyRevisionValues,
+  RatingRevisionSource,
+  RatingRevisionValues,
+} from './collection-revisions';
 import {
   copyRevisionValues,
   copyRevisionValuesSchema,
   describeRevisionProblem,
+  parseRevisionValues,
+  ratingRevisionValues,
+  ratingRevisionValuesSchema,
   recordCopyRevision,
   recordCopyRevisions,
+  recordRatingRevision,
   restoredCopyOf,
+  restoredRatingOf,
 } from './collection-revisions';
 
 const asTx = (mock: MockDatabaseService): Prisma.TransactionClient => mock as unknown as Prisma.TransactionClient;
@@ -212,6 +223,115 @@ describe('copy revisions (#1231)', () => {
       };
 
       expect(restoredCopyOf(values).description.acquiredOn).toBe('2019');
+    });
+  });
+});
+
+/** A rating change's revision columns: a 7 on 2019-03, unless given (#1231). */
+const ratingSource = (overrides: Partial<RatingRevisionSource> = {}): RatingRevisionSource => ({
+  id: 'rc-1',
+  occurredOn: new Date('2019-03-01T00:00:00Z'),
+  occurredOnPrecision: DatePrecision.Month,
+  rating: 7,
+  ...overrides,
+});
+
+describe('rating change revisions (#1231)', () => {
+  describe('ratingRevisionValues', () => {
+    it("keeps the change's rating and its date as an ISO day at its precision, and no id", () => {
+      expect(ratingRevisionValues(ratingSource())).toEqual({
+        occurredOn: '2019-03-01',
+        occurredOnPrecision: DatePrecision.Month,
+        rating: 7,
+      });
+    });
+
+    it('keeps a clearing and an unknown date as nulls', () => {
+      expect(ratingRevisionValues(ratingSource({ occurredOn: null, occurredOnPrecision: null, rating: null }))).toEqual(
+        { occurredOn: null, occurredOnPrecision: null, rating: null },
+      );
+    });
+
+    it('reads back through its own schema, from JSON', () => {
+      const stored = JSON.parse(JSON.stringify(ratingRevisionValues(ratingSource())));
+
+      expect(ratingRevisionValuesSchema.safeParse(stored)).toEqual({
+        success: true,
+        data: ratingRevisionValues(ratingSource()),
+      });
+    });
+  });
+
+  // Read back from a JSON column, the values are data from outside the
+  // process: what the change's CHECK constraints would refuse is refused here,
+  // so a restore never fails on one.
+  describe('ratingRevisionValuesSchema', () => {
+    const valid = ratingRevisionValues(ratingSource());
+
+    it.each<[string, Partial<Record<keyof RatingRevisionValues, unknown>>]>([
+      ['a rating of 0', { rating: 0 }],
+      ['a rating of 11', { rating: 11 }],
+      ['a fractional rating', { rating: 7.5 }],
+      ['a rating that is text', { rating: '7' }],
+      ['a date without its precision', { occurredOnPrecision: null }],
+      ['a precision without its date', { occurredOn: null }],
+      ['a date that is not an ISO day', { occurredOn: '2019-03' }],
+      ['an unknown precision', { occurredOnPrecision: 'Week' }],
+      ['a missing column', { rating: undefined }],
+    ])('refuses %s', (_, change) => {
+      expect(ratingRevisionValuesSchema.safeParse({ ...valid, ...change }).success).toBe(false);
+    });
+
+    it('refuses what is not an object', () => {
+      expect(ratingRevisionValuesSchema.safeParse(null).success).toBe(false);
+    });
+  });
+
+  describe('recordRatingRevision', () => {
+    it("writes the change's values as a revision of it", async () => {
+      const tx = createMockDatabaseService();
+
+      await recordRatingRevision(asTx(tx), ratingSource());
+
+      expect(tx.collectionRatingRevision.create).toHaveBeenCalledWith({
+        data: { ratingChangeId: 'rc-1', values: ratingRevisionValues(ratingSource()) },
+        select: { id: true },
+      });
+    });
+  });
+
+  describe('restoredRatingOf', () => {
+    it('reads the date at its precision, so the restore writes the first day of its period', () => {
+      expect(
+        restoredRatingOf({ occurredOn: '2019-03-15', occurredOnPrecision: DatePrecision.Year, rating: 4 }),
+      ).toEqual({ occurredOn: { on: new Date('2019-01-01T00:00:00Z'), precision: DatePrecision.Year }, rating: 4 });
+    });
+
+    it('restores an unknown date as unknown', () => {
+      expect(restoredRatingOf({ occurredOn: null, occurredOnPrecision: null, rating: null })).toEqual({
+        occurredOn: null,
+        rating: null,
+      });
+    });
+  });
+
+  describe('parseRevisionValues', () => {
+    it('answers the parsed values', () => {
+      const logger = new Logger('test');
+
+      expect(
+        parseRevisionValues(ratingRevisionValuesSchema, ratingRevisionValues(ratingSource()), logger, 'Revision rev-1'),
+      ).toEqual(ratingRevisionValues(ratingSource()));
+    });
+
+    it("answers null for values that fail the schema, and logs one line that names the revision's subject", () => {
+      const logger = new Logger('test');
+      const error = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
+
+      expect(parseRevisionValues(ratingRevisionValuesSchema, { rating: 99 }, logger, 'Revision rev-1')).toBeNull();
+      expect(error).toHaveBeenCalledTimes(1);
+      expect(error).toHaveBeenCalledWith(expect.stringMatching(/^Revision rev-1 can't be read back: .*rating/));
+      expect(String(error.mock.calls[0]?.[0])).not.toContain('\n');
     });
   });
 });

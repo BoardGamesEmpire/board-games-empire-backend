@@ -1,4 +1,5 @@
 import { DatePrecision, GameCondition, GameRemovalReason, Prisma } from '@bge/database';
+import type { Logger } from '@nestjs/common';
 import { z } from 'zod';
 import type { Money } from './values/money';
 import { moneyFromColumns } from './values/money';
@@ -167,7 +168,7 @@ export async function recordCopyRevision(tx: Prisma.TransactionClient, copy: Cop
   await recordCopyRevisions(tx, [copy]);
 }
 
-/** Why stored values failed {@link copyRevisionValuesSchema}, on one line, for the server's log (#1231). */
+/** Why stored values failed their schema, on one line, for the server's log (#1231). */
 export function describeRevisionProblem(error: z.ZodError): string {
   return error.issues
     .map((issue) => `${issue.path.length === 0 ? '(values)' : issue.path.join('.')}: ${issue.message}`)
@@ -247,4 +248,104 @@ export async function restorableRelease(
   `);
 
   return held?.id ?? null;
+}
+
+/**
+ * A revision's stored values, parsed through `schema` (#1231): they are data
+ * from outside the process. Null when they fail it, which the server's log
+ * says on one line, naming `subject`, since nestjs-pino drops an Error
+ * argument.
+ */
+export function parseRevisionValues<S extends z.ZodType>(
+  schema: S,
+  stored: unknown,
+  logger: Pick<Logger, 'error'>,
+  subject: string,
+): z.output<S> | null {
+  const parsed = schema.safeParse(stored);
+
+  if (!parsed.success) {
+    logger.error(`${subject} can't be read back: ${describeRevisionProblem(parsed.error)}`);
+
+    return null;
+  }
+
+  return parsed.data;
+}
+
+/**
+ * The columns of a rating change a revision keeps (#1231): the rating and its
+ * date, which a user edits, and the change's id, which becomes the revision's
+ * `ratingChangeId`. When the user last edited it, whether it is taken back
+ * and the upstream account that synced it are not the change's description,
+ * so a revision neither keeps nor restores them.
+ */
+export const RATING_REVISION_SELECT = {
+  id: true,
+  occurredOn: true,
+  occurredOnPrecision: true,
+  rating: true,
+} as const satisfies Prisma.CollectionRatingChangeSelect;
+
+/** A rating change as a revision is written from: {@link RATING_REVISION_SELECT}'s columns (#1231). */
+export type RatingRevisionSource = Prisma.CollectionRatingChangeGetPayload<{
+  select: typeof RATING_REVISION_SELECT;
+}>;
+
+/**
+ * A rating change's values as a revision keeps them, in its `values` JSON
+ * (#1231). Read back, they pass through this schema before a restore writes
+ * them: it refuses what the change's CHECK constraints would (a rating from 1
+ * to 10, and a date set with its precision), so a restore never fails on one.
+ */
+export const ratingRevisionValuesSchema = z
+  .object({
+    /** The first day of the date's period, as an ISO day (`2019-03-01`); null when unknown. */
+    occurredOn: z.iso.date().nullable(),
+
+    occurredOnPrecision: precision,
+
+    /** The rating from then on; null when the change cleared it. */
+    rating: z.number().int().min(1).max(10).nullable(),
+  })
+  .refine((values) => paired(values.occurredOn, values.occurredOnPrecision), {
+    path: ['occurredOnPrecision'],
+    error: 'occurredOn and occurredOnPrecision are set together',
+  });
+
+/** A rating change's values as a revision keeps them (#1231). */
+export type RatingRevisionValues = z.infer<typeof ratingRevisionValuesSchema>;
+
+/** A rating change's values, as {@link recordRatingRevision} keeps them (#1231). */
+export function ratingRevisionValues(change: RatingRevisionSource): RatingRevisionValues {
+  return {
+    occurredOn: isoDay(change.occurredOn),
+    occurredOnPrecision: change.occurredOnPrecision,
+    rating: change.rating,
+  };
+}
+
+/**
+ * Keeps what a rating change says now as a revision of it (#1231). Every
+ * user edit or restore of a change calls it under the entry's lock, with the
+ * change as read in the same transaction, before the change is written. A
+ * take-back changes none of these values, so it keeps none.
+ */
+export async function recordRatingRevision(tx: Prisma.TransactionClient, change: RatingRevisionSource): Promise<void> {
+  await tx.collectionRatingRevision.create({
+    data: { ratingChangeId: change.id, values: ratingRevisionValues(change) },
+    select: { id: true },
+  });
+}
+
+/**
+ * Parsed rating revision values, as a restore writes them back and the
+ * revisions list shows them (#1231): the date at its precision, so a restore
+ * is checked as an edit is.
+ */
+export function restoredRatingOf(values: RatingRevisionValues): {
+  occurredOn: PartialDate | null;
+  rating: number | null;
+} {
+  return { occurredOn: storedDate(values.occurredOn, values.occurredOnPrecision), rating: values.rating };
 }

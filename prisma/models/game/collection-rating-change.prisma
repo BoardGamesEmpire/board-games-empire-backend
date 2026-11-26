@@ -28,12 +28,17 @@ model CollectionRatingChange {
   upstreamAccountId String?          @map("upstream_account_id")
   upstreamKey       String?          @map("upstream_key")
 
+  // The key a client sends with an earlier rating it adds, so a retry answers
+  // the change the first request made (ADR 0002). Null for every other change.
+  clientRequestId String? @map("client_request_id")
+
   revisions CollectionRatingRevision[]
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@unique([upstreamAccountId, upstreamKey])
+  @@unique([entryId, clientRequestId], map: "collection_rating_change_entry_client_request_id_unique")
   @@index([entryId, occurredOn])
   @@map("collection_rating_changes")
 }

@@ -23,7 +23,7 @@ import type { CopyRevisionValues } from './collection-revisions';
 import {
   COPY_REVISION_SELECT,
   copyRevisionValuesSchema,
-  describeRevisionProblem,
+  parseRevisionValues,
   recordCopyRevision,
   restorableRelease,
   restoredCopyOf,
@@ -31,7 +31,7 @@ import {
 import type { OwnerCopyRow } from './collection-row';
 import { COPY_ORDER, OWNED_COPY, OWNER_COPY_SELECT, readOwnEntry, removedWithEntry } from './collection-row';
 import type { LockedEntry } from './collection-write.service';
-import { CollectionWriteService, writeEntryUnder } from './collection-write.service';
+import { CollectionWriteService } from './collection-write.service';
 import type {
   CollectionCopyDto,
   CollectionReleaseSummaryDto,
@@ -41,14 +41,7 @@ import type {
   UpdateCollectionCopyDto,
 } from './dto';
 import { toCollectionCopyDto, toCollectionRevisionDto } from './dto';
-import {
-  collectionEntryNotFound,
-  copyNotFound,
-  copyNotRemoved,
-  copyNotTakenBack,
-  lastCopy,
-  revisionNotFound,
-} from './game-collection.errors';
+import { copyNotFound, copyNotRemoved, copyNotTakenBack, lastCopy, revisionNotFound } from './game-collection.errors';
 import {
   assertNotInFuture,
   assertRemovalAfterAcquisition,
@@ -155,7 +148,7 @@ export class CollectionCopyService {
     const attempt = () =>
       this.writes.run(
         async (tx) => {
-          const entry = await this.lockOwnEntryAndStampUpdate(tx, entryId, now);
+          const entry = await this.writes.lockOwnEntryForUpdate(tx, this.abilityService, entryId, now);
           const replayed = clientRequestId === undefined ? null : await this.copyUnderKey(tx, entryId, clientRequestId);
           const copy = replayed ?? (await addCopy(tx, { ...entry, id: entryId }, description, now, clientRequestId));
 
@@ -212,7 +205,7 @@ export class CollectionCopyService {
 
     return this.writes.run(
       async (tx) => {
-        const entry = await this.lockOwnEntryAndStampUpdate(tx, entryId, now);
+        const entry = await this.writes.lockOwnEntryForUpdate(tx, this.abilityService, entryId, now);
         const copy = await tx.collectionCopy.findUnique({
           where: { id: copyId, entryId, retractedAt: null },
           select: COPY_REVISION_SELECT,
@@ -287,7 +280,7 @@ export class CollectionCopyService {
 
     return this.writes.run(
       async (tx) => {
-        const entry = await this.lockOwnEntryAndStampUpdate(tx, entryId, now);
+        const entry = await this.writes.lockOwnEntryForUpdate(tx, this.abilityService, entryId, now);
         const copy = await tx.collectionCopy.findUnique({
           where: { id: copyId, entryId, AND: OWNED_COPY },
           select: COPY_REVISION_SELECT,
@@ -346,7 +339,12 @@ export class CollectionCopyService {
     }
 
     const readable = copy.revisions.flatMap((revision) => {
-      const values = this.readValues(copyId, revision.id, revision.values);
+      const values = parseRevisionValues(
+        copyRevisionValuesSchema,
+        revision.values,
+        this.logger,
+        `Revision ${revision.id} of copy ${copyId}`,
+      );
 
       return values === null ? [] : [{ revision, values }];
     });
@@ -396,7 +394,7 @@ export class CollectionCopyService {
 
     return this.writes.run(
       async (tx) => {
-        const entry = await this.lockOwnEntryAndStampUpdate(tx, entryId, now);
+        const entry = await this.writes.lockOwnEntryForUpdate(tx, this.abilityService, entryId, now);
         const copy = await tx.collectionCopy.findUnique({
           where: { id: copyId, entryId, retractedAt: null },
           select: COPY_REVISION_SELECT,
@@ -484,7 +482,7 @@ export class CollectionCopyService {
 
     return this.writes.run(
       async (tx) => {
-        await this.lockOwnEntryAndStampUpdate(tx, entryId, now);
+        await this.writes.lockOwnEntryForUpdate(tx, this.abilityService, entryId, now);
         const copy = await tx.collectionCopy.findUnique({
           where: { id: copyId, entryId, retractedAt: null },
           select: { removedAt: true },
@@ -527,7 +525,7 @@ export class CollectionCopyService {
 
     return this.writes.run(
       async (tx) => {
-        await this.lockOwnEntryAndStampUpdate(tx, entryId, now);
+        await this.writes.lockOwnEntryForUpdate(tx, this.abilityService, entryId, now);
         const copy = await tx.collectionCopy.findUnique({
           where: { id: copyId, entryId },
           select: { retractedAt: true },
@@ -602,32 +600,21 @@ export class CollectionCopyService {
       where: { id: revisionId, copyId },
       select: { values: true },
     });
-    const values = revision === null ? null : this.readValues(copyId, revisionId, revision.values);
+    const values =
+      revision === null
+        ? null
+        : parseRevisionValues(
+            copyRevisionValuesSchema,
+            revision.values,
+            this.logger,
+            `Revision ${revisionId} of copy ${copyId}`,
+          );
 
     if (values === null) {
       throw revisionNotFound(revisionId);
     }
 
     return values;
-  }
-
-  /**
-   * A revision's stored values, parsed: they are data from outside the
-   * process (#1231). Null when they fail the schema, which the server's log
-   * says on one line: nestjs-pino drops an Error argument.
-   */
-  private readValues(copyId: string, revisionId: string, stored: unknown): CopyRevisionValues | null {
-    const parsed = copyRevisionValuesSchema.safeParse(stored);
-
-    if (!parsed.success) {
-      this.logger.error(
-        `Revision ${revisionId} of copy ${copyId} can't be read back: ${describeRevisionProblem(parsed.error)}`,
-      );
-
-      return null;
-    }
-
-    return parsed.data;
   }
 
   /** The editions `releaseIds` name, by id, as they are now; one deleted since is absent (#1231). */
@@ -646,33 +633,5 @@ export class CollectionCopyService {
     });
 
     return new Map(releases.map((release) => [release.id, release]));
-  }
-
-  /**
-   * Locks the entry's row, as the transaction's first lock (#1221), only when
-   * it is the acting user's own (#1231), so a request for another user's
-   * entry never makes its owner's writes wait, and writes its `lastUpdated`
-   * under the actor's `update` conditions (#1288): each copy write is an
-   * update of the entry. Another user's entry, or any entry for an actor that
-   * is no user, answers `COLLECTION_ENTRY_NOT_FOUND` before anything is read
-   * or written, as the list does: the write's answer is the copy as the
-   * entry's owner reads it. Answers what the copy is checked against: the
-   * entry's medium and platform game.
-   */
-  private async lockOwnEntryAndStampUpdate(
-    tx: Prisma.TransactionClient,
-    entryId: string,
-    now: Date,
-  ): Promise<LockedEntry> {
-    const actingUserId = resolveActingUserIdOrNull(this.abilityService);
-    const locked = actingUserId === null ? null : await this.writes.lockEntry(tx, entryId, actingUserId);
-
-    if (locked === null) {
-      throw collectionEntryNotFound(entryId);
-    }
-
-    await writeEntryUnder(tx, this.abilityService, entryId, Action.update, {}, { lastUpdated: now });
-
-    return locked;
   }
 }
