@@ -696,9 +696,13 @@ _Avoid_: platform incarnation, PG
 **Platform type**:
 The broad class of platform a game is played on, such as tabletop, console, PC or mobile.
 
+**Game type**:
+Planned: the kind of game something is: a board game, video game, tabletop RPG, trading card game or traditional card game. A game has one, or none when its DataGateway can't classify it. Game search leaves out tabletop RPGs and trading card games unless asked. The game type says what a game is, and the platform type says where it's played.
+_Avoid_: game kind; not to be confused with content type, platform type or category
+
 **Content type**:
 What a game is in relation to other games, such as a base game, expansion, DLC, accessory or bundle. A platform game can have its own, which overrides the game's on that platform, since Jagged Earth is an expansion on tabletop and DLC on PC.
-_Avoid_: game type, expansion type; not to be confused with content format
+_Avoid_: expansion type; not to be confused with content format or game type
 
 **Override**:
 A value set at a narrower level that replaces the broader one: a release's over its platform game's, and a platform game's over its game's. A user's customization overrides for that user only.
