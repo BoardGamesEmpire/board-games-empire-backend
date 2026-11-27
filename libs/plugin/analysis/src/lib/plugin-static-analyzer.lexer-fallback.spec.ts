@@ -11,7 +11,7 @@ import { PluginStaticAnalyzer } from './plugin-static-analyzer.js';
  * so here the lexer always throws and meriyah's walk is the only ESM source.
  */
 jest.mock('es-module-lexer', () => ({
-  init: Promise.resolve(),
+  init: () => Promise.resolve(),
   parse: () => {
     throw new Error('lexer failed');
   },

@@ -127,7 +127,7 @@
     "compression": "1.8.2",
     "dotenv": "18.0.10",
     "entities": "9.0.0",
-    "es-module-lexer": "2.3.2",
+    "es-module-lexer": "3.0.5",
     "eventemitter2": "6.4.9",
     "fast-xml-parser": "5.12.1",
     "hast-util-from-html": "2.1.0",

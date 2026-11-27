@@ -128,6 +128,40 @@ describe('PluginStaticAnalyzer', () => {
     ]);
   });
 
+  it('warns on a template import() with substitutions instead of screening its glob (#59)', async () => {
+    // The lexer reports `ioredis${suffix}` as the glob `ioredis*`, which
+    // names no one module.
+    await write('lazy.js', 'export const load = (suffix) => import(`ioredis${suffix}`);\n');
+
+    const report = await analyze();
+
+    expect(findingsBy(report, 'dynamic-import')).toEqual([]);
+    expect(findingsBy(report, 'non-literal-import')).toEqual([
+      expect.objectContaining({ specifier: null, severity: 'warning' }),
+    ]);
+  });
+
+  it('screens a template import() without substitutions as the module it names (#59)', async () => {
+    await write('lazy.js', 'export const load = () => import(`ioredis`);\n');
+
+    const report = await analyze();
+
+    expect(findingsBy(report, 'dynamic-import')).toEqual([
+      expect.objectContaining({ specifier: 'ioredis', severity: 'forbidden' }),
+    ]);
+    expect(findingsBy(report, 'non-literal-import')).toEqual([]);
+  });
+
+  it('flags an export-star of a forbidden specifier (#59)', async () => {
+    await write('surface.mjs', "export * from 'ioredis';\n");
+
+    const report = await analyze();
+
+    expect(findingsBy(report, 'esm-import')).toEqual([
+      expect.objectContaining({ specifier: 'ioredis', severity: 'forbidden' }),
+    ]);
+  });
+
   it('warns on require(x) with a non-literal argument', async () => {
     await write('loader.cjs', 'module.exports = (name) => require(name);\n');
 

@@ -146,7 +146,7 @@ export class PluginStaticAnalyzer {
 
   async analyze(root: PluginCodeRoot, options: StaticAnalysisOptions): Promise<StaticAnalysisReport> {
     // Idempotent WASM initialization — resolved once, awaited every call.
-    await init;
+    await init();
     this.assertParserSanity();
 
     const findings: StaticAnalysisFinding[] = [];
@@ -400,13 +400,19 @@ export class PluginStaticAnalyzer {
       const [imports] = parseEsm(source);
 
       for (const entry of imports) {
-        if (entry.d === -2) {
-          continue; // import.meta — no specifier.
+        if (entry.type === 'import-meta') {
+          continue; // No specifier.
         }
 
-        if (entry.n !== undefined) {
-          classify(entry.d >= 0 ? 'dynamic-import' : 'esm-import', entry.n);
-        } else if (entry.d >= 0) {
+        if (entry.type !== 'dynamic') {
+          // A static import, an `export ... from` or an `export * from`.
+          classify('esm-import', entry.specifier);
+        } else if (entry.specifier !== undefined && !entry.glob) {
+          classify('dynamic-import', entry.specifier);
+        } else {
+          // A computed specifier. The lexer reports a template literal with
+          // substitutions as a glob (`./locales/*.js`), which names no one
+          // module, so it is as unscreenable as any other expression.
           record('non-literal-import', null, 'warning');
         }
       }
