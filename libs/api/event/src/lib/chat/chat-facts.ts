@@ -2,7 +2,7 @@ import type { EventParticipationStatus, EventPolicy, Prisma } from '@bge/databas
 import { liveEventWhere } from '@bge/database';
 import { NOT_REMOVED } from '../constants/not-removed.constant';
 
-/** The event policy's event chat settings (#1544). */
+/** The event policy's chat controls (#1544). */
 export type ChatPolicy = Pick<
   EventPolicy,
   'chatEnabled' | 'chatPostAccess' | 'chatReadAccess' | 'chatSpectatorsMayPost'
@@ -10,8 +10,8 @@ export type ChatPolicy = Pick<
 
 /**
  * What decides one user's access to one event's event chat (#1543): their
- * attendee row, its RSVP and event role, the event's state and chat settings,
- * and any host mute on them.
+ * attendee row, its RSVP and event role, the event's state, the event
+ * policy's chat controls, and any host mute on them.
  */
 export interface ChatFacts {
   readonly archivedAt: Date | null;
@@ -20,7 +20,7 @@ export interface ChatFacts {
   readonly hostMutedAt: Date | null;
   readonly hostMutedUntil: Date | null;
 
-  /** The event's chat settings, or null for an event with no policy row, which reads as the defaults. */
+  /** The event policy's chat controls, or null for an event with no policy row, which reads as the defaults. */
   readonly policy: ChatPolicy | null;
 
   /**

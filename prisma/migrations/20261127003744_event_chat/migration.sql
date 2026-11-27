@@ -57,7 +57,7 @@ CREATE TABLE "event_chat_states" (
     "last_read_sequence" INTEGER NOT NULL DEFAULT 0,
     "host_muted_at" TIMESTAMPTZ(3),
     "host_muted_until" TIMESTAMPTZ(3),
-    "self_muted_at" TIMESTAMPTZ(3),
+    "chat_muted_at" TIMESTAMPTZ(3),
     "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMPTZ(3) NOT NULL,
 

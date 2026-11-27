@@ -280,11 +280,11 @@ describe('grantablePermissions and mayKeyHold (#1417)', () => {
         });
       }
 
-      // Every key's ability carries the denial of the attendance-only types
-      // (#1543), so what a key scope its owner doesn't hold builds is no allow.
-      const allows = factory.createForApiKey(owner, keyScopedTo(notHeld)).rules.filter(({ inverted }) => !inverted);
-
-      expect(allows).toEqual([]);
+      // A key scope its owner doesn't hold builds nothing: all the key's
+      // ability carries is the denial of the attendance-only types (#1543).
+      expect(factory.createForApiKey(owner, keyScopedTo(notHeld)).rules).toEqual([
+        { action: Action.manage, subject: ResourceType.EventChatMessage, inverted: true },
+      ]);
     });
   });
 });

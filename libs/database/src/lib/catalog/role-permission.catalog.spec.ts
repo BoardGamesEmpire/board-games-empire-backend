@@ -1041,9 +1041,10 @@ describe('the shipped catalogs', () => {
       expect(entryOf('delete:event_chat_message')).toMatchObject({
         action: Action.delete,
         subject: ResourceType.EventChatMessage,
-        conditions: { eventId: '{{ eventId }}' },
         riskLevel: RiskLevel.Medium,
       });
+      // Exactly the event: an author condition would narrow it to their own.
+      expect(entryOf('delete:event_chat_message')?.conditions).toStrictEqual({ eventId: '{{ eventId }}' });
       expect(holdersOf('delete:event_chat_message')).toEqual(
         [SystemRole.EventCoHost, SystemRole.EventHost, SystemRole.EventModerator].sort(),
       );

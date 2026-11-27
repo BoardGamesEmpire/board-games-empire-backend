@@ -1,10 +1,16 @@
 import type { Actor } from '@bge/actor-context';
 import { SERVER_PLUGIN_UNIT } from '@bge/actor-context';
 import type { Prisma } from '@bge/database';
-import { EventChatAccess, EventParticipationStatus, SystemRole } from '@bge/database';
+import {
+  EventChatAccess,
+  EventParticipationStatus,
+  ROLE_PERMISSION_CATALOG,
+  ROLE_SCOPE,
+  SystemRole,
+} from '@bge/database';
 import type { MockDatabaseService } from '@bge/testing';
 import { createMockDatabaseService } from '@bge/testing';
-import { chatAccess, decideChatAccess } from './chat-access';
+import { CHAT_MODERATING_ROLES, chatAccess, decideChatAccess } from './chat-access';
 import type { ChatFacts, ChatPolicy } from './chat-facts';
 
 const NOW = new Date('2026-11-26T12:00:00.000Z');
@@ -20,7 +26,7 @@ const policy = (overrides: Partial<ChatPolicy> = {}): ChatPolicy => ({
   ...overrides,
 });
 
-/** An attending participant of a live event, under the default chat settings, with no host mute. */
+/** An attending participant of a live event, under the event policy's default chat controls, with no host mute. */
 const facts = (overrides: Partial<ChatFacts> = {}): ChatFacts => ({
   attendeeId: 'attendee-1',
   status: Attending,
@@ -130,6 +136,17 @@ describe('decideChatAccess (#1543, #1544)', () => {
       expect(access).toEqual({ canRead: true, attendeeId: 'attendee-1', moderates: true, post: { allowed: true } });
     });
 
+    // The roles that moderate are the ones the catalog lets delete anyone's
+    // message, so a new moderating role can't be added in one place only.
+    it('are the event roles the catalog gives delete:event_chat_message (#1543)', () => {
+      const deleters = Object.values(SystemRole).filter(
+        (role) => ROLE_SCOPE[role] === 'event' && ROLE_PERMISSION_CATALOG[role].includes('delete:event_chat_message'),
+      );
+
+      expect(deleters.length).toBeGreaterThan(0);
+      expect([...CHAT_MODERATING_ROLES].sort()).toEqual(deleters.sort());
+    });
+
     // Custom event roles (#1170) carry their own names, so they match none of
     // the moderating roles.
     it.each([
@@ -151,8 +168,33 @@ describe('decideChatAccess (#1543, #1544)', () => {
       });
     });
 
-    it.each(MODERATING_ROLES)('lets a %s read, and nobody post', (role) => {
+    it('refuses a spectator, even one the event lets post', () => {
+      const access = decideChatAccess(
+        facts({
+          role: SystemRole.EventSpectator,
+          policy: policy({ chatEnabled: false, chatSpectatorsMayPost: true }),
+        }),
+        NOW,
+      );
+
+      expect(access).toEqual({ canRead: false, refusal: 'EVENT_CHAT_OFF' });
+    });
+
+    // Hosts, co-hosts and event moderators always read and post (#1544).
+    it.each(MODERATING_ROLES)('lets a %s read and post', (role) => {
       expect(decideChatAccess(facts({ role, policy: policy({ chatEnabled: false }) }), NOW)).toEqual({
+        canRead: true,
+        attendeeId: 'attendee-1',
+        moderates: true,
+        post: { allowed: true },
+      });
+    });
+
+    // Only a cancelled or archived event stops them posting (#1544).
+    it.each(MODERATING_ROLES)('leaves a %s read-only on a cancelled event', (role) => {
+      const access = decideChatAccess(facts({ role, cancelledAt: NOW, policy: policy({ chatEnabled: false }) }), NOW);
+
+      expect(access).toEqual({
         canRead: true,
         attendeeId: 'attendee-1',
         moderates: true,
@@ -217,6 +259,35 @@ describe('decideChatAccess (#1543, #1544)', () => {
     it.each(MODERATING_ROLES)('never stops a %s posting', (role) => {
       expect(decideChatAccess(facts({ role, hostMutedAt: MUTED_AT, hostMutedUntil: null }), NOW)).toEqual(
         expect.objectContaining({ moderates: true, post: { allowed: true } }),
+      );
+    });
+
+    // The mute is checked last: a reader who couldn't post anyway is told
+    // why, with no mute end to wait for (#1543).
+    it('leaves a muted spectator refused as a spectator, while the setting is off', () => {
+      const until = new Date('2026-11-26T13:00:00.000Z');
+      const access = decideChatAccess(
+        facts({ role: SystemRole.EventSpectator, hostMutedAt: MUTED_AT, hostMutedUntil: until }),
+        NOW,
+      );
+
+      expect(access).toEqual(
+        expect.objectContaining({
+          canRead: true,
+          post: { allowed: false, refusal: 'EVENT_CHAT_POST_NOT_ALLOWED', mutedUntil: null },
+        }),
+      );
+    });
+
+    it('leaves a muted attendee of a cancelled event refused as read-only', () => {
+      const until = new Date('2026-11-26T13:00:00.000Z');
+      const access = decideChatAccess(facts({ cancelledAt: NOW, hostMutedAt: MUTED_AT, hostMutedUntil: until }), NOW);
+
+      expect(access).toEqual(
+        expect.objectContaining({
+          canRead: true,
+          post: { allowed: false, refusal: 'EVENT_CHAT_READ_ONLY', mutedUntil: null },
+        }),
       );
     });
   });

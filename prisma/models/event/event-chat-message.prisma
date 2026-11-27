@@ -18,7 +18,8 @@ model EventChatMessage {
   // EventChatCounter, so a client can page and spot gaps by number (#1543).
   sequence Int
 
-  // Null once the message is deleted.
+  // Null once the message is deleted: its text is erased and the row
+  // stays as a placeholder (#1543).
   body String?
 
   // The reply key carries the event, so a reply can only point at a message

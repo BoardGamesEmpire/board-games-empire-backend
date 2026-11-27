@@ -21,7 +21,7 @@ model EventChatState {
 
   // A chat mute: the attendee silencing this event chat's notifications for
   // themselves. It never stops them posting (#1543).
-  selfMutedAt DateTime? @map("self_muted_at") @db.Timestamptz(3)
+  chatMutedAt DateTime? @map("chat_muted_at") @db.Timestamptz(3)
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)

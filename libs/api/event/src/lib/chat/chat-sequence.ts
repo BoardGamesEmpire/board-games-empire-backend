@@ -17,8 +17,8 @@ import type { Prisma } from '@bge/database';
  * number that commits later.
  *
  * A send that rolls back takes its increment with it, so the next send gets
- * the same number and the sequence keeps no gap. There is no backfill: the
- * counter starts at 0 for every event and counts only what is sent from here.
+ * the same number and the sequence keeps no gap. There is no backfill: a new
+ * event has no counter row, and its first send inserts one and gets 1.
  */
 export async function nextChatSequence(tx: Prisma.TransactionClient, eventId: string): Promise<number> {
   const [row] = await tx.$queryRaw<{ last_sequence: number }[]>`

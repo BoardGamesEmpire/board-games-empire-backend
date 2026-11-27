@@ -14,8 +14,8 @@ export type ChatReadRefusal =
 export type ChatPostRefusal = 'EVENT_CHAT_READ_ONLY' | 'EVENT_CHAT_POST_NOT_ALLOWED' | 'EVENT_CHAT_MUTED';
 
 /**
- * Whether a reader may post. A refusal carries the end of the host mute behind
- * it, null when it has none or isn't a host mute.
+ * Whether a reader may post (#1543). A refusal carries the end of the host
+ * mute behind it, null when it has none or isn't a host mute.
  */
 export type ChatPost =
   | { readonly allowed: true }
@@ -30,8 +30,16 @@ export type ChatAccess =
   | { readonly canRead: false; readonly refusal: ChatReadRefusal }
   | { readonly attendeeId: string; readonly canRead: true; readonly moderates: boolean; readonly post: ChatPost };
 
-/** The event roles that moderate an event chat: they read it whatever their RSVP, and no host mute stops them. */
-const MODERATING_ROLES: readonly string[] = [SystemRole.EventHost, SystemRole.EventCoHost, SystemRole.EventModerator];
+/**
+ * The event roles that moderate an event chat (#1543, #1544): they read and
+ * post whatever their RSVP and whether the chat is on, and no host mute stops
+ * them. They are the event roles the catalog gives `delete:event_chat_message`.
+ */
+export const CHAT_MODERATING_ROLES: readonly string[] = [
+  SystemRole.EventHost,
+  SystemRole.EventCoHost,
+  SystemRole.EventModerator,
+];
 
 /** The schema's defaults, which an event with no policy row reads as (#1544). */
 const DEFAULT_CHAT_POLICY: ChatPolicy = {
@@ -51,28 +59,43 @@ function refusePost(refusal: ChatPostRefusal, mutedUntil: Date | null = null): C
 
 /**
  * A host mute holds from when it was set until its end, if it has one. At its
- * end it no longer holds.
+ * end it no longer holds (#1543).
  */
 function isHostMuted(facts: ChatFacts, now: Date): boolean {
   return facts.hostMutedAt !== null && (facts.hostMutedUntil === null || facts.hostMutedUntil > now);
 }
 
+/**
+ * Why an attendee who doesn't moderate can't read, or null when they can. With
+ * the chat off it is hidden from them, and its messages are kept (#1544).
+ */
+function readRefusal(policy: ChatPolicy, status: EventParticipationStatus): ChatReadRefusal | null {
+  if (!policy.chatEnabled) {
+    return 'EVENT_CHAT_OFF';
+  }
+
+  if (!admits(policy.chatReadAccess, status)) {
+    return 'EVENT_CHAT_READ_NOT_ALLOWED';
+  }
+
+  return null;
+}
+
 function decidePost(facts: ChatFacts, policy: ChatPolicy, moderates: boolean, now: Date): ChatPost {
   // Cancelled or archived, the chat is read-only for everyone, hosts included;
-  // reopening or unarchiving restores posting.
+  // reopening or unarchiving restores posting (#1544).
   if (facts.cancelledAt !== null || facts.archivedAt !== null) {
     return refusePost('EVENT_CHAT_READ_ONLY');
   }
 
-  // With the chat off, only its moderators still read it, and nobody posts.
-  if (!policy.chatEnabled) {
-    return refusePost('EVENT_CHAT_READ_ONLY');
-  }
-
+  // Hosts, co-hosts and event moderators always post, the chat off included
+  // (#1544).
   if (moderates) {
     return { allowed: true };
   }
 
+  // A spectator posts only where the event policy lets spectators post
+  // (#1544).
   if (facts.role === SystemRole.EventSpectator && !policy.chatSpectatorsMayPost) {
     return refusePost('EVENT_CHAT_POST_NOT_ALLOWED');
   }
@@ -81,6 +104,8 @@ function decidePost(facts: ChatFacts, policy: ChatPolicy, moderates: boolean, no
     return refusePost('EVENT_CHAT_POST_NOT_ALLOWED');
   }
 
+  // The host mute is checked last, so a reader who couldn't post anyway is
+  // told why, with no mute end to wait for (#1543).
   if (isHostMuted(facts, now)) {
     return refusePost('EVENT_CHAT_MUTED', facts.hostMutedUntil);
   }
@@ -100,14 +125,11 @@ export function decideChatAccess(facts: ChatFacts | null, now: Date): ChatAccess
   }
 
   const policy = facts.policy ?? DEFAULT_CHAT_POLICY;
-  const moderates = MODERATING_ROLES.includes(facts.role);
+  const moderates = CHAT_MODERATING_ROLES.includes(facts.role);
+  const refusal = moderates ? null : readRefusal(policy, facts.status);
 
-  if (!moderates && !policy.chatEnabled) {
-    return { canRead: false, refusal: 'EVENT_CHAT_OFF' };
-  }
-
-  if (!moderates && !admits(policy.chatReadAccess, facts.status)) {
-    return { canRead: false, refusal: 'EVENT_CHAT_READ_NOT_ALLOWED' };
+  if (refusal !== null) {
+    return { canRead: false, refusal };
   }
 
   return { canRead: true, attendeeId: facts.attendeeId, moderates, post: decidePost(facts, policy, moderates, now) };

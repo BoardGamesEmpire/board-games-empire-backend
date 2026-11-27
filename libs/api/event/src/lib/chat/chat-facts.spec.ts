@@ -65,7 +65,7 @@ describe('loadChatFacts (#1543)', () => {
     });
   });
 
-  it("selects the role's name, the event's state and chat settings, and the attendee's host mute", async () => {
+  it("selects the role's name, the event's state, the event policy's chat controls, and the attendee's host mute", async () => {
     await loadChatFacts(client(), 'user-1', 'event-1');
 
     expect(db.eventAttendee.findFirst.mock.calls[0][0]?.select).toEqual({

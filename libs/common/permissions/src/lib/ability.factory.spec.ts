@@ -3151,19 +3151,25 @@ describe('AbilityFactory', () => {
       }
     });
 
-    it('admits an Admin attending as EventParticipant to that event only', () => {
-      const ability = factory.createForUser(
-        makeUser({ roles: [shipped(SystemRole.User), shipped(SystemRole.Admin)], eventsAttended: [attending('e1')] }),
-      );
+    // An elevated user who attends is admitted as that attendee: the Owner's
+    // manage:all and the read of every type an Admin and a Moderator hold add
+    // nothing, and take nothing away.
+    it.each([SystemRole.Owner, SystemRole.Admin, SystemRole.Moderator])(
+      'admits the %s attending as EventParticipant to that event only',
+      (roleName) => {
+        const ability = factory.createForUser(
+          makeUser({ roles: [shipped(SystemRole.User), shipped(roleName)], eventsAttended: [attending('e1')] }),
+        );
 
-      expect(ability.can(Action.read, chatIn('e1'))).toBe(true);
-      expect(ability.can(Action.read, chatIn('e2'))).toBe(false);
-      expect(accessibleBy(ability, Action.read).ofType('EventChatMessage')).toEqual({ OR: [{ eventId: 'e1' }] });
-      // A route's type-level gate passes for an attendee; the row decides.
-      expect(ability.can(Action.read, ResourceType.EventChatMessage)).toBe(true);
-      // Attending gives back what the event role grants, and nothing more.
-      expect(ability.can(Action.delete, chatIn('e1'))).toBe(false);
-    });
+        expect(ability.can(Action.read, chatIn('e1'))).toBe(true);
+        expect(ability.can(Action.read, chatIn('e2'))).toBe(false);
+        expect(accessibleBy(ability, Action.read).ofType('EventChatMessage')).toEqual({ OR: [{ eventId: 'e1' }] });
+        // A route's type-level gate passes for an attendee; the row decides.
+        expect(ability.can(Action.read, ResourceType.EventChatMessage)).toBe(true);
+        // Attending gives back what the event role grants, and nothing more.
+        expect(ability.can(Action.delete, chatIn('e1'))).toBe(false);
+      },
+    );
 
     // A host's removal deletes the attendee's role and keeps the row, so the
     // graph still lists the event, with no role to grant anything.
@@ -3267,7 +3273,8 @@ describe('AbilityFactory', () => {
           permissions: [
             directOnChat(),
             directOnChat({ resourceId: 'message-1' }),
-            // An override that turns a denial into an allow is an allow.
+            // A direct permission that allows, given on a permission that is a
+            // denial, is an allow.
             makeUserPermission({
               inverted: false,
               resourceType: ResourceType.EventChatMessage,

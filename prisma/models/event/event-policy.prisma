@@ -59,9 +59,9 @@ model EventPolicy {
   // attendees may read it and post in it, by their RSVP. Reading and posting
   // are set apart, so a host can open the chat to everyone but take posts
   // only from those coming. A spectator posts only when
-  // `chatSpectatorsMayPost` is on. With the chat off, the event's hosts,
-  // co-hosts and event moderators still read it and nobody posts; other
-  // attendees can't read it (#1544).
+  // `chatSpectatorsMayPost` is on. With the chat off, its messages are
+  // hidden from everyone but the event's hosts, co-hosts and event
+  // moderators, who still read and post, and they are kept (#1544).
   chatEnabled           Boolean         @default(true) @map("chat_enabled")
   chatReadAccess        EventChatAccess @default(AllAttendees) @map("chat_read_access")
   chatPostAccess        EventChatAccess @default(AllAttendees) @map("chat_post_access")

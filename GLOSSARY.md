@@ -242,7 +242,7 @@ A role a user holds within one household or one event, whose permissions reach o
 _Avoid_: membership role, attendee role
 
 **Owner**:
-The server-wide role with full control of a server. Every other owner is qualified: household owner, key owner, owner of a record.
+The server-wide role with full control of a server (except event chats it does not attend, #1553). Every other owner is qualified: household owner, key owner, owner of a record.
 _Avoid_: system owner, site owner, server owner; owner on its own for anything but this role
 
 **Staff**:
@@ -258,7 +258,7 @@ A server-wide role for keeping content in order: it can read everything (except 
 _Avoid_: moderator on its own for the event role (say event moderator)
 
 **Elevation**:
-Gaining a server role on top of the base role, never in place of it. An elevated user holds the Owner, Admin or Moderator role: the Owner, Admins and Moderators together.
+Gaining a server role on top of the base role, never in place of it. The elevated users are those holding the Owner, Admin or Moderator role.
 _Avoid_: promotion; staff for the elevated users (that leaves out the Owner); elevation for a nomination joining an event's lineup (say added to the lineup)
 
 **Custom role**:
@@ -566,12 +566,12 @@ One message in an event chat. When it is deleted, a placeholder stays in its pla
 The occurrence a chat message was sent from, set automatically. It never controls who can read the message.
 
 **Live topic**:
-What a client subscribes to on the live namespace to receive changes as they happen, such as an event chat's new messages.
-_Avoid_: topic on its own (that is an inbound stream entry); gateway
+Planned: what a client subscribes to on the live namespace to receive changes as they happen, such as an event chat's new messages. It is not a domain event: it carries changes out to clients, where a domain event is announced within the server.
+_Avoid_: topic on its own (that is an inbound stream entry); domain event; gateway (it also names WebSocket endpoints and DataGateways)
 
 **Live namespace**:
-The one place on the server where a client subscribes to live topics.
-_Avoid_: gateway on its own (it also names DataGateways)
+Planned: the single WebSocket namespace through which a client subscribes to every live topic. Game search keeps a namespace of its own.
+_Avoid_: gateway on its own (it also names WebSocket endpoints and DataGateways)
 
 **Host mute**:
 A host, co-host or event moderator stopping one attendee from posting in an event chat.
