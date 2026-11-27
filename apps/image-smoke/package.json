@@ -5,14 +5,18 @@
   "nx": {
     "targets": {
       "smoke": {
-        "executor": "@nx/jest:jest",
+        "executor": "nx:run-commands",
         "cache": false,
-        "options": {
-          "jestConfig": "apps/image-smoke/jest.smoke.config.cts"
-        },
         "dependsOn": [
           "@boardgamesempire/stub-gateway:build"
-        ]
+        ],
+        "options": {
+          "command": "jest --config ./apps/image-smoke/jest.smoke.config.cts",
+          "cwd": ".",
+          "env": {
+            "TS_NODE_COMPILER_OPTIONS": "{\"moduleResolution\":\"node10\",\"module\":\"commonjs\",\"customConditions\":null}"
+          }
+        }
       }
     },
     "tags": [

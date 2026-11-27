@@ -5,7 +5,8 @@
     "types": ["jest", "node"],
     "esModuleInterop": true,
     "noUnusedLocals": false,
-    "noImplicitAny": false
+    "noImplicitAny": false,
+    "rootDir": "."
   },
   "include": ["jest.config.ts", "src/**/*.ts"],
   "references": [

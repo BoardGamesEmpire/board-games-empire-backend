@@ -59,6 +59,7 @@ Thumbs.db
 .nx/workspace-data
 .nx/polygraph
 .nx/self-healing
+.nx/migrate-runs
 
 test-output
 

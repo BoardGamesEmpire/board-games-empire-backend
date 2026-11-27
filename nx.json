@@ -62,6 +62,18 @@
         "apps/gateway-coordinator-e2e/**/*",
         "apps/igdb-gateway-e2e/**/*"
       ]
+    },
+    {
+      "plugin": "@nx/jest/plugin",
+      "options": {
+        "targetName": "e2e"
+      },
+      "include": [
+        "apps/api-e2e/**/*",
+        "apps/boardgamegeek-gateway-e2e/**/*",
+        "apps/gateway-coordinator-e2e/**/*",
+        "apps/igdb-gateway-e2e/**/*"
+      ]
     }
   ],
   "targetDefaults": {
@@ -84,5 +96,8 @@
     }
   },
   "defaultBase": "master",
-  "analytics": false
+  "analytics": false,
+  "affected": {
+    "legacy": true
+  }
 }

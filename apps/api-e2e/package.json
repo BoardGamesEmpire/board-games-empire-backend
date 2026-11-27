@@ -9,18 +9,13 @@
     ],
     "targets": {
       "e2e": {
-        "executor": "@nx/jest:jest",
-        "outputs": [
-          "{projectRoot}/test-output/jest/coverage"
-        ],
-        "options": {
-          "jestConfig": "apps/api-e2e/jest.config.cts"
-        },
+        "cache": false,
         "dependsOn": [
           "@boardgamesempire/api:build",
           "@boardgamesempire/worker:build"
         ]
       }
-    }
+    },
+    "// targets": "to see all targets run: nx show project @boardgamesempire/api-e2e --web"
   }
 }
