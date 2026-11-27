@@ -33,8 +33,9 @@ import { createTestDatabase, requireDatabaseUrl } from '../support/test-db';
  * - a server that accepts the connection and never answers → P2028, "Unable
  *   to start a transaction in the given time", for an interactive transaction
  *   once `maxWait` passes (the pool has no connect timeout, #447);
- * - a server that closes the connection before answering → P1017, cause kind
- *   `ConnectionClosed`;
+ * - a server that resets the connection before answering → P1017, cause kind
+ *   `ConnectionClosed`; one that closes it cleanly → a plain `Error`,
+ *   "Connection terminated unexpectedly", no code;
  * - the backend ended mid-statement → P2039 for a model statement and P2010
  *   for a raw one, SQLSTATE 57P01 at `meta.driverAdapterError.cause`;
  * - the socket dropped mid-statement → a plain `Error`, "Connection terminated
@@ -307,8 +308,12 @@ describe('the shape of a database outage', () => {
     }
   });
 
-  it('a server that closes the connection before answering arrives as P1017 (#1172)', async () => {
-    const server = createServer((socket) => socket.destroy());
+  // Both servers read the startup message before they hang up. A socket closed
+  // with that message still unread resets on macOS but closes cleanly on Linux,
+  // so a server that hangs up on accept pins whichever the platform picked
+  // (#1172).
+  it('a server that resets the connection before answering arrives as P1017 (#1172)', async () => {
+    const server = createServer((socket) => socket.once('data', () => socket.resetAndDestroy()));
     const port = await listen(server);
 
     try {
@@ -322,6 +327,30 @@ describe('the shape of a database outage', () => {
 
           expect((error as Prisma.PrismaClientKnownRequestError).code).toBe('P1017');
           expect(driverCauseOf(error)?.kind).toBe('ConnectionClosed');
+          expect(classified(error)).toBe('classified');
+        },
+      );
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("a server that closes the connection cleanly before answering arrives as node-postgres's codeless error (#1172)", async () => {
+    const server = createServer((socket) => socket.once('data', () => socket.end()));
+    const port = await listen(server);
+
+    try {
+      await withClient(
+        (url) => {
+          url.hostname = '127.0.0.1';
+          url.port = String(port);
+        },
+        async (client) => {
+          const error = await rejectionOf(client.user.count());
+
+          expect(error).not.toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
+          expect((error as Error).message).toBe('Connection terminated unexpectedly');
+          expect((error as { code?: unknown }).code).toBeUndefined();
           expect(classified(error)).toBe('classified');
         },
       );

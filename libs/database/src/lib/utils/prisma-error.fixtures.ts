@@ -340,7 +340,7 @@ export function transactionExpired(): Prisma.PrismaClientKnownRequestError {
 }
 
 /**
- * The server closed the connection before answering: P1017 with a mapped
+ * The server reset the connection before answering: P1017 with a mapped
  * `ConnectionClosed` cause (#1172).
  */
 export function serverClosedConnection(): Prisma.PrismaClientKnownRequestError {

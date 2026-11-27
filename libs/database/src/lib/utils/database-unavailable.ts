@@ -63,7 +63,7 @@ const CONNECTION_EXCEPTION_CLASS = '08';
  * they carry nothing else. Only the ones the shape spec observed (#1172).
  */
 const CODELESS_DRIVER_MESSAGES: ReadonlySet<string> = new Set([
-  // The socket closed while a statement was running.
+  // The socket closed before the server answered, or while a statement ran.
   'Connection terminated unexpectedly',
   // A statement on a client whose connection already failed.
   'Client has encountered a connection error and is not queryable',
@@ -105,7 +105,7 @@ function driverCauseOf(error: Record<string, unknown>): Record<string, unknown> 
  * outage arrives in more than one shape:
  *
  * - connection refused at a host's only address, or its name doesn't resolve
- *   → P1001; the server closed the connection before answering → P1017;
+ *   → P1001; the server reset the connection before answering → P1017;
  * - connection refused at every address of a host (`localhost` on a machine
  *   that resolves it to `::1` and `127.0.0.1`) → a Prisma error whose `code` is
  *   Node's `ECONNREFUSED`, nothing under `meta`, and an empty message;
@@ -116,9 +116,9 @@ function driverCauseOf(error: Record<string, unknown>): Record<string, unknown> 
  * - the backend ended mid-statement (`pg_terminate_backend`, a fast shutdown)
  *   → P2039 for a model statement, P2010 for a raw one, SQLSTATE 57P01 under
  *   `meta.driverAdapterError`;
- * - the socket dropped mid-statement, or the next statement on a connection
- *   that already failed → a plain `Error` with node-postgres's own text and no
- *   code.
+ * - the server closed the connection cleanly before answering, the socket
+ *   dropped mid-statement, or the next statement on a connection that already
+ *   failed → a plain `Error` with node-postgres's own text and no code.
  *
  * The rest (P1008, P2037, 53300, 57P02, 57P03, class 08) are what the adapter
  * maps or passes through for a timeout, a full server, a crash or a server
