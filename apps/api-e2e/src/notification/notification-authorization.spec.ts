@@ -8,7 +8,7 @@ import { mintApiKey } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import type { TestDatabase } from '../support/test-db';
 import { createTestDatabase } from '../support/test-db';
-import { unreadNotifications } from './notification-wire';
+import { notificationPage, unreadCount, unreadNotifications } from './notification-wire';
 
 /**
  * A plain user reads and clears their own notifications (#504). The routes'
@@ -30,6 +30,8 @@ import { unreadNotifications } from './notification-wire';
 describe('notification authorization', () => {
   const baseUrl = requireBaseUrl(process.env);
   const UNREAD_PATH = '/api/notifications/unread';
+  const LIST_PATH = '/api/notifications';
+  const COUNT_PATH = '/api/notifications/unread/count';
   const MARK_READ_PATH = '/api/notifications/mark-read';
   const MARK_ALL_READ_PATH = '/api/notifications/mark-all-read';
 
@@ -75,6 +77,20 @@ describe('notification authorization', () => {
     return unreadNotifications(response, `GET ${UNREAD_PATH}`)
       .map(({ id }) => id)
       .sort();
+  }
+
+  async function listedIds(reader: Caller): Promise<string[]> {
+    const response = await request(baseUrl).get(LIST_PATH).set(reader.headers).expect(200);
+
+    return notificationPage(response, `GET ${LIST_PATH}`)
+      .notifications.map(({ id }) => id)
+      .sort();
+  }
+
+  async function unreadCountOf(reader: Caller): Promise<number> {
+    const response = await request(baseUrl).get(COUNT_PATH).set(reader.headers).expect(200);
+
+    return unreadCount(response, `GET ${COUNT_PATH}`);
   }
 
   async function isRead(notificationId: string): Promise<boolean> {
@@ -194,6 +210,34 @@ describe('notification authorization', () => {
       // The control: the owner reads both, so the key's page is its scope's.
       await expect(unreadIds(owner)).resolves.toEqual([scoped, other].sort());
       await expect(unreadIds(key)).resolves.toEqual([scoped]);
+    });
+
+    const readKey = (owner: SessionActor, notificationId: string) =>
+      mintApiKey(baseUrl, db.client, owner, {
+        slugs: ['read:notification:own'],
+        resourceType: ResourceType.Notification,
+        resourceId: notificationId,
+      });
+
+    it('lists only that notification (#1597)', async () => {
+      const owner = await actors.user();
+      const scoped = await notify(owner);
+      const other = await notify(owner);
+      const key = await readKey(owner, scoped);
+
+      // The control: the owner lists both, so the key's page is its scope's.
+      await expect(listedIds(owner)).resolves.toEqual([scoped, other].sort());
+      await expect(listedIds(key)).resolves.toEqual([scoped]);
+    });
+
+    it('counts only that notification as unread (#1597)', async () => {
+      const owner = await actors.user();
+      const scoped = await notify(owner);
+      await notify(owner);
+      const key = await readKey(owner, scoped);
+
+      await expect(unreadCountOf(owner)).resolves.toBe(2);
+      await expect(unreadCountOf(key)).resolves.toBe(1);
     });
 
     const updateKey = (owner: SessionActor, notificationId: string) =>

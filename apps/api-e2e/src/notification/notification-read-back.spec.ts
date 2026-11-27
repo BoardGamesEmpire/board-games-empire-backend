@@ -8,13 +8,14 @@ import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import type { TestDatabase } from '../support/test-db';
 import { createTestDatabase } from '../support/test-db';
-import { unreadNotifications } from './notification-wire';
+import { notificationPage, unreadNotifications } from './notification-wire';
 
 /**
  * A notification's user-facing text is stored as a `t()` marker and rendered
  * when the user reads it back (#188). The worker that writes the row never
- * translates; `I18nResponseInterceptor` does, on `GET /notifications/unread`,
- * in the reader's locale.
+ * translates; `I18nResponseInterceptor` does, on `GET /notifications/unread`
+ * and on the history list `GET /notifications` (#1597), in the reader's
+ * locale.
  *
  * The row is written through the real `NotificationsService`, so the marker
  * takes the same path the worker's does: a class instance into a Prisma JSON
@@ -23,6 +24,7 @@ import { unreadNotifications } from './notification-wire';
 describe('notification read-back', () => {
   const baseUrl = requireBaseUrl(process.env);
   const UNREAD_PATH = '/api/notifications/unread';
+  const LIST_PATH = '/api/notifications';
 
   let db: TestDatabase;
   let actors: Actors;
@@ -64,5 +66,14 @@ describe('notification read-back', () => {
     expect(notification.type).toBe(NotificationType.ImportFailed);
     expect(notification.payload['errorCode']).toBe('GATEWAY_ERROR');
     expect(notification.payload['error']).toBe('Fetching game data from the gateway failed.');
+
+    // The history list renders the same marker the same way (#1597).
+    const listResponse = await request(baseUrl).get(LIST_PATH).set(reader.headers).expect(200);
+    const { notifications: listed } = notificationPage(listResponse, `GET ${LIST_PATH}`);
+
+    expect(listed).toHaveLength(1);
+    expect(listed[0].id).toBe(notification.id);
+    expect(listed[0].payload['errorCode']).toBe('GATEWAY_ERROR');
+    expect(listed[0].payload['error']).toBe('Fetching game data from the gateway failed.');
   });
 });
