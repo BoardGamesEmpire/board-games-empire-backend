@@ -281,19 +281,24 @@ describe('the shape of a database outage', () => {
           url.port = String(port);
         },
         async (client) => {
-          // Prisma's default maxWait is 2 s; a shorter one keeps the case quick
-          // and raises the same error.
-          const error = await rejectionOf(client.$transaction(async (tx) => tx.user.count(), { maxWait: 250 }));
+          try {
+            // Prisma's default maxWait is 2 s; a shorter one keeps the case
+            // quick and raises the same error.
+            const error = await rejectionOf(client.$transaction(async (tx) => tx.user.count(), { maxWait: 250 }));
 
-          expect(error).toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
-          expect((error as Prisma.PrismaClientKnownRequestError).code).toBe('P2028');
-          expect((error as Error).message).toBe(
-            'Transaction API error: Unable to start a transaction in the given time.',
-          );
-          expect(classified(error)).toBe('classified');
-
-          // The pending connect ends only when its socket does.
-          held.forEach((socket) => socket.destroy());
+            expect(error).toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
+            expect((error as Prisma.PrismaClientKnownRequestError).code).toBe('P2028');
+            expect((error as Error).message).toBe(
+              'Transaction API error: Unable to start a transaction in the given time.',
+            );
+            expect(classified(error)).toBe('classified');
+          } finally {
+            // The pending connect ends only when its socket does, and the
+            // pool's end() waits for it. Destroyed here, before withClient
+            // closes the client, so a failed assertion fails the case rather
+            // than hanging it until Jest's timeout (#1172).
+            held.forEach((socket) => socket.destroy());
+          }
         },
       );
     } finally {
