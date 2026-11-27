@@ -53,7 +53,7 @@ function readManifest(ref, missing, onMissing) {
       return null;
     }
 
-    throw new Error(`could not read ${ref}: ${stderr || error.message}`);
+    throw new Error(`could not read ${ref}: ${stderr || error.message}`, { cause: error });
   }
 
   return {
@@ -73,7 +73,9 @@ function readLabels(ref) {
   try {
     labels = imagetools(['inspect', ref, '--format', '{{json .Image.Config.Labels}}']);
   } catch (error) {
-    throw new Error(`could not read the labels of ${ref}: ${String(error.stderr ?? '').trim() || error.message}`);
+    throw new Error(`could not read the labels of ${ref}: ${String(error.stderr ?? '').trim() || error.message}`, {
+      cause: error,
+    });
   }
 
   return JSON.parse(labels) ?? {};

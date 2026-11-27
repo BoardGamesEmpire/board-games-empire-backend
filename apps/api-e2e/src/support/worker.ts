@@ -167,6 +167,7 @@ export async function startWorker(env: NodeJS.ProcessEnv = process.env): Promise
               throw new Error(
                 `could not list consumers on '${name}' through CLIENT LIST ` +
                   `(${error instanceof Error ? error.message : String(error)})`,
+                { cause: error },
               );
             }
           }),

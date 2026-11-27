@@ -60,7 +60,7 @@ export class EncryptionService {
       return decrypted.toString('utf8');
     } catch (error) {
       this.logger.error('Decryption failed', error instanceof Error ? error.stack : String(error));
-      throw new Error('Failed to decrypt data');
+      throw new Error('Failed to decrypt data', { cause: error });
     }
   }
 }
