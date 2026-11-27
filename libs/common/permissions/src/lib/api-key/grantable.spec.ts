@@ -286,6 +286,37 @@ describe('grantablePermissions and mayKeyHold (#1417)', () => {
         { action: Action.manage, subject: ResourceType.EventChatMessage, inverted: true },
       ]);
     });
+
+    // The attendance-only test reads the rule's subject, which for a
+    // direct permission is its row's resourceType, so the list and the
+    // key's rules agree both ways when that differs from the permission's
+    // subject (#1543).
+    it.each([
+      [
+        'an attendance-only permission on a row of an ordinary type',
+        ResourceType.EventChatMessage,
+        ResourceType.Game,
+        true,
+      ],
+      [
+        'an ordinary permission on a row of an attendance-only type',
+        ResourceType.Game,
+        ResourceType.EventChatMessage,
+        false,
+      ],
+    ])('agrees with the factory on %s (#1543)', (_name, subject, resourceType, holds) => {
+      const permission = makePermission({ id: `perm-${subject}-${resourceType}`, slug: 'read:mixed', subject });
+      const direct = { ...makeGrant(permission), resourceType };
+      const directOwner = makeOwner({ permissions: [direct] });
+      const builds = new AbilityFactory()
+        .createForApiKey(directOwner, keyScopedTo(permission))
+        .rules.some(({ inverted }) => !inverted);
+
+      expect({ mayKeyHold: mayKeyHold(directOwner, permission.id), builds }).toEqual({
+        mayKeyHold: holds,
+        builds: holds,
+      });
+    });
   });
 });
 

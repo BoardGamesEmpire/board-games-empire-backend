@@ -30,7 +30,10 @@ model EventChatMessage {
   replies   EventChatMessage[] @relation("EventChatReplies")
 
   // The occurrence tag: the occurrence the message was sent from (#1543).
-  // It never controls who can read the message.
+  // It never controls who can read the message. The key is the occurrence
+  // alone, so removing the occurrence nulls the tag and leaves the event: the
+  // database doesn't check that the occurrence is one of the message's
+  // event's, and the send path refuses one that isn't (#1545).
   occurrence   EventOccurrence? @relation(fields: [occurrenceId], references: [id], onDelete: SetNull)
   occurrenceId String?          @map("occurrence_id")
 

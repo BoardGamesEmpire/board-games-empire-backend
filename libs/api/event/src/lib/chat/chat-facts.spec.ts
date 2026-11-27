@@ -19,7 +19,15 @@ const POLICY = {
 const row = (overrides: object = {}) => ({
   id: 'attendee-1',
   status: EventParticipationStatus.Maybe,
-  role: { role: { name: SystemRole.EventCoHost } },
+  role: {
+    role: {
+      name: SystemRole.EventCoHost,
+      permissions: [
+        { permission: { slug: 'read:event_chat_message' } },
+        { permission: { slug: 'delete:event_chat_message' } },
+      ],
+    },
+  },
   event: { cancelledAt: CANCELLED_AT, archivedAt: null, policy: POLICY },
   chatState: { hostMutedAt: MUTED_AT, hostMutedUntil: MUTED_UNTIL },
   ...overrides,
@@ -65,13 +73,36 @@ describe('loadChatFacts (#1543)', () => {
     });
   });
 
-  it("selects the role's name, the event's state, the event policy's chat controls, and the attendee's host mute", async () => {
+  it("selects the role's name and chat grants, the event's state, the event policy's chat controls, and the attendee's host mute", async () => {
     await loadChatFacts(client(), 'user-1', 'event-1');
 
     expect(db.eventAttendee.findFirst.mock.calls[0][0]?.select).toEqual({
       id: true,
       status: true,
-      role: { select: { role: { select: { name: true } } } },
+      role: {
+        select: {
+          role: {
+            select: {
+              name: true,
+              permissions: {
+                where: {
+                  revokedAt: null,
+                  permission: {
+                    is: {
+                      slug: {
+                        in: ['read:event_chat_message', 'create:event_chat_message', 'delete:event_chat_message'],
+                      },
+                      retiredAt: null,
+                      inverted: false,
+                    },
+                  },
+                },
+                select: { permission: { select: { slug: true } } },
+              },
+            },
+          },
+        },
+      },
       event: {
         select: {
           cancelledAt: true,
@@ -90,6 +121,7 @@ describe('loadChatFacts (#1543)', () => {
       attendeeId: 'attendee-1',
       status: EventParticipationStatus.Maybe,
       role: SystemRole.EventCoHost,
+      grants: { read: true, post: false, moderate: true },
       cancelledAt: CANCELLED_AT,
       archivedAt: null,
       policy: POLICY,
@@ -106,11 +138,23 @@ describe('loadChatFacts (#1543)', () => {
     );
   });
 
-  it('gives a null role for an attendee with no role row (#551)', async () => {
+  it('gives a null role and no grants for an attendee with no role row (#551)', async () => {
     db.eventAttendee.findFirst.mockResolvedValue(row({ role: null }) as never);
 
     await expect(loadChatFacts(client(), 'user-1', 'event-1')).resolves.toEqual(
-      expect.objectContaining({ role: null }),
+      expect.objectContaining({ role: null, grants: { read: false, post: false, moderate: false } }),
+    );
+  });
+
+  // The where leaves out a revoked grant, a retired permission and an
+  // inverted one, so a role the Owner took the read from holds none (#772).
+  it('gives no grants for a role whose chat grants the read leaves out', async () => {
+    db.eventAttendee.findFirst.mockResolvedValue(
+      row({ role: { role: { name: SystemRole.EventSpectator, permissions: [] } } }) as never,
+    );
+
+    await expect(loadChatFacts(client(), 'user-1', 'event-1')).resolves.toEqual(
+      expect.objectContaining({ grants: { read: false, post: false, moderate: false } }),
     );
   });
 

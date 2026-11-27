@@ -90,7 +90,7 @@ export class PluginConsentCheckClassifier {
       const decidingScope = CONSENT_SCOPE_TO_GRANT_SCOPE[check.consentScope];
       const grant = grantByScopeAndSlug.get(`${decidingScope}|${check.canonicalSlug}`);
       const currentRiskLevel = catalog.riskBySlug.get(check.canonicalSlug) ?? null;
-      const { wildcardSubject, unboundedUnitScope } = consentCatalogFlags({
+      const { wildcardSubject, attendanceOnlySubject, unboundedUnitScope } = consentCatalogFlags({
         origin: check.origin,
         decidingScope,
         corePermission: catalog.corePermissionsBySlug.get(check.canonicalSlug),
@@ -110,6 +110,7 @@ export class PluginConsentCheckClassifier {
         grant,
         currentRiskLevel: judgedRiskLevel,
         wildcardSubject,
+        attendanceOnlySubject,
         unboundedUnitScope,
       });
 
@@ -234,6 +235,9 @@ export interface ConsentClassifyOptions {
 }
 
 export interface ConsentCheckDecisionInput {
+  /** The core permission is on an attendance-only resource type, which no plugin reaches (#1543). */
+  readonly attendanceOnlySubject: boolean;
+
   /** Today's catalog risk, `null` when the catalog row is gone. */
   readonly currentRiskLevel: RiskLevel | null;
 
@@ -249,14 +253,21 @@ export interface ConsentCheckDecisionInput {
  * check.
  */
 export type ConsentCheckNonConferringCause =
-  'no_row' | 'denied' | 'wildcard_subject' | 'unbound_unit_scope' | 'no_catalog_row' | 'stale_risk';
+  | 'no_row'
+  | 'denied'
+  | 'wildcard_subject'
+  | 'attendance_only_subject'
+  | 'unbound_unit_scope'
+  | 'no_catalog_row'
+  | 'stale_risk';
 
 /**
  * The one rule for "does this check confer" (#1149), pure so that every
  * reader applies it to rows it has already loaded. `Denied` is durable
  * refusal; a missing row, a stale `decidedRiskLevel`, a vanished catalog row,
- * a subject drifted to the `all` wildcard, or a unit-scope grant that binds no
- * unit are all `pending` — the decision (or re-decision) has not been made,
+ * a subject drifted to the `all` wildcard, a permission on an attendance-only
+ * resource type (#1543), or a unit-scope grant that binds no unit are all
+ * `pending` — the decision (or re-decision) has not been made,
  * and the ability confers nothing for them. The missing-row and risk rules are
  * the same ones the ability read path applies when it intersects Granted rows
  * (#60): a vanished catalog row means the grant confers nothing, including
@@ -267,7 +278,7 @@ export function decideConsentCheck(input: ConsentCheckDecisionInput): {
   readonly cause: ConsentCheckNonConferringCause | null;
   readonly decision: ConsentCheckDecision;
 } {
-  const { grant, currentRiskLevel, wildcardSubject, unboundedUnitScope } = input;
+  const { grant, currentRiskLevel, wildcardSubject, attendanceOnlySubject, unboundedUnitScope } = input;
 
   if (!grant) {
     return { decision: 'pending', cause: 'no_row' };
@@ -279,6 +290,10 @@ export function decideConsentCheck(input: ConsentCheckDecisionInput): {
 
   if (wildcardSubject) {
     return { decision: 'pending', cause: 'wildcard_subject' };
+  }
+
+  if (attendanceOnlySubject) {
+    return { decision: 'pending', cause: 'attendance_only_subject' };
   }
 
   if (unboundedUnitScope) {

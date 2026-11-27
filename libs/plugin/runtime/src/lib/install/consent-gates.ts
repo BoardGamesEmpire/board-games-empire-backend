@@ -1,5 +1,11 @@
 import type { Permission } from '@bge/database';
-import { bindsConsentUnit, CONSENT_UNIT_BINDING_REFUSAL, PluginGrantScope, RiskLevel } from '@bge/database';
+import {
+  bindsConsentUnit,
+  CONSENT_UNIT_BINDING_REFUSAL,
+  isAttendanceOnly,
+  PluginGrantScope,
+  RiskLevel,
+} from '@bge/database';
 import type { StaticAnalysisFinding } from '@boardgamesempire/plugin-analysis';
 import type {
   ForbiddenPermissionViolation,
@@ -42,6 +48,34 @@ export const collectWildcardSubjectViolations = (
         permissionSlug: check.canonicalSlug,
         detail:
           "carries the wildcard 'all' subject — never grantable to a plugin, same rule AbilityFactory applies to direct assignment",
+      });
+    }
+  }
+
+  return violations;
+};
+
+/**
+ * Attendance-only exclusion on the CORE side (#1543), resolvable only once the
+ * `Permission` rows are loaded: a core check whose row is on an
+ * attendance-only resource type, such as an event chat's messages, is never
+ * grantable to a plugin. Only event attendance reaches those types, and a
+ * plugin attends nothing: `AbilityFactory.createForPlugin` denies them after
+ * every allow, so a consent to one could never confer anything.
+ */
+export const collectAttendanceOnlyViolations = (
+  validated: PluginManifestValidationResult,
+  corePermissions: ReadonlyMap<string, Permission>,
+): readonly ForbiddenPermissionViolation[] => {
+  const violations: ForbiddenPermissionViolation[] = [];
+
+  for (const check of validated.permissionChecks) {
+    const permission = check.origin === 'core' ? corePermissions.get(check.canonicalSlug) : undefined;
+
+    if (permission !== undefined && isAttendanceOnly(permission.subject)) {
+      violations.push({
+        permissionSlug: check.canonicalSlug,
+        detail: `is on ${permission.subject}, which only event attendance reaches — never grantable to a plugin (#1543)`,
       });
     }
   }

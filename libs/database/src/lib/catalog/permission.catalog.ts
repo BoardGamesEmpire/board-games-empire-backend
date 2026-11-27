@@ -1518,9 +1518,12 @@ export const PERMISSION_CATALOG = [
   // An event's chat is its attendees' (#1543). These grants are the
   // attendance ceiling: every event role reads the chat, posts to it, and
   // edits and deletes its own messages, each bound to the event attended.
-  // Whether a given attendee may read or post right now (a spectator posting,
-  // an RSVP level the event's policy asks for, the chat switched off) is the
-  // chat's access check on the event's policy (#1544), not a role list.
+  // The chat's access check (`chatAccess`) reads them from the attendee's
+  // event role, live: the read to read, the create to post, and the delete
+  // of anyone's message to moderate. Taking one from a role takes it from
+  // that role's attendees. Within that ceiling, whether an attendee may read
+  // or post right now (a spectator posting, an RSVP level the event's policy
+  // asks for, the chat switched off) is the event's policy (#1544).
   //
   // None has a `:household` variant, and none ever will: a household role
   // never reaches an event's chat, and neither does a server role. The type is
@@ -1559,7 +1562,9 @@ export const PERMISSION_CATALOG = [
     reason: "Delete your own chat messages in an event's chat",
   }),
   // The host, co-host and event moderator remove anyone's message in the
-  // event's chat.
+  // event's chat. Holding it is what moderating the chat means to the
+  // access check: always reading and posting, the chat off included, and no
+  // host mute stopping them.
   permission({
     action: Action.delete,
     subject: ResourceType.EventChatMessage,

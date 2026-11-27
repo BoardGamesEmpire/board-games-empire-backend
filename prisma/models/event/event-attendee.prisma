@@ -34,7 +34,8 @@ model EventAttendee {
   gameVotes         EventGameVote[]
   availabilityVotes EventAvailabilityVote[]
 
-  // How far this attendee has read the event chat, and any mute on them (#1543).
+  // How far this attendee has read the event chat, and any host mute or chat
+  // mute on them (#1543).
   chatState EventChatState?
 
   notes    String?

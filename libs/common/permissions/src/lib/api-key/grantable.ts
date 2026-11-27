@@ -125,15 +125,19 @@ export function mayKeyHold(owner: UserWithRoles, permissionId: string): boolean 
  * The first context where the owner holds `permissionId` and a key scope over
  * it builds an allow. {@link renderHeldAllow} refuses a denial and a condition
  * the context can't resolve, exactly as the factory does (#1417). A permission
- * on `all` never qualifies (#1418), nor does one on an attendance-only resource
- * type (#1543), so the list and {@link mayKeyHold} share both rules.
+ * on `all` never qualifies (#1418), nor does a context whose rule would be on
+ * an attendance-only resource type (#1543), so the list and {@link mayKeyHold}
+ * share both rules. The type tested is the rule's subject, `held.subject`: a
+ * direct permission's rule is on its row's `resourceType`, the type
+ * {@link buildsDirectPermissionRule} tests, and the key's rule is built there
+ * too.
  */
 function firstGrantableContext(owner: UserWithRoles, permissionId: string, now: number): HoldingContext | undefined {
   return holdingContexts(owner, permissionId, now).find(
     (held) =>
       held.permission.retiredAt == null &&
       held.permission.subject !== 'all' &&
-      !isAttendanceOnly(held.permission.subject) &&
+      !isAttendanceOnly(held.subject) &&
       !('refusal' in renderHeldAllow(held)),
   );
 }

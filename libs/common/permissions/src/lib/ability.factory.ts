@@ -569,7 +569,11 @@ export class AbilityFactory {
  * household role, owning or belonging to an event's household opens no chat.
  * An event role's grant comes later, bound to the event attended, and lets
  * the attendee into that event's chat and no other: it is the only rule that
- * can. Direct permissions come last: a denial still applies, and an allow on
+ * can. No event role can hold a grant on `all` to widen it: the catalog's
+ * guards, which the entry check runs on every edit of the Owner's, refuse an
+ * unconditioned grant on an event role and one whose conditions don't name
+ * `{{ eventId }}` (#458), and the check's probe refuses any condition on
+ * `all` (#772). Direct permissions come last: a denial still applies, and an allow on
  * one of these types builds no rule ({@link buildsDirectPermissionRule}).
  *
  * A plugin's ability and an API key's call it after every allow, so neither

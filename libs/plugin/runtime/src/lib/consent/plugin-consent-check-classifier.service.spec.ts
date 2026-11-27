@@ -368,6 +368,31 @@ describe('PluginConsentCheckClassifier', () => {
     });
   });
 
+  // A plugin's ability denies the attendance-only types after every allow, so
+  // a Granted row there confers nothing, and no consent could change it.
+  it('a Granted row on an attendance-only type is pending and categorically excluded (#1543)', async () => {
+    db.permission.findMany.mockResolvedValue([
+      { slug: 'read:event_chat_message', riskLevel: RiskLevel.Medium, subject: 'EventChatMessage' },
+    ] as never);
+    db.pluginGrant.findMany.mockResolvedValue([
+      {
+        permissionSlug: 'read:event_chat_message',
+        scopeType: PluginGrantScope.Household,
+        status: PluginGrantStatus.Granted,
+        decidedRiskLevel: RiskLevel.Medium,
+      },
+    ] as never);
+
+    const result = await classifier.classify('plg_1', HOUSEHOLD_UNIT, [check('read:event_chat_message')]);
+
+    expect(result.decisions.get('read:event_chat_message')).toEqual({
+      decision: 'pending',
+      decidedRiskLevel: RiskLevel.Medium,
+      staleRisk: false,
+      ungrantable: 'categorical_exclusion',
+    });
+  });
+
   it('a Granted row whose catalog row vanished confers nothing (mirrors the ability read path)', async () => {
     db.pluginGrant.findMany.mockResolvedValue([
       {

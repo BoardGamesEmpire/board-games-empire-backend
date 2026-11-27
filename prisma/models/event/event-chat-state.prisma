@@ -2,7 +2,7 @@
  * One attendee's state in their event's event chat (#1543): how far they have
  * read, a host mute on them, and their own chat mute. It hangs off the
  * attendee row, not the user, so it belongs to the one event. No row means
- * nothing read and no mute of either kind.
+ * nothing read, no host mute and no chat mute.
  */
 model EventChatState {
   id String @id @default(cuid(2))
@@ -14,8 +14,9 @@ model EventChatState {
   lastReadSequence Int @default(0) @map("last_read_sequence")
 
   // A host mute: set by a host, co-host or event moderator, it stops the
-  // attendee posting. A null end time mutes until lifted; a set one mutes
-  // while it is still ahead. Removing the attendee clears it (#1543).
+  // attendee posting. With a null end time it holds until lifted; with a
+  // set one, while that is still ahead. Removing the attendee clears it
+  // (#1543).
   hostMutedAt    DateTime? @map("host_muted_at") @db.Timestamptz(3)
   hostMutedUntil DateTime? @map("host_muted_until") @db.Timestamptz(3)
 

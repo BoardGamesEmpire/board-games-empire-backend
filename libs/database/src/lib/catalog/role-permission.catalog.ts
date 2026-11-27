@@ -254,8 +254,9 @@ const EVENT_HOST: readonly PermissionSlug[] = [
   'update:event_invite:revoke',
 
   // Chat: every event role reads, posts, and edits and deletes its own chat
-  // messages; the host, co-host and event moderator also delete anyone's
-  // (#1543). Who may post right now is the chat's access check (#1544).
+  // messages; the host, co-host and event moderator also delete anyone's,
+  // which is what makes them moderate the chat (#1543). Who may post right
+  // now, within these grants, is the event's policy (#1544).
   'create:event_chat_message',
   'delete:event_chat_message:own',
   'delete:event_chat_message',

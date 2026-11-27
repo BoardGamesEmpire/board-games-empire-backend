@@ -23,23 +23,13 @@ export type ChatPost =
 
 /**
  * One user's access to one event chat (#1543). A reader's `attendeeId` is the
- * attendee row they read and post as, and `moderates` says whether they are a
- * host, co-host or event moderator there.
+ * attendee row they read and post as, and `moderates` says whether their event
+ * role may remove anyone's message there, as a host, co-host and event
+ * moderator's may.
  */
 export type ChatAccess =
   | { readonly canRead: false; readonly refusal: ChatReadRefusal }
   | { readonly attendeeId: string; readonly canRead: true; readonly moderates: boolean; readonly post: ChatPost };
-
-/**
- * The event roles that moderate an event chat (#1543, #1544): they read and
- * post whatever their RSVP and whether the chat is on, and no host mute stops
- * them. They are the event roles the catalog gives `delete:event_chat_message`.
- */
-export const CHAT_MODERATING_ROLES: readonly string[] = [
-  SystemRole.EventHost,
-  SystemRole.EventCoHost,
-  SystemRole.EventModerator,
-];
 
 /** The schema's defaults, which an event with no policy row reads as (#1544). */
 const DEFAULT_CHAT_POLICY: ChatPolicy = {
@@ -66,31 +56,47 @@ function isHostMuted(facts: ChatFacts, now: Date): boolean {
 }
 
 /**
- * Why an attendee who doesn't moderate can't read, or null when they can. With
- * the chat off it is hidden from them, and its messages are kept (#1544).
+ * Why an attendee can't read, or null when they can. Their event role must
+ * hold the chat's read (#1543). Past that, a moderator always reads (#1544).
+ * For anyone else, with the chat off it is hidden from them, and its messages
+ * are kept (#1544).
  */
-function readRefusal(policy: ChatPolicy, status: EventParticipationStatus): ChatReadRefusal | null {
+function readRefusal(facts: ChatFacts, policy: ChatPolicy): ChatReadRefusal | null {
+  if (!facts.grants.read) {
+    return 'EVENT_CHAT_READ_NOT_ALLOWED';
+  }
+
+  if (facts.grants.moderate) {
+    return null;
+  }
+
   if (!policy.chatEnabled) {
     return 'EVENT_CHAT_OFF';
   }
 
-  if (!admits(policy.chatReadAccess, status)) {
+  if (!admits(policy.chatReadAccess, facts.status)) {
     return 'EVENT_CHAT_READ_NOT_ALLOWED';
   }
 
   return null;
 }
 
-function decidePost(facts: ChatFacts, policy: ChatPolicy, moderates: boolean, now: Date): ChatPost {
+function decidePost(facts: ChatFacts, policy: ChatPolicy, now: Date): ChatPost {
   // Cancelled or archived, the chat is read-only for everyone, hosts included;
   // reopening or unarchiving restores posting (#1544).
   if (facts.cancelledAt !== null || facts.archivedAt !== null) {
     return refusePost('EVENT_CHAT_READ_ONLY');
   }
 
+  // An event role that doesn't hold the chat's post never posts, whatever
+  // the event policy says (#1543).
+  if (!facts.grants.post) {
+    return refusePost('EVENT_CHAT_POST_NOT_ALLOWED');
+  }
+
   // Hosts, co-hosts and event moderators always post, the chat off included
   // (#1544).
-  if (moderates) {
+  if (facts.grants.moderate) {
     return { allowed: true };
   }
 
@@ -105,7 +111,7 @@ function decidePost(facts: ChatFacts, policy: ChatPolicy, moderates: boolean, no
   }
 
   // The host mute is checked last, so a reader who couldn't post anyway is
-  // told why, with no mute end to wait for (#1543).
+  // told why, with no host mute's end to wait for (#1543).
   if (isHostMuted(facts, now)) {
     return refusePost('EVENT_CHAT_MUTED', facts.hostMutedUntil);
   }
@@ -125,14 +131,18 @@ export function decideChatAccess(facts: ChatFacts | null, now: Date): ChatAccess
   }
 
   const policy = facts.policy ?? DEFAULT_CHAT_POLICY;
-  const moderates = CHAT_MODERATING_ROLES.includes(facts.role);
-  const refusal = moderates ? null : readRefusal(policy, facts.status);
+  const refusal = readRefusal(facts, policy);
 
   if (refusal !== null) {
     return { canRead: false, refusal };
   }
 
-  return { canRead: true, attendeeId: facts.attendeeId, moderates, post: decidePost(facts, policy, moderates, now) };
+  return {
+    canRead: true,
+    attendeeId: facts.attendeeId,
+    moderates: facts.grants.moderate,
+    post: decidePost(facts, policy, now),
+  };
 }
 
 /**
