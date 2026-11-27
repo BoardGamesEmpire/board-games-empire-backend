@@ -299,6 +299,7 @@ const KNOWN_READ_CEILINGS: PinnedReadCeilings = {
     EventGuest: { 'read:event_availability_vote': 'binds eventId' },
     EventSpectator: { 'read:event_availability_vote': 'binds eventId' },
   },
+  EventChatMessage: {},
   EventGame: {
     HouseholdOwner: { 'read:event_game:household': 'binds householdId' },
     HouseholdAdmin: { 'read:event_game:household': 'binds householdId' },

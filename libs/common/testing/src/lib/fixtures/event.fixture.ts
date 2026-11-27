@@ -8,6 +8,7 @@ import type {
   EventPolicy,
 } from '@bge/database';
 import {
+  EventChatAccess,
   EventParticipationStatus,
   EventSchedulingMode,
   EventType,
@@ -69,6 +70,10 @@ export function makeEventPolicy(eventId: string, overrides: Partial<EventPolicy>
     interestedWeight: InterestedWeight.AsAbstain,
     votingWindowHours: null,
     occurrenceOverrideScope: OccurrenceOverrideScope.Any,
+    chatEnabled: true,
+    chatReadAccess: EventChatAccess.AllAttendees,
+    chatPostAccess: EventChatAccess.AllAttendees,
+    chatSpectatorsMayPost: false,
     createdAt: new Date('2024-01-01T00:00:00Z'),
     updatedAt: new Date('2024-01-01T00:00:00Z'),
     ...overrides,

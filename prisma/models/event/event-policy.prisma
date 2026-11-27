@@ -55,6 +55,18 @@ model EventPolicy {
   // Null = host closes manually.
   votingWindowHours Int? @map("voting_window_hours")
 
+  // Event chat controls (#1544): whether the event chat is on, and which
+  // attendees may read it and post in it, by their RSVP. Reading and posting
+  // are set apart, so a host can open the chat to everyone but take posts
+  // only from those coming. A spectator posts only when
+  // `chatSpectatorsMayPost` is on. With the chat off, the event's hosts,
+  // co-hosts and event moderators still read it and nobody posts; other
+  // attendees can't read it (#1544).
+  chatEnabled           Boolean         @default(true) @map("chat_enabled")
+  chatReadAccess        EventChatAccess @default(AllAttendees) @map("chat_read_access")
+  chatPostAccess        EventChatAccess @default(AllAttendees) @map("chat_post_access")
+  chatSpectatorsMayPost Boolean         @default(false) @map("chat_spectators_may_post")
+
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
@@ -112,4 +124,15 @@ enum OccurrenceOverrideScope {
   Any // an occurrence may replace them, or remove them through its "no restriction" flags
 
   @@map("occurrence_override_scopes")
+}
+
+/// Which attendees an event chat setting admits, by their RSVP (#1544).
+/// Listed widest first: each level admits only part of the one above it.
+enum EventChatAccess {
+  AllAttendees // everyone on the list, invited ones included
+  Responded // anyone who has given an RSVP, not attending included
+  MaybeOrAttending // maybe or attending
+  Attending // attending only
+
+  @@map("event_chat_access_levels")
 }
