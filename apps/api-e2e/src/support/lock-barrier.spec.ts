@@ -297,6 +297,29 @@ describe('expectLockWaiter', () => {
     ).resolves.toEqual(waiter);
   });
 
+  it('polls again past a waiter whose statement is still BEGIN in the pg_stat_activity snapshot (#1594)', async () => {
+    // `pg_stat_activity` is a snapshot taken when the query first reads it,
+    // while `pg_blocking_pids` reads the lock manager live. A backend that had
+    // only sent BEGIN at the snapshot, and queued on the row since, comes back
+    // as a waiter running BEGIN. The next poll's snapshot names its statement.
+    const waiting: LockWaiter = { pid: 99, query: 'SELECT h.id FROM households h FOR NO KEY UPDATE' };
+    const polls: LockWaiter[][] = [[{ pid: 99, query: '  begin ' }], [waiting]];
+    const seen: unknown[][] = [];
+    const barrier: Barrier = {
+      ...barrierWatching([]),
+      observer: stub('observer', WATCHED_OBSERVER_PID, (async (sql: string, params: readonly unknown[] = []) => {
+        seen.push([sql, ...params]);
+
+        return polls.shift() ?? [waiting];
+      }) as BarrierConnection['query']),
+    };
+
+    await expect(
+      expectLockWaiter(barrier, { heldBy: WATCHED_HOLDER_PID, description: 'the transfer request', timeoutMs: 5_000 }),
+    ).resolves.toEqual(waiting);
+    expect(seen).toHaveLength(2);
+  });
+
   it('asks who the HOLDER is blocking, which reaches a backend waiting on a row', async () => {
     const seen: unknown[][] = [];
 
