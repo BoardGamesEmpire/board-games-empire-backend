@@ -1,0 +1,29 @@
+# Realtime goes through live topics, checked as the subscriber
+
+Everything the server pushes to clients about shared content goes through one WebSocket namespace, `live`, in which a client subscribes to live topics such as `event:<eventId>:chat` or `game:<gameId>`. Each topic type registers one check, "may this subscriber hear this?", which runs as the subscriber when they subscribe, again whenever the answer may have changed, and periodically. Writes stay on REST: the socket delivers and never mutates.
+
+Event chat is the first feature that needs the server to push shared content to several people at once, and more are queued behind it: a game's page updating when its import finishes, notifications pushed instead of polled, import progress, and admin live logs (#876). Without one mechanism, each would be a gateway with its own access checks and its own way of taking access away, and a gateway that got either wrong would leak quietly. The decision was made in a design brainstorm on 2026-11-25, revised after an external review the same day, and is tracked in #1531 (event chat in #1532).
+
+- **Rooms are the boundary, not namespaces.** Any signed-in user can connect to any namespace, so a namespace per feature would add no privacy. A socket hears a topic only after the server joins it to the topic's room, and only the server can. Features never hold the Socket.IO server; they get a single `publish(topic, …)` that emits to one topic's room, and nothing emits to the namespace as a whole.
+- **A topic's check runs as the subscriber.** `authorize` takes the subscriber explicitly. Re-checks run from domain event listeners whose actor is whoever made the change, and borrowing that actor's authority would answer the wrong question.
+- **Access is taken away when it changes, not at the next reconnect.** Each topic type names the domain events that may change its answer. A change to one person reaches that person's sockets through a private `user:<id>` room; a change to the whole topic goes through the sockets in its room. The instance that made the change evicts its own sockets at once and tells the others without waiting on them. A subscribe that races a revocation is checked again right after it joins. A sweep every few minutes re-checks every subscription and session, so a revocation path someone forgot is bounded at minutes.
+- **A session ending disconnects its sockets** in every namespace, including a socket that only listens and so never meets the per-frame session guard. Natural expiry, which fires no hook, is caught by a timer at the session's expiry.
+- **Refusals don't reveal what exists.** Anyone who can't read a topic's resource, or names one that doesn't exist, gets one code, the same as not found.
+- **Payloads are hints where they can be.** Catalog, notification and import topics carry ids, and the client re-fetches over REST, which applies the normal permissions. Chat carries the message itself, so for chat the room check and eviction are what keep it private.
+- **Connection state recovery is off for the whole server.** Socket.IO would restore a recovered socket's rooms and replay missed packets without any check running again, and the option is per server, not per namespace. A reconnecting client re-subscribes and catches up over REST from its last cursor.
+- **Processes without a socket server publish through `@socket.io/redis-streams-emitter`**, matching the Redis streams adapter, through the same `publish` contract.
+
+## Considered options
+
+- **A namespace per feature, writes over the socket.** It feels most like chat and saves a round trip. Every hardened write path would be rebuilt for frames: client request ids ([ADR 0002](0002-retried-writes-use-client-request-ids.md)), API keys (#1420), audit, webhooks, quotas. Rejected.
+- **A namespace per feature, writes over REST.** It keeps the write machinery, but each feature brings its own handshake lookup and its own revocation logic, the part most likely to be got wrong. Rejected.
+- **Moving game search onto `live`.** A search is one person's request streaming back to that person, with start and cancel commands and no shared audience, so a topic adds nothing; it already works on both sides with a REST fallback. Socket.IO carries every namespace over one connection, so keeping `games/search` separate costs one handshake lookup, not a second socket. Kept separate; the session-end disconnect applies to it.
+- **Re-authorizing a recovered socket before its replay.** It would keep recovery's benefit, but nothing needs that benefit: `live` catches up over REST, and the client already ends a search early, keeping what came, when `games/search` drops. Turning recovery off removes the replay path altogether. Rejected.
+
+## Consequences
+
+- A new realtime feature is a new topic type: a parser, an `authorize`, and the domain events that can change its answer. It inherits subscription, eviction, the sweep and session end.
+- A topic type whose answer can change must have a domain event for every change. Where none exists, building the topic means adding one first (an attendee's event role changing, for event chat; a session ending, for every topic).
+- Between a revocation on one api instance and the eviction reaching another, a publish on that other instance can still reach the removed socket for a fraction of a second. That window is accepted, bounded by the post-join check and the sweep.
+- Every publish is an `XADD` to the adapter's Redis stream, which every namespace shares and which is capped. A high-rate topic type, such as admin logs, must check for subscribers before publishing and use its own stream or a separate path, so it can't push other topics' entries out.
+- A reconnect costs the client a re-subscribe and a REST catch-up per open topic, where recovery would have replayed silently.
