@@ -84,6 +84,15 @@
     "member_invites_off": "This event's policy doesn't let participants invite. Ask the host or a co-host to send the invite.",
     "role_not_provisioned": "Event role '{role}' is not provisioned on this server"
   },
+  "event_chat": {
+    "user_required": "Only a registered user signed in to their own account can use an event chat.",
+    "not_found": "This event chat can't be found.",
+    "off": "This event chat is turned off.",
+    "read_not_allowed": "Your RSVP to this event doesn't let you read its event chat.",
+    "read_only": "This event chat is read-only, so no one can post in it.",
+    "post_not_allowed": "Your RSVP or event role doesn't let you post in this event chat.",
+    "muted": "A host mute stops you from posting in this event chat."
+  },
   "event_policy": {
     "threshold_value_required": "A vote threshold of a set percentage or a fixed number of votes needs that percentage or number, and the event, or one of its dates, would be left without it. Enter the percentage or number, or choose another vote threshold.",
     "quorum_value_required": "A quorum of a set percentage or a fixed number of eligible voters needs that percentage or number, and the event, or one of its dates, would be left without it. Enter the percentage or number, or choose another quorum.",

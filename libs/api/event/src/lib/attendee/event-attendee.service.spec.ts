@@ -350,6 +350,20 @@ describe('EventAttendeeService', () => {
         );
       });
 
+      // A host mute hangs off the attendee row, which a removal keeps, so it
+      // would otherwise outlive the removal and greet them when they come back.
+      it("clears the removed attendee's host mute, so adding them back starts clean (#1543)", async () => {
+        await service.removeAttendee('event-1', 'att-1');
+
+        expect(db.eventChatState.updateMany).toHaveBeenCalledWith({
+          where: { attendeeId: 'att-1' },
+          data: { hostMutedAt: null, hostMutedUntil: null },
+        });
+        expect(db.eventAttendee.update.mock.invocationCallOrder[0]).toBeLessThan(
+          db.eventChatState.updateMany.mock.invocationCallOrder[0],
+        );
+      });
+
       it('answers 404 for an attendee already removed, and writes nothing', async () => {
         db.eventAttendee.findUnique.mockResolvedValue(null);
 
