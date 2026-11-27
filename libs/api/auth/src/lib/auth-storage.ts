@@ -66,8 +66,10 @@ return count`;
  *   active-sessions list can keep naming a session deleted in that second,
  *   which is harmless, since better-auth skips a listed session it cannot
  *   find.
- * - **Failures are raised.** The store must be built with `throwOnErrors`,
- *   and one that is not is refused here. Otherwise Keyv resolves a failed read
+ * - **Failures are raised.** The store must have no `error` listener, and one
+ *   that has is refused here: Keyv 6 raises a failed call only from a store
+ *   nothing listens to (`createCacheStore`'s `throwOnErrors` builds one).
+ *   Otherwise Keyv resolves a failed read
  *   as a miss and a failed write or delete as `false`, so better-auth would
  *   issue a cookie for a session it never saved, and a sign-out could not
  *   tell that the session survived (#487). A failed read is an error too, so
@@ -86,9 +88,9 @@ return count`;
  * `authFactory`: {@link createRedisAuthStorage} adds both steps.
  */
 export function createAuthStorage(store: Keyv): AuthStorage {
-  if (!store.throwOnErrors) {
+  if (store.listenerCount('error') > 0) {
     throw new Error(
-      "better-auth's storage needs a store built with throwOnErrors, so a failed Redis call reaches better-auth.",
+      "better-auth's storage needs a store with no error listener, so a failed Redis call reaches better-auth.",
     );
   }
 
@@ -178,7 +180,7 @@ export function createRedisAuthStorage(client: Redis): CompleteAuthStorage {
  */
 async function readEnvelope(store: Keyv, raw: string) {
   try {
-    return await store.deserializeData<unknown>(raw);
+    return await store.decode<unknown>(raw);
   } catch {
     return undefined;
   }

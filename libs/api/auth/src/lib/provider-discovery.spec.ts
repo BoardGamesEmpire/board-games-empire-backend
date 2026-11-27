@@ -133,7 +133,7 @@ describe("authFactory's sign-in provider discovery", () => {
       },
     });
 
-    return authFactory(noUsers, config, memoryAuthStorage(new Keyv({ throwOnErrors: true })));
+    return authFactory(noUsers, config, memoryAuthStorage(new Keyv()));
   }
 
   const signInWithFake = (auth: ReturnType<typeof authFor>) =>

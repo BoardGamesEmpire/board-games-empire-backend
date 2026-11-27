@@ -8,28 +8,66 @@ import Keyv from 'keyv';
  * shared cache client, under `namespace`. Every Valkey-backed cache builds its
  * store here, so what a store leaves in Redis is decided in one place.
  *
- * - **No index set** (`useRedisSets: false`). By default the adapter adds
- *   every key it writes to a `namespace:<namespace>` set and removes it only
- *   when the store deletes the key. A key that expires on its TTL, or that the
- *   api's boot flush unlinks, stays a member, so the set grew for as long as
- *   Redis kept it (#449). The cost falls on two calls nothing here makes: the
- *   adapter's `clear()` finds the keys with `KEYS`, which blocks Redis, and
- *   matches any namespace that starts with this one; and Keyv's iterator
- *   scans for the namespace without the adapter's prefix, so it finds nothing.
- * - **One prefix** (`useKeyPrefix: false`). With the set off, the adapter
- *   prefixes each key itself ({@link cacheStoreKey}), and Keyv's own prefix
- *   would repeat the namespace.
+ * - **No index set** (`useSets: false`, the adapter's default since
+ *   `@keyv/valkey` 6, stated so the choice stays here). With the set on, the
+ *   adapter adds every key it writes to a set for the namespace and removes it
+ *   only when the store deletes the key. A key that expires on its TTL, or that
+ *   the api's boot flush unlinks, stays a member, so the set grew for as long
+ *   as Redis kept it (#449).
+ * - **One colon** (`namespaceSeparator: ':'`). Since version 6 the adapter
+ *   puts `::` between the namespace and the key by default. The boot flush,
+ *   the throttler and better-auth's storage reach keys by
+ *   {@link cacheStoreKey}'s `namespace:<namespace>:<key>`, so the store keeps
+ *   that layout.
+ * - **Failures by listener.** Keyv 6 decides what a failed call does by
+ *   whether the store has an `error` listener: with one, the call returns its
+ *   fallback (a miss, or `false`); with none, it rejects. A store gets a
+ *   listener unless it is asked to raise ({@link CacheStoreOptions}).
  *
  * Nothing bounds a store but its entries' TTLs. Redis evicts nothing,
  * because the job queues share it and BullMQ needs `noeviction`.
  */
 export function createCacheStore(client: Redis, namespace: string, options: CacheStoreOptions = {}): Keyv {
-  return new Keyv({
-    store: new KeyvValkey(client, { useRedisSets: false }),
-    namespace,
-    useKeyPrefix: false,
-    throwOnErrors: options.throwOnErrors ?? false,
-  });
+  const store = new Keyv({ store: valkeyAdapter(client), namespace });
+
+  if (!options.throwOnErrors) {
+    store.on('error', ignoreError);
+  }
+
+  return store;
+}
+
+/**
+ * The adapter over the shared client, without its hold on the client's `error`
+ * events.
+ *
+ * The adapter re-emits each connection error the client reports, and Keyv
+ * re-emits it again. A store with no `error` listener throws what it is given,
+ * here from inside the client and outside any call, so a dropped connection
+ * would crash the process through a store that raises. The adapter's listener
+ * gives way to one that drops the error, as the client's connection errors
+ * were dropped before Keyv 6, and that keeps the client from printing each one
+ * as unhandled.
+ */
+function valkeyAdapter(client: Redis): KeyvValkey {
+  const before = new Set(client.listeners('error'));
+  const adapter = new KeyvValkey(client, { useSets: false, namespaceSeparator: ':' });
+
+  for (const listener of client.listeners('error')) {
+    if (!before.has(listener)) {
+      client.removeListener('error', listener);
+    }
+  }
+
+  if (!client.listeners('error').includes(ignoreError)) {
+    client.on('error', ignoreError);
+  }
+
+  return adapter;
+}
+
+function ignoreError(): void {
+  // Dropped on purpose; see createCacheStore and valkeyAdapter.
 }
 
 /**
@@ -48,12 +86,12 @@ export function createCacheModuleStore(client: Redis, namespace: string): Import
 
 export interface CacheStoreOptions {
   /**
-   * Raise a failed Redis call to the caller. By default Keyv catches it: a
-   * failed read resolves as a miss, and a failed write or delete is emitted as
-   * an `error` event and resolves `false`. A cache can afford that, since the
-   * next read misses and loads again. A store that must not lose a write
-   * quietly, or pass an outage off as a miss, turns this on, as better-auth's
-   * does (#640).
+   * Raise a failed Redis call to the caller. By default the store's `error`
+   * listener catches it: a failed read resolves as a miss, and a failed write
+   * or delete resolves `false`. A cache can afford that, since the next read
+   * misses and loads again. A store that must not lose a write quietly, or
+   * pass an outage off as a miss, turns this on, as better-auth's does (#640).
+   * Such a store has no `error` listener, and adding one stops it raising.
    */
   readonly throwOnErrors?: boolean;
 }
