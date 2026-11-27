@@ -17,13 +17,7 @@ import { emitCollectionSupplyChanges, syncCollectionEntrySupply } from '@bge/eve
 import { t } from '@bge/i18n';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
 import type { MockDatabaseService } from '@bge/testing';
-import {
-  batchTransactionCall,
-  createTestingModuleWithDb,
-  paginationQuery,
-  rawQueryText,
-  unwrapTransaction,
-} from '@bge/testing';
+import { createTestingModuleWithDb, paginationQuery, rawQueryText, unwrapTransaction } from '@bge/testing';
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { COLLECTION_INCLUDE, OWNER_COPY_SELECT } from './collection-row';
@@ -173,8 +167,8 @@ describe('GameCollectionService', () => {
     });
 
     db = ctx.db;
-    // A removal and an add-back write in a callback transaction, the list
-    // reads in a batch one; the mock runs both (#1221).
+    // The writes and the reads each run in a callback transaction, which the
+    // mock runs against itself (#1221, #1231).
     unwrapTransaction(db);
     syncSupply.mockResolvedValue([]);
     // Each read that returns rows also reads their base-game links (#1070).
@@ -208,6 +202,37 @@ describe('GameCollectionService', () => {
 
       return result;
     }) as never);
+  }
+
+  /** The options the first transaction was opened with, its isolation level among them (#1231). */
+  function firstTransactionOptions(): unknown {
+    return (db.$transaction.mock.calls[0] as unknown[] | undefined)?.[1];
+  }
+
+  /**
+   * Records in `order`, beside the callback transaction's `begin` and
+   * `commit`, each read a collection row is composed from, so a test can pin
+   * that they all run inside the one transaction (#1231). Each read keeps the
+   * stub it had.
+   */
+  function recordRowReads(order: string[]): void {
+    recordTransaction(order);
+    const reads = [
+      ['row', db.gameCollection.findUnique],
+      ['rows', db.gameCollection.findMany],
+      ['count', db.gameCollection.count],
+      ['base games', db.gameExpansion.findMany],
+      ['owner copies', db.collectionCopy.findMany],
+    ] as const;
+
+    for (const [name, mock] of reads) {
+      const read = mock as unknown as jest.Mock;
+      const stubbed = read.getMockImplementation();
+      read.mockImplementation(async (...args: unknown[]) => {
+        order.push(name);
+        return stubbed?.(...args);
+      });
+    }
   }
 
   /**
@@ -327,17 +352,20 @@ describe('GameCollectionService', () => {
     });
 
     // The count only agrees with the rows because both read one snapshot, and
-    // the transaction mock resolves the operation array at any isolation level —
-    // so the guarantee has to be pinned or it can regress silently.
+    // the transaction mock runs its callback at any isolation level — so the
+    // guarantee has to be pinned or it can regress silently.
     it('reads the rows and the count in one REPEATABLE READ transaction', async () => {
+      const order: string[] = [];
       db.gameCollection.findMany.mockResolvedValue([]);
       db.gameCollection.count.mockResolvedValue(0);
+      recordRowReads(order);
 
       await service.listOwn(paginationQuery({ limit: 20 }));
 
-      const { operations, options } = batchTransactionCall(db);
-      expect(operations).toHaveLength(2);
-      expect(options).toEqual({ isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+      expect(order).toEqual(['begin', 'rows', 'count', 'commit']);
+      expect(firstTransactionOptions()).toEqual({
+        isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+      });
     });
 
     describe('with updatedSince (#1070)', () => {
@@ -1974,6 +2002,54 @@ describe('GameCollectionService', () => {
       expect(page.rows[0]?.copies).toEqual([PUBLIC_COPY]);
     });
 
+    // A row's `quantity` is the include's count of owned copies, and the
+    // owner's copies are a read of their own. Read apart, a copy write
+    // committed between them would answer a `quantity` of 2 beside one copy,
+    // so both reads, and the base games beside them, share the row's
+    // snapshot (#1231).
+    describe('in one state of the entry', () => {
+      it('listOwn composes its page inside the REPEATABLE READ transaction that read it', async () => {
+        const order: string[] = [];
+        db.gameCollection.findMany.mockResolvedValue([withPublicCopies()]);
+        db.gameCollection.count.mockResolvedValue(1);
+        db.collectionCopy.findMany.mockResolvedValue([ownersCopyRow()] as never);
+        recordRowReads(order);
+
+        const page = await service.listOwn(paginationQuery({ limit: 20 }));
+
+        expect(order).toEqual(['begin', 'rows', 'count', 'base games', 'owner copies', 'commit']);
+        expect(firstTransactionOptions()).toEqual({
+          isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+        });
+        expect(page.rows[0]?.copies).toEqual([ownersCopy()]);
+      });
+
+      it('getById composes its row inside a REPEATABLE READ transaction that read it', async () => {
+        const order: string[] = [];
+        db.gameCollection.findUnique.mockResolvedValue(withPublicCopies());
+        db.collectionCopy.findMany.mockResolvedValue([ownersCopyRow()] as never);
+        recordRowReads(order);
+
+        await service.getById('gc-1');
+
+        expect(order).toEqual(['begin', 'row', 'base games', 'owner copies', 'commit']);
+        expect(firstTransactionOptions()).toEqual({
+          isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+        });
+      });
+
+      it('listForUser composes its page inside the transaction that read it', async () => {
+        const order: string[] = [];
+        db.gameCollection.findMany.mockResolvedValue([withPublicCopies()]);
+        db.gameCollection.count.mockResolvedValue(1);
+        recordRowReads(order);
+
+        await service.listForUser(ME, paginationQuery({ limit: 20 }));
+
+        expect(order).toEqual(['begin', 'rows', 'count', 'base games', 'commit']);
+      });
+    });
+
     describe("a write's answer", () => {
       beforeEach(() => {
         db.platformGame.findUnique.mockResolvedValue({ id: 'pg-1' } as PlatformGame);
@@ -1994,6 +2070,22 @@ describe('GameCollectionService', () => {
 
         expect(db.collectionCopy.findMany).toHaveBeenLastCalledWith(ownerCopyQuery(['gc-1']));
         expect(row.copies).toEqual([ownersCopy()]);
+      });
+
+      // The write's transaction holds the entry's lock, which every copy
+      // write takes first, so the answer read before it commits is one state
+      // of the entry (#1231).
+      it.each([
+        ['addToCollection', () => service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical })],
+        ['update', () => service.update('gc-1', { rating: 7 })],
+        ['remove', () => service.remove('gc-1', {})],
+      ] as const)("%s reads its answer's base games and owner copies before it commits", async (_method, write) => {
+        const order: string[] = [];
+        recordRowReads(order);
+
+        await write();
+
+        expect(order.slice(-3)).toEqual(['base games', 'owner copies', 'commit']);
       });
     });
   });

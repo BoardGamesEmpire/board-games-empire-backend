@@ -5,7 +5,6 @@ import { emitCollectionSupplyChanges, syncCollectionEntrySupply } from '@bge/eve
 import type { MockDatabaseService } from '@bge/testing';
 import { createTestingModuleWithDb, rawQueryText, unwrapTransaction } from '@bge/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { COLLECTION_INCLUDE } from './collection-row';
 import { CollectionWriteService } from './collection-write.service';
 
 // The supply sync has its own spec in `@bge/event`; here it is a seam, so the
@@ -432,18 +431,22 @@ describe('CollectionWriteService', () => {
     // An entry route answers the row as the transaction leaves it: the
     // removal or acquisition its write caused is written by the reconcile,
     // after the write, so the row is read after that, in the same
-    // transaction.
-    it('answers the entry read after the reconcile and the sync, in the same transaction', async () => {
+    // transaction, still under the entry's lock.
+    it('answers what `read` reads of the entry after the reconcile and the sync, in the same transaction', async () => {
       const order: string[] = [];
       recordTransaction(order);
       const row = { id: 'gc-1', deletedAt: NOW };
-      db.gameCollection.findUniqueOrThrow.mockImplementation((async (args: { include?: unknown }) => {
-        order.push(args.include === undefined ? 'reconcile' : 'read');
-        return args.include === undefined ? entryState(null, 0) : row;
+      db.gameCollection.findUniqueOrThrow.mockImplementation((async () => {
+        order.push('reconcile');
+        return entryState(null, 0);
       }) as never);
       syncSupply.mockImplementation(async () => {
         order.push('sync');
         return [];
+      });
+      const read = jest.fn(async () => {
+        order.push('read');
+        return row;
       });
 
       await expect(
@@ -452,16 +455,14 @@ describe('CollectionWriteService', () => {
             order.push('write');
             return 'gc-1';
           },
+          read,
           'user-1',
           NOW,
         ),
       ).resolves.toBe(row);
 
       expect(order).toEqual(['begin', 'write', 'reconcile', 'sync', 'read', 'commit']);
-      expect(db.gameCollection.findUniqueOrThrow).toHaveBeenLastCalledWith({
-        where: { id: 'gc-1' },
-        include: COLLECTION_INCLUDE,
-      });
+      expect(read).toHaveBeenCalledWith(db, 'gc-1');
     });
 
     // A copy removal names its own reason, so a removal stamped later by a
@@ -483,7 +484,13 @@ describe('CollectionWriteService', () => {
       db.gameCollection.findUniqueOrThrow.mockResolvedValue(entryState(null, 0) as never);
       db.collectionCopy.findFirst.mockResolvedValue({ removeReason: GameRemovalReason.Traded } as never);
 
-      await service.runForRow(async () => 'gc-1', 'user-1', NOW, GameRemovalReason.Lost);
+      await service.runForRow(
+        async () => 'gc-1',
+        async () => null,
+        'user-1',
+        NOW,
+        GameRemovalReason.Lost,
+      );
 
       expect(db.gameCollection.update.mock.calls[0]?.[0]?.data).toMatchObject({
         deletedAt: NOW,

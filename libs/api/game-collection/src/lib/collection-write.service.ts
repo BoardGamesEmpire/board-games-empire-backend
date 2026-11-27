@@ -5,8 +5,7 @@ import { emitCollectionSupplyChanges, syncCollectionEntrySupply } from '@bge/eve
 import type { AbilityService } from '@bge/permissions';
 import { Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import type { GameCollectionWithRelations } from './collection-row';
-import { COLLECTION_INCLUDE, OWNED_COPY, REMOVED_COPY } from './collection-row';
+import { OWNED_COPY, REMOVED_COPY } from './collection-row';
 import { collectionEntryNotFound } from './game-collection.errors';
 
 /** A collection entry as {@link CollectionWriteService.lockEntry} holds it. */
@@ -114,23 +113,24 @@ export class CollectionWriteService {
 
   /**
    * {@link run} for a write whose answer is the entry itself. `write` answers
-   * the id of the entry it wrote, and the answer is that entry, read with
-   * `COLLECTION_INCLUDE` after its ownership is reconciled, in the same
-   * transaction: the removal or acquisition the write caused shows, and no
-   * later write does.
+   * the id of the entry it wrote, and the answer is what `read` reads of that
+   * entry after its ownership is reconciled, in the same transaction, under
+   * the entry's lock: the removal or acquisition the write caused shows, and
+   * no later write does (#1231).
    *
    * An entry removal passes its own `removeReason`, which the reconcile gives
    * the entry when it removes it ({@link reconcileOwnership}).
    */
-  async runForRow(
+  async runForRow<T>(
     write: (tx: Prisma.TransactionClient) => Promise<string>,
+    read: (tx: Prisma.TransactionClient, entryId: string) => Promise<T>,
     actingUserId: string | null,
     now: Date,
     removeReason?: GameRemovalReason | null,
-  ): Promise<GameCollectionWithRelations> {
+  ): Promise<T> {
     return this.transact(
       async (tx) => ({ entryId: await write(tx), result: null }),
-      (tx, { entryId }) => tx.gameCollection.findUniqueOrThrow({ where: { id: entryId }, include: COLLECTION_INCLUDE }),
+      (tx, { entryId }) => read(tx, entryId),
       actingUserId,
       now,
       removeReason,

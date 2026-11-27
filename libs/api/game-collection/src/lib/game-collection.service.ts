@@ -131,9 +131,7 @@ export class GameCollectionService {
       ],
     } satisfies Prisma.GameCollectionWhereInput;
 
-    const { rows, total } = await this.paginate(where, query);
-
-    return { rows: await this.rowsWithOwnerCopies(rows), total };
+    return this.paginate(where, query, true);
   }
 
   /**
@@ -166,7 +164,7 @@ export class GameCollectionService {
       ],
     } satisfies Prisma.GameCollectionWhereInput;
 
-    const { rows, total } = await this.paginate(where, query);
+    const { rows, total } = await this.paginate(where, query, false);
 
     return { rows: await this.rowsWithOnWishlist(rows), total };
   }
@@ -213,34 +211,37 @@ export class GameCollectionService {
 
   /**
    * One page of collection entries plus the total matching count for the
-   * response envelope (#230).
+   * response envelope (#230), composed by {@link composeRows}, with the
+   * entry owner's copies when `ownerCopies` is set (#1231).
    *
-   * REPEATABLE READ because Prisma's default batch isolation snapshots each
+   * REPEATABLE READ because Prisma's default isolation snapshots each
    * statement separately, which can report fewer total rows than the page
-   * itself contains. The identical `where` keeps the count scoped to what the
-   * actor may see, and `id` breaks ties on `updatedAt` so a row cannot drift
-   * across a page boundary between requests.
+   * itself contains, or a row's `quantity` beside a different set of its
+   * copies (#1231). Every read of the page, the composing ones included, is
+   * in the one snapshot. The identical `where` keeps the count scoped to what
+   * the actor may see, and `id` breaks ties on `updatedAt` so a row cannot
+   * drift across a page boundary between requests.
    */
   private async paginate(
     where: Prisma.GameCollectionWhereInput,
     pagination: PaginationQueryDto,
+    ownerCopies: boolean,
   ): Promise<PaginatedRows<GameCollectionRow>> {
-    const [rows, total] = await this.db.$transaction(
-      [
-        this.db.gameCollection.findMany({
+    return this.db.$transaction(
+      async (tx) => {
+        const rows = await tx.gameCollection.findMany({
           where,
           include: COLLECTION_INCLUDE,
           orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
           skip: pagination.skip,
           take: pagination.pageSize,
-        }),
+        });
+        const total = await tx.gameCollection.count({ where });
 
-        this.db.gameCollection.count({ where }),
-      ],
+        return { rows: await this.composeRows(tx, rows, ownerCopies), total };
+      },
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
-
-    return { rows: await this.rowsWithBaseGames(rows), total };
   }
 
   /**
@@ -249,20 +250,28 @@ export class GameCollectionService {
    * shape for every other reader (#1231).
    */
   async getById(id: string): Promise<GameCollectionDto> {
-    const collection = await this.db.gameCollection.findUnique({
-      where: {
-        id,
-        // eslint-disable-next-line no-restricted-syntax -- single-row fetch by id, not a collection read
-        AND: this.abilityService.getCurrentResourceConditions(ResourceType.GameCollection, Action.read),
+    // One REPEATABLE READ snapshot, as `paginate` reads a page in (#1231).
+    return this.db.$transaction(
+      async (tx) => {
+        const collection = await tx.gameCollection.findUnique({
+          where: {
+            id,
+            // eslint-disable-next-line no-restricted-syntax -- single-row fetch by id, not a collection read
+            AND: this.abilityService.getCurrentResourceConditions(ResourceType.GameCollection, Action.read),
+          },
+          include: COLLECTION_INCLUDE,
+        });
+
+        if (!collection) {
+          throw collectionEntryNotFound(id);
+        }
+
+        const [row] = await this.composeRows(tx, [collection], true);
+
+        return row;
       },
-      include: COLLECTION_INCLUDE,
-    });
-
-    if (!collection) {
-      throw collectionEntryNotFound(id);
-    }
-
-    return this.rowWithOwnerCopies(await this.rowWithBaseGames(collection));
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
   }
 
   /**
@@ -276,26 +285,22 @@ export class GameCollectionService {
    * the copy routes already send it. The key reads only the entries its
    * grants reach, and this read only adds to those rows.
    */
-  private async rowsWithOwnerCopies(rows: GameCollectionRow[]): Promise<GameCollectionRow[]> {
+  private async rowsWithOwnerCopies(
+    tx: Prisma.TransactionClient,
+    rows: GameCollectionRow[],
+  ): Promise<GameCollectionRow[]> {
     const actingUserId = resolveActingUserIdOrNull(this.abilityService);
     if (actingUserId === null || rows.length === 0) {
       return rows;
     }
 
     const owned = await readOwnerCopies(
-      this.db,
+      tx,
       rows.map(({ id }) => id),
       actingUserId,
     );
 
     return rows.map((row) => ({ ...row, copies: owned.get(row.id) ?? row.copies }));
-  }
-
-  /** One row with its copies, as {@link rowsWithOwnerCopies} reads them. */
-  private async rowWithOwnerCopies(row: GameCollectionRow): Promise<GameCollectionRow> {
-    const [withCopies] = await this.rowsWithOwnerCopies([row]);
-
-    return withCopies;
   }
 
   /**
@@ -413,6 +418,7 @@ export class GameCollectionService {
 
           return locked.id;
         },
+        (tx, entryId) => this.readWrittenRow(tx, entryId),
         userId,
         now,
       );
@@ -465,7 +471,7 @@ export class GameCollectionService {
 
           await appendRatingChangeIfChanged(tx, id, data.rating, current?.rating ?? null, now);
 
-          return tx.gameCollection.findUniqueOrThrow({ where: { id }, include: COLLECTION_INCLUDE });
+          return this.readWrittenRow(tx, id);
         }),
       (error) => this.unexpected(error, `Error updating collection entry ${id}`),
     );
@@ -558,6 +564,7 @@ export class GameCollectionService {
 
             return id;
           },
+          (tx, entryId) => this.readWrittenRow(tx, entryId),
           actingUserId,
           now,
           reason ?? null,
@@ -618,9 +625,12 @@ export class GameCollectionService {
    * Each row also sends the include's count of owned copies as its
    * `quantity`, and not the count's own shape (#1231).
    */
-  private async rowsWithBaseGames(rows: readonly GameCollectionWithRelations[]): Promise<GameCollectionRow[]> {
+  private async rowsWithBaseGames(
+    tx: Prisma.TransactionClient,
+    rows: readonly GameCollectionWithRelations[],
+  ): Promise<GameCollectionRow[]> {
     const links = await readBaseGameLinksOnPlatform(
-      this.db,
+      tx,
       rows.map(({ platformGame }) => platformGame),
       this.scopeComposer.compose(ResourceType.Game, Action.read, { deletedAt: null }),
     );
@@ -635,30 +645,52 @@ export class GameCollectionService {
     }));
   }
 
-  /** One row with its game's base games, as {@link rowsWithBaseGames} reads them. */
-  private async rowWithBaseGames(row: GameCollectionWithRelations): Promise<GameCollectionRow> {
-    const [withLinks] = await this.rowsWithBaseGames([row]);
+  /**
+   * `rows` as the routes send them (#1231): each with its game's base games
+   * ({@link rowsWithBaseGames}), and, given `ownerCopies`, the entry owner's
+   * copies on the rows the acting user owns ({@link rowsWithOwnerCopies}).
+   *
+   * Read in `tx`, the transaction that read `rows`, so a row's `quantity`,
+   * the include's count, and the copies it carries are one state of the
+   * entry: a list or a single read holds one REPEATABLE READ snapshot, and a
+   * write's transaction holds the entry's lock, which every copy write takes
+   * first. Read apart, a copy write committed between them could answer a
+   * `quantity` of 2 beside one copy.
+   */
+  private async composeRows(
+    tx: Prisma.TransactionClient,
+    rows: readonly GameCollectionWithRelations[],
+    ownerCopies: boolean,
+  ): Promise<GameCollectionRow[]> {
+    const withBaseGames = await this.rowsWithBaseGames(tx, rows);
 
-    return withLinks;
+    return ownerCopies ? this.rowsWithOwnerCopies(tx, withBaseGames) : withBaseGames;
   }
 
   /**
-   * The row a write returns, with its game's base games (#1070), and the
-   * entry owner's copies for the entry's owner (#1231). `toError` maps the write's own
-   * failure. The reads run after that mapping, never inside it, so a failed
-   * read reaches the client as itself.
+   * The entry a write answers, read in the write's transaction after the
+   * write, and composed there for its owner ({@link composeRows}, #1231).
+   */
+  private async readWrittenRow(tx: Prisma.TransactionClient, id: string): Promise<GameCollectionRow> {
+    const row = await tx.gameCollection.findUniqueOrThrow({ where: { id }, include: COLLECTION_INCLUDE });
+    const [composed] = await this.composeRows(tx, [row], true);
+
+    return composed;
+  }
+
+  /**
+   * The row a write returns, read and composed in the write's own
+   * transaction ({@link readWrittenRow}). `toError` maps its failure, a
+   * failed read included, which rolls the write back with it (#1231).
    */
   private async writtenRow(
-    write: () => Promise<GameCollectionWithRelations>,
+    write: () => Promise<GameCollectionRow>,
     toError: (error: unknown) => unknown,
   ): Promise<GameCollectionRow> {
-    let row: GameCollectionWithRelations;
     try {
-      row = await write();
+      return await write();
     } catch (error) {
       throw toError(error);
     }
-
-    return this.rowWithOwnerCopies(await this.rowWithBaseGames(row));
   }
 }
