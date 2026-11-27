@@ -1,4 +1,5 @@
 import { Action, Reach, ResourceType, RiskLevel, SystemRole } from '../client';
+import { ATTENDANCE_ONLY_RESOURCE_TYPES, isAttendanceOnly } from './attendance-only';
 import { parseTemplate } from './catalog-guards';
 import { PERMISSION_CATALOG } from './permission.catalog';
 import { ROLE_PERMISSION_CATALOG } from './role-permission.catalog';
@@ -980,6 +981,73 @@ describe('the shipped catalogs', () => {
         expect(held).not.toContain('update:event:archive');
       },
     );
+
+    // An event chat is read and written only as an attendee of its event
+    // (#1543): the event roles are the only holders, and each grant binds the
+    // event attended. The ability factory denies these types to every other
+    // pass, so a server or household role holding one would be dead weight
+    // that reads as authority.
+    const attendanceOnlyEntries = PERMISSION_CATALOG.filter(({ subject }) => isAttendanceOnly(subject));
+
+    it('no server or household role holds a permission on an attendance-only type (#1543)', () => {
+      const attendanceOnlySlugs: readonly string[] = attendanceOnlyEntries.map(({ slug }) => slug);
+      const nonEventRoles = Object.values(SystemRole).filter((role) => ROLE_SCOPE[role] !== 'event');
+      const offenders = nonEventRoles.flatMap((role) =>
+        ROLE_PERMISSION_CATALOG[role]
+          .filter((slug) => attendanceOnlySlugs.includes(slug))
+          .map((slug) => `${role}: ${slug}`),
+      );
+
+      expect(attendanceOnlySlugs.length).toBeGreaterThan(0);
+      expect(nonEventRoles).toEqual(expect.arrayContaining([SystemRole.Admin, SystemRole.HouseholdOwner]));
+      expect(offenders).toEqual([]);
+    });
+
+    it('every permission on an attendance-only type binds eventId (#1543)', () => {
+      const unbound = attendanceOnlyEntries
+        .filter(({ conditions }) => !JSON.stringify(conditions ?? {}).includes('{{ eventId }}'))
+        .map(({ slug }) => slug);
+
+      expect(ATTENDANCE_ONLY_RESOURCE_TYPES.length).toBeGreaterThan(0);
+      expect(attendanceOnlyEntries.length).toBeGreaterThan(0);
+      expect(unbound).toEqual([]);
+    });
+
+    // The catalog is the attendance ceiling: every attending role reads,
+    // posts, and edits and deletes its own messages. Which of them may post
+    // (a spectator, an RSVP level) is the chat's access check, on the event's
+    // policy (#1544). Removing someone else's message is the host's, the
+    // co-host's and the event moderator's (#1543).
+    it.each([
+      ['read:event_chat_message', Action.read, RiskLevel.Medium],
+      ['create:event_chat_message', Action.create, RiskLevel.Low],
+      ['update:event_chat_message:own', Action.update, RiskLevel.Low],
+      ['delete:event_chat_message:own', Action.delete, RiskLevel.Low],
+    ])('give %s to every event role, bound to the event attended (#1543)', (slug, action, riskLevel) => {
+      const ownsTheRow = slug.endsWith(':own');
+
+      expect(entryOf(slug)).toMatchObject({ action, subject: ResourceType.EventChatMessage, riskLevel });
+      expect(entryOf(slug)?.conditions).toStrictEqual(
+        ownsTheRow ? { eventId: '{{ eventId }}', authorId: '{{ user.id }}' } : { eventId: '{{ eventId }}' },
+      );
+      expect(holdersOf(slug)).toEqual(
+        Object.values(SystemRole)
+          .filter((role) => ROLE_SCOPE[role] === 'event')
+          .sort(),
+      );
+    });
+
+    it("give delete:event_chat_message, on anyone's message in the event, to the host, co-host and event moderator alone (#1543)", () => {
+      expect(entryOf('delete:event_chat_message')).toMatchObject({
+        action: Action.delete,
+        subject: ResourceType.EventChatMessage,
+        conditions: { eventId: '{{ eventId }}' },
+        riskLevel: RiskLevel.Medium,
+      });
+      expect(holdersOf('delete:event_chat_message')).toEqual(
+        [SystemRole.EventCoHost, SystemRole.EventHost, SystemRole.EventModerator].sort(),
+      );
+    });
 
     it('grant create on household roles to nobody: adding a member writes its role row itself (#168)', () => {
       const creates = PERMISSION_CATALOG.filter(

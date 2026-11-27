@@ -1513,6 +1513,62 @@ export const PERMISSION_CATALOG = [
     reason: "Update the policy configuration of your household's events",
   }),
 
+  // ─── EventChatMessage ───────────────────────────────
+  //
+  // An event's chat is its attendees' (#1543). These grants are the
+  // attendance ceiling: every event role reads the chat, posts to it, and
+  // edits and deletes its own messages, each bound to the event attended.
+  // Whether a given attendee may read or post right now (a spectator posting,
+  // an RSVP level the event's policy asks for, the chat switched off) is the
+  // chat's access check on the event's policy (#1544), not a role list.
+  //
+  // None has a `:household` variant, and none ever will: a household role
+  // never reaches an event's chat, and neither does a server role. The type is
+  // attendance-only (`ATTENDANCE_ONLY_RESOURCE_TYPES`), so the ability factory
+  // denies it to every pass but the event roles'.
+  permission({
+    action: Action.read,
+    subject: ResourceType.EventChatMessage,
+    conditions: { eventId: '{{ eventId }}' },
+    slug: 'read:event_chat_message',
+    riskLevel: RiskLevel.Medium,
+    reason: "Read an event's chat as one of its attendees",
+  }),
+  permission({
+    action: Action.create,
+    subject: ResourceType.EventChatMessage,
+    conditions: { eventId: '{{ eventId }}' },
+    slug: 'create:event_chat_message',
+    riskLevel: RiskLevel.Low,
+    reason: "Post in an event's chat as one of its attendees",
+  }),
+  permission({
+    action: Action.update,
+    subject: ResourceType.EventChatMessage,
+    conditions: { eventId: '{{ eventId }}', authorId: '{{ user.id }}' },
+    slug: 'update:event_chat_message:own',
+    riskLevel: RiskLevel.Low,
+    reason: "Edit your own chat messages in an event's chat",
+  }),
+  permission({
+    action: Action.delete,
+    subject: ResourceType.EventChatMessage,
+    conditions: { eventId: '{{ eventId }}', authorId: '{{ user.id }}' },
+    slug: 'delete:event_chat_message:own',
+    riskLevel: RiskLevel.Low,
+    reason: "Delete your own chat messages in an event's chat",
+  }),
+  // The host, co-host and event moderator remove anyone's message in the
+  // event's chat.
+  permission({
+    action: Action.delete,
+    subject: ResourceType.EventChatMessage,
+    conditions: { eventId: '{{ eventId }}' },
+    slug: 'delete:event_chat_message',
+    riskLevel: RiskLevel.Medium,
+    reason: 'Delete any chat message in the chat of an event you host or moderate',
+  }),
+
   // Game Collection
   //
   // Read access is a union of scoped grants (CASL `can` rules on the same
