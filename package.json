@@ -119,7 +119,7 @@
     "better-auth": "1.7.25",
     "better-call": "1.4.5",
     "bullmq": "5.81.6",
-    "bullmq-otel": "1.3.1",
+    "bullmq-otel": "2.0.1",
     "cache-manager": "7.2.9",
     "cacheable": "2.5.0",
     "class-transformer": "0.5.1",
