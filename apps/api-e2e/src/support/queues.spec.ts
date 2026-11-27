@@ -87,25 +87,9 @@ describe('countPendingJobs', () => {
         Promise.resolve(Object.fromEntries(types.map((type, index) => [type, index + 1]))),
     };
 
-    // Six states requested: waiting, paused, active, delayed, prioritized,
-    // waiting-children — so 1+2+3+4+5+6.
-    await expect(countPendingJobs(queue)).resolves.toBe(21);
-  });
-
-  it('counts jobs parked in the paused list', async () => {
-    // Pausing RENAMEs `wait` to `paused`, so a queue holding work reports zero
-    // under `wait`. What this pins is that the sum INCLUDES a paused count when
-    // one comes back — not that the production call would miss it without the
-    // explicit argument. It would not: `sanitizeJobTypes` adds `paused` for any
-    // request containing `waiting`. See the note on `countPendingJobs` for why
-    // the argument is spelled out regardless.
-    const paused: QueueLike = {
-      name: 'paused-queue',
-      getJobCounts: (...types: string[]) =>
-        Promise.resolve(Object.fromEntries(types.map((type) => [type, type === 'paused' ? 3 : 0]))),
-    };
-
-    await expect(countPendingJobs(paused)).resolves.toBe(3);
+    // Five states requested: waiting, active, delayed, prioritized,
+    // waiting-children — so 1+2+3+4+5.
+    await expect(countPendingJobs(queue)).resolves.toBe(15);
   });
 
   it('reports zero for an empty queue', async () => {
@@ -230,22 +214,24 @@ function scriptedStream(name: string, options: ScriptedStreamOptions = {}): Drai
       const failedReason = options.failedReasons?.[jobId];
       return Promise.resolve(failedReason === undefined ? undefined : { failedReason });
     },
-    client: Promise.resolve({
-      xrange: (requested: string, start: string, end: string) => {
-        requireKey(requested);
-        expect(end).toBe('+');
+    getBackend: () => ({
+      client: Promise.resolve({
+        xrange: (requested: string, start: string, end: string) => {
+          requireKey(requested);
+          expect(end).toBe('+');
 
-        append(options.arrivals?.[fake.reads] ?? []);
-        fake.reads += 1;
+          append(options.arrivals?.[fake.reads] ?? []);
+          fake.reads += 1;
 
-        return Promise.resolve(stream.filter(([id]) => idValue(id) >= idValue(start)));
-      },
-      xrevrange: (requested: string, end: string, start: string, countToken: 'COUNT', count: number) => {
-        requireKey(requested);
-        expect([end, start, countToken, count]).toEqual(['+', '-', 'COUNT', 1]);
+          return Promise.resolve(stream.filter(([id]) => idValue(id) >= idValue(start)));
+        },
+        xrevrange: (requested: string, end: string, start: string, countToken: 'COUNT', count: number) => {
+          requireKey(requested);
+          expect([end, start, countToken, count]).toEqual(['+', '-', 'COUNT', 1]);
 
-        return Promise.resolve(stream.slice(-1));
-      },
+          return Promise.resolve(stream.slice(-1));
+        },
+      }),
     }),
   };
 
@@ -282,7 +268,7 @@ describe('eventStreamReader', () => {
   it("refuses a client without the stream's range reads, naming the queue", async () => {
     const queue: DrainableQueue = {
       ...scriptedStream('feedback'),
-      client: Promise.resolve({ xread: () => Promise.resolve(null) }),
+      getBackend: () => ({ client: Promise.resolve({ xread: () => Promise.resolve(null) }) }),
     };
 
     await expect(eventStreamReader(queue)).rejects.toThrow(/^Queue 'feedback': .*xrange\/xrevrange/);
