@@ -74,7 +74,7 @@ function storeFailing(method: 'get' | 'set' | 'delete', fails: (key: string) => 
     return original(key, ...rest);
   }) as never);
 
-  return { store: new Keyv({ store: entries, throwOnErrors: true }), failures };
+  return { store: new Keyv({ store: entries }), failures };
 }
 
 /** Whether `key` is one of better-auth's rate-limit counts, which it keys on the client's address. */
@@ -87,7 +87,6 @@ const isCount = (key: string) => key.includes(CLIENT_IP);
  * Messages render as their catalog keys.
  */
 async function servedOver(store: Keyv, prisma: PrismaClient = noUsers) {
-  store.on('error', () => undefined);
   const auth = authFactory(prisma, config, memoryAuthStorage(store), noEvents);
   (await auth.$context).rateLimit.enabled = true;
 
@@ -111,7 +110,7 @@ const signIn = (handle: (request: Request) => Promise<Response>) =>
  */
 describe('createAuthRequestHandler', () => {
   it("gives better-auth's 429 a code and a plain-language message, and keeps its retry hint (#640)", async () => {
-    const handle = await servedOver(new Keyv({ throwOnErrors: true }));
+    const handle = await servedOver(new Keyv());
     for (let attempt = 0; attempt < 3; attempt++) {
       await signIn(handle);
     }
@@ -133,7 +132,7 @@ describe('createAuthRequestHandler', () => {
     // The limiter reads its count ahead of better-auth's own error handling,
     // so the handler throws, and Express would answer a bare 500.
     const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
-    const handle = await servedOver(new Keyv({ store: new ReadsFail(), throwOnErrors: true }));
+    const handle = await servedOver(new Keyv({ store: new ReadsFail() }));
 
     const response = await signIn(handle);
 
@@ -149,7 +148,7 @@ describe('createAuthRequestHandler', () => {
   });
 
   it('passes every other answer through as better-auth gave it, its own code included (#640)', async () => {
-    const handle = await servedOver(new Keyv({ throwOnErrors: true }));
+    const handle = await servedOver(new Keyv());
 
     const response = await signIn(handle);
 
@@ -344,7 +343,6 @@ describe('createAuthRequestHandler', () => {
 
     it("doesn't log better-auth's 500 on a direct call, whose caller gets the error itself (#894)", async () => {
       const { store } = storeFailing('get', () => true);
-      store.on('error', () => undefined);
       const auth = authFactory(noUsers, config, memoryAuthStorage(store), noEvents);
 
       await expect(
@@ -360,10 +358,7 @@ describe('createAuthRequestHandler', () => {
       const fault = jest.fn(async () => {
         throw new Error('a fault');
       });
-      const handle = await servedOver(
-        new Keyv({ throwOnErrors: true }),
-        prismaWith({ user: { findFirst: fault, findUnique: fault } }),
-      );
+      const handle = await servedOver(new Keyv(), prismaWith({ user: { findFirst: fault, findUnique: fault } }));
 
       const response = await signIn(handle);
 

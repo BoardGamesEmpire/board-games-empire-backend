@@ -257,7 +257,7 @@ describe("authFactory's sign-in rate limit", () => {
    * so it is switched on there.
    */
   async function limitedAuth() {
-    const auth = authFactory(noUsers, config, memoryAuthStorage(new Keyv({ throwOnErrors: true })));
+    const auth = authFactory(noUsers, config, memoryAuthStorage(new Keyv()));
     (await auth.$context).rateLimit.enabled = true;
     return auth;
   }
@@ -329,7 +329,6 @@ describe("authFactory's sign-out", () => {
   }
 
   function authOver(store: Keyv) {
-    store.on('error', () => undefined);
     return authFactory({} as PrismaClient, config, memoryAuthStorage(store));
   }
 
@@ -349,7 +348,7 @@ describe("authFactory's sign-out", () => {
     );
 
   it('refuses with 503 and keeps the cookie when the session cannot be deleted (#487)', async () => {
-    const auth = authOver(new Keyv({ store: new DeletesFail(), throwOnErrors: true }));
+    const auth = authOver(new Keyv({ store: new DeletesFail() }));
 
     const response = await signOut(auth, { cookie: await sessionCookie(auth, 'session-token') });
 
@@ -364,7 +363,7 @@ describe("authFactory's sign-out", () => {
   it('refuses a bearer sign-out it could not revoke as well (#487)', async () => {
     // The bearer plugin turns the credential into the cookie only after
     // `hooks.before` has run, so the hook reads the credential itself.
-    const auth = authOver(new Keyv({ store: new DeletesFail(), throwOnErrors: true }));
+    const auth = authOver(new Keyv({ store: new DeletesFail() }));
 
     const response = await signOut(auth, { authorization: 'Bearer session-token' });
 
@@ -374,7 +373,7 @@ describe("authFactory's sign-out", () => {
   it('reads a signed bearer credential as the bearer plugin does, so a forged signature names no session (#487)', async () => {
     // The plugin ignores a credential whose signature does not match, so the
     // route signs out no session for it, and the hook must not delete one.
-    const auth = authOver(new Keyv({ store: new DeletesFail(), throwOnErrors: true }));
+    const auth = authOver(new Keyv({ store: new DeletesFail() }));
     const signed = decodeURIComponent((await sessionCookie(auth, 'session-token')).split('=').slice(1).join('='));
 
     const forged = await signOut(auth, { authorization: 'Bearer session-token.forged-signature' });
@@ -387,7 +386,7 @@ describe("authFactory's sign-out", () => {
   it('reads a percent-encoded bearer credential as the plugin does, and a malformed one as written (#487)', async () => {
     // A client may send the signed cookie's value as it was set, encoded. The
     // plugin decodes it; one that cannot be decoded names no session.
-    const auth = authOver(new Keyv({ store: new DeletesFail(), throwOnErrors: true }));
+    const auth = authOver(new Keyv({ store: new DeletesFail() }));
     const encoded = (await sessionCookie(auth, 'session-token')).split('=').slice(1).join('=');
 
     const genuine = await signOut(auth, { authorization: `Bearer ${encoded}` });
@@ -399,7 +398,7 @@ describe("authFactory's sign-out", () => {
   });
 
   it('signs out, deletes the session and clears the cookie when the store is up (#487)', async () => {
-    const store = new Keyv({ throwOnErrors: true });
+    const store = new Keyv();
     const auth = authOver(store);
     const expiresAt = new Date(Date.now() + 60_000);
     await store.set(
@@ -421,7 +420,7 @@ describe("authFactory's sign-out", () => {
   });
 
   it('lets a sign-out that names no session through, as before (#487)', async () => {
-    const auth = authOver(new Keyv({ store: new DeletesFail(), throwOnErrors: true }));
+    const auth = authOver(new Keyv({ store: new DeletesFail() }));
 
     const response = await signOut(auth, {});
 

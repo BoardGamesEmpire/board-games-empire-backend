@@ -1,12 +1,13 @@
 import type { Redis } from '@bge/redis';
 import Keyv from 'keyv';
+import { EventEmitter } from 'node:events';
 import type { CompleteAuthStorage } from './auth-storage';
 import { createAuthStorage, createRedisAuthStorage } from './auth-storage';
 import type { StorageFailureRecord } from './storage-failure-record';
 import { withStorageFailureRecord } from './storage-failure-record';
 
 /** An in-memory store that raises failures, as the api's Redis-backed one is built to. */
-const memoryStore = () => new Keyv({ throwOnErrors: true });
+const memoryStore = () => new Keyv();
 
 describe('createAuthStorage', () => {
   beforeEach(() => jest.useFakeTimers({ now: new Date('2026-10-20T12:00:00Z') }));
@@ -57,9 +58,8 @@ describe('createAuthStorage', () => {
 
   it('raises a failed delete, so a sign-out can tell the session was not revoked (#487)', async () => {
     const store = memoryStore();
-    store.on('error', () => undefined);
     const storage = createAuthStorage(store);
-    jest.spyOn(store.store as Map<string, unknown>, 'delete').mockImplementation(() => {
+    jest.spyOn(store.store, 'delete').mockImplementation(() => {
       throw new Error('Connection is closed.');
     });
 
@@ -67,7 +67,11 @@ describe('createAuthStorage', () => {
   });
 
   it('refuses a store that would pass a failed call off as success (#640)', () => {
-    expect(() => createAuthStorage(new Keyv())).toThrow(/throwOnErrors/);
+    // Keyv 6 resolves a failed call with a fallback once anything listens.
+    const store = new Keyv();
+    store.on('error', () => undefined);
+
+    expect(() => createAuthStorage(store)).toThrow(/no error listener/);
   });
 });
 
@@ -97,9 +101,8 @@ describe('createRedisAuthStorage', () => {
   } = {}) {
     const commands: unknown[][] = [];
     const values = new Map<unknown, unknown>();
-    const client = {
+    const client = Object.assign(new EventEmitter(), {
       options: { family: 4 },
-      on: () => client,
       async get(key: string) {
         commands.push(['get', key]);
         if (getError) {
@@ -143,21 +146,31 @@ describe('createRedisAuthStorage', () => {
         values.delete(key);
         return value;
       },
-    };
+    });
 
     return { client: client as unknown as Redis, commands, values };
   }
 
   it('writes a session where it always lived in Redis, with a PTTL of its full life (#640)', async () => {
+    const now = new Date('2026-11-26T12:00:00Z').getTime();
+    jest.useFakeTimers({ now });
     const { client, commands } = recordingClient();
 
     await createRedisAuthStorage(client).set('session-token', 'session', 604_800);
 
-    // Seven days, in the milliseconds Redis's PX takes. The value is Keyv's
-    // serialized envelope around 'session'.
+    // Seven days on, in the epoch milliseconds Redis's PXAT takes: Keyv 6
+    // hands the adapter an absolute expiry. The value is Keyv's serialized
+    // envelope around 'session'.
     expect(commands).toEqual([
-      ['set', 'namespace:api:cache:auth_session-token', expect.stringContaining('"session"'), 'PX', 604_800_000],
+      [
+        'set',
+        'namespace:api:cache:auth_session-token',
+        expect.stringContaining('"session"'),
+        'PXAT',
+        now + 604_800_000,
+      ],
     ]);
+    jest.useRealTimers();
   });
 
   it('counts a request in one EVAL on the key get reads, expiring it after the window in milliseconds (#832)', async () => {

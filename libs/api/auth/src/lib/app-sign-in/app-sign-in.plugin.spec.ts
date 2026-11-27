@@ -27,7 +27,7 @@ function createInstance(options: { readonly errorURL?: string; readonly storage?
     basePath: '/api/auth',
     advanced: { cookiePrefix: 'bge_auth_' },
     ...(options.errorURL === undefined ? {} : { onAPIError: { errorURL: options.errorURL } }),
-    secondaryStorage: options.storage ?? memoryAuthStorage(new Keyv({ throwOnErrors: true })),
+    secondaryStorage: options.storage ?? memoryAuthStorage(new Keyv()),
     socialProviders: { github: { clientId: 'client-id', clientSecret: 'client-secret' } },
     plugins: [appSignIn({ render: (key) => `rendered:${key}`, issuer: ORIGIN })],
   });
@@ -124,7 +124,7 @@ describe('appSignIn', () => {
     // address is built: the app is told, with a code and a message, and the
     // flow is removed rather than left to expire (#1019).
     it('tells the app, and leaves no flow behind, when the sign-in can’t start (#1019)', async () => {
-      const base = memoryAuthStorage(new Keyv({ throwOnErrors: true }));
+      const base = memoryAuthStorage(new Keyv());
       const flowKeys: string[] = [];
       const storage: CompleteAuthStorage = {
         ...base,
