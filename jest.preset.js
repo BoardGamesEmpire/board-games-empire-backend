@@ -47,6 +47,8 @@ const ESM_PACKAGES = [
 const UNIFIED_ESM_PACKAGES = [
   'ccount',
   'character-entities(-[a-z0-9]+)?',
+  // hast-util-to-mdast 10.1.4 collapses whitespace with it.
+  'collapse-white-space',
   'comma-separated-tokens',
   'decode-named-character-reference',
   'devlop',
