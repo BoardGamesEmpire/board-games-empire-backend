@@ -32,6 +32,7 @@
   "isHostnameOrWildcard": "Each entry must be a valid hostname or wildcard (e.g. \"example.com\" or \"*.example.com\")",
   "isCidr": "Each entry must be a valid CIDR (e.g. \"10.0.0.0/8\" or \"fc00::/7\"). Single IPs require explicit prefix (e.g. \"10.0.0.5/32\"). Remove any IPv6 zone ID (e.g. \"%eth0\")",
   "skipWithinCeiling": "page is too deep: (page - 1) × limit must not exceed {constraints.0}",
+  "isCursor": "{property} must be the nextCursor of a previous page, passed back unchanged",
   "offerGames": {
     "tooMany": "{property} can name at most {constraints.0} collection entries in all, counting expansions",
     "repeatedId": "{property} names a collection entry more than once; name each one once"
