@@ -1,5 +1,6 @@
-import type { RedisOptions } from 'bullmq';
 import { Queue } from 'bullmq';
+import type { RedisOptions } from 'iovalkey';
+import Redis from 'iovalkey';
 import { redisTlsOptions } from './redis-reset';
 
 /**
@@ -68,11 +69,23 @@ export function testQueueConnection(env: NodeJS.ProcessEnv = process.env): Redis
 /**
  * A queue handle on the harness's ephemeral Redis. Callers own the
  * lifecycle — an unclosed connection keeps Jest's event loop alive.
+ *
+ * The queue gets a client rather than options, as the apps' queues do.
+ * From options BullMQ 6 builds an ioredis client, and ioredis is only an
+ * optional peer of it, which nothing here installs. A client BullMQ is
+ * given is not its to close, so `close` quits it after the queue.
  */
 export function createTestQueue(name: string, env: NodeJS.ProcessEnv = process.env): TestQueue {
-  const queue = new Queue(name, { connection: testQueueConnection(env) });
+  const client = new Redis(testQueueConnection(env));
+  const queue = new Queue(name, { connection: client });
 
-  return { queue, close: (): Promise<void> => queue.close() };
+  return {
+    queue,
+    close: async (): Promise<void> => {
+      await queue.close();
+      await client.quit();
+    },
+  };
 }
 
 /**
@@ -85,25 +98,13 @@ export function createTestQueue(name: string, env: NodeJS.ProcessEnv = process.e
  * `waiting` is the JobType callers hand to the API. Substituting `'wait'` here
  * has already been suggested in review once, hence this note.
  *
- * That substitution would also be actively harmful, which is the reason
- * `paused` is spelled out below. `getJobCounts` runs its arguments through
- * `sanitizeJobTypes`, which pushes `'paused'` whenever `'waiting'` is present
- * and then dedupes — so paused jobs are counted implicitly already, and listing
- * `paused` changes no count today. It earns its place by surviving the edit
- * that drops the implicit add: switch to `'wait'` and BullMQ stops volunteering
- * `paused`, silently, because the special case is keyed on the exact string
- * `'waiting'`.
- *
- * Why paused matters at all: pausing RENAMEs the `wait` list to `paused`, so a
- * paused queue holding work reports zero under `wait`. Nothing in the suite
- * pauses a queue (see the note at the top of this file), so this is insurance
- * against one that someone pauses by hand.
- *
- * No double counting: a job is in exactly one of these lists, since pause moves
- * it rather than copying it, and `sanitizeJobTypes` dedupes the type list.
+ * A paused queue needs no state of its own: BullMQ 6 removed `paused` and
+ * counts a paused queue's jobs as `waiting`. Nothing in the suite pauses a
+ * queue (see the note at the top of this file), but one paused by hand is
+ * still counted.
  */
 export async function countPendingJobs(queue: QueueLike): Promise<number> {
-  const counts = await queue.getJobCounts('waiting', 'paused', 'active', 'delayed', 'prioritized', 'waiting-children');
+  const counts = await queue.getJobCounts('waiting', 'active', 'delayed', 'prioritized', 'waiting-children');
   return Object.values(counts).reduce((sum, count) => sum + count, 0);
 }
 
@@ -195,9 +196,9 @@ type StreamEntry = [id: string, fields: string[]];
 
 /**
  * The two stream reads the drain makes, as a structural slice of the
- * connection a BullMQ `Queue` exposes (`queue.client`). Declared for the same
- * reason as {@link QueueLike}: the unit spec scripts event sequences a real
- * queue cannot be made to produce on demand.
+ * connection a BullMQ `Queue`'s backend exposes (`getBackend().client`).
+ * Declared for the same reason as {@link QueueLike}: the unit spec scripts
+ * event sequences a real queue cannot be made to produce on demand.
  */
 export interface EventStreamReader {
   xrange(key: string, start: string, end: string): Promise<StreamEntry[]>;
@@ -205,12 +206,12 @@ export interface EventStreamReader {
 }
 
 /**
- * The slice of a BullMQ `Queue` {@link drainQueue} reads. `client` is only an
- * object here, as BullMQ types it no closer than its own `IRedisClient`;
- * {@link eventStreamReader} finds the stream reads on it.
+ * The slice of a BullMQ `Queue` {@link drainQueue} reads. The backend's
+ * `client` is only an object here, as BullMQ types it no closer than its own
+ * `IRedisClient`; {@link eventStreamReader} finds the stream reads on it.
  */
 export interface DrainableQueue extends QueueLike {
-  readonly client: Promise<object>;
+  getBackend(): { readonly client: Promise<object> };
   getJob(jobId: string): Promise<{ readonly failedReason?: string } | undefined>;
   toKey(type: string): string;
 }
@@ -218,17 +219,18 @@ export interface DrainableQueue extends QueueLike {
 /**
  * The queue's connection, as the stream reads the drain makes (#1007).
  *
- * BullMQ types `queue.client` as `IRedisClient`, an interface over every Redis
- * client it supports that declares only the commands BullMQ itself sends, and
- * the range reads aren't among them. The queues here connect with
- * {@link testQueueConnection}'s options, so BullMQ builds an ioredis client and
- * wraps it in an adapter that passes every command outside its own table
- * through to ioredis, `xrange` and `xrevrange` included. Checked rather than
+ * BullMQ 6 keeps the raw client on the queue's Redis backend, and types it as
+ * `IRedisClient`, an interface over every Redis client it supports that
+ * declares only the commands BullMQ itself sends, and the range reads aren't
+ * among them. The queues here connect through an
+ * iovalkey client ({@link createTestQueue}), which BullMQ wraps as it would an
+ * ioredis one, in an adapter that passes every command outside its own table
+ * through to the client, `xrange` and `xrevrange` included. Checked rather than
  * cast, so a queue on a client without them fails here, by name, and not as
  * "undefined is not a function" inside the drain.
  */
 export async function eventStreamReader(queue: DrainableQueue): Promise<EventStreamReader> {
-  const client: Partial<EventStreamReader> = await queue.client;
+  const client: Partial<EventStreamReader> = await queue.getBackend().client;
 
   if (typeof client.xrange !== 'function' || typeof client.xrevrange !== 'function') {
     throw new Error(`Queue '${queue.name}': its Redis client has no xrange/xrevrange to read the events stream with`);
