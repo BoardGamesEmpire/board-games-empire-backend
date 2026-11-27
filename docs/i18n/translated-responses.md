@@ -46,9 +46,10 @@ serialization.
 
 A marker can also be stored in a row and rendered each time the row is read
 back. The ImportFailed notification does this: the worker writes `payload.error`
-as `t(...)`, and `GET /notifications/unread` renders it in the reader's locale,
-at the time they read it. The brand is a plain property, so the marker survives
-the JSON column the same way it survives the response cache.
+as `t(...)`, and `GET /notifications/unread` and `GET /notifications` render it
+in the reader's locale, at the time they read it. The brand is a plain property,
+so the marker survives the JSON column the same way it survives the response
+cache.
 
 - **Type the stored field `I18nMessage`, not `string`.** The HTTP read renders
   it, but anything that reads the row in-process gets the marker. That includes

@@ -1,9 +1,14 @@
 import { Action, ResourceType } from '@bge/database';
+import type { NotificationDto } from '@bge/notifications-service';
 import { AbilityService, CheckPolicies, PoliciesGuard, resolveScopeSubjectId } from '@bge/permissions';
-import { Body, Controller, Get, HttpCode, Post, UseGuards } from '@nestjs/common';
+import type { CursorPaginatedResponse } from '@bge/shared';
+import { ApiCursorPaginatedEnvelope, cursorPaginated } from '@bge/shared';
+import { Body, Controller, Get, HttpCode, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
+import { ListNotificationsQueryDto } from './dto/list-notifications.query.dto';
 import { MarkReadDto } from './dto/mark-read.dto';
+import { UnreadCountDto } from './dto/unread-count.dto';
 import { MAX_UNREAD_NOTIFICATIONS } from './notifications.constants';
 import { UserNotificationsService } from './user-notifications.service';
 
@@ -14,10 +19,11 @@ import { UserNotificationsService } from './user-notifications.service';
  */
 @ApiBearerAuth()
 @ApiSecurity('api_key')
-// Must stay out of the response cache: the unread list is what a client polls,
-// and it changes with each mark-read and each notification a worker writes. A
-// cached body would repeat the list from before either for the whole TTL
-// (#530).
+// Must stay out of the response cache: the unread list and the unread count are
+// what a client polls, and the history list is what it reads right after a
+// mark-read. Each changes with every mark-read and every notification a worker
+// writes, so a cached body would repeat the one from before either for the
+// whole TTL (#530, #1597).
 @UseGuards(PoliciesGuard)
 @ApiTags('notifications')
 @Controller('notifications')
@@ -33,6 +39,47 @@ export class NotificationsController {
   @Get('unread')
   async getUnread() {
     return this.notifications.getUnread(resolveScopeSubjectId(this.abilityService));
+  }
+
+  @ApiCursorPaginatedEnvelope('notifications', {
+    description: "A page of the acting user's notification history, read and unread, newest first",
+  })
+  @ApiResponse({
+    status: Http.BadRequest,
+    description:
+      'The query failed validation, naming each field: cursor not one a previous page returned, or limit ' +
+      'not a positive whole number within the maximum, or a parameter it does not take, such as page',
+  })
+  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
+  @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
+  @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Notification))
+  @Get()
+  async list(
+    @Query() query: ListNotificationsQueryDto,
+  ): Promise<CursorPaginatedResponse<'notifications', NotificationDto>> {
+    const page = await this.notifications.list(resolveScopeSubjectId(this.abilityService), {
+      after: query.after,
+      pageSize: query.pageSize,
+    });
+
+    return cursorPaginated('notifications', page, query, ResourceType.Notification);
+  }
+
+  // A route of its own rather than a field on `/unread`'s response: `/unread`
+  // answers with the list and this answers with a number (#1597).
+  @ApiResponse({
+    status: Http.Ok,
+    type: UnreadCountDto,
+    description: 'How many unread notifications the acting user has, uncapped',
+  })
+  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
+  @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
+  @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Notification))
+  @Get('unread/count')
+  async countUnread(): Promise<UnreadCountDto> {
+    const count = await this.notifications.countUnread(resolveScopeSubjectId(this.abilityService));
+
+    return { count };
   }
 
   @ApiResponse({ status: Http.Ok, description: 'Named notifications marked read' })

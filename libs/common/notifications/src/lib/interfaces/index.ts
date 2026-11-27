@@ -433,3 +433,12 @@ export type UnreadNotificationDto = {
     type: T;
   };
 }[NotificationType];
+
+/**
+ * One notification as `UserNotificationsService.list` (`@bge/notifications`)
+ * returns it for the history list: {@link UnreadNotificationDto}'s shape plus
+ * `readAt`, which is `null` while the notification is unread. The history holds
+ * read and unread notifications alike, so a client can show when each was read
+ * (#1597).
+ */
+export type NotificationDto = UnreadNotificationDto & { readAt: Date | null };

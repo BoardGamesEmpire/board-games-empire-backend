@@ -1,4 +1,6 @@
 export * from './capped-pagination-query.dto';
+export * from './cursor-paginated-response.dto';
+export * from './cursor-pagination-query.dto';
 export * from './expansion-link.dto';
 export * from './paginated-response.dto';
 export * from './pagination-query.dto';
