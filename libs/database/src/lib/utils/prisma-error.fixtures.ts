@@ -164,6 +164,43 @@ export function uniqueViolationWithoutMeta(): Prisma.PrismaClientKnownRequestErr
   return uniqueViolation({ omitMeta: true });
 }
 
+export interface ForeignKeyViolationOptions {
+  /** The column under `cause.constraint.fields`, which the adapter reports when Postgres names one. */
+  readonly fields?: readonly string[];
+
+  /** The constraint's name under `cause.constraint.index`: a real foreign key's, or a trigger's `USING CONSTRAINT`. */
+  readonly index?: string;
+
+  /** No `constraint` under the cause: a trigger that raised `foreign_key_violation` and named nothing. */
+  readonly omitConstraint?: boolean;
+}
+
+/**
+ * A P2003 in the shape `@prisma/adapter-pg@7.10` raises for SQLSTATE 23503
+ * (#1231): the driver error under `meta.driverAdapterError`, its cause of kind
+ * `ForeignKeyConstraintViolation` naming the constraint the way the adapter
+ * maps a `pg` error, a column under `fields` or else a name under `index`.
+ * Defaults to `index`, the shape a real foreign key's failure reports.
+ */
+export function foreignKeyViolation(options: ForeignKeyViolationOptions = {}): Prisma.PrismaClientKnownRequestError {
+  const { fields, index = 'test_fkey', omitConstraint = false } = options;
+  const constraint = fields !== undefined ? { fields } : { index };
+
+  return new Prisma.PrismaClientKnownRequestError('Foreign key constraint violated', {
+    code: PrismaError.ForeignKeyConstraintViolation,
+    clientVersion: 'test',
+    meta: {
+      modelName: 'TestModel',
+      driverAdapterError: new DriverAdapterError({
+        originalCode: '23503',
+        originalMessage: 'insert or update violates foreign key constraint',
+        kind: 'ForeignKeyConstraintViolation',
+        ...(omitConstraint ? {} : { constraint }),
+      }),
+    },
+  });
+}
+
 export interface DeadlockOptions {
   /**
    * Drop `cause.originalCode`. On the `bare` shape that leaves only the

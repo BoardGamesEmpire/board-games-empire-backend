@@ -1,0 +1,37 @@
+// One change to a collection entry's personal rating, appended each time the
+// rating changes, so the entry's owner can see how it moved (#1231). The history is
+// the entry owner's alone. Correcting it never changes the entry's current rating.
+//
+// The migration's CHECK constraints keep a rating from 1 to 10, set a date
+// and its precision together at the first day of its period, and give an
+// upstream account a key.
+model CollectionRatingChange {
+  id String @id @default(cuid(2))
+
+  entry   GameCollection @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  entryId String         @map("entry_id")
+
+  // Null when the change cleared the rating.
+  rating Int?
+
+  // When the change happened, at its precision. Null is unknown.
+  occurredOn          DateTime?      @map("occurred_on") @db.Date
+  occurredOnPrecision DatePrecision? @map("occurred_on_precision")
+
+  // Set when the user takes the change back as never having happened.
+  retractedAt    DateTime? @map("retracted_at") @db.Timestamptz(3)
+  editedByUserAt DateTime? @map("edited_by_user_at") @db.Timestamptz(3)
+
+  // A synced change names its upstream account and the upstream's key for it,
+  // as a synced copy does.
+  upstreamAccount   UpstreamAccount? @relation(fields: [upstreamAccountId], references: [id], onDelete: SetNull)
+  upstreamAccountId String?          @map("upstream_account_id")
+  upstreamKey       String?          @map("upstream_key")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([upstreamAccountId, upstreamKey])
+  @@index([entryId, occurredOn])
+  @@map("collection_rating_changes")
+}

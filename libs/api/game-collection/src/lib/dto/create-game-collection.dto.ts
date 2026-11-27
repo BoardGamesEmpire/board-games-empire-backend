@@ -2,7 +2,20 @@ import { GameMedium, Reach } from '@bge/database';
 import { i18nValidationMessage } from '@bge/i18n';
 import { ReachProperty } from '@bge/shared';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsEnum, IsInt, IsNotEmpty, IsOptional, IsPositive, IsString, Max, Min } from 'class-validator';
+import { Type } from 'class-transformer';
+import {
+  IsBoolean,
+  IsEnum,
+  IsInt,
+  IsNotEmpty,
+  IsObject,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+  ValidateNested,
+} from 'class-validator';
+import { CollectionCopyDescriptionDto } from './create-collection-copy.dto';
 
 const COLLECTION_REACHES = [
   Reach.Private,
@@ -45,18 +58,6 @@ export class CreateGameCollectionDto {
   @IsEnum(GameMedium, { message: i18nValidationMessage('validation.isEnum') })
   medium!: GameMedium;
 
-  @ApiPropertyOptional({ description: 'ID of a specific GameRelease of the platform game' })
-  @IsOptional()
-  @IsString({ message: i18nValidationMessage('validation.isString') })
-  @IsNotEmpty({ message: i18nValidationMessage('validation.isNotEmpty') })
-  releaseId?: string;
-
-  @ApiPropertyOptional({ description: 'Number of copies owned', default: 1 })
-  @IsOptional()
-  @IsInt({ message: i18nValidationMessage('validation.isInt') })
-  @IsPositive({ message: i18nValidationMessage('validation.isPositive') })
-  quantity?: number;
-
   @ApiPropertyOptional({ description: 'Personal rating (1-10)' })
   @IsOptional()
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
@@ -81,4 +82,16 @@ export class CreateGameCollectionDto {
 
   @CollectionReachProperty(Reach.Private)
   reach?: CollectionReach;
+
+  @ApiPropertyOptional({
+    type: CollectionCopyDescriptionDto,
+    description:
+      'The copy this add acquires: the one copy of a new entry, or the new copy of an entry you removed. ' +
+      'An entry you still own gets no copy, so this is not read; add another copy through its copies instead.',
+  })
+  @IsOptional()
+  @IsObject({ message: i18nValidationMessage('validation.isObject') })
+  @ValidateNested()
+  @Type(() => CollectionCopyDescriptionDto)
+  copy?: CollectionCopyDescriptionDto;
 }

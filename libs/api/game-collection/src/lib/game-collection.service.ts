@@ -1,24 +1,33 @@
-import type { GameCollection } from '@bge/database';
 import {
   Action,
+  constraintIdentity,
   DatabaseService,
-  isPrismaDependentRecordNotFoundError,
+  identifiesConstraint,
+  isPrismaForeignKeyConstraintError,
   ListKind,
   Prisma,
   readBaseGameLinksOnPlatform,
   readWishlistedPlatformGames,
   ResourceType,
 } from '@bge/database';
-import { emitCollectionSupplyChanges, syncCollectionEntrySupply } from '@bge/event';
-import { CodedHttpException, t } from '@bge/i18n';
+import type { CodedHttpException } from '@bge/i18n';
+import { t } from '@bge/i18n';
 import { AbilityService, resolveActingUserIdOrNull, resolveScopeSubjectId, ScopeComposer } from '@bge/permissions';
 import { PaginatedRows, PaginationQueryDto, pickDefined } from '@bge/shared';
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { EventEmitter2 } from '@nestjs/event-emitter';
-import { createId } from '@paralleldrive/cuid2';
-import { Http } from '@status/codes';
+import { BadRequestException, HttpException, Injectable, Logger } from '@nestjs/common';
+import {
+  addCopy,
+  assertRemovableOn,
+  copyCreateData,
+  copyRemovalData,
+  isCopyReleaseViolation,
+  REMOVAL_CHECK_SELECT,
+  removalOf,
+} from './collection-copy-data';
+import { appendRatingChangeIfChanged } from './collection-rating.service';
 import type { GameCollectionRow, GameCollectionWithRelations } from './collection-row';
-import { changedSince, COLLECTION_INCLUDE } from './collection-row';
+import { changedSince, COLLECTION_INCLUDE, OWNED_COPY, readOwnerCopies } from './collection-row';
+import { CollectionWriteService, writeEntryUnder } from './collection-write.service';
 import {
   CreateGameCollectionDto,
   GameCollectionDto,
@@ -27,20 +36,51 @@ import {
   RemoveGameCollectionQueryDto,
   UpdateGameCollectionDto,
 } from './dto';
+import { collectionEntryNotFound, platformGameNotFound, releaseNotFound } from './game-collection.errors';
+import type { PartialDate } from './values/partial-date';
+import { defaultRemovalDate, givenRemovalDate } from './values/partial-date';
 
 /**
- * The refusal for a collection entry the actor can't see: missing, already
- * removed, or outside their scope, which the 404 never tells apart. Its code
- * says the 404 is about this row, so a client may read it as "already removed"
- * and complete a queued removal, where a 404 without it (a route that moved,
- * an id that matched no route) may not (#634).
+ * The unique that keeps a user to one entry per platform game and medium, in
+ * every spelling a P2002 identity reports it (see `identifiesConstraint`): the
+ * index name, the raw columns, and the Prisma fields (#1231).
  */
-function collectionEntryNotFound(id: string): CodedHttpException {
-  return new CodedHttpException(
-    Http.NotFound,
-    'COLLECTION_ENTRY_NOT_FOUND',
-    t('errors.game_collection.not_found', { id }),
-  );
+const ENTRY_IDENTITY_SPELLINGS = [
+  ['game_collections_user_id_platform_game_id_medium_key'],
+  ['user_id', 'platform_game_id', 'medium'],
+  ['userId', 'platformGameId', 'medium'],
+] as const;
+
+/**
+ * Whether `error` is a unique violation on the entry's identity, the race of
+ * two first adds (#1231). One whose constraint can't be named counts: the
+ * entry table's only other unique is its generated key, so the identity is by
+ * far the likelier, and the retry it earns runs once.
+ */
+function isEntryIdentityViolation(error: unknown): boolean {
+  const identity = constraintIdentity(error);
+
+  return identity.source === 'unknown' || identifiesConstraint(identity, ...ENTRY_IDENTITY_SPELLINGS);
+}
+
+/**
+ * The refusal for a new entry's insert that failed on a foreign key (#1231):
+ * a row read before the insert went since. The copy's release, named by its
+ * trigger or its foreign key, answers `GAME_RELEASE_NOT_FOUND`; anything else
+ * answers `PLATFORM_GAME_NOT_FOUND`, as the add's only other reference is its
+ * platform game. That includes a failure whose constraint can't be named,
+ * which is the answer this insert gave before it could tell them apart.
+ */
+function vanishedReference(
+  error: unknown,
+  platformGameId: string,
+  releaseId: string | null | undefined,
+): CodedHttpException {
+  if (releaseId != null && isCopyReleaseViolation(error)) {
+    return releaseNotFound(releaseId);
+  }
+
+  return platformGameNotFound(platformGameId);
 }
 
 /**
@@ -56,7 +96,7 @@ export class GameCollectionService {
     private readonly db: DatabaseService,
     private readonly abilityService: AbilityService,
     private readonly scopeComposer: ScopeComposer,
-    private readonly eventEmitter: EventEmitter2,
+    private readonly writes: CollectionWriteService,
   ) {}
 
   /**
@@ -72,6 +112,8 @@ export class GameCollectionService {
    * `resolveScopeSubjectId` refuses `plugin`, `system` and `external` actors:
    * "my collection" has no meaning without a user, and the refusal must never
    * soften into an empty page. PROVISIONAL — #395.
+   *
+   * Each row carries its copies in the entry owner's shape (#1231).
    */
   async listOwn(query: ListGameCollectionsQueryDto): Promise<PaginatedRows<GameCollectionDto>> {
     const { includeDeleted, deletedOnly, medium, favorite, updatedSince } = query;
@@ -89,7 +131,7 @@ export class GameCollectionService {
       ],
     } satisfies Prisma.GameCollectionWhereInput;
 
-    return this.paginate(where, query);
+    return this.paginate(where, query, true);
   }
 
   /**
@@ -106,6 +148,10 @@ export class GameCollectionService {
    * Each row also says whether its game is on the acting user's wishlist
    * (`onWishlist`, #1241), so a client can show "a friend's copy of a game you
    * want" without a round trip per page.
+   *
+   * Its copies are the public shape for every caller, the path user too: this
+   * is the route other readers read, so its rows never read the entry
+   * owner's (#1231).
    */
   async listForUser(
     targetUserId: string,
@@ -118,7 +164,7 @@ export class GameCollectionService {
       ],
     } satisfies Prisma.GameCollectionWhereInput;
 
-    const { rows, total } = await this.paginate(where, query);
+    const { rows, total } = await this.paginate(where, query, false);
 
     return { rows: await this.rowsWithOnWishlist(rows), total };
   }
@@ -165,135 +211,222 @@ export class GameCollectionService {
 
   /**
    * One page of collection entries plus the total matching count for the
-   * response envelope (#230).
+   * response envelope (#230), composed by {@link composeRows}, with the
+   * entry owner's copies when `ownerCopies` is set (#1231).
    *
-   * REPEATABLE READ because Prisma's default batch isolation snapshots each
+   * REPEATABLE READ because Prisma's default isolation snapshots each
    * statement separately, which can report fewer total rows than the page
-   * itself contains. The identical `where` keeps the count scoped to what the
-   * actor may see, and `id` breaks ties on `updatedAt` so a row cannot drift
-   * across a page boundary between requests.
+   * itself contains, or a row's `quantity` beside a different set of its
+   * copies (#1231). Every read of the page, the composing ones included, is
+   * in the one snapshot. The identical `where` keeps the count scoped to what
+   * the actor may see, and `id` breaks ties on `updatedAt` so a row cannot
+   * drift across a page boundary between requests.
    */
   private async paginate(
     where: Prisma.GameCollectionWhereInput,
     pagination: PaginationQueryDto,
+    ownerCopies: boolean,
   ): Promise<PaginatedRows<GameCollectionRow>> {
-    const [rows, total] = await this.db.$transaction(
-      [
-        this.db.gameCollection.findMany({
+    return this.db.$transaction(
+      async (tx) => {
+        const rows = await tx.gameCollection.findMany({
           where,
           include: COLLECTION_INCLUDE,
           orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
           skip: pagination.skip,
           take: pagination.pageSize,
-        }),
+        });
+        const total = await tx.gameCollection.count({ where });
 
-        this.db.gameCollection.count({ where }),
-      ],
+        return { rows: await this.composeRows(tx, rows, ownerCopies), total };
+      },
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
-
-    return { rows: await this.rowsWithBaseGames(rows), total };
-  }
-
-  /** A single entry the acting user may read (owner sees own tombstones). */
-  async getById(id: string): Promise<GameCollectionDto> {
-    const collection = await this.db.gameCollection.findUnique({
-      where: {
-        id,
-        // eslint-disable-next-line no-restricted-syntax -- single-row fetch by id, not a collection read
-        AND: this.abilityService.getCurrentResourceConditions(ResourceType.GameCollection, Action.read),
-      },
-      include: COLLECTION_INCLUDE,
-    });
-
-    if (!collection) {
-      throw collectionEntryNotFound(id);
-    }
-
-    return this.rowWithBaseGames(collection);
   }
 
   /**
-   * Add a game to the acting user's collection. Idempotent upsert on the
-   * `(user, platformGame, medium)` identity: re-adding an active entry updates
-   * the provided fields, and adding back a removed entry clears its removal,
-   * while server-managed play history (`playCount`, `lastPlayed`) and any
-   * unspecified fields survive the removal and the add-back.
+   * A single entry the acting user may read; the entry's owner also reads it once
+   * removed. Its copies are the entry owner's shape for its owner, and the public
+   * shape for every other reader (#1231).
+   */
+  async getById(id: string): Promise<GameCollectionDto> {
+    // One REPEATABLE READ snapshot, as `paginate` reads a page in (#1231).
+    return this.db.$transaction(
+      async (tx) => {
+        const collection = await tx.gameCollection.findUnique({
+          where: {
+            id,
+            // eslint-disable-next-line no-restricted-syntax -- single-row fetch by id, not a collection read
+            AND: this.abilityService.getCurrentResourceConditions(ResourceType.GameCollection, Action.read),
+          },
+          include: COLLECTION_INCLUDE,
+        });
+
+        if (!collection) {
+          throw collectionEntryNotFound(id);
+        }
+
+        const [row] = await this.composeRows(tx, [collection], true);
+
+        return row;
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+  }
+
+  /**
+   * Each row with its copies in the entry owner's shape, for the rows the acting
+   * user owns (#1231). `readOwnerCopies` decides which those are, in one
+   * query bound to the acting user as the entries' owner; every other row
+   * keeps the public copies the include read. An actor with no user behind
+   * it owns no entry, so nothing is read for it.
    *
-   * Adding back a removed entry also resumes the nominations its removal
-   * paused, in every live event that offers it
-   * (`syncCollectionEntrySupply`, #1221). The entry's row is locked
-   * `FOR UPDATE` before the write, as the transaction's first lock, so a
-   * nomination naming the entry, or an attendee offering it coming back,
-   * takes turns with the add-back: whichever comes second waits, then reads
-   * what the first committed. A new entry, or one never removed, has nothing
-   * paused, so it runs no sync. The changes are emitted once the transaction
-   * commits.
+   * An API key acts for the user who made it, so its rows carry the entry owner's shape, as
+   * the copy routes already send it. The key reads only the entries its
+   * grants reach, and this read only adds to those rows.
+   */
+  private async rowsWithOwnerCopies(
+    tx: Prisma.TransactionClient,
+    rows: GameCollectionRow[],
+  ): Promise<GameCollectionRow[]> {
+    const actingUserId = resolveActingUserIdOrNull(this.abilityService);
+    if (actingUserId === null || rows.length === 0) {
+      return rows;
+    }
+
+    const owned = await readOwnerCopies(
+      tx,
+      rows.map(({ id }) => id),
+      actingUserId,
+    );
+
+    return rows.map((row) => ({ ...row, copies: owned.get(row.id) ?? row.copies }));
+  }
+
+  /**
+   * Add a game to the acting user's collection, idempotent on the
+   * `(user, platformGame, medium)` identity (#1231):
    *
-   * When the pre-read finds no row, the `FOR UPDATE` locks nothing, and
-   * another request may create the entry, offer it and remove it before the
-   * upsert, which then adds that row back. The id the create would use is
-   * minted here, so an upsert that answers another id updated a row it did
-   * not create, and runs the sync on it as well. Its `UPDATE` is then the
-   * first lock on the row. A genuine create answers the minted id and runs
-   * no sync.
+   * - **No entry yet:** a new entry, created with one copy from `copy`.
+   * - **A removed entry:** acquired again. Its own fields are updated and it
+   *   gets one new copy from `copy`; the write runner then clears its removal
+   *   and resumes the offers the removal paused (#1221).
+   * - **An entry still owned:** only its own fields are updated. `copy` is not
+   *   read, so a replayed add adds no copy.
+   *
+   * Play history (`playCount`, `lastPlayed`) and every field the add leaves
+   * out survive a removal and an acquisition.
+   *
+   * Each case is checked against the row it writes (#1288): a new entry
+   * against `create` with its user, platform game and medium, as
+   * `ListService.create` checks a list; an existing one against `update`, on
+   * the locked row and inside its write's `where`, as `PATCH` is. A key whose
+   * grants are pinned to one entry therefore adds no other.
+   *
+   * The identity is locked `FOR UPDATE` first, as the transaction's first
+   * lock, so the add takes turns with a nomination naming the entry, or with
+   * its attendee coming back (#1221). When no entry exists the lock holds
+   * nothing, and a concurrent first add of the same game may insert it too.
+   * The second insert waits for the first to commit, then fails on the
+   * entry's unique key, and the whole transaction runs once more, finding the
+   * entry the other made.
+   *
+   * A rating the add carries is a change of the entry's rating, kept in the
+   * history dated today: the first one for a new entry, and one for an
+   * existing entry only when it differs from the rating the locked row holds,
+   * so a replayed add appends nothing (#1231).
+   *
+   * The platform game and the copy's release are read without a lock, so
+   * either can go before the insert commits. The insert's foreign key then
+   * fails, and answers the same 404 as a platform game or release that was
+   * never there: `PLATFORM_GAME_NOT_FOUND` or `GAME_RELEASE_NOT_FOUND`.
    */
   async addToCollection(dto: CreateGameCollectionDto): Promise<GameCollectionDto> {
     const userId = this.abilityService.getActingUserId();
-    const { platformGameId, medium, releaseId, ...attributes } = dto;
+    const { platformGameId, medium, copy, ...attributes } = dto;
 
     const platformGame = await this.db.platformGame.findUnique({
       where: { id: platformGameId },
       select: { id: true },
     });
     if (!platformGame) {
-      throw new NotFoundException(t('errors.platform_game.not_found', { id: platformGameId }));
+      throw platformGameNotFound(platformGameId);
     }
 
-    if (releaseId) {
-      await this.assertReleaseBelongsTo(releaseId, platformGameId);
-    }
+    const identity = { userId, platformGameId, medium };
+    const described = copy ?? {};
+    const provided = pickDefined(attributes);
+    const now = new Date();
 
-    const provided = pickDefined({ ...attributes, releaseId });
-    const lastUpdated = new Date();
-    // The schema's own default, cuid2, minted here so the upsert's answer
-    // says whether it created the row (#1221).
-    const newId = createId();
+    const acquire = () =>
+      this.writes.runForRow(
+        async (tx) => {
+          const [locked] = await tx.$queryRaw<
+            { deletedAt: Date | null; id: string; rating: number | null }[]
+          >(Prisma.sql`
+            SELECT id, deleted_at AS "deletedAt", rating
+            FROM game_collections
+            WHERE user_id = ${userId} AND platform_game_id = ${platformGameId} AND medium = ${medium}::game_mediums
+            FOR UPDATE
+          `);
+
+          if (locked === undefined) {
+            this.abilityService.assertCurrentActorCan(Action.create, ResourceType.GameCollection, identity);
+
+            const copyData = await copyCreateData(tx, described, identity, now);
+            let createdId: string;
+            try {
+              const created = await tx.gameCollection.create({
+                data: { ...identity, ...provided, lastUpdated: now, copies: { create: copyData } },
+                select: { id: true },
+              });
+              createdId = created.id;
+            } catch (error) {
+              if (isPrismaForeignKeyConstraintError(error)) {
+                throw vanishedReference(error, platformGameId, described.releaseId);
+              }
+
+              throw error;
+            }
+
+            // A new entry had no rating, so a null sends nothing to clear and
+            // its history starts empty (#1231).
+            await appendRatingChangeIfChanged(tx, createdId, provided.rating, null, now);
+
+            return createdId;
+          }
+
+          this.abilityService.assertCurrentActorCan(Action.update, ResourceType.GameCollection, {
+            id: locked.id,
+            ...identity,
+            deletedAt: locked.deletedAt,
+          });
+          await writeEntryUnder(
+            tx,
+            this.abilityService,
+            locked.id,
+            Action.update,
+            {},
+            { ...provided, lastUpdated: now },
+          );
+
+          await appendRatingChangeIfChanged(tx, locked.id, provided.rating, locked.rating, now);
+
+          if (locked.deletedAt !== null) {
+            await addCopy(tx, { ...identity, id: locked.id }, described, now);
+          }
+
+          return locked.id;
+        },
+        (tx, entryId) => this.readWrittenRow(tx, entryId),
+        userId,
+        now,
+      );
 
     return this.writtenRow(
-      () =>
-        this.writeThenSyncSupply(
-          async (tx) => {
-            const [locked] = await tx.$queryRaw<{ deletedAt: Date | null }[]>(Prisma.sql`
-              SELECT deleted_at AS "deletedAt"
-              FROM game_collections
-              WHERE user_id = ${userId} AND platform_game_id = ${platformGameId} AND medium = ${medium}::game_mediums
-              FOR UPDATE
-            `);
-
-            const row = await tx.gameCollection.upsert({
-              where: { userId_platformGameId_medium: { userId, platformGameId, medium } },
-              create: { id: newId, userId, platformGameId, medium, ...provided, lastUpdated },
-              update: { ...provided, deletedAt: null, deleteReason: null, lastUpdated },
-              include: COLLECTION_INCLUDE,
-            });
-
-            // Removed when locked, or created by another request since the
-            // pre-read and possibly removed in that window.
-            const addedBack = locked === undefined ? row.id !== newId : locked.deletedAt !== null;
-
-            return { row, synced: addedBack ? { id: row.id, deletedAt: null } : null };
-          },
-          userId,
-          lastUpdated,
-        ),
-      (error) => {
-        this.logger.error(`Error adding platform game ${platformGameId} to collection for user ${userId}`, error);
-
-        return isPrismaDependentRecordNotFoundError(error)
-          ? new NotFoundException(t('errors.platform_game.not_found', { id: platformGameId }))
-          : error;
-      },
+      () => this.onceMoreOnIdentityViolation(acquire),
+      (error) =>
+        this.unexpected(error, `Error adding platform game ${platformGameId} to collection for user ${userId}`),
     );
   }
 
@@ -301,7 +434,20 @@ export class GameCollectionService {
    * Patch the mutable fields of an entry. Standard REST semantics: omitted
    * fields are preserved, explicit `null` clears nullable fields. Identity
    * (`platformGameId`/`medium`) and play history (`playCount`/`lastPlayed`)
-   * are not writable here.
+   * are not writable here, and neither are the copies' edition and count
+   * (#1231).
+   *
+   * A rating that differs from the entry's current one is a change of the
+   * rating, kept in its history dated today, clearing it included. The
+   * current rating is read under the entry's lock, the transaction's first
+   * lock, so two patches can't both compare against the old rating and
+   * append twice (#1231). The lock is taken only on an entry inside the
+   * update conditions (`lockEntryUnder`), and the entry is then written
+   * under them, as ever; a miss answers `COLLECTION_ENTRY_NOT_FOUND` and the
+   * transaction keeps nothing.
+   *
+   * The patch changes no copy, so it needs no reconcile, supply sync or emit
+   * (#1221): a plain transaction, not the write runner.
    */
   async update(id: string, dto: UpdateGameCollectionDto): Promise<GameCollectionDto> {
     const data = pickDefined(dto);
@@ -309,116 +455,154 @@ export class GameCollectionService {
       throw new BadRequestException(t('common.at_least_one_field'));
     }
 
-    // Only a release change needs a pre-read (the row's platform game); every
-    // other patch goes straight to the scoped update.
-    if (data.releaseId) {
-      const existing = await this.db.gameCollection.findUnique({
-        where: {
-          id,
-          // eslint-disable-next-line no-restricted-syntax -- single-row pre-read for a write by id, not a collection read
-          AND: this.abilityService.getCurrentResourceConditions(ResourceType.GameCollection, Action.update),
-        },
-        select: { platformGameId: true },
-      });
-
-      if (!existing) {
-        throw collectionEntryNotFound(id);
-      }
-
-      await this.assertReleaseBelongsTo(data.releaseId, existing.platformGameId);
-    }
+    const now = new Date();
 
     return this.writtenRow(
       () =>
-        this.db.gameCollection.update({
-          where: {
-            id,
-            // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
-            AND: this.abilityService.getCurrentResourceConditions(ResourceType.GameCollection, Action.update),
-          },
-          data: { ...data, lastUpdated: new Date() },
-          include: COLLECTION_INCLUDE,
+        this.db.$transaction(async (tx) => {
+          await this.writes.lockEntryUnder(tx, this.abilityService, id, Action.update);
+
+          const current =
+            data.rating === undefined
+              ? null
+              : await tx.gameCollection.findUniqueOrThrow({ where: { id }, select: { rating: true } });
+
+          await writeEntryUnder(tx, this.abilityService, id, Action.update, {}, { ...data, lastUpdated: now });
+
+          await appendRatingChangeIfChanged(tx, id, data.rating, current?.rating ?? null, now);
+
+          return this.readWrittenRow(tx, id);
         }),
-      (error) => this.mapMissingToNotFound(error, id),
+      (error) => this.unexpected(error, `Error updating collection entry ${id}`),
     );
   }
 
   /**
    * Remove a game from the collection: "I no longer own this", not "never
-   * played". The entry stays, marked removed, so play history and the rows
-   * that name it (locations, offers, loans) survive a removal and an add-back.
+   * played" (#1231). Each copy the user still owns is removed, dated
+   * `removedOn`, or, when the user gives no date, today in UTC, or the copy's
+   * acquisition day when that is later (`removalOf`), with the
+   * reason, and stamped as edited by the user so a sync never undoes it;
+   * copies already removed or taken back keep what they have. The
+   * write runner then removes the entry with its last owned copy, with that
+   * reason. The entry stays, so play history and the rows that name it
+   * (locations, offers) survive, and adding the game again brings it back.
+   *
+   * The entry's row is locked first, as the transaction's first lock
+   * (#1221), and only when it is inside the `delete` conditions
+   * (`lockEntryUnder`), then held to them and to being live, inside
+   * the check's `where`, so a key that may only update entries removes none
+   * (#1288). A missing, foreign or already-removed entry answers
+   * `COLLECTION_ENTRY_NOT_FOUND`, which a client may read as "already
+   * removed" (#634). A removal dated on a day that is today nowhere yet, or
+   * before an owned copy was acquired, is refused (#1231).
    *
    * Every live event that offers the entry stops counting it as supplied
    * (`syncCollectionEntrySupply`, #1221): the nominations of its game that
    * await an outcome pause, and it leaves the lineup of every date still
    * ahead. The offers themselves stay, and resume supplying when the game is
-   * added back. The removal's `UPDATE` is the transaction's first lock, on
-   * the entry's row, so a nomination naming the entry takes turns with it.
-   * The changes are emitted once the transaction commits. The owner's answer
-   * is the removed entry, whatever the sync changed.
+   * acquired again. The answer, to the entry's owner, is the removed entry, whatever the
+   * sync changed.
    */
-  async remove(id: string, { reason }: RemoveGameCollectionQueryDto): Promise<GameCollectionDto> {
+  async remove(id: string, { reason, removedOn }: RemoveGameCollectionQueryDto): Promise<GameCollectionDto> {
     const now = new Date();
     const actingUserId = resolveActingUserIdOrNull(this.abilityService);
+    const given = givenRemovalDate(removedOn, now);
 
-    // Single scoped write: `deletedAt: null` in the filter makes a repeat
-    // removal (or a foreign/missing row) miss and surface as 404, which rolls
-    // the transaction back before the sync runs.
     return this.writtenRow(
       () =>
-        this.writeThenSyncSupply(
+        this.writes.runForRow(
           async (tx) => {
-            const row = await tx.gameCollection.update({
-              where: {
-                id,
-                deletedAt: null,
-                // eslint-disable-next-line no-restricted-syntax -- single-row removal by id, not a collection read
-                AND: this.abilityService.getCurrentResourceConditions(ResourceType.GameCollection, Action.delete),
-              },
-              data: { deletedAt: now, deleteReason: reason ?? null, lastUpdated: now },
-              include: COLLECTION_INCLUDE,
+            await this.writes.lockEntryUnder(tx, this.abilityService, id, Action.delete);
+
+            await writeEntryUnder(
+              tx,
+              this.abilityService,
+              id,
+              Action.delete,
+              { deletedAt: null },
+              { lastUpdated: now },
+            );
+
+            const owned = await tx.collectionCopy.findMany({
+              where: { entryId: id, ...OWNED_COPY },
+              select: { id: true, ...REMOVAL_CHECK_SELECT },
             });
 
-            return { row, synced: { id: row.id, deletedAt: now } };
+            // Each copy is dated by itself, so a copy acquired tomorrow in
+            // UTC is not removed before it was acquired (#1231).
+            const removals = new Map<string, { copyIds: string[]; removal: PartialDate }>();
+            for (const copy of owned) {
+              const removal = removalOf(copy, given, now);
+              assertRemovableOn(copy, removal);
+
+              const key = `${removal.on.toISOString()}/${removal.precision}`;
+              const group = removals.get(key) ?? { copyIds: [], removal };
+              group.copyIds.push(copy.id);
+              removals.set(key, group);
+            }
+
+            // Every copy on one date, which is every removal that names a
+            // date and nearly every other, is one statement over the entry's
+            // owned copies, as the entry's lock holds them still. Only copies
+            // that differ are written apart, each date by its copies' ids.
+            const dated = [...removals.values()];
+            if (dated.length <= 1) {
+              const removal = dated[0]?.removal ?? given ?? defaultRemovalDate(null, now);
+              await tx.collectionCopy.updateMany({
+                where: { entryId: id, ...OWNED_COPY },
+                data: copyRemovalData(removal, reason, now),
+              });
+            } else {
+              for (const { copyIds, removal } of dated) {
+                await tx.collectionCopy.updateMany({
+                  where: { id: { in: copyIds }, entryId: id, ...OWNED_COPY },
+                  data: copyRemovalData(removal, reason, now),
+                });
+              }
+            }
+
+            return id;
           },
+          (tx, entryId) => this.readWrittenRow(tx, entryId),
           actingUserId,
           now,
+          reason ?? null,
         ),
-      (error) => this.mapMissingToNotFound(error, id),
+      (error) => this.unexpected(error, `Error removing collection entry ${id}`),
     );
   }
 
   /**
-   * Runs `write`, then `syncCollectionEntrySupply` on the entry state it
-   * answers, in one transaction, and emits what the sync changed once that
-   * commits (#1221). A `write` that answers `synced: null` runs no sync and
-   * emits nothing. Its first statement must lock the entry's row, as the
-   * transaction's first lock, so every write that changes what the entry
-   * supplies takes turns with it (`syncCollectionEntrySupply`).
-   *
-   * The transaction keeps the default isolation, READ COMMITTED: the sync
-   * relies on each of its statements reading what had committed when it
-   * started.
+   * Runs `attempt`, and once more when it fails on the entry's identity
+   * (#1231). Postgres aborts a transaction on the violation, so nothing
+   * inside it can recover; the second run is a transaction of its own, and
+   * reads what the other committed. A violation of any other unique would
+   * only happen again, so it is thrown as it is, and so is a second one.
    */
-  private async writeThenSyncSupply(
-    write: (tx: Prisma.TransactionClient) => Promise<{
-      row: GameCollectionWithRelations;
-      synced: Pick<GameCollection, 'id' | 'deletedAt'> | null;
-    }>,
-    actingUserId: string | null,
-    now: Date,
-  ): Promise<GameCollectionWithRelations> {
-    const { row, supplyChanges } = await this.db.$transaction(async (tx) => {
-      const { row, synced } = await write(tx);
+  private async onceMoreOnIdentityViolation<T>(attempt: () => Promise<T>): Promise<T> {
+    try {
+      return await attempt();
+    } catch (error) {
+      if (!isEntryIdentityViolation(error)) {
+        throw error;
+      }
 
-      return { row, supplyChanges: synced ? await syncCollectionEntrySupply(tx, synced, now) : null };
-    });
+      return attempt();
+    }
+  }
 
-    if (supplyChanges) {
-      emitCollectionSupplyChanges(this.eventEmitter, supplyChanges, actingUserId, now);
+  /**
+   * A write's failure as the client gets it. A refusal is an HTTP exception
+   * already, and passes as it is; anything else is logged first.
+   */
+  private unexpected(error: unknown, context: string): unknown {
+    if (!(error instanceof HttpException)) {
+      const failure = error instanceof Error ? error : new Error(String(error));
+      this.logger.error(`${context}: ${failure.message}`, failure.stack);
     }
 
-    return row;
+    return error;
   }
 
   /**
@@ -437,78 +621,76 @@ export class GameCollectionService {
    *   follows the platform game's own content type where it has one (#1391).
    * - The ceiling needs no user, so an anonymous viewer of another user's
    *   collection gets the base games it could open, the Public ones.
+   *
+   * Each row also sends the include's count of owned copies as its
+   * `quantity`, and not the count's own shape (#1231).
    */
-  private async rowsWithBaseGames(rows: readonly GameCollectionWithRelations[]): Promise<GameCollectionRow[]> {
+  private async rowsWithBaseGames(
+    tx: Prisma.TransactionClient,
+    rows: readonly GameCollectionWithRelations[],
+  ): Promise<GameCollectionRow[]> {
     const links = await readBaseGameLinksOnPlatform(
-      this.db,
+      tx,
       rows.map(({ platformGame }) => platformGame),
       this.scopeComposer.compose(ResourceType.Game, Action.read, { deletedAt: null }),
     );
 
-    return rows.map(({ platformGame, ...row }) => ({
+    return rows.map(({ _count, platformGame, ...row }) => ({
       ...row,
       platformGame: {
         ...platformGame,
         game: { ...platformGame.game, baseGames: links.get(platformGame.id) ?? [] },
       },
+      quantity: _count.copies,
     }));
   }
 
-  /** One row with its game's base games, as {@link rowsWithBaseGames} reads them. */
-  private async rowWithBaseGames(row: GameCollectionWithRelations): Promise<GameCollectionRow> {
-    const [withLinks] = await this.rowsWithBaseGames([row]);
+  /**
+   * `rows` as the routes send them (#1231): each with its game's base games
+   * ({@link rowsWithBaseGames}), and, given `ownerCopies`, the entry owner's
+   * copies on the rows the acting user owns ({@link rowsWithOwnerCopies}).
+   *
+   * Read in `tx`, the transaction that read `rows`, so a row's `quantity`,
+   * the include's count, and the copies it carries are one state of the
+   * entry: a list or a single read holds one REPEATABLE READ snapshot, and a
+   * write's transaction holds the entry's lock, which every copy write takes
+   * first. Read apart, a copy write committed between them could answer a
+   * `quantity` of 2 beside one copy.
+   */
+  private async composeRows(
+    tx: Prisma.TransactionClient,
+    rows: readonly GameCollectionWithRelations[],
+    ownerCopies: boolean,
+  ): Promise<GameCollectionRow[]> {
+    const withBaseGames = await this.rowsWithBaseGames(tx, rows);
 
-    return withLinks;
+    return ownerCopies ? this.rowsWithOwnerCopies(tx, withBaseGames) : withBaseGames;
   }
 
   /**
-   * The row a write returns, with its game's base games (#1070). `toError`
-   * maps the write's own failure, a missing row to 404 in every caller. The
-   * link read runs after that mapping, never inside it, so a failed link read
-   * reaches the client as itself.
+   * The entry a write answers, read in the write's transaction after the
+   * write, and composed there for its owner ({@link composeRows}, #1231).
+   */
+  private async readWrittenRow(tx: Prisma.TransactionClient, id: string): Promise<GameCollectionRow> {
+    const row = await tx.gameCollection.findUniqueOrThrow({ where: { id }, include: COLLECTION_INCLUDE });
+    const [composed] = await this.composeRows(tx, [row], true);
+
+    return composed;
+  }
+
+  /**
+   * The row a write returns, read and composed in the write's own
+   * transaction ({@link readWrittenRow}). `toError` maps its failure, a
+   * failed read included, which rolls the write back with it (#1231).
    */
   private async writtenRow(
-    write: () => Promise<GameCollectionWithRelations>,
+    write: () => Promise<GameCollectionRow>,
     toError: (error: unknown) => unknown,
   ): Promise<GameCollectionRow> {
-    let row: GameCollectionWithRelations;
     try {
-      row = await write();
+      return await write();
     } catch (error) {
       throw toError(error);
-    }
-
-    return this.rowWithBaseGames(row);
-  }
-
-  /**
-   * The scoped `where` matched no row: missing, already tombstoned (remove), or
-   * outside the actor's CASL scope. All collapse to 404 so foreign rows are
-   * indistinguishable from absent ones (mirrors FriendshipService).
-   */
-  private mapMissingToNotFound(error: unknown, id: string) {
-    if (isPrismaDependentRecordNotFoundError(error)) {
-      return collectionEntryNotFound(id);
-    }
-
-    this.logger.error(`Error mutating collection entry with id ${id}`, error);
-    return error instanceof Error ? error : new Error(String(error));
-  }
-
-  private async assertReleaseBelongsTo(releaseId: string, platformGameId: string) {
-    const release = await this.db.gameRelease.findUnique({
-      where: { id: releaseId },
-      select: { platformGameId: true },
-    });
-
-    if (!release) {
-      throw new NotFoundException(t('errors.game_release.not_found', { id: releaseId }));
-    }
-
-    if (release.platformGameId !== platformGameId) {
-      throw new BadRequestException(
-        t('errors.game_collection.release_platform_mismatch', { releaseId, platformGameId }),
-      );
     }
   }
 }

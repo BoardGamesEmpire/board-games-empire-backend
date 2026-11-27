@@ -1,8 +1,9 @@
 model GameLoan {
   id String @id @default(cuid(2))
 
-  collection   GameCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
-  collectionId String         @map("collection_id")
+  // The copy lent, not the whole entry (#1231).
+  copy   CollectionCopy @relation(fields: [copyId], references: [id], onDelete: Cascade)
+  copyId String         @map("copy_id")
 
   lender   User   @relation("LoansGiven", fields: [lenderId], references: [id])
   lenderId String @map("lender_id")
@@ -27,7 +28,7 @@ model GameLoan {
 
   @@index([lenderId])
   @@index([borrowerId])
-  @@index([collectionId])
+  @@index([copyId])
   @@index([status])
   @@map("loaned_games")
 }

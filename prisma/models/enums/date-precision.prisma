@@ -1,0 +1,11 @@
+/// How much of a date is known: the day, only the month, or only the year.
+/// The date is stored as the first day of its period, so "2019" is
+/// 2019-01-01 at `Year` and "2019-03" is 2019-03-01 at `Month`. A date that
+/// is not known at all is null, with a null precision (#1231).
+enum DatePrecision {
+  Day
+  Month
+  Year
+
+  @@map("date_precisions")
+}

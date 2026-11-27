@@ -96,7 +96,9 @@ export async function platformOfType(prisma: PrismaClient, platformType: Platfor
 /**
  * An offered game on `eventId`, arranged directly in the database (#1187): a
  * fresh game with `facts`, on a platform of the type named, in `ownerId`'s
- * collection, offered by `ownerId`'s attendee row.
+ * collection, offered by `ownerId`'s attendee row. The entry owns one copy,
+ * as one the api adds would, so removing it through the api removes that
+ * copy and the entry with it (#1231).
  */
 export async function arrangeOfferedGame(
   prisma: PrismaClient,
@@ -121,7 +123,7 @@ export async function arrangeOfferedGame(
     select: { id: true },
   });
   const collection = await prisma.gameCollection.create({
-    data: { userId: ownerId, platformGameId: platformGame.id, medium },
+    data: { userId: ownerId, platformGameId: platformGame.id, medium, copies: { create: {} } },
     select: { id: true },
   });
   const { id: attendeeId } = await prisma.eventAttendee.findUniqueOrThrow({

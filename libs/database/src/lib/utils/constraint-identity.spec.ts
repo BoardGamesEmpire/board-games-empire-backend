@@ -1,7 +1,12 @@
 import { Prisma } from '../client';
 import type { ConstraintIdentity } from './constraint-identity';
-import { constraintIdentity, identifiesConstraint, isIdentifiedConstraint } from './constraint-identity';
-import { uniqueViolation, uniqueViolationWithoutMeta } from './prisma-error.fixtures';
+import {
+  constraintIdentity,
+  foreignKeyIdentity,
+  identifiesConstraint,
+  isIdentifiedConstraint,
+} from './constraint-identity';
+import { foreignKeyViolation, uniqueViolation, uniqueViolationWithoutMeta } from './prisma-error.fixtures';
 
 /**
  * The branch coverage the e2e pin cannot reach.
@@ -320,5 +325,56 @@ describe('identifiesConstraint', () => {
 
   it('returns false when given no spellings at all', () => {
     expect(identifiesConstraint(identityFor(['household_id', 'user_id']))).toBe(false);
+  });
+});
+
+/**
+ * The P2003 reader (#1231): the same driver payload as a P2002's, so the same
+ * normalization, under a guard of its own.
+ */
+describe('foreignKeyIdentity', () => {
+  it('reads the constraint name from driverAdapterError.cause.constraint.index', () => {
+    expect(foreignKeyIdentity(foreignKeyViolation({ index: 'collection_copies_release_match' }))).toEqual({
+      source: 'driverAdapterError.index',
+      names: ['collection_copies_release_match'],
+      sqlState: '23503',
+    });
+  });
+
+  it('reads the column from driverAdapterError.cause.constraint.fields', () => {
+    expect(foreignKeyIdentity(foreignKeyViolation({ fields: ['platform_game_id'] }))).toEqual({
+      source: 'driverAdapterError.fields',
+      names: ['platform_game_id'],
+      sqlState: '23503',
+    });
+  });
+
+  // A trigger that raises `foreign_key_violation` without naming a constraint.
+  it('reports unknown when the payload names no constraint', () => {
+    expect(foreignKeyIdentity(foreignKeyViolation({ omitConstraint: true }))).toEqual({
+      source: 'unknown',
+      sqlState: '23503',
+    });
+  });
+
+  it.each([
+    ['a unique violation', uniqueViolation({ index: 'some_unique' })],
+    ['a non-Prisma error', new Error('connection reset')],
+    ['null', null],
+  ])('reports not-a-foreign-key-violation for %s', (_label, error: unknown) => {
+    expect(foreignKeyIdentity(error)).toEqual({ source: 'not-a-foreign-key-violation' });
+  });
+
+  // And the other way round: a P2003 is no unique violation.
+  it('leaves constraintIdentity reporting not-a-unique-violation for a P2003', () => {
+    expect(constraintIdentity(foreignKeyViolation())).toEqual({ source: 'not-a-unique-violation' });
+  });
+
+  it('feeds identifiesConstraint, which matches the name and nothing else', () => {
+    const identity = foreignKeyIdentity(foreignKeyViolation({ index: 'collection_copies_release_match' }));
+
+    expect(identifiesConstraint(identity, ['collection_copies_release_match'])).toBe(true);
+    expect(identifiesConstraint(identity, ['game_collections_platform_game_id_fkey'])).toBe(false);
+    expect(identifiesConstraint({ source: 'not-a-foreign-key-violation' }, ['x'])).toBe(false);
   });
 });

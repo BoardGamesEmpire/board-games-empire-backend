@@ -1,26 +1,21 @@
 import { i18nValidationMessage } from '@bge/i18n';
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsInt, IsNotEmpty, IsOptional, IsPositive, IsString, Max, Min, ValidateIf } from 'class-validator';
+import { IsBoolean, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 import type { CollectionReach } from './create-game-collection.dto';
 import { CollectionReachProperty } from './create-game-collection.dto';
 
 /**
  * Standard REST PATCH semantics: omitted fields are preserved, explicit `null`
- * clears a nullable field. `quantity` and `reach` are non-nullable, so
- * `null` is rejected for them (`@ValidateIf` keeps validation active for
- * `null`, unlike `@IsOptional`, which skips both `null` and `undefined`).
+ * clears a nullable field. `reach` is non-nullable, so `null` is rejected for
+ * it.
  *
  * Deliberately not writable here:
  * - `platformGameId` / `medium` — identity of the row; add a new entry instead.
  * - `playCount` / `lastPlayed` — server-managed via play tracking.
+ * - `quantity` / `releaseId` — the entry's copies hold its edition, and its
+ *   quantity is the number of copies it still owns (#1231).
  */
 export class UpdateGameCollectionDto {
-  @ApiPropertyOptional({ description: 'Number of copies owned' })
-  @ValidateIf((o) => o.quantity !== undefined)
-  @IsInt({ message: i18nValidationMessage('validation.isInt') })
-  @IsPositive({ message: i18nValidationMessage('validation.isPositive') })
-  quantity?: number;
-
   @ApiPropertyOptional({ description: 'Personal rating (1-10); null clears it', nullable: true })
   @IsOptional()
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
@@ -42,15 +37,6 @@ export class UpdateGameCollectionDto {
   @IsOptional()
   @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
   playAgain?: boolean | null;
-
-  @ApiPropertyOptional({
-    description: 'ID of a specific GameRelease of the platform game; null clears it',
-    nullable: true,
-  })
-  @IsOptional()
-  @IsString({ message: i18nValidationMessage('validation.isString') })
-  @IsNotEmpty({ message: i18nValidationMessage('validation.isNotEmpty') })
-  releaseId?: string | null;
 
   @CollectionReachProperty()
   reach?: CollectionReach;

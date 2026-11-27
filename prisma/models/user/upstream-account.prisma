@@ -23,6 +23,11 @@ model UpstreamAccount {
 
   syncLogs UpstreamAccountSyncLog[]
 
+  // What a sync wrote from this account. Each keeps the upstream's key and
+  // stays when the account goes (#1231).
+  collectionCopies        CollectionCopy[]
+  collectionRatingChanges CollectionRatingChange[]
+
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 

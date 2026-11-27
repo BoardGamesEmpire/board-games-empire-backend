@@ -7,7 +7,10 @@
   "game_collection": {
     "added": "Game added to collection successfully",
     "updated": "Collection entry updated successfully",
-    "removed": "Game removed from collection successfully"
+    "removed": "Game removed from collection successfully",
+    "copy_added": "Copy added successfully",
+    "copy_updated": "Copy updated successfully",
+    "copy_removed": "Copy removed successfully"
   },
   "list": {
     "created": "List created successfully",

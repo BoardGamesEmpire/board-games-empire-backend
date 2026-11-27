@@ -1,4 +1,6 @@
 import type { Game, GameCollection, Platform, PlatformGame } from '@bge/database';
+import { GameCondition, GameRemovalReason } from '@bge/database';
+import { z } from 'zod';
 import type { ExpansionLinkWire } from '../game/game-wire';
 import type { HttpResponseLike, RequestDescription, Wire } from '../support/wire';
 import { envelopeFailure, isRecord } from '../support/wire';
@@ -10,8 +12,15 @@ import { envelopeFailure, isRecord } from '../support/wire';
  * against `undefined` that names neither the key nor the change.
  */
 
-/** `onWishlist` is sent on `GET /users/:userId/game-collections` only, and is null for an actor with no wishlist they can read (#1241). */
-export type GameCollectionWire = Wire<GameCollection> & { readonly onWishlist?: boolean | null };
+/**
+ * `onWishlist` is sent on `GET /users/:userId/game-collections` only, and is
+ * null for an actor with no wishlist they can read (#1241). `quantity` is the
+ * number of copies the owner still has, counted rather than stored (#1231).
+ */
+export type GameCollectionWire = Wire<GameCollection> & {
+  readonly onWishlist?: boolean | null;
+  readonly quantity: number;
+};
 
 /** The players and play time a game carries and its platform game may override (#1070). */
 export type PlayerAndPlayTimeField = 'minPlayers' | 'maxPlayers' | 'minPlayTime' | 'maxPlayTime';
@@ -132,4 +141,150 @@ export function readCollectionEnvelope(
   }
 
   return { collection };
+}
+
+/** A price on the wire: whole minor units and an ISO 4217 code (#1231). */
+const moneyWireSchema = z.object({ amount: z.number().int(), currency: z.string() }).strict();
+
+/** A copy's edition on the wire: the release's id, name and year (#1231). */
+const copyReleaseWireSchema = z
+  .object({ editionName: z.string().nullable(), id: z.string().min(1), releaseYear: z.number().nullable() })
+  .strict()
+  .nullable();
+
+/**
+ * A copy as its owner reads it (#1231). Strict, so a field the owner's shape
+ * doesn't name, such as when the user last edited it or its upstream
+ * account, fails the parse rather than passing unread.
+ */
+export const collectionCopyWireSchema = z
+  .object({
+    acquiredFrom: z.string().nullable(),
+    acquiredOn: z.string().nullable(),
+    condition: z.enum(GameCondition).nullable(),
+    createdAt: z.string(),
+    currentValue: moneyWireSchema.nullable(),
+    id: z.string().min(1),
+    note: z.string().nullable(),
+    pricePaid: moneyWireSchema.nullable(),
+    release: copyReleaseWireSchema,
+    removedAt: z.string().nullable(),
+    removedOn: z.string().nullable(),
+    removeReason: z.enum(GameRemovalReason).nullable(),
+  })
+  .strict();
+
+export type CollectionCopyWire = z.infer<typeof collectionCopyWireSchema>;
+
+/**
+ * A copy as every reader but its owner sees it on a collection row (#1231):
+ * its id, edition and condition, and nothing else. Strict, so a private field
+ * on the wire fails the parse.
+ */
+export const publicCopyWireSchema = z
+  .object({
+    condition: z.enum(GameCondition).nullable(),
+    id: z.string().min(1),
+    release: copyReleaseWireSchema,
+  })
+  .strict();
+
+export type PublicCopyWire = z.infer<typeof publicCopyWireSchema>;
+
+/**
+ * A collection row's `copies` (#1231), each parsed with `schema`: the owner's
+ * shape or the public one. A row without the array fails here, not as an
+ * assertion against `undefined`.
+ */
+function rowCopies<T>(
+  row: GameCollectionWire,
+  request: RequestDescription,
+  schema: z.ZodType<T>,
+  shape: string,
+): readonly T[] {
+  const parsed = z.array(schema).safeParse((row as unknown as Record<string, unknown>)['copies']);
+  if (!parsed.success) {
+    throw new Error(
+      `${request}: collection row ${row.id} carried no 'copies' array of ${shape} (${parsed.error.message}). ` +
+        'Update apps/api-e2e/src/game-collection/game-collection-wire.ts if the row changed on purpose.',
+    );
+  }
+
+  return parsed.data;
+}
+
+/** A row's copies as every reader but the owner sees them: no private field (#1231). */
+export function publicRowCopies(row: GameCollectionWire, request: RequestDescription): readonly PublicCopyWire[] {
+  return rowCopies(row, request, publicCopyWireSchema, 'public copies');
+}
+
+/** A row's copies as their owner reads them: every field the copy routes send (#1231). */
+export function ownerRowCopies(row: GameCollectionWire, request: RequestDescription): readonly CollectionCopyWire[] {
+  return rowCopies(row, request, collectionCopyWireSchema, "the owner's copies");
+}
+
+const copyEnvelopeSchema = z.object({ copy: collectionCopyWireSchema });
+
+const listCopiesEnvelopeSchema = z.object({ copies: z.array(collectionCopyWireSchema) });
+
+/** `POST`, `PATCH` and `DELETE` on `/api/game-collections/:id/copies`: `{ copy, message }` (#1231). */
+export function copyEnvelope(response: HttpResponseLike, request: RequestDescription): CollectionCopyWire {
+  const parsed = copyEnvelopeSchema.safeParse(response.body);
+  if (!parsed.success) {
+    return fail(`its 'copy' is not a copy as its owner reads it (${parsed.error.message})`, request, response);
+  }
+
+  return parsed.data.copy;
+}
+
+/** `GET /api/game-collections/:id/copies`: `{ copies: [...] }` (#1231). */
+export function listCopiesEnvelope(
+  response: HttpResponseLike,
+  request: RequestDescription,
+): readonly CollectionCopyWire[] {
+  const parsed = listCopiesEnvelopeSchema.safeParse(response.body);
+  if (!parsed.success) {
+    return fail(
+      `its 'copies' is not a list of copies as their owner reads them (${parsed.error.message})`,
+      request,
+      response,
+    );
+  }
+
+  return parsed.data.copies;
+}
+
+/**
+ * A change of an entry's rating as its owner reads it (#1231). Strict, so a
+ * field the owner's shape doesn't name, such as its upstream account, fails
+ * the parse rather than passing unread.
+ */
+export const ratingChangeWireSchema = z
+  .object({
+    createdAt: z.string(),
+    id: z.string().min(1),
+    occurredOn: z.string().nullable(),
+    rating: z.number().int().nullable(),
+  })
+  .strict();
+
+export type RatingChangeWire = z.infer<typeof ratingChangeWireSchema>;
+
+const listRatingsEnvelopeSchema = z.object({ ratings: z.array(ratingChangeWireSchema) });
+
+/** `GET /api/game-collections/:id/ratings`: `{ ratings: [...] }` (#1231). */
+export function listRatingsEnvelope(
+  response: HttpResponseLike,
+  request: RequestDescription,
+): readonly RatingChangeWire[] {
+  const parsed = listRatingsEnvelopeSchema.safeParse(response.body);
+  if (!parsed.success) {
+    return fail(
+      `its 'ratings' is not a list of rating changes as their owner reads them (${parsed.error.message})`,
+      request,
+      response,
+    );
+  }
+
+  return parsed.data.ratings;
 }

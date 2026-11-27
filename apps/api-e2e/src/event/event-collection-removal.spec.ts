@@ -3,6 +3,7 @@ import {
   EventSchedulingMode,
   GameAdditionMode,
   GameMedium,
+  GameRemovalReason,
   NominationStatus,
   OccurrenceStatus,
   Reach,
@@ -12,7 +13,7 @@ import type { Actors, AuthenticatedActor } from '@bge/testing-e2e';
 import { createActors } from '@bge/testing-e2e';
 import request from 'supertest';
 import { arrangeCollectionEntry } from '../game-collection/game-collection-fixtures';
-import { readCollectionEnvelope } from '../game-collection/game-collection-wire';
+import { copyEnvelope, readCollectionEnvelope } from '../game-collection/game-collection-wire';
 import { requireBaseUrl } from '../support/e2e-env';
 import type { Barrier } from '../support/lock-barrier';
 import { expectLockWaiter, withBarrier } from '../support/lock-barrier';
@@ -277,6 +278,41 @@ describe('removing an offered game from the collection (#1221)', () => {
     expect(voteOf(reopened, stayerAttendeeId)).toMatchObject({ voteType: VoteType.For, eligible: true });
   });
 
+  // The copy route removes the entry with its last owned copy, through the
+  // same write runner, so the entry's offers follow as they do when the
+  // entry itself is removed (#1231, #1221).
+  it("removing the entry's last copy through the copy route pauses its nominations, as removing the entry does (#1231)", async () => {
+    const { host, owner, eventId, ownerAttendeeId, stayerAttendeeId, offered, nomination } = await arrangeEvent();
+    const { id: copyId } = await db.client.collectionCopy.findFirstOrThrow({
+      where: { entryId: offered.collectionId },
+      select: { id: true },
+    });
+
+    const removedCopy = copyEnvelope(
+      await request(baseUrl)
+        .delete(`${COLLECTIONS_PATH}/${offered.collectionId}/copies/${copyId}`)
+        .query({ reason: GameRemovalReason.Sold })
+        .set(owner.headers)
+        .expect(200),
+      'DELETE /api/game-collections/:id/copies/:copyId as the owner',
+    );
+    expect(removedCopy).toMatchObject({ id: copyId, removedAt: expect.any(String) });
+
+    const paused = await readNomination(host, eventId, nomination.id);
+    expect(paused.status).toBe(NominationStatus.Paused);
+    expect(paused.pausedFrom).toBe(NominationStatus.Open);
+    expect(voteOf(paused, stayerAttendeeId)).toMatchObject({ voteType: VoteType.For, eligible: true });
+    expect((await offerReads(host, eventId, ownerAttendeeId)).event.ids).not.toContain(offered.suppliedById);
+
+    // Adding a copy back acquires the entry again, and reopens the nomination.
+    await request(baseUrl)
+      .post(`${COLLECTIONS_PATH}/${offered.collectionId}/copies`)
+      .set(owner.headers)
+      .send({})
+      .expect(201);
+    expect((await readNomination(host, eventId, nomination.id)).status).toBe(NominationStatus.Open);
+  });
+
   it('takes the game off the lineup still ahead and keeps it off after the add-back (#1221)', async () => {
     const { host, owner, eventId, offered, lineupGameId } = await arrangeEvent();
     // A date that has started keeps its lineup, the game included. A date
@@ -446,10 +482,10 @@ describe('removing an offered game from the collection (#1221)', () => {
 
   /**
    * The same, raced. A removal and a write that changes what the entry
-   * supplies take turns on the entry's row: the removal's UPDATE of it, a
-   * supply check's FOR SHARE (`lockSupplier`), and an attendee's coming back
-   * (`syncSuppliedGames`). Whichever comes second waits, then reads what the
-   * first committed.
+   * supplies take turns on the entry's row: the removal's FOR UPDATE of it
+   * (`lockEntry`, #1231), a supply check's FOR SHARE (`lockSupplier`), and an
+   * attendee's coming back (`syncSuppliedGames`). Whichever comes second
+   * waits, then reads what the first committed.
    *
    * The barrier stands in for one side by holding the lock that side's
    * transaction takes, and the request under test runs over its route.
@@ -490,8 +526,9 @@ describe('removing an offered game from the collection (#1221)', () => {
     it('a removal racing a nomination of the same game: the nomination waits for the removal and is refused, or commits first and is paused (#1221)', async () => {
       const { host, owner, eventId } = await arrangeEvent();
 
-      // The removal first: the barrier's UPDATE of the entry's row is the
-      // removal's first lock, and the nomination's supply check waits on it.
+      // The removal first: the barrier's UPDATE of the entry's row holds it
+      // as the removal's first lock does, and the nomination's supply check
+      // waits on it.
       const first = await offerOf(eventId, owner);
       const refused = await withBarrier(async (barrier) => {
         const { holder } = barrier;
@@ -535,9 +572,9 @@ describe('removing an offered game from the collection (#1221)', () => {
 
       // The nomination first. The barrier holds the event's row, so the
       // nomination stops between its supply check, which holds the entry's
-      // row as a share, and its share of the event. The removal's UPDATE of
-      // the entry's row then waits on the nomination itself, not on the
-      // barrier.
+      // row as a share, and its share of the event. The removal's first
+      // lock, its FOR UPDATE of the entry's row (#1231), then waits on the
+      // nomination itself, not on the barrier.
       const second = await offerOf(eventId, owner);
       const { created, removal } = await withBarrier(async (barrier) => {
         const { holder } = barrier;
@@ -570,7 +607,7 @@ describe('removing an offered game from the collection (#1221)', () => {
           exclude: barrierPids(barrier),
           settledEarly: removing.settledEarly,
         });
-        expect(waiting.query).toMatch(/UPDATE[\s\S]*game_collections/);
+        expect(waiting.query).toMatch(/FROM game_collections\s+WHERE id = \$1\s+FOR UPDATE/);
 
         // Released before anything else is asked of the database, as above.
         await holder.rollback();
@@ -595,10 +632,10 @@ describe('removing an offered game from the collection (#1221)', () => {
       await rsvp(owner, eventId, ownerAttendeeId, EventParticipationStatus.NotAttending).expect(200);
       expect((await readNomination(host, eventId, nomination.id)).status).toBe(NominationStatus.Paused);
 
-      // The barrier's UPDATE of the entry's row is the removal's first lock.
-      // Coming back resumes the supplier's nominations only after holding their
-      // offers' collection entries as shares, so it waits, then reads the
-      // game removed.
+      // The barrier's UPDATE of the entry's row holds it as the removal's
+      // first lock does. Coming back resumes the supplier's nominations only
+      // after holding their offers' collection entries as shares, so it
+      // waits, then reads the game removed.
       const back = await withBarrier(async (barrier) => {
         const { holder } = barrier;
 

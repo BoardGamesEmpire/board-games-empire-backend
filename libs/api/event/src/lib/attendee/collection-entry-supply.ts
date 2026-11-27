@@ -34,19 +34,19 @@ export interface CollectionSupplyChange {
  * ({@link emitCollectionSupplyChanges}).
  *
  * Run it in the transaction that removed the entry or added it back, AFTER
- * that transaction locked the entry's row: a removal's `UPDATE` of it, or an
- * add-back's `FOR UPDATE` before its write. That lock is what makes this
- * take turns with every other write that changes what the entry supplies,
- * since each holds the entry's row `FOR SHARE` first: a nomination, a direct
- * add, or adding a nomination's game to the lineup, each naming the offer
- * (`lockSupplier`), and an attendee leaving or coming back
+ * that transaction locked the entry's row with a `FOR UPDATE` before its
+ * write: by the entry's id, or by its identity for an add (#1231). That lock
+ * is what makes this take turns with every other write that changes what the
+ * entry supplies, since each holds the entry's row `FOR SHARE` first: a
+ * nomination, a direct add, or adding a nomination's game to the lineup, each
+ * naming the offer (`lockSupplier`), and an attendee leaving or coming back
  * (`syncSuppliedGames`). Whichever comes second waits, then reads what the
- * first committed. Without it, this would miss a
- * nomination opened, or an attendee coming back, in a transaction still open
- * when it reads: under READ COMMITTED each statement here reads what had
- * committed when it started, and an update waits only on the rows that match
- * in that read. An offer made after the first read supplies nothing yet,
- * since anything naming it waits on the entry's row.
+ * first committed. Without it, this would miss a nomination opened, or an
+ * attendee coming back, in a transaction still open when it reads: under
+ * READ COMMITTED each statement here reads what had committed when it
+ * started, and an update waits only on the rows that match in that read. An
+ * offer made after the first read supplies nothing yet, since anything
+ * naming it waits on the entry's row.
  *
  * Then it locks each event that offers the entry `FOR SHARE`, all of them
  * before any nomination: removing a date writes to the nominations that name

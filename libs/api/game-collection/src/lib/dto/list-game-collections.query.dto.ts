@@ -49,11 +49,13 @@ export class ListGameCollectionsQueryDto extends GameCollectionPaginationQueryDt
     description:
       'Only entries changed at or after this time, for catching up on changes (combine with includeDeleted). ' +
       'An entry counts as changed when it did or a value it embeds did: the game, its platform game and ' +
-      "platform, an expansion's links and their base games, and the release. A base game that gains a " +
-      "platform game counts as a change to its add-ons' entries. These changes are not seen: a link deleted " +
-      "outright, as when its base game is deleted; a base game's platform game deleted outright; and a " +
-      "change to the viewer's friendships, blocks, shares or household memberships that decides whether " +
-      'they may open a base game. Reload in full to pick those up (#1391).',
+      "platform, the release each copy names as its edition, and an expansion's links and their base games. " +
+      "A copy added, edited or removed changes its entry, so a copy's change of edition resends the row, " +
+      "and a base game that gains a platform game counts as a change to its add-ons' entries. These changes " +
+      "are not seen: a link deleted outright, as when its base game is deleted; a base game's platform game " +
+      'deleted outright; a release deleted outright, which leaves the copies that named it with no edition; ' +
+      "and a change to the viewer's friendships, blocks, shares or household memberships that decides " +
+      'whether they may open a base game. Reload in full to pick those up (#1391, #1231).',
   })
   @IsOptional()
   @IsDate({ message: i18nValidationMessage('validation.isDate') })

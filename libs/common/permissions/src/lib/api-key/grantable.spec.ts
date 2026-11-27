@@ -25,6 +25,7 @@ describe('API_KEY_PINNABLE_TYPES (#1417)', () => {
   // covers that, so a change here is a reviewed decision, not a drive-by.
   it('pins the pinnable types', () => {
     expect([...API_KEY_PINNABLE_TYPES].sort()).toEqual([
+      'GameCollection',
       'HouseholdBan',
       'Job',
       'Notification',
@@ -64,6 +65,18 @@ describe('acceptsPin (#1417)', () => {
 
   it('accepts a pin on manage:webhook_subscription:own, whose create route checks the row (#1418)', () => {
     expect(acceptsPin({ action: Action.manage, subject: ResourceType.WebhookSubscription })).toBe(true);
+  });
+
+  // Each collection entry route holds a key to its pin: the reads compose the
+  // key's ceiling, and every write is held to the conditions of the row it
+  // writes. A create pin stays refused, so a key can't hold one through the
+  // route (#1288).
+  it.each([Action.read, Action.update, Action.delete])('accepts a pin on %s:game_collection (#1288)', (action) => {
+    expect(acceptsPin({ action, subject: ResourceType.GameCollection })).toBe(true);
+  });
+
+  it('refuses a pin on create:game_collection (#1288)', () => {
+    expect(acceptsPin({ action: Action.create, subject: ResourceType.GameCollection })).toBe(false);
   });
 
   it('still accepts a pin on read:plugin (#1418)', () => {
