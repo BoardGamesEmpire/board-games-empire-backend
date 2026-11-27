@@ -23,6 +23,9 @@ model Notification {
 
   // Ordered unread fetch is the dominant read pattern
   @@index([userId, read, createdAt(sort: Desc)])
+  // The history list reads read and unread rows in one order (#1597); the
+  // index above stays for the unread list and the unread count.
+  @@index([userId, createdAt(sort: Desc), id(sort: Desc)])
   @@map("notifications")
 }
 
