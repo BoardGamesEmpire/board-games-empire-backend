@@ -1,5 +1,6 @@
 /* eslint-disable bge/no-uncoded-exception-body -- these cases hand the renderer a coded body no producer may build, to pin that it completes any body into the envelope (#1260) */
 import type { AuditContextService } from '@bge/actor-context';
+import { databaseUnreachable } from '@bge/database/testing';
 import { SearchStartDto } from '@bge/game-search';
 import type { I18nTranslations } from '@bge/i18n';
 import { CodedHttpException, FALLBACK_LOCALE, I18N_CATALOG_DIR, i18nValidationMessage, t } from '@bge/i18n';
@@ -372,6 +373,41 @@ describe('WsErrorFilter', () => {
       });
       expect(client.disconnect).not.toHaveBeenCalled();
       expect(logged).toHaveBeenCalledWith(expect.stringContaining('search:start'), exception);
+    });
+
+    it('answers a database outage on a frame 503 DATABASE_UNAVAILABLE in the frame locale, and keeps the socket open (#1172)', async () => {
+      const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      const translate = jest.spyOn(i18n, 'translate');
+      const outage = databaseUnreachable();
+      const { client, host } = hostFor('search:start', { correlationId: 'corr-1' });
+
+      await filter.catch(outage, host);
+
+      expect(translate).toHaveBeenCalledWith('errors.database.unavailable', expect.objectContaining({ lang: 'en' }));
+      expect(client.emit).toHaveBeenCalledTimes(1);
+      expect(client.emit).toHaveBeenCalledWith(WsErrorEvents.Exception, {
+        statusCode: 503,
+        error: 'Service Unavailable',
+        message:
+          "The server can't reach its database right now, so your request wasn't completed. Try again in a little while.",
+        code: 'DATABASE_UNAVAILABLE',
+        pattern: 'search:start',
+        correlationId: 'corr-1',
+      });
+      expect(client.disconnect).not.toHaveBeenCalled();
+      expect(logged).toHaveBeenCalledWith(expect.stringContaining('search:start'), outage.stack);
+      expect(logged).toHaveBeenCalledWith(expect.stringContaining('code=P1001'), outage.stack);
+    });
+
+    // The predicate reads an error's `cause`, so an HTTP exception carrying a
+    // driver error must keep its own answer, as it does over HTTP (#1172).
+    it('keeps the status of an HTTP exception whose cause is a database outage (#1172)', async () => {
+      jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      const { client, host } = hostFor('search:start', { correlationId: 'corr-1' });
+
+      await filter.catch(new ConflictException('refused', { cause: { code: '57P01' } }), host);
+
+      expect(client.emit).toHaveBeenCalledWith(WsErrorEvents.Exception, expect.objectContaining({ statusCode: 409 }));
     });
 
     it("renders the 500's copy in the frame's locale (#527)", async () => {

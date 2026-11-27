@@ -1,4 +1,5 @@
 import type { AuthService } from '@bge/auth';
+import { databaseUnreachable } from '@bge/database/testing';
 import type { I18nTranslations, LocaleResolutionService } from '@bge/i18n';
 import { CodedHttpException, t } from '@bge/i18n';
 import { Logger, ServiceUnavailableException } from '@nestjs/common';
@@ -109,6 +110,44 @@ describe('AuthenticatedGateway', () => {
     });
     expect(resolve).toHaveBeenCalledWith(expect.objectContaining({ acceptLanguage: 'fr' }));
     expect(logged).toHaveBeenCalledWith(expect.stringContaining('socket-1'), outage);
+  });
+
+  it('refuses a handshake during a database outage 503 DATABASE_UNAVAILABLE (#1172)', async () => {
+    const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const outage = databaseUnreachable();
+    const authService = { getSessionFromHeaders: jest.fn().mockRejectedValue(outage) } as unknown as AuthService;
+    const { namespace, middleware } = fakeNamespace();
+
+    new TestGateway(authService, frameScope, translator).afterInit(namespace);
+    const refusal = await handshake(middleware, connection({ acceptLanguage: 'fr' }));
+
+    expect(refusal).toBeInstanceOf(WsConnectionRefusal);
+    expect(refusal).toMatchObject({ message: 'fr:errors.database.unavailable' });
+    expect((refusal as WsConnectionRefusal).data).toEqual({
+      statusCode: 503,
+      error: 'Service Unavailable',
+      message: 'fr:errors.database.unavailable',
+      code: 'DATABASE_UNAVAILABLE',
+    });
+    expect(resolve).toHaveBeenCalledWith(expect.objectContaining({ acceptLanguage: 'fr' }));
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining('socket-1'), outage.stack);
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining('code=P1001'), outage.stack);
+  });
+
+  // The predicate reads an error's `cause`, so an HTTP exception carrying a
+  // driver error keeps its own answer, as it does over HTTP (#1172).
+  it('keeps the status of an HTTP exception whose cause is a database outage (#1172)', async () => {
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const refused = new CodedHttpException(503, 'SESSION_UNAVAILABLE', t('errors.auth.session_unavailable'), {
+      cause: { code: '57P01' },
+    });
+    const authService = { getSessionFromHeaders: jest.fn().mockRejectedValue(refused) } as unknown as AuthService;
+    const { namespace, middleware } = fakeNamespace();
+
+    new TestGateway(authService, frameScope, translator).afterInit(namespace);
+    const refusal = await handshake(middleware, connection({ acceptLanguage: 'fr' }));
+
+    expect((refusal as WsConnectionRefusal).data).toMatchObject({ code: 'SESSION_UNAVAILABLE' });
   });
 
   it("looks up a connection's session once, however many gateways share its namespace", async () => {

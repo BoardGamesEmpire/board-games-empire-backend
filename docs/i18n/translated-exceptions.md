@@ -82,6 +82,12 @@ envelope with catalog copy (`errors.request.*`) in the request locale:
 
 - **`UnknownErrorFilter`**, a global `@Catch()` registered so that it is tried
   last, answers everything that isn't an `HttpException`:
+  - a database outage, from a middleware, a guard or a handler, is logged and
+    answered 503 `DATABASE_UNAVAILABLE` with `errors.database.unavailable`
+    (#1172). `isDatabaseUnavailableError` in `@bge/database` decides what an
+    outage is, and a frame, a WebSocket handshake and `/api/auth` answer it
+    the same way. A deadlock is not one: it keeps its 409
+    `TRANSACTION_DEADLOCK`;
   - a body over the limit (body-parser's 413) is `REQUEST_TOO_LARGE`;
   - any other request body-parser can't read keeps its 4xx status, with
     `errors.request.unreadable` and no code. The parser's own text goes to

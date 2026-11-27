@@ -523,7 +523,8 @@
     "inventory_tombstoned": "Plugin '{slug}' was uninstalled — reinstall it to manage it again"
   },
   "database": {
-    "deadlock": "Another change was being applied at the same time. Please retry the request."
+    "deadlock": "Another change was being applied at the same time. Please retry the request.",
+    "unavailable": "The server can't reach its database right now, so your request wasn't completed. Try again in a little while."
   },
   "actor_context": {
     "not_user_attributable": {

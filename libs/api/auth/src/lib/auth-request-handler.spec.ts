@@ -1,4 +1,5 @@
 import type { PrismaClient } from '@bge/database';
+import { databaseUnreachable } from '@bge/database/testing';
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { EventEmitter2 } from '@nestjs/event-emitter';
@@ -390,6 +391,101 @@ describe('createAuthRequestHandler', () => {
 
       expect(response.status).toBe(500);
       await expect(response.json()).resolves.toEqual(failed);
+    });
+
+    describe('a database outage (#1172)', () => {
+      const databaseUnavailable = {
+        statusCode: 503,
+        error: 'Service Unavailable',
+        code: 'DATABASE_UNAVAILABLE',
+        message: 'errors.database.unavailable',
+      };
+      const down = jest.fn(async () => {
+        throw databaseUnreachable();
+      });
+
+      it('answers a sign-in the database cannot serve 503 DATABASE_UNAVAILABLE', async () => {
+        const handle = await servedOver(
+          new Keyv({ throwOnErrors: true }),
+          prismaWith({ user: { findFirst: down, findUnique: down } }),
+        );
+
+        const response = await signIn(handle);
+
+        expect(down).toHaveBeenCalled();
+        expect(response.status).toBe(503);
+        await expect(response.json()).resolves.toEqual(databaseUnavailable);
+        expect(loggedErrors).toHaveBeenCalledWith(
+          expect.stringContaining('code=P1001'),
+          expect.stringContaining("Can't reach database"),
+        );
+      });
+
+      // better-auth's email sign-up catches a failed user create and answers
+      // its own 422, so the create path is shown through the anonymous sign-in,
+      // which lets the error through.
+      it('answers a sign-in whose user the database cannot create 503 DATABASE_UNAVAILABLE', async () => {
+        const handle = await servedOver(
+          new Keyv({ throwOnErrors: true }),
+          prismaWith({ systemSetting: settingsOn, user: { create: down } }),
+        );
+
+        const response = await handle(post('/sign-in/anonymous', {}));
+
+        expect(down).toHaveBeenCalled();
+        expect(response.status).toBe(503);
+        await expect(response.json()).resolves.toEqual(databaseUnavailable);
+      });
+
+      it('answers a setting the database cannot read 503 DATABASE_UNAVAILABLE', async () => {
+        const handle = await servedOver(
+          new Keyv({ throwOnErrors: true }),
+          prismaWith({ systemSetting: { findUnique: down } }),
+        );
+
+        const response = await handle(
+          post('/sign-up/email', {
+            email: 'new@example.com',
+            password: 'a-new-password-1234',
+            name: 'new',
+            username: 'newuser',
+          }),
+        );
+
+        expect(response.status).toBe(503);
+        await expect(response.json()).resolves.toEqual(databaseUnavailable);
+      });
+
+      // AUTH_UNAVAILABLE says more: the sign-in state is unknown, so a client
+      // must not take itself as signed out.
+      it('answers AUTH_UNAVAILABLE when the storage also failed in the same request', async () => {
+        const handle = createAuthRequestHandler(
+          async () => {
+            noteStorageFailure();
+            throw databaseUnreachable();
+          },
+          { render: (key) => key },
+        );
+
+        const response = await handle(anyRequest());
+
+        expect(response.status).toBe(503);
+        await expect(response.json()).resolves.toEqual(unavailable);
+      });
+
+      it('still answers a programming error AUTH_FAILED', async () => {
+        const handle = createAuthRequestHandler(
+          async () => {
+            throw new TypeError('boom');
+          },
+          { render: (key) => key },
+        );
+
+        const response = await handle(anyRequest());
+
+        expect(response.status).toBe(500);
+        await expect(response.json()).resolves.toEqual(failed);
+      });
     });
 
     it('answers an empty 500 with no storage failure 500 AUTH_FAILED (#894)', async () => {

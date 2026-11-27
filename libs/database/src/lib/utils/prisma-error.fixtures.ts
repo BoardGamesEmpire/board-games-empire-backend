@@ -26,10 +26,21 @@ interface DriverAdapterCause {
   readonly constraint?: { readonly fields?: readonly string[]; readonly index?: string };
   readonly detail?: string;
   readonly hint?: string;
+
+  /** Where a mapped `DatabaseNotReachable` was trying to connect. */
+  readonly host?: string;
+
   readonly kind: string;
   readonly message?: string;
   readonly originalCode?: string;
-  readonly originalMessage: string;
+
+  /**
+   * Postgres's own text. Absent from the socket-mapped kinds
+   * (`DatabaseNotReachable`, `ConnectionClosed`), which no server answered (#1172).
+   */
+  readonly originalMessage?: string;
+
+  readonly port?: number;
   readonly severity?: string;
 }
 
@@ -258,4 +269,156 @@ export function transactionWriteConflict(): Prisma.PrismaClientKnownRequestError
     'Transaction failed due to a write conflict or a deadlock. Please retry your transaction',
     { code: PrismaError.TransactionWriteConflict, clientVersion: 'test' },
   );
+}
+
+/**
+ * The database server refused the connection, or its host name did not
+ * resolve: P1001 with a mapped `DatabaseNotReachable` cause. The shape
+ * `@prisma/adapter-pg@7.10` raises for a host with a single address, pinned by
+ * `apps/api-e2e/src/database/database-unavailable-shape.spec.ts` (#1172).
+ */
+export function databaseUnreachable(): Prisma.PrismaClientKnownRequestError {
+  return new Prisma.PrismaClientKnownRequestError("Can't reach database server at db.example.test:5432", {
+    code: PrismaError.DatabaseUnreachable,
+    clientVersion: 'test',
+    meta: {
+      modelName: 'User',
+      driverAdapterError: new DriverAdapterError({ kind: 'DatabaseNotReachable', host: 'db.example.test', port: 5432 }),
+    },
+  });
+}
+
+/**
+ * Every address of a host name refused the connection. Node's connect raises
+ * an `AggregateError` with no `syscall`, which the adapter doesn't recognise as
+ * a socket error and rethrows raw, so Prisma wraps it under Node's own code,
+ * `ECONNREFUSED`, with no driver error under `meta` (#1172). `localhost` reaches
+ * this shape where it resolves to both `::1` and `127.0.0.1`.
+ */
+export function connectionRefusedAtEveryAddress(): Prisma.PrismaClientKnownRequestError {
+  return new Prisma.PrismaClientKnownRequestError('', {
+    code: 'ECONNREFUSED',
+    clientVersion: 'test',
+    meta: { modelName: 'User' },
+  });
+}
+
+/**
+ * A socket error the adapter never maps, rethrown raw and wrapped by Prisma
+ * under Node's own code with no driver error under `meta`: `EHOSTUNREACH` for
+ * a host with no route, `EAI_AGAIN` for a resolver that's down (#1172).
+ */
+export function unmappedSocketError(code = 'EHOSTUNREACH'): Prisma.PrismaClientKnownRequestError {
+  return new Prisma.PrismaClientKnownRequestError(`connect ${code} 10.0.0.9:5432`, {
+    code,
+    clientVersion: 'test',
+    meta: { modelName: 'User' },
+  });
+}
+
+/**
+ * An interactive transaction that couldn't get a connection within `maxWait`,
+ * as against a server that accepts the connection and never answers: P2028
+ * with an empty `meta` (#1172).
+ */
+export function transactionStartTimedOut(): Prisma.PrismaClientKnownRequestError {
+  return new Prisma.PrismaClientKnownRequestError(
+    'Transaction API error: Unable to start a transaction in the given time.',
+    { code: 'P2028', clientVersion: 'test', meta: {} },
+  );
+}
+
+/**
+ * A statement on an interactive transaction that outlived its `timeout`:
+ * P2028 too, but the code's own slowness rather than an outage (#1172).
+ */
+export function transactionExpired(): Prisma.PrismaClientKnownRequestError {
+  return new Prisma.PrismaClientKnownRequestError(
+    'Transaction API error: A query cannot be executed on an expired transaction. The timeout for this transaction was 100 ms, however 302 ms passed since the start of the transaction.',
+    { code: 'P2028', clientVersion: 'test', meta: { operation: 'query', timeout: 100, timeTaken: 302 } },
+  );
+}
+
+/**
+ * The server closed the connection before answering: P1017 with a mapped
+ * `ConnectionClosed` cause (#1172).
+ */
+export function serverClosedConnection(): Prisma.PrismaClientKnownRequestError {
+  return new Prisma.PrismaClientKnownRequestError('Server has closed the connection.', {
+    code: PrismaError.ServerClosedConnection,
+    clientVersion: 'test',
+    meta: { modelName: 'User', driverAdapterError: new DriverAdapterError({ kind: 'ConnectionClosed' }) },
+  });
+}
+
+export interface AdminShutdownOptions {
+  /**
+   * Which statement the backend was serving when it ended. A model statement
+   * gets Prisma's generic database error, P2039; a raw one gets P2010. Either
+   * way the SQLSTATE sits under `meta.driverAdapterError`.
+   */
+  readonly statement?: 'model' | 'raw';
+}
+
+/**
+ * Postgres ended the backend mid-statement, `pg_terminate_backend` or a fast
+ * shutdown: SQLSTATE 57P01 with severity FATAL, which the adapter passes
+ * through as `kind: 'postgres'` (#1172).
+ */
+export function adminShutdown(options: AdminShutdownOptions = {}): Prisma.PrismaClientKnownRequestError {
+  const { statement = 'model' } = options;
+  const message = 'terminating connection due to administrator command';
+  const driverAdapterError = new DriverAdapterError({
+    originalCode: '57P01',
+    originalMessage: message,
+    kind: 'postgres',
+    code: '57P01',
+    severity: 'FATAL',
+    message,
+  });
+
+  return statement === 'raw'
+    ? new Prisma.PrismaClientKnownRequestError(`Raw query failed. Code: \`57P01\`. Message: \`${message}\``, {
+        code: PrismaError.RawQueryFailed,
+        clientVersion: 'test',
+        meta: { driverAdapterError },
+      })
+    : new Prisma.PrismaClientKnownRequestError(`Database error. Code: \`57P01\`. Message: \`${message}\``, {
+        code: 'P2039',
+        clientVersion: 'test',
+        meta: { modelName: 'User', driverAdapterError },
+      });
+}
+
+/**
+ * The client could not be initialised: a fault of the build or the setup, such
+ * as an adapter for another provider. With a driver adapter it never means the
+ * database is down, which arrives as a request error instead (#1172).
+ */
+export function clientInitializationFailed(): Prisma.PrismaClientInitializationError {
+  return new Prisma.PrismaClientInitializationError(
+    'The Driver Adapter `@prisma/adapter-pg`, based on `postgres`, is not compatible with the provider `mysql` specified in the Prisma schema.',
+    'test',
+  );
+}
+
+/**
+ * node-postgres's own codeless errors, which the adapter rethrows raw and
+ * Prisma passes on as a plain `Error` with its `clientVersion` attached (#1172).
+ */
+function codelessDriverError(message: string): Error {
+  return Object.assign(new Error(message), { clientVersion: 'test' });
+}
+
+/** The connection dropped while a statement was running (#1172). */
+export function connectionTerminated(): Error {
+  return codelessDriverError('Connection terminated unexpectedly');
+}
+
+/**
+ * The next statement on a connection that has already failed, such as a
+ * transaction whose backend was ended while it waited (#1172).
+ */
+export function connectionNotQueryable(): Error {
+  return codelessDriverError('Client has encountered a connection error and is not queryable');
 }

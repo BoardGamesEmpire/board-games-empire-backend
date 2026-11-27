@@ -1,4 +1,5 @@
 import type { AuditContextService } from '@bge/actor-context';
+import { databaseUnreachable } from '@bge/database/testing';
 import { t } from '@bge/i18n-core';
 import type { ArgumentsHost } from '@nestjs/common';
 import { HttpException, Logger, NotFoundException } from '@nestjs/common';
@@ -65,6 +66,38 @@ describe('UnknownErrorFilter (#527)', () => {
 
     expect((answer as HttpException).getStatus()).toBe(500);
     expect((answer as HttpException).getResponse()).toMatchObject({ message: 't:errors.request.failed' });
+  });
+
+  it('answers a database outage 503 DATABASE_UNAVAILABLE in the request locale, and logs it (#1172)', () => {
+    const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const outage = databaseUnreachable();
+
+    const answer = rendered(outage) as HttpException;
+
+    expect(answer.getStatus()).toBe(503);
+    expect(answer.getResponse()).toEqual({
+      statusCode: 503,
+      error: 'Service Unavailable',
+      code: 'DATABASE_UNAVAILABLE',
+      message: 't:errors.database.unavailable',
+    });
+    expect(answer.cause).toBe(outage);
+    expect(logged).toHaveBeenCalledTimes(1);
+    // The code names the outage when the message can't (#1172).
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining('code=P1001 kind=DatabaseNotReachable'), outage.stack);
+  });
+
+  it('still answers a programming error 500 with no code (#1172)', () => {
+    jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+
+    const answer = rendered(new TypeError('boom')) as HttpException;
+
+    expect(answer.getStatus()).toBe(500);
+    expect(answer.getResponse()).toEqual({
+      statusCode: 500,
+      error: 'Internal Server Error',
+      message: 't:errors.request.failed',
+    });
   });
 
   it('keeps the error as the cause, for the logs', () => {
