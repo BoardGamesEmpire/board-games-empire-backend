@@ -441,13 +441,4 @@ export type UnreadNotificationDto = {
  * read and unread notifications alike, so a client can show when each was read
  * (#1597).
  */
-export type NotificationDto = {
-  [T in NotificationType]: {
-    createdAt: Date;
-    id: string;
-    payload: NotificationPayloadMap[T];
-    read: boolean;
-    readAt: Date | null;
-    type: T;
-  };
-}[NotificationType];
+export type NotificationDto = UnreadNotificationDto & { readAt: Date | null };

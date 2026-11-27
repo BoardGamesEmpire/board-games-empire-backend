@@ -1,9 +1,9 @@
-import { applyDecorators } from '@nestjs/common';
-import { ApiExtraModels, ApiProperty, ApiResponse, getSchemaPath } from '@nestjs/swagger';
+import { ApiProperty } from '@nestjs/swagger';
 import type { KeysetPosition } from '../pagination/keyset-cursor.js';
 import { encodeKeysetCursor } from '../pagination/keyset-cursor.js';
 import { assertListScopeComposed } from '../scope/assert-list-scope-composed.js';
 import type { ListScope } from '../scope/list-scope.js';
+import { ApiListEnvelope } from './list-envelope.js';
 
 /**
  * Metadata attached to every cursor-paged list response. There is no `total`
@@ -65,7 +65,7 @@ export function cursorPage<T extends KeysetPosition>(rows: readonly T[], pageSiz
  * by keyset, and like it, `scope` is #365's erosion guard: the `ResourceType`
  * whose intrinsic scope the read composed, or `Unscoped('<why>')`. It is checked
  * first, so a list whose read skipped the composer throws instead of answering
- * with the caller's ceiling (#1597).
+ * with the actor's ceiling (#1597).
  */
 export function cursorPaginated<K extends string, T>(
   resourceKey: K,
@@ -82,39 +82,16 @@ export function cursorPaginated<K extends string, T>(
 }
 
 /**
- * OpenAPI schema for a cursor-paged list whose row type is not modelled here:
- * `pagination` is a real `$ref` and the rows are an array of unspecified
- * objects. Apply it through {@link ApiCursorPaginatedEnvelope}, which also
- * registers the model the `$ref` points at.
- */
-export function cursorPaginatedEnvelopeSchema(resourceKey: string) {
-  return {
-    type: 'object' as const,
-    required: [resourceKey, 'pagination'],
-    properties: {
-      [resourceKey]: {
-        type: 'array' as const,
-        items: { type: 'object' as const, additionalProperties: true },
-      },
-      pagination: { $ref: getSchemaPath(CursorPaginationMetaDto) },
-    },
-  };
-}
-
-/**
- * The 200 response for a cursor-paged list: {@link cursorPaginatedEnvelopeSchema}
- * plus the `＠ApiExtraModels` registration its `$ref` depends on. One decorator
- * for the same reason as `ApiPaginatedEnvelope`: forgetting the registration
- * builds, runs and ships a dangling `$ref` that only breaks client generation.
+ * The 200 response for a cursor-paged list whose rows are not modelled here:
+ * the envelope schema with `pagination` a `$ref` to
+ * {@link CursorPaginationMetaDto}, plus that model's registration, as one
+ * decorator (see `ApiListEnvelope` for why) (#1597).
  *
  *   ＠ApiCursorPaginatedEnvelope('notifications', { description: 'Notification history' })
  */
 export function ApiCursorPaginatedEnvelope(
   resourceKey: string,
-  { status = 200, description = `Paginated ${resourceKey}` }: { description?: string; status?: number } = {},
+  options: { description?: string; status?: number } = {},
 ): MethodDecorator & ClassDecorator {
-  return applyDecorators(
-    ApiExtraModels(CursorPaginationMetaDto),
-    ApiResponse({ status, description, schema: cursorPaginatedEnvelopeSchema(resourceKey) }),
-  );
+  return ApiListEnvelope(resourceKey, CursorPaginationMetaDto, options);
 }

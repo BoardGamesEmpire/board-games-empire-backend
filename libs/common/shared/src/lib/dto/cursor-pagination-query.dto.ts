@@ -11,7 +11,7 @@ import { DEFAULT_MAX_PAGE_SIZE, DEFAULT_PAGE_SIZE } from './pagination-query.dto
  * Accepts only a cursor {@link decodeKeysetCursor} can read. A non-string
  * fails here as well as on `@IsString`: it is not a cursor either (#1597).
  */
-@ValidatorConstraint({ name: 'keysetCursor', async: false })
+@ValidatorConstraint({ name: 'isCursor', async: false })
 class KeysetCursorConstraint implements ValidatorConstraintInterface {
   validate(value: unknown): boolean {
     return typeof value === 'string' && decodeKeysetCursor(value) !== null;
@@ -56,11 +56,11 @@ export abstract class CursorPaginationQueryDto {
    * the read never sees one. A null, which a JSON frame can send past
    * `@IsOptional` (#564), is the first page as an absent cursor is.
    *
-   * `@Exclude()` keeps class-transformer from writing a crafted `?position=`
+   * `@Exclude()` keeps class-transformer from writing a crafted `?after=`
    * onto this setter-less getter, as it does for `pageSize`.
    */
   @Exclude()
-  get position(): KeysetPosition | undefined {
+  get after(): KeysetPosition | undefined {
     if (typeof this.cursor !== 'string') {
       return undefined;
     }
@@ -76,7 +76,7 @@ export abstract class CursorPaginationQueryDto {
  * declarer per chain, the whole `limit` chain is re-declared beside `@Max` so
  * `@IsPositive` survives, `declare` keeps the es2024 class field from
  * clobbering the transformed value, and `defaultPageSize` resolves `pageSize`
- * when the caller omits `limit`.
+ * when the client omits `limit`.
  *
  *   export class ListWidgetsQueryDto extends CappedCursorPaginationQueryDto() {}
  */

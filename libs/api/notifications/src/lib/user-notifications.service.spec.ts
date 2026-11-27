@@ -1,6 +1,6 @@
 import { Action, NotificationType, ResourceType } from '@bge/database';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
-import { encodeKeysetCursor, olderThan } from '@bge/shared';
+import { encodeKeysetCursor, keysetOlderThan } from '@bge/shared';
 import type { MockAbilityService, MockDatabaseService } from '@bge/testing';
 import { createMockAbilityService, createTestingModuleWithDb } from '@bge/testing';
 import { UserNotificationsService } from './user-notifications.service';
@@ -58,7 +58,7 @@ describe('UserNotificationsService', () => {
     });
   });
 
-  describe('list', () => {
+  describe('list (#1597)', () => {
     /** Rows as the read selects them, newest first, one second apart. */
     const rows = (count: number) =>
       Array.from({ length: count }, (_, index) => ({
@@ -76,8 +76,8 @@ describe('UserNotificationsService', () => {
     });
 
     // One extra row tells the read whether a next page exists without a
-    // count; the order matches olderThan's tie-break on id (#1597).
-    it("composes the user's own notifications with the caller's read ceiling, newest first, one row past the page", async () => {
+    // count; the order matches keysetOlderThan's tie-break on id (#1597).
+    it("composes the user's own notifications with the actor's read ceiling, newest first, one row past the page", async () => {
       await service.list('user-1', { pageSize: 25 });
 
       expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.Notification, Action.read);
@@ -97,11 +97,11 @@ describe('UserNotificationsService', () => {
       await service.list('user-1', { after: position, pageSize: 25 });
 
       expect(db.notification.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { userId: 'user-1', AND: [olderThan(position), COND] } }),
+        expect.objectContaining({ where: { userId: 'user-1', AND: [keysetOlderThan(position), COND] } }),
       );
     });
 
-    it('maps readAt through and cuts the extra row into a next cursor', async () => {
+    it('maps readAt through and cuts the extra row into a next cursor (#1597)', async () => {
       db.notification.findMany.mockResolvedValue(rows(26));
 
       const page = await service.list('user-1', { pageSize: 25 });
@@ -122,7 +122,7 @@ describe('UserNotificationsService', () => {
       );
     });
 
-    it('ends on a short page with a null cursor', async () => {
+    it('ends on a short page with a null cursor (#1597)', async () => {
       db.notification.findMany.mockResolvedValue(rows(3));
 
       const page = await service.list('user-1', { pageSize: 25 });
@@ -133,9 +133,9 @@ describe('UserNotificationsService', () => {
   });
 
   // The count is uncapped, unlike the /unread list, and composed with the
-  // caller's read ceiling as the list is (#1597).
-  describe('countUnread', () => {
-    it("counts the user's own unread notifications within the caller's read ceiling", async () => {
+  // actor's read ceiling as the list is (#1597).
+  describe('countUnread (#1597)', () => {
+    it("counts the user's own unread notifications within the actor's read ceiling", async () => {
       db.notification.count.mockResolvedValue(142);
 
       await expect(service.countUnread('user-1')).resolves.toBe(142);

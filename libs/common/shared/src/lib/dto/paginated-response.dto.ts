@@ -1,8 +1,8 @@
 import type { Type as NestType } from '@nestjs/common';
-import { applyDecorators } from '@nestjs/common';
-import { ApiExtraModels, ApiProperty, ApiResponse, getSchemaPath } from '@nestjs/swagger';
+import { ApiProperty } from '@nestjs/swagger';
 import { assertListScopeComposed } from '../scope/assert-list-scope-composed.js';
 import type { ListScope } from '../scope/list-scope.js';
+import { ApiListEnvelope, listEnvelopeSchema } from './list-envelope.js';
 
 /** Metadata attached to every paginated list response. */
 export class PaginationMetaDto {
@@ -91,8 +91,8 @@ export function paginated<K extends string, T>(
 
 /**
  * OpenAPI schema for a paginated list whose ROW type is not modelled yet: the
- * `pagination` block is a real `$ref`, and the rows are declared as an array of
- * objects with an unspecified shape.
+ * `pagination` block is a real `$ref` to {@link PaginationMetaDto}, and the
+ * rows are declared as an array of objects with an unspecified shape.
  *
  * Preferred over {@link PaginatedResponseDto} only where no row DTO exists —
  * households and household members carry none, and inventing a partial one
@@ -101,38 +101,18 @@ export function paginated<K extends string, T>(
  * an envelope and that `pagination` is required, which a bare `description`
  * never told it. Modelling those rows is #376.
  *
- * Requires `＠ApiExtraModels(PaginationMetaDto)` alongside it, since the `$ref`
- * is the only mention of that model in the document. Prefer
- * {@link ApiPaginatedEnvelope}, which applies both and cannot be half-applied;
- * reach for this helper directly only when composing a response the decorator
- * does not cover.
+ * Requires `＠ApiExtraModels(PaginationMetaDto)` alongside it. Prefer
+ * {@link ApiPaginatedEnvelope}, which applies both; reach for this helper
+ * directly only when composing a response the decorator does not cover.
  */
 export function paginatedEnvelopeSchema(resourceKey: string) {
-  return {
-    type: 'object' as const,
-    required: [resourceKey, 'pagination'],
-    properties: {
-      [resourceKey]: {
-        type: 'array' as const,
-        items: { type: 'object' as const, additionalProperties: true },
-      },
-      pagination: { $ref: getSchemaPath(PaginationMetaDto) },
-    },
-  };
+  return listEnvelopeSchema(resourceKey, PaginationMetaDto);
 }
 
 /**
- * The 200 response for a paginated list whose rows are not modelled yet:
- * {@link paginatedEnvelopeSchema} plus the `＠ApiExtraModels` registration that
- * schema depends on.
- *
- * The two exist as one decorator because they are one decision and the failure
- * mode of splitting them is silent. `paginatedEnvelopeSchema` emits a `$ref` to
- * `PaginationMetaDto`, and a `$ref` resolves only if something else in the
- * document registers that model; nothing checks the pairing. Forget the
- * registration and the build passes, the server runs, and the OpenAPI document
- * ships a dangling pointer that breaks client generation — the one reader who
- * would have noticed. Applying both here makes the omission unrepresentable.
+ * The 200 response for a paginated list whose rows are not modelled yet: the
+ * envelope schema plus the registration of {@link PaginationMetaDto}, as one
+ * decorator (see {@link ApiListEnvelope} for why).
  *
  *   ＠ApiPaginatedEnvelope('households', { description: 'Paginated households' })
  *
@@ -141,12 +121,9 @@ export function paginatedEnvelopeSchema(resourceKey: string) {
  */
 export function ApiPaginatedEnvelope(
   resourceKey: string,
-  { status = 200, description = `Paginated ${resourceKey}` }: { description?: string; status?: number } = {},
+  options: { description?: string; status?: number } = {},
 ): MethodDecorator & ClassDecorator {
-  return applyDecorators(
-    ApiExtraModels(PaginationMetaDto),
-    ApiResponse({ status, description, schema: paginatedEnvelopeSchema(resourceKey) }),
-  );
+  return ApiListEnvelope(resourceKey, PaginationMetaDto, options);
 }
 
 const responseDtoCache = new WeakMap<NestType<unknown>, Map<string, NestType<unknown>>>();

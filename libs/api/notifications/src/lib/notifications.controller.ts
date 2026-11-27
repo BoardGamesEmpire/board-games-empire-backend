@@ -58,19 +58,19 @@ export class NotificationsController {
     @Query() query: ListNotificationsQueryDto,
   ): Promise<CursorPaginatedResponse<'notifications', NotificationDto>> {
     const page = await this.notifications.list(resolveScopeSubjectId(this.abilityService), {
-      after: query.position,
+      after: query.after,
       pageSize: query.pageSize,
     });
 
     return cursorPaginated('notifications', page, query, ResourceType.Notification);
   }
 
-  // Beside `unread`, not under it: `unread` answers with the list and this
-  // answers with a number, so the two stay separate routes (#1597).
+  // A route of its own rather than a field on `/unread`'s response: `/unread`
+  // answers with the list and this answers with a number (#1597).
   @ApiResponse({
     status: Http.Ok,
     type: UnreadCountDto,
-    description: "The acting user's unread notifications, uncapped",
+    description: 'How many unread notifications the acting user has, uncapped',
   })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })

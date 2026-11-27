@@ -2,7 +2,7 @@ import { Action, DatabaseService, ResourceType } from '@bge/database';
 import type { NotificationDto, NotificationPayload, UnreadNotificationDto } from '@bge/notifications-service';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
 import type { CursorPage, KeysetPosition } from '@bge/shared';
-import { cursorPage, olderThan } from '@bge/shared';
+import { cursorPage, keysetOlderThan } from '@bge/shared';
 import { Injectable, Logger } from '@nestjs/common';
 import { MAX_UNREAD_NOTIFICATIONS } from './notifications.constants';
 
@@ -58,14 +58,14 @@ export class UserNotificationsService {
 
   /**
    * One page of the user's notification history, read and unread alike,
-   * newest first. The scope is the user's own notifications and the caller's
+   * newest first. The scope is the user's own notifications and the actor's
    * ceiling clips it, as on `/unread`.
    *
    * Paged by keyset, not offset: a notification written while a client pages
    * would shift an offset page and repeat a row. The cursor clause goes inside
    * the scope's `AND`, so the composer sets it beside the ceiling; it narrows
    * the set and never stands in for the ceiling. The order ends on `id` to
-   * match `olderThan`'s tie-break, which keeps a page boundary inside a
+   * match `keysetOlderThan`'s tie-break, which keeps a page boundary inside a
    * `createMany` batch, whose rows share one `createdAt`, from skipping or
    * repeating a row. One row past the page tells `cursorPage` whether another
    * page exists (#1597).
@@ -77,7 +77,7 @@ export class UserNotificationsService {
     const notifications = await this.db.notification.findMany({
       where: this.scopeComposer.compose(ResourceType.Notification, Action.read, {
         userId,
-        ...(after && { AND: [olderThan(after)] }),
+        ...(after && { AND: [keysetOlderThan(after)] }),
       }),
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: pageSize + 1,
@@ -103,7 +103,7 @@ export class UserNotificationsService {
   }
 
   /**
-   * How many unread notifications the user has, within the caller's `read`
+   * How many unread notifications the user has, within the actor's `read`
    * ceiling, as the lists compose it. Uncapped, unlike `/unread`'s list, so a
    * badge can show the real number (#1597).
    */

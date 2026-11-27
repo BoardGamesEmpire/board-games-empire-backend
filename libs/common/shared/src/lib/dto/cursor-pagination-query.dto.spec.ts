@@ -75,14 +75,14 @@ describe('CappedCursorPaginationQueryDto (#1597)', () => {
       const dto = toDto(ListQuery, { cursor: encodeKeysetCursor(position) });
 
       expect(await validate(dto)).toHaveLength(0);
-      expect(dto.position).toEqual(position);
+      expect(dto.after).toEqual(position);
     });
 
     it('leaves the cursor optional: absent is the first page, with no position', async () => {
       const dto = toDto(ListQuery, {});
 
       expect(await validate(dto)).toHaveLength(0);
-      expect(dto.position).toBeUndefined();
+      expect(dto.after).toBeUndefined();
     });
 
     // #564: a JSON frame can send null past `@IsOptional`; it is the first
@@ -91,10 +91,10 @@ describe('CappedCursorPaginationQueryDto (#1597)', () => {
       const dto = toDto(ListQuery, { cursor: null });
 
       expect(await validate(dto)).toHaveLength(0);
-      expect(dto.position).toBeUndefined();
+      expect(dto.after).toBeUndefined();
     });
 
-    // A garbage cursor is the caller's mistake, so it must be a 400 naming
+    // A garbage cursor is the client's mistake, so it must be a 400 naming
     // `cursor`, never a 500 out of the query that would have read it.
     it.each([
       ['an empty cursor', ''],
@@ -104,8 +104,8 @@ describe('CappedCursorPaginationQueryDto (#1597)', () => {
       const errors = await errorsFor(ListQuery, 'cursor', { cursor });
 
       expect(errors).toHaveLength(1);
-      expect(errors[0].constraints).toHaveProperty('keysetCursor');
-      expect(errors[0].constraints?.keysetCursor.split('|')[0]).toBe('validation.isCursor');
+      expect(errors[0].constraints).toHaveProperty('isCursor');
+      expect(errors[0].constraints?.isCursor.split('|')[0]).toBe('validation.isCursor');
     });
 
     // `?cursor=a&cursor=b` reaches the pipe as an array. Both constraints fail
@@ -114,18 +114,18 @@ describe('CappedCursorPaginationQueryDto (#1597)', () => {
       const errors = await errorsFor(ListQuery, 'cursor', { cursor: ['a', 'b'] });
 
       expect(errors).toHaveLength(1);
-      expect(Object.keys(errors[0].constraints ?? {}).sort()).toEqual(['isString', 'keysetCursor']);
+      expect(Object.keys(errors[0].constraints ?? {}).sort()).toEqual(['isCursor', 'isString']);
     });
   });
 
-  // `pageSize` and `position` are getters with no setter: class-transformer
+  // `pageSize` and `after` are getters with no setter: class-transformer
   // would throw "Cannot set property" (a 500) if it wrote a crafted parameter
   // onto either, and neither may steer the page.
-  it('ignores a crafted pageSize or position parameter instead of failing on it', async () => {
-    const dto = toDto(ListQuery, { limit: '10', pageSize: '99', position: 'x' });
+  it('ignores a crafted pageSize or after parameter instead of failing on it', async () => {
+    const dto = toDto(ListQuery, { limit: '10', pageSize: '99', after: 'x' });
 
     expect(dto.pageSize).toBe(10);
-    expect(dto.position).toBeUndefined();
+    expect(dto.after).toBeUndefined();
     expect(await validate(dto, { whitelist: true, forbidNonWhitelisted: true })).toHaveLength(0);
   });
 

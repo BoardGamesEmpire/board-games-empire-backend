@@ -9,7 +9,7 @@ export interface KeysetPosition {
 }
 
 /**
- * The newest-first "after this position" clause {@link olderThan} builds. A
+ * The newest-first "after this position" clause {@link keysetOlderThan} builds. A
  * plain object rather than a Prisma type, so `@bge/shared` stays free of the
  * generated client, and any model with `createdAt` and `id` accepts it.
  */
@@ -32,7 +32,7 @@ const MAX_CURSOR_ID_LENGTH = 64;
  * outside it (0000, negative, or six digits with a sign) also round-trips
  * through `toISOString()`, but Postgres has no year 0 and the pg adapter
  * writes the others as timestamps Postgres refuses, so the read would fail
- * with a 500 instead of the caller's 400 (#1597).
+ * with a 500 instead of the client's 400 (#1597).
  */
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
@@ -59,7 +59,7 @@ export function encodeKeysetCursor(position: KeysetPosition): string {
 /**
  * Reads a cursor back to its position, or `null` for anything that is not
  * exactly what {@link encodeKeysetCursor} writes. It never throws: the input
- * comes straight from a query string, and a malformed cursor is the caller's
+ * comes straight from a query string, and a malformed cursor is the client's
  * 400, not the server's 500 (#1597).
  *
  * It accepts only base64url of a JSON array of exactly two strings, where:
@@ -125,7 +125,7 @@ export function decodeKeysetCursor(cursor: string): KeysetPosition | null {
  * from skipping or repeating rows. Compared by value, so a deleted cursor row
  * still marks where the next page starts (#1597).
  */
-export function olderThan(position: KeysetPosition): KeysetOlderThan {
+export function keysetOlderThan(position: KeysetPosition): KeysetOlderThan {
   return {
     OR: [{ createdAt: { lt: position.createdAt } }, { createdAt: position.createdAt, id: { lt: position.id } }],
   };

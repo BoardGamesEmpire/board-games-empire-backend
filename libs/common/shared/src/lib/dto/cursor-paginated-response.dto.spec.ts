@@ -31,7 +31,7 @@ const applyToList = (decorator: MethodDecorator, probe: { prototype: { list: () 
 /** These cases exercise the envelope, not the scope guard, which has its own cases below (#1597). */
 const ENVELOPE_ONLY = Unscoped('envelope arithmetic under test; no read behind it');
 
-describe('cursorPage — trimming the read of pageSize + 1', () => {
+describe('cursorPage — trimming the read of pageSize + 1 (#1597)', () => {
   it('keeps pageSize rows and encodes the last kept row when a row was cut', () => {
     const read = rowsOf(4);
 
@@ -67,7 +67,7 @@ describe('cursorPage — trimming the read of pageSize + 1', () => {
   });
 });
 
-describe('cursorPaginated — the cursor list envelope', () => {
+describe('cursorPaginated — the cursor list envelope (#1597)', () => {
   it('nests the rows under the resource key', () => {
     const rows = rowsOf(2);
 
@@ -146,7 +146,7 @@ describe('cursorPaginated — the cursor list envelope', () => {
  * something registers that model. The decorator applies both, as
  * `ApiPaginatedEnvelope` does (#1597).
  */
-describe('ApiCursorPaginatedEnvelope — the schema and its model registration, together', () => {
+describe('ApiCursorPaginatedEnvelope — the schema and its model registration, together (#1597)', () => {
   class Probe {
     // eslint-disable-next-line @typescript-eslint/no-empty-function -- a probe route; only its decorators matter (#1321)
     list() {}

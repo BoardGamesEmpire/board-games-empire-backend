@@ -197,27 +197,23 @@ describe('notification authorization', () => {
    * read and cleared every one of its owner's (#649).
    */
   describe('through an API key scoped to one notification', () => {
-    it('lists only that notification as unread', async () => {
-      const owner = await actors.user();
-      const scoped = await notify(owner);
-      const other = await notify(owner);
-      const key = await mintApiKey(baseUrl, db.client, owner, {
-        slugs: ['read:notification:own'],
-        resourceType: ResourceType.Notification,
-        resourceId: scoped,
-      });
-
-      // The control: the owner reads both, so the key's page is its scope's.
-      await expect(unreadIds(owner)).resolves.toEqual([scoped, other].sort());
-      await expect(unreadIds(key)).resolves.toEqual([scoped]);
-    });
-
     const readKey = (owner: SessionActor, notificationId: string) =>
       mintApiKey(baseUrl, db.client, owner, {
         slugs: ['read:notification:own'],
         resourceType: ResourceType.Notification,
         resourceId: notificationId,
       });
+
+    it('lists only that notification as unread', async () => {
+      const owner = await actors.user();
+      const scoped = await notify(owner);
+      const other = await notify(owner);
+      const key = await readKey(owner, scoped);
+
+      // The control: the owner reads both, so the key's page is its scope's.
+      await expect(unreadIds(owner)).resolves.toEqual([scoped, other].sort());
+      await expect(unreadIds(key)).resolves.toEqual([scoped]);
+    });
 
     it('lists only that notification (#1597)', async () => {
       const owner = await actors.user();

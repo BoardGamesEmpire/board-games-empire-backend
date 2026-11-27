@@ -212,7 +212,7 @@ describe('notification history', () => {
 
   // The last two are well-formed base64url JSON that Postgres would refuse if
   // the read reached it: a NUL in text, and a year it has no such date for.
-  // The decoder refuses both, so each is the caller's 400, never a 500.
+  // The decoder refuses both, so each is the client's 400, never a 500.
   const encode = (position: readonly [string, string]) => Buffer.from(JSON.stringify(position)).toString('base64url');
 
   it.each([
@@ -242,11 +242,13 @@ describe('notification history', () => {
 
   it('counts unread notifications past the 100 that /unread returns (#1597)', async () => {
     const [reader, other] = await Promise.all([actors.user(), actors.user()]);
+    // A read row carries the readAt a mark-read writes with it (#903).
     const row = (read: boolean) => ({
       userId: reader.user.id,
       type: NotificationType.GameImported,
       payload: PAYLOAD,
       read,
+      readAt: read ? new Date() : null,
     });
     await db.client.notification.createMany({ data: [...Array.from({ length: 101 }, () => row(false)), row(true)] });
     await notify(other);

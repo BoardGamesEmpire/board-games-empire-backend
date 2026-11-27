@@ -1,4 +1,4 @@
-import { decodeKeysetCursor, encodeKeysetCursor, MAX_CURSOR_LENGTH, olderThan } from './keyset-cursor';
+import { decodeKeysetCursor, encodeKeysetCursor, keysetOlderThan, MAX_CURSOR_LENGTH } from './keyset-cursor';
 
 const base64url = (text: string): string => Buffer.from(text, 'utf8').toString('base64url');
 
@@ -62,10 +62,10 @@ describe('keyset cursor (#1597)', () => {
   // Newest first, with id breaking ties: a whole createMany batch shares one
   // createdAt, so a page boundary inside it must continue by id rather than
   // skip or repeat the rest of the batch.
-  it('olderThan matches an older row, or a same-instant row with a smaller id', () => {
+  it('keysetOlderThan matches an older row, or a same-instant row with a smaller id', () => {
     const d = new Date('2026-11-27T10:00:00.123Z');
 
-    expect(olderThan({ createdAt: d, id: 'n5' })).toEqual({
+    expect(keysetOlderThan({ createdAt: d, id: 'n5' })).toEqual({
       OR: [{ createdAt: { lt: d } }, { createdAt: d, id: { lt: 'n5' } }],
     });
   });

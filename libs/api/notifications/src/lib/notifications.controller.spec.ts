@@ -83,7 +83,7 @@ describe('NotificationsController', () => {
     });
   });
 
-  it("counts the acting user's unread notifications", async () => {
+  it("counts the acting user's unread notifications (#1597)", async () => {
     notifications.countUnread.mockResolvedValue(3);
 
     await expect(controller.countUnread()).resolves.toEqual({ count: 3 });
@@ -97,7 +97,7 @@ describe('NotificationsController', () => {
     expect(Reflect.getMetadata(CACHE_RESPONSE_KEY, NotificationsController.prototype[route])).toBeUndefined();
   });
 
-  it('keeps the unread count and the unread list on distinct paths', () => {
+  it('keeps the unread count and the unread list on distinct paths (#1597)', () => {
     expect(Reflect.getMetadata('path', NotificationsController.prototype.getUnread)).toBe('unread');
     expect(Reflect.getMetadata('path', NotificationsController.prototype.countUnread)).toBe('unread/count');
     expect(Reflect.getMetadata('path', NotificationsController.prototype.list)).toBe('/');
