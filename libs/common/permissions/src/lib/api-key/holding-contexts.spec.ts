@@ -115,6 +115,24 @@ describe('holdingContexts (#266)', () => {
     expect(holdingContexts(owner, wildcard.id, NOW)).toEqual([]);
   });
 
+  // Only event attendance grants an attendance-only type, so the owner's
+  // ability builds no rule from a direct allow on one, and a key borrows none.
+  // A denial there still builds its `cannot`.
+  it('skips a direct allow on an attendance-only type, and keeps a denial on one (#1543)', () => {
+    const denial = makePermission({ id: 'perm-denial', action: Action.read, subject: 'Household', inverted: true });
+    const owner = makeOwner({
+      permissions: [
+        makeGrant(held, { resourceType: ResourceType.EventChatMessage }),
+        makeGrant(denial, { resourceType: ResourceType.EventChatMessage }),
+      ],
+    });
+
+    expect(holdingContexts(owner, held.id, NOW)).toEqual([]);
+    expect(holdingContexts(owner, denial.id, NOW).map(({ source, subject }) => ({ source, subject }))).toEqual([
+      { source: 'directPermission', subject: ResourceType.EventChatMessage },
+    ]);
+  });
+
   // Which permissions a key holds is fixed when it is made; which households
   // they reach follows its owner's memberships as the graph loads now.
   it('builds no rule for a membership the owner no longer has', () => {

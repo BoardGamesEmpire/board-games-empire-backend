@@ -1,4 +1,5 @@
 import type { Permission } from '@bge/database';
+import { isAttendanceOnly } from '@bge/database';
 import type { RoleWithPermissions, UserPermissionWithPermission, UserWithRoles } from '../interfaces';
 
 /** What gives the owner a permission in a holding context (#266). */
@@ -127,18 +128,29 @@ export function ownerContexts(owner: UserWithRoles): Record<string, unknown>[] {
 
 /**
  * Whether the owner's own ability builds a rule from a direct permission at
- * all: the row is still in force, and its permission is not on the `'all'`
- * wildcard, which is never directly assignable (wildcard authority is
- * role-gated only). Which polarity that rule takes is
- * {@link isDirectPermissionDenial}'s question. The owner's ability and an API
- * key's both ask this one predicate, so a key never borrows a direct
- * permission its owner's ability leaves out (#266).
+ * all. Three things stop it:
+ *
+ * - the row is no longer in force;
+ * - its permission is on the `'all'` wildcard, which is never directly
+ *   assignable (wildcard authority is role-gated only);
+ * - the row is an allow on an attendance-only resource type, which only an
+ *   event role grants (#1543). A denial on one still builds its `cannot`, so
+ *   the row's own polarity is read here ({@link isDirectPermissionDenial}),
+ *   and the type is the row's `resourceType`, the subject of the rule it
+ *   would build.
+ *
+ * The owner's ability and an API key's both ask this one predicate, so a key
+ * never borrows a direct permission its owner's ability leaves out (#266).
  */
 export function buildsDirectPermissionRule(
-  direct: Pick<UserPermissionWithPermission, 'expiresAt' | 'permission'>,
+  direct: Pick<UserPermissionWithPermission, 'expiresAt' | 'inverted' | 'permission' | 'resourceType'>,
   now: number,
 ): boolean {
-  return direct.permission.subject !== 'all' && isActiveDirectPermission(direct, now);
+  if (direct.permission.subject === 'all' || !isActiveDirectPermission(direct, now)) {
+    return false;
+  }
+
+  return isDirectPermissionDenial(direct) || !isAttendanceOnly(direct.resourceType);
 }
 
 /**
@@ -156,7 +168,9 @@ function isActiveDirectPermission(direct: Pick<UserPermissionWithPermission, 'ex
  * the polarity when it is `true` or `false`, and `null` inherits the
  * permission's.
  */
-export function isDirectPermissionDenial(direct: UserPermissionWithPermission): boolean {
+export function isDirectPermissionDenial(
+  direct: Pick<UserPermissionWithPermission, 'inverted' | 'permission'>,
+): boolean {
   return direct.inverted ?? direct.permission.inverted;
 }
 

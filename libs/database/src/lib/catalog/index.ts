@@ -1,3 +1,4 @@
+export * from './attendance-only';
 export * from './catalog-edit-lock';
 export * from './catalog-entry-check';
 export * from './catalog-guards';

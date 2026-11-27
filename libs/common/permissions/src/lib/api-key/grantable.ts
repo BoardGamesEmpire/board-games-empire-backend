@@ -1,5 +1,5 @@
 import type { Permission, RiskLevel } from '@bge/database';
-import { Action, ResourceType } from '@bge/database';
+import { Action, isAttendanceOnly, ResourceType } from '@bge/database';
 import type { UserWithRoles } from '../interfaces';
 import type { HoldingContext } from './holding-contexts';
 import { holdingContexts } from './holding-contexts';
@@ -97,6 +97,9 @@ export function grantablePermissions(owner: UserWithRoles): GrantablePermission[
  * - it is an allow: a denial is refused for now;
  * - its subject isn't `all`: a key scope over it would reach every type, and no
  *   pin can narrow it (#1418);
+ * - its subject isn't an attendance-only resource type, such as an event chat's
+ *   messages: only event attendance grants those, and a key attends nothing,
+ *   whatever its owner attends (#1543);
  * - it isn't retired (the loader already leaves retired rows out; a stale
  *   cached graph must not bring one back);
  * - it renders in at least one context where its owner holds it, with every
@@ -109,7 +112,10 @@ export function grantablePermissions(owner: UserWithRoles): GrantablePermission[
  * the list's alone: the loaders drop retired rows, so the factory meets one
  * only in a stale cached graph, where the owner's own ability still holds it
  * too. So is the `all` check: the factory still builds an allow from an
- * existing `all`-subject scope row, and create and edit refuse such slugs. Risk excludes nothing.
+ * existing `all`-subject scope row, and create and edit refuse such slugs. The
+ * attendance-only check has the factory behind it: every key's ability denies
+ * those types after its allows, so a key scope over one reaches nothing. Risk
+ * excludes nothing.
  */
 export function mayKeyHold(owner: UserWithRoles, permissionId: string): boolean {
   return firstGrantableContext(owner, permissionId, Date.now()) !== undefined;
@@ -119,13 +125,16 @@ export function mayKeyHold(owner: UserWithRoles, permissionId: string): boolean 
  * The first context where the owner holds `permissionId` and a key scope over
  * it builds an allow. {@link renderHeldAllow} refuses a denial and a condition
  * the context can't resolve, exactly as the factory does (#1417). A permission
- * on `all` never qualifies, so the list and {@link mayKeyHold} share the rule
- * (#1418).
+ * on `all` never qualifies (#1418), nor does one on an attendance-only resource
+ * type (#1543), so the list and {@link mayKeyHold} share both rules.
  */
 function firstGrantableContext(owner: UserWithRoles, permissionId: string, now: number): HoldingContext | undefined {
   return holdingContexts(owner, permissionId, now).find(
     (held) =>
-      held.permission.retiredAt == null && held.permission.subject !== 'all' && !('refusal' in renderHeldAllow(held)),
+      held.permission.retiredAt == null &&
+      held.permission.subject !== 'all' &&
+      !isAttendanceOnly(held.permission.subject) &&
+      !('refusal' in renderHeldAllow(held)),
   );
 }
 

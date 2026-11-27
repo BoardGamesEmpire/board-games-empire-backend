@@ -220,6 +220,25 @@ describe('grantablePermissions and mayKeyHold (#1417)', () => {
     expect(mayKeyHold(admin, readPublicContent.id)).toBe(false);
   });
 
+  // Only event attendance grants an event chat, and a key attends nothing:
+  // every key's ability denies the type, so the list doesn't offer it.
+  it('never offers a chat permission to a key, even to an attending owner (#1543)', () => {
+    const readChat = makePermission({
+      id: 'perm-read-chat',
+      slug: 'read:event_chat_message',
+      subject: ResourceType.EventChatMessage,
+      conditions: { eventId: '{{ eventId }}' },
+      riskLevel: RiskLevel.Medium,
+    });
+    const attendee = makeOwner({
+      eventsAttended: [{ eventId: 'e1', role: makeRole('EventParticipant', [readChat, readGame]) }],
+    });
+
+    // The attendance still offers what else its role holds.
+    expect(grantablePermissions(attendee).map(({ slug }) => slug)).toEqual(['read:game']);
+    expect(mayKeyHold(attendee, readChat.id)).toBe(false);
+  });
+
   // Risk adds friction at create and excludes nothing.
   it('offers a Critical permission with its riskLevel', () => {
     const manageSafeHttpPolicy = catalogPermission('manage:safe_http_policy');
@@ -261,7 +280,11 @@ describe('grantablePermissions and mayKeyHold (#1417)', () => {
         });
       }
 
-      expect(factory.createForApiKey(owner, keyScopedTo(notHeld)).rules).toEqual([]);
+      // Every key's ability carries the denial of the attendance-only types
+      // (#1543), so what a key scope its owner doesn't hold builds is no allow.
+      const allows = factory.createForApiKey(owner, keyScopedTo(notHeld)).rules.filter(({ inverted }) => !inverted);
+
+      expect(allows).toEqual([]);
     });
   });
 });
