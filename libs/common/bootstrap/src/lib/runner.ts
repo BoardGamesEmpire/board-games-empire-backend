@@ -199,10 +199,11 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
     const deadlineAt = started + waitMs;
 
     let firstState: MigrationStateKind | undefined;
-    // What the ledger showed when the loop settled: `in-sync`, `ahead` or `diverged`.
-    let settledState: MigrationStateKind = 'in-sync';
-    let unknownMigrations: readonly string[] = [];
-    let divergedMigrations: readonly string[] = [];
+    // What the ledger showed on the read the loop below settles on: `in-sync`,
+    // `ahead` or `diverged`, and the migrations this build does not know.
+    let settledState: MigrationStateKind;
+    let unknownMigrations: readonly string[];
+    let divergedMigrations: readonly string[];
 
     // Called once, on the read the boot settles on: a read while the schema is
     // behind classifies the unknown migrations before the pending ones apply,
@@ -391,7 +392,6 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
       // recorded, not thrown: the first error is the one naming what the operator
       // must look at.
       if (held) {
-        held = false;
         try {
           await lock.release();
         } catch (releaseError) {

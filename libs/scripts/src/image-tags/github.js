@@ -27,7 +27,7 @@ async function get(github, path) {
     });
   } catch (error) {
     // fetch says only "fetch failed"; what failed is in its cause.
-    throw new Error(`GitHub didn't answer ${url}: ${error.cause?.message ?? error.message}`);
+    throw new Error(`GitHub didn't answer ${url}: ${error.cause?.message ?? error.message}`, { cause: error });
   }
 }
 

@@ -530,13 +530,7 @@ export const validatePluginManifest = (
 
   // ── updateCheck (#84 opt-in polling) ─────────────────────────────────
   if (manifest.updateCheck !== undefined) {
-    let parsedUrl: URL | null = null;
-
-    try {
-      parsedUrl = new URL(manifest.updateCheck.url);
-    } catch {
-      parsedUrl = null;
-    }
+    const parsedUrl = URL.parse(manifest.updateCheck.url);
 
     if (parsedUrl === null || parsedUrl.protocol !== 'https:') {
       push(
