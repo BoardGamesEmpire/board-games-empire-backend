@@ -137,6 +137,13 @@
       "enabled": false
     },
     {
+      "description": "Sentry's majors wait for the Sentry observability plugin (#73), which lifts this rule; nothing imports Sentry until then. From 11, @sentry/node depends on the sentry CLI, licensed FSL-1.1-Apache-2.0, as a production dependency, so a move to it needs that plugin's licensing decision as well (#1435). Disabled rather than left for approval, so nobody approves one by accident.",
+      "matchManagers": ["npm"],
+      "matchUpdateTypes": ["major"],
+      "matchPackageNames": ["@sentry/**"],
+      "enabled": false
+    },
+    {
       "description": "The cache stores hand the shared iovalkey client to @keyv/valkey, which builds on its own iovalkey: the two have to be one copy, or the client's type stops matching the adapter's and the build fails. @keyv/valkey moves to a new iovalkey only in a major, which also needs a new keyv major, so all three move as one PR. iovalkey 0.4 came alone in the weekly group and broke #1007. separateMajorMinor is off for the reason it is off for better-auth's group, and a major in the group waits for approval on the Dependency Dashboard and holds the whole group with it, as OpenTelemetry's does.",
       "matchManagers": ["npm"],
       "matchPackageNames": ["iovalkey", "keyv", "@keyv/valkey"],
