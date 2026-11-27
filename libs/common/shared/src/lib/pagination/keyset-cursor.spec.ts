@@ -61,11 +61,13 @@ describe('keyset cursor (#1597)', () => {
 
   // Newest first, with id breaking ties: a whole createMany batch shares one
   // createdAt, so a page boundary inside it must continue by id rather than
-  // skip or repeat the rest of the batch.
-  it('keysetOlderThan matches an older row, or a same-instant row with a smaller id', () => {
+  // skip or repeat the rest of the batch. The redundant lte bound is the index
+  // range Postgres can start a deep page's scan from; the OR alone gives none.
+  it('keysetOlderThan matches an older row, or a same-instant row with a smaller id, bounded at the cursor', () => {
     const d = new Date('2026-11-27T10:00:00.123Z');
 
     expect(keysetOlderThan({ createdAt: d, id: 'n5' })).toEqual({
+      createdAt: { lte: d },
       OR: [{ createdAt: { lt: d } }, { createdAt: d, id: { lt: 'n5' } }],
     });
   });

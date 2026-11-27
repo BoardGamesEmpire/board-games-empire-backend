@@ -14,6 +14,7 @@ export interface KeysetPosition {
  * generated client, and any model with `createdAt` and `id` accepts it.
  */
 export interface KeysetOlderThan {
+  createdAt: { lte: Date };
   OR: [{ createdAt: { lt: Date } }, { createdAt: Date; id: { lt: string } }];
 }
 
@@ -124,9 +125,16 @@ export function decodeKeysetCursor(cursor: string): KeysetPosition | null {
  * page boundary inside a `createMany` batch, which shares one `createdAt`,
  * from skipping or repeating rows. Compared by value, so a deleted cursor row
  * still marks where the next page starts (#1597).
+ *
+ * The `lte` bound repeats what the `OR` already says, for the planner's sake:
+ * Postgres cannot turn that `OR` into an index range, so without the bound a
+ * deep page walks the user's index from the newest row to the cursor. With it,
+ * `created_at <= cursor` is an index condition and the scan starts at the
+ * cursor, so every page costs about the same however deep it is (#1597).
  */
 export function keysetOlderThan(position: KeysetPosition): KeysetOlderThan {
   return {
+    createdAt: { lte: position.createdAt },
     OR: [{ createdAt: { lt: position.createdAt } }, { createdAt: position.createdAt, id: { lt: position.id } }],
   };
 }
