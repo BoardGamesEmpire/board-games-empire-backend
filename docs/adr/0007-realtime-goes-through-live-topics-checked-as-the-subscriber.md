@@ -1,6 +1,6 @@
 # Realtime goes through live topics, checked as the subscriber
 
-Everything the server pushes to clients about shared content goes through one WebSocket namespace, `live`, in which a client subscribes to topics such as `event:<eventId>:chat` or `game:<gameId>`. Each topic type registers one check, "may this subscriber hear this?", which runs as the subscriber when they subscribe, again whenever the answer may have changed, and periodically. Writes stay on REST: the socket delivers and never mutates.
+Everything the server pushes to clients about shared content goes through one WebSocket namespace, `live`, in which a client subscribes to live topics such as `event:<eventId>:chat` or `game:<gameId>`. Each topic type registers one check, "may this subscriber hear this?", which runs as the subscriber when they subscribe, again whenever the answer may have changed, and periodically. Writes stay on REST: the socket delivers and never mutates.
 
 Event chat is the first feature that needs the server to push shared content to several people at once, and more are queued behind it: a game's page updating when its import finishes, notifications pushed instead of polled, import progress, and admin live logs (#876). Without one mechanism, each would be a gateway with its own access checks and its own way of taking access away, and a gateway that got either wrong would leak quietly. The decision was made in a design brainstorm on 2026-11-25, revised after an external review the same day, and is tracked in #1531 (event chat in #1532).
 
