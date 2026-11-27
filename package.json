@@ -238,7 +238,7 @@
     "tsx": "4.23.15",
     "typescript": "6.0.3",
     "typescript-eslint": "8.73.0",
-    "verdaccio": "6.11.3",
+    "verdaccio": "7.1.2",
     "webpack-cli": "5.1.4"
   },
   "workspaces": [
@@ -268,6 +268,9 @@
     }
   },
   "overrides": {
+    "@nx/js": {
+      "verdaccio": "$verdaccio"
+    },
     "multer": "$multer"
   }
 }
