@@ -296,9 +296,10 @@ jobs:
       # implicitDependencies pull it in for any change to the app it tests,
       # and ci.yml itself is in sharedGlobals.
       #
-      # `--shard` reaches Jest because the jest executor passes on any option
-      # it doesn't declare. The gateway e2e apps and the coordinator's sit this
-      # step out: Jest fails a run that finds no tests, so a project can't be
+      # `--shard` reaches Jest because the e2e targets, inferred by
+      # `@nx/jest/plugin`, hand Jest any argument Nx doesn't take. The gateway
+      # e2e apps and the coordinator's sit this step out: Jest fails a run that
+      # finds no tests, so a project can't be
       # split more ways than it has spec files, and each gateway app has two
       # and the coordinator's has three. They run whole in the first shard, in
       # the next step, which leaves the shard count free to change. Both steps

@@ -8,17 +8,12 @@
     ],
     "targets": {
       "e2e": {
-        "executor": "@nx/jest:jest",
-        "outputs": [
-          "{projectRoot}/test-output/jest/coverage"
-        ],
-        "options": {
-          "jestConfig": "apps/gateway-coordinator-e2e/jest.config.cts"
-        },
+        "cache": false,
         "dependsOn": [
           "@boardgamesempire/gateway-coordinator:build"
         ]
       }
-    }
+    },
+    "// targets": "to see all targets run: nx show project @boardgamesempire/gateway-coordinator-e2e --web"
   }
 }
