@@ -429,6 +429,12 @@ export interface LockWaiter {
  * follows the chain for one that sends more.
  *
  * `exclude` and the ordering serve as they do for {@link advisoryWaiters}.
+ *
+ * A waiter's `query` can be older than its wait (#1594). `pg_stat_activity` is
+ * a snapshot taken when the query first reads it; `pg_blocking_pids` reads the
+ * lock manager live, row by row. A backend that had only sent `BEGIN` at the
+ * snapshot, and queued on the row since, is returned running `BEGIN`.
+ * {@link expectLockWaiter} polls again past such a row.
  */
 export async function lockWaiters(
   observer: BarrierConnection,
@@ -451,9 +457,18 @@ export async function lockWaiters(
  * row the application is about to lock, and this says the request queued
  * behind it rather than answering first. It sees only the first request
  * queued on a row, as {@link lockWaiters} explains.
+ *
+ * A waiter whose statement is still `BEGIN` or `START TRANSACTION` is passed
+ * over until a later poll's snapshot names the statement that waits (#1594):
+ * those take no row lock, so the row is stale, not the request's wait.
  */
 export async function expectLockWaiter(barrier: Barrier, options: WaiterSearch): Promise<LockWaiter> {
-  return pollForWaiter(() => lockWaiters(barrier.observer, options.heldBy, options.exclude), options, {
+  const find = async () =>
+    (await lockWaiters(barrier.observer, options.heldBy, options.exclude)).filter(
+      (waiter) => !TRANSACTION_START.test(waiter.query),
+    );
+
+  return pollForWaiter(find, options, {
     answered: (settled) =>
       `${options.description} answered without ever waiting on a lock held by pid ${options.heldBy}: ` +
       `${settled}. Most likely something in front of the lock answered first — a guard, an existence ` +
@@ -465,6 +480,9 @@ export async function expectLockWaiter(barrier: Barrier, options: WaiterSearch):
       `or it is still working its way toward the lock — which on a cold run can take longer than this budget.`,
   });
 }
+
+/** A statement that only opens a transaction: a stale `pg_stat_activity` row, never a lock wait (#1594). */
+const TRANSACTION_START = /^\s*(BEGIN|START\s+TRANSACTION)\b[^;]*;?\s*$/i;
 
 /** What {@link expectAdvisoryWaiter} and {@link expectLockWaiter} are asked. */
 export interface WaiterSearch {
