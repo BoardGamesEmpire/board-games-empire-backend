@@ -1254,6 +1254,49 @@ describe('CollectionCopyService (#1231)', () => {
       });
       expect(syncSupply).toHaveBeenCalledWith(db, { id: 'gc-1', deletedAt: null }, expect.any(Date));
     });
+
+    // A copy the restore makes owned again needs room, as an add does: else a
+    // removal, an add and a restore, repeated, would own copies past the cap
+    // (#1231).
+    it('restoring an owned revision of a removed copy on an entry at the limit is refused with COLLECTION_COPY_LIMIT_REACHED, and writes nothing', async () => {
+      db.collectionCopy.findUnique.mockResolvedValue(
+        copyRow({ removedAt: new Date('2025-01-01T00:00:00Z'), retractedAt: null }) as never,
+      );
+      db.collectionCopy.count.mockResolvedValue(100);
+
+      await expect(service.restore('gc-1', 'copy-1', 'rev-1')).rejects.toMatchObject({
+        status: 409,
+        code: 'COLLECTION_COPY_LIMIT_REACHED',
+      });
+      expect(db.collectionCopy.count).toHaveBeenCalledWith({
+        where: { entryId: 'gc-1', removedAt: null, retractedAt: null },
+      });
+      expect(db.collectionCopy.count.mock.invocationCallOrder[0]).toBeGreaterThan(
+        db.$queryRaw.mock.invocationCallOrder[0] ?? Infinity,
+      );
+      expect(db.collectionCopyRevision.createMany).not.toHaveBeenCalled();
+      expect(db.collectionCopy.update).not.toHaveBeenCalled();
+    });
+
+    // A copy owned already, or one that stays removed, owns nothing more, so
+    // a restore of it is never refused for the cap.
+    it.each([
+      ['an owned copy to an owned revision', null, storedValues()],
+      [
+        'a removed copy to a removed revision',
+        new Date('2025-01-01T00:00:00Z'),
+        storedValues({ removedAt: '2024-07-01T10:00:00.000Z', removeReason: GameRemovalReason.Traded }),
+      ],
+    ])('restoring %s at the limit counts no room', async (_case, removedAt, values) => {
+      db.collectionCopy.findUnique.mockResolvedValue(copyRow({ removedAt, retractedAt: null }) as never);
+      db.collectionCopyRevision.findUnique.mockResolvedValue({ values } as never);
+      db.collectionCopy.count.mockResolvedValue(100);
+
+      await service.restore('gc-1', 'copy-1', 'rev-1');
+
+      expect(db.collectionCopy.count).not.toHaveBeenCalled();
+      expect(db.collectionCopy.update).toHaveBeenCalled();
+    });
   });
 
   /**
@@ -1436,6 +1479,48 @@ describe('CollectionCopyService (#1231)', () => {
 
       expect(syncSupply).not.toHaveBeenCalled();
       expect(abilityService.assertCurrentActorCan).not.toHaveBeenCalled();
+    });
+
+    // A copy owned again needs room, as an add does: else a take-back, an
+    // add and an undo, repeated, would own copies past the cap (#1231).
+    it('undoing the take-back of an owned copy on an entry at the limit is refused with COLLECTION_COPY_LIMIT_REACHED, and writes nothing', async () => {
+      db.collectionCopy.count.mockResolvedValue(100);
+
+      await expect(service.undoTakeBack('gc-1', 'copy-1')).rejects.toMatchObject({
+        status: 409,
+        code: 'COLLECTION_COPY_LIMIT_REACHED',
+      });
+      expect(db.collectionCopy.count).toHaveBeenCalledWith({
+        where: { entryId: 'gc-1', removedAt: null, retractedAt: null },
+      });
+      expect(db.collectionCopy.count.mock.invocationCallOrder[0]).toBeGreaterThan(
+        db.$queryRaw.mock.invocationCallOrder[0] ?? Infinity,
+      );
+      expect(db.collectionCopy.update).not.toHaveBeenCalled();
+    });
+
+    it('undoing the take-back of an owned copy one short of the limit counts it again', async () => {
+      db.collectionCopy.count.mockResolvedValue(99);
+
+      await service.undoTakeBack('gc-1', 'copy-1');
+
+      expect(db.collectionCopy.update).toHaveBeenCalled();
+    });
+
+    // A removed copy counts as removed again, so it owns nothing more.
+    it('undoing the take-back of a removed copy at the limit counts no room', async () => {
+      db.collectionCopy.findUnique.mockResolvedValue(
+        copyRow({
+          removedAt: new Date('2025-01-01T00:00:00Z'),
+          retractedAt: new Date('2026-11-01T00:00:00Z'),
+        }) as never,
+      );
+      db.collectionCopy.count.mockResolvedValue(100);
+
+      await service.undoTakeBack('gc-1', 'copy-1');
+
+      expect(db.collectionCopy.count).not.toHaveBeenCalled();
+      expect(db.collectionCopy.update).toHaveBeenCalled();
     });
 
     it('answers COLLECTION_COPY_NOT_FOUND for a copy the entry does not hold, and writes nothing', async () => {

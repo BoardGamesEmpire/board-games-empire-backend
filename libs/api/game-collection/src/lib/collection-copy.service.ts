@@ -6,6 +6,7 @@ import { pickDefined } from '@bge/shared';
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import {
   addCopy,
+  assertCopyRoom,
   assertRemovableOn,
   copyColumns,
   copyRemovalData,
@@ -106,8 +107,9 @@ export class CollectionCopyService {
   /**
    * Adds a copy to the entry, described by `dto` (#1231). An entry holds at
    * most `COLLECTION_COPY_LIMIT` copies the user owns, checked under the
-   * entry's lock; removed and taken-back ones don't count. A copy added to a
-   * removed entry acquires it again.
+   * entry's lock; removed and taken-back ones don't count. A restore or an
+   * undone take-back that makes a copy owned again is held to the same cap.
+   * A copy added to a removed entry acquires it again.
    *
    * Keyed by `clientRequestId` (ADR 0002, #252): a repeat under a key the
    * entry already holds answers the copy that key made, as it stands now,
@@ -344,6 +346,11 @@ export class CollectionCopyService {
    * platform game, is restored as none rather than failing the write
    * (`restorableRelease`).
    *
+   * A restore that makes a removed copy owned again needs room for it, as an
+   * add does: on an entry whose user owns `COLLECTION_COPY_LIMIT` copies
+   * already, it is refused with `COLLECTION_COPY_LIMIT_REACHED`. Otherwise a
+   * removal, an add and a restore, repeated, would own copies past the cap.
+   *
    * Through the write runner, a restore that makes a removed copy owned again
    * acquires a removed entry again and resumes its offers (#1221). One that
    * removes the entry's last owned copy removes the entry, with the restored
@@ -388,6 +395,10 @@ export class CollectionCopyService {
           copy.removedAt === null &&
           removal.removedAt !== null &&
           (await this.assertMayRemoveIfLastOwned(tx, entryId, entry));
+
+        if (copy.removedAt !== null && removal.removedAt === null) {
+          await assertCopyRoom(tx, entryId);
+        }
 
         await recordCopyRevision(tx, copy);
         const restored = await tx.collectionCopy.update({
@@ -461,6 +472,12 @@ export class CollectionCopyService {
    * `COLLECTION_COPY_NOT_FOUND`; one that isn't taken back is answered as it
    * stands, and nothing is written to it (ADR 0002).
    *
+   * A copy owned again needs room for it, as an add does: on an entry whose
+   * user owns `COLLECTION_COPY_LIMIT` copies already, the undo is refused
+   * with `COLLECTION_COPY_LIMIT_REACHED`. Otherwise a take-back, an add and
+   * an undo, repeated, would own copies past the cap. A removed copy counts
+   * as removed again, and needs no room.
+   *
    * A copy owned again on a removed entry acquires the entry again, and the
    * write runner resumes the offers its removal paused (#1221). A removed
    * copy changes no ownership. Neither removes the entry, so neither needs
@@ -500,6 +517,10 @@ export class CollectionCopyService {
         // Neither taken back nor removed, the copy is owned.
         if (takenBack && copy.removedAt === null && (await this.isLastOwned(tx, entryId))) {
           throw lastCopyTakeBack();
+        }
+
+        if (!takenBack && copy.removedAt === null) {
+          await assertCopyRoom(tx, entryId);
         }
 
         const written = await tx.collectionCopy.update({

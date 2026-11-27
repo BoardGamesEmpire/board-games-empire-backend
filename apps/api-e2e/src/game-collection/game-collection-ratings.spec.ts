@@ -321,7 +321,9 @@ describe('collection rating history (#1231)', () => {
     it('a future date is refused with COLLECTION_DATE_IN_FUTURE, adding or editing', async () => {
       const owner = await actors.user();
       const { entryId, today } = await arrangeRatedEntry(owner);
-      const future = String(new Date().getUTCFullYear() + 1);
+      // Two years on: from 10:00 UTC on 31 December, next year is already
+      // today in UTC+14, so it would be accepted (#1231).
+      const future = String(new Date().getUTCFullYear() + 2);
 
       const refusedAdd = await addRating(owner, entryId, { occurredOn: future, rating: 5 });
       expectErrorEnvelope(refusedAdd, { status: 400, code: 'COLLECTION_DATE_IN_FUTURE' });

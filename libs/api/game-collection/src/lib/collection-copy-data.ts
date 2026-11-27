@@ -152,10 +152,11 @@ export async function copyColumns(
 }
 
 /**
- * Refuses one more copy on an entry whose user owns
+ * Refuses one more owned copy on an entry whose user owns
  * {@link COLLECTION_COPY_LIMIT} of its copies already
- * (`COLLECTION_COPY_LIMIT_REACHED`, #1231). Run it under the entry's lock, so
- * two acquisitions can't both pass it.
+ * (`COLLECTION_COPY_LIMIT_REACHED`, #1231): an added copy, or one a restore or
+ * an undone take-back makes owned again. Run it under the entry's lock, so
+ * two of them can't both pass it.
  */
 export async function assertCopyRoom(tx: Prisma.TransactionClient, entryId: string): Promise<void> {
   const held = await tx.collectionCopy.count({ where: { entryId, ...OWNED_COPY } });

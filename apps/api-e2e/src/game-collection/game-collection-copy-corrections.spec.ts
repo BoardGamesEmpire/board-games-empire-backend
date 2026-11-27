@@ -201,6 +201,30 @@ describe('copy corrections (#1231)', () => {
     expect(await readEntry(owner, entryId)).toMatchObject({ deletedAt: null, deleteReason: null, quantity: 1 });
   });
 
+  // A copy the restore makes owned again needs room, as an add does: else a
+  // removal, an add and a restore, repeated, would own copies past the cap
+  // (#1231).
+  it('restoring an owned revision of a removed copy on an entry that owns 100 copies is refused with COLLECTION_COPY_LIMIT_REACHED (#1231)', async () => {
+    const owner = await actors.user();
+    const { entryId, copyId } = await addedEntry(owner);
+    await addedCopy(owner, entryId);
+    await removeCopy(owner, entryId, copyId, { reason: GameRemovalReason.Sold }).expect(200);
+    const beforeRemoval = await newestRevisionOf(owner, entryId, copyId);
+    // One owned copy from the add, and 99 more.
+    await db.client.collectionCopy.createMany({ data: Array.from({ length: 99 }, () => ({ entryId })) });
+
+    const refused = await restore(owner, entryId, copyId, beforeRemoval.id);
+
+    expectErrorEnvelope(refused, { status: 409, code: 'COLLECTION_COPY_LIMIT_REACHED' });
+    expect(refused.body.limit).toBe(100);
+    expect(await readEntry(owner, entryId)).toMatchObject({ quantity: 100 });
+    expect(await revisionsOf(owner, entryId, copyId)).toHaveLength(1);
+    expect(
+      (await db.client.collectionCopy.findUniqueOrThrow({ where: { id: copyId }, select: { removedAt: true } }))
+        .removedAt,
+    ).not.toBeNull();
+  });
+
   it('restoring a revision records the current values as a revision first, so a restore can be undone (#1231)', async () => {
     const owner = await actors.user();
     const { entryId, copyId } = await addedEntry(owner, { note: 'First' });
@@ -513,6 +537,31 @@ describe('copy corrections (#1231)', () => {
 
       expect(copy).toMatchObject({ id: second.id, note: 'Second', retractedAt: null });
       expect(await readEntry(owner, entryId)).toMatchObject({ deletedAt: null, quantity: 2 });
+    });
+
+    // A copy owned again needs room, as an add does: else a take-back, an
+    // add and an undo, repeated, would own copies past the cap (#1231).
+    it('undoing a take-back on an entry that owns 100 copies is refused with COLLECTION_COPY_LIMIT_REACHED (#1231)', async () => {
+      const owner = await actors.user();
+      const { entryId } = await addedEntry(owner);
+      const mistaken = await addedCopy(owner, entryId);
+      await takenBack(owner, entryId, mistaken.id);
+      // One owned copy from the add, and 99 more.
+      await db.client.collectionCopy.createMany({ data: Array.from({ length: 99 }, () => ({ entryId })) });
+
+      const refused = await undoTakeBack(owner, entryId, mistaken.id);
+
+      expectErrorEnvelope(refused, { status: 409, code: 'COLLECTION_COPY_LIMIT_REACHED' });
+      expect(refused.body.limit).toBe(100);
+      expect(await readEntry(owner, entryId)).toMatchObject({ quantity: 100 });
+      expect(
+        (
+          await db.client.collectionCopy.findUniqueOrThrow({
+            where: { id: mistaken.id },
+            select: { retractedAt: true },
+          })
+        ).retractedAt,
+      ).not.toBeNull();
     });
 
     // A take-back is the user's word on the copy, so a sync never brings it
