@@ -10,7 +10,15 @@
     "removed": "Game removed from collection successfully",
     "copy_added": "Copy added successfully",
     "copy_updated": "Copy updated successfully",
-    "copy_removed": "Copy removed successfully"
+    "copy_removed": "Copy removed successfully",
+    "copy_restored": "Copy restored to what it said before",
+    "copy_taken_back": "Copy taken back",
+    "copy_take_back_undone": "Copy no longer taken back",
+    "rating_change_added": "Rating change added successfully",
+    "rating_change_updated": "Rating change updated successfully",
+    "rating_change_restored": "Rating change restored to what it said before",
+    "rating_change_taken_back": "Rating change taken back",
+    "rating_change_take_back_undone": "Rating change no longer taken back"
   },
   "list": {
     "created": "List created successfully",

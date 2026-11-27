@@ -21,10 +21,10 @@ import {
   copyCreateData,
   copyRemovalData,
   isCopyReleaseViolation,
-  REMOVAL_CHECK_SELECT,
   removalOf,
 } from './collection-copy-data';
 import { appendRatingChangeIfChanged } from './collection-rating.service';
+import { COPY_REVISION_SELECT, recordCopyRevisions } from './collection-revisions';
 import type { GameCollectionRow, GameCollectionWithRelations } from './collection-row';
 import { changedSince, COLLECTION_INCLUDE, OWNED_COPY, readOwnerCopies } from './collection-row';
 import { CollectionWriteService, writeEntryUnder } from './collection-write.service';
@@ -38,7 +38,7 @@ import {
 } from './dto';
 import { collectionEntryNotFound, platformGameNotFound, releaseNotFound } from './game-collection.errors';
 import type { PartialDate } from './values/partial-date';
-import { defaultRemovalDate, givenRemovalDate } from './values/partial-date';
+import { defaultRemovalDate, sentDate } from './values/partial-date';
 
 /**
  * The unique that keeps a user to one entry per platform game and medium, in
@@ -483,7 +483,9 @@ export class GameCollectionService {
    * `removedOn`, or, when the user gives no date, today in UTC, or the copy's
    * acquisition day when that is later (`removalOf`), with the
    * reason, and stamped as edited by the user so a sync never undoes it;
-   * copies already removed or taken back keep what they have. The
+   * each first keeps what it said before as a revision, which restoring
+   * undoes the removal (#1231). Copies already removed or taken back keep
+   * what they have. The
    * write runner then removes the entry with its last owned copy, with that
    * reason. The entry stays, so play history and the rows that name it
    * (locations, offers) survive, and adding the game again brings it back.
@@ -507,7 +509,7 @@ export class GameCollectionService {
   async remove(id: string, { reason, removedOn }: RemoveGameCollectionQueryDto): Promise<GameCollectionDto> {
     const now = new Date();
     const actingUserId = resolveActingUserIdOrNull(this.abilityService);
-    const given = givenRemovalDate(removedOn, now);
+    const given = sentDate(removedOn, now, 'removedOn');
 
     return this.writtenRow(
       () =>
@@ -526,7 +528,7 @@ export class GameCollectionService {
 
             const owned = await tx.collectionCopy.findMany({
               where: { entryId: id, ...OWNED_COPY },
-              select: { id: true, ...REMOVAL_CHECK_SELECT },
+              select: COPY_REVISION_SELECT,
             });
 
             // Each copy is dated by itself, so a copy acquired tomorrow in
@@ -541,6 +543,10 @@ export class GameCollectionService {
               group.copyIds.push(copy.id);
               removals.set(key, group);
             }
+
+            // A removal edits each copy it removes, so each keeps what it
+            // said before as a revision, read under the entry's lock (#1231).
+            await recordCopyRevisions(tx, owned);
 
             // Every copy on one date, which is every removal that names a
             // date and nearly every other, is one statement over the entry's

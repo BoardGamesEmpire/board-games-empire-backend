@@ -13,7 +13,7 @@ import type { Actors, AuthenticatedActor } from '@bge/testing-e2e';
 import { createActors } from '@bge/testing-e2e';
 import request from 'supertest';
 import { arrangeCollectionEntry } from '../game-collection/game-collection-fixtures';
-import { copyEnvelope, readCollectionEnvelope } from '../game-collection/game-collection-wire';
+import { copyEnvelope, listRevisionsEnvelope, readCollectionEnvelope } from '../game-collection/game-collection-wire';
 import { requireBaseUrl } from '../support/e2e-env';
 import type { Barrier } from '../support/lock-barrier';
 import { expectLockWaiter, withBarrier } from '../support/lock-barrier';
@@ -136,7 +136,7 @@ describe('removing an offered game from the collection (#1221)', () => {
   const removed = async (owner: AuthenticatedActor, offer: Pick<Offer, 'collectionId'>) =>
     readCollectionEnvelope(
       await removeFromCollection(owner, offer.collectionId).expect(200),
-      'DELETE /api/game-collections/:id as the owner',
+      "DELETE /api/game-collections/:id as the entry's owner",
     ).collection;
 
   /** Adds the offer's game back to `owner`'s collection, as the same medium the fixture arranges. */
@@ -147,7 +147,7 @@ describe('removing an offered game from the collection (#1221)', () => {
         .set(owner.headers)
         .send({ platformGameId: offer.platformGameId, medium: GameMedium.Physical })
         .expect(201),
-      'POST /api/game-collections as the owner',
+      "POST /api/game-collections as the entry's owner",
     ).collection;
 
   /** The 404 a supply check answers for an offer that supplies nothing, its message telling it from the event's own 404. */
@@ -294,7 +294,7 @@ describe('removing an offered game from the collection (#1221)', () => {
         .query({ reason: GameRemovalReason.Sold })
         .set(owner.headers)
         .expect(200),
-      'DELETE /api/game-collections/:id/copies/:copyId as the owner',
+      "DELETE /api/game-collections/:id/copies/:copyId as the entry's owner",
     );
     expect(removedCopy).toMatchObject({ id: copyId, removedAt: expect.any(String) });
 
@@ -311,6 +311,80 @@ describe('removing an offered game from the collection (#1221)', () => {
       .send({})
       .expect(201);
     expect((await readNomination(host, eventId, nomination.id)).status).toBe(NominationStatus.Open);
+  });
+
+  // A copy removal keeps what the copy said before as a revision. Restoring
+  // it makes the copy owned again, so the entry comes back through the same
+  // write runner, and its offers resume as they do on an add-back (#1231,
+  // #1221).
+  it('removing a copy keeps what it said before, so restoring that revision makes it owned again and brings the entry back, resuming its offers (#1221)', async () => {
+    const { host, owner, eventId, ownerAttendeeId, offered, nomination } = await arrangeEvent();
+    const copiesPath = `${COLLECTIONS_PATH}/${offered.collectionId}/copies`;
+    const { id: copyId } = await db.client.collectionCopy.findFirstOrThrow({
+      where: { entryId: offered.collectionId },
+      select: { id: true },
+    });
+
+    await request(baseUrl)
+      .delete(`${copiesPath}/${copyId}`)
+      .query({ reason: GameRemovalReason.Sold })
+      .set(owner.headers)
+      .expect(200);
+    expect((await readNomination(host, eventId, nomination.id)).status).toBe(NominationStatus.Paused);
+
+    const [beforeRemoval] = listRevisionsEnvelope(
+      await request(baseUrl).get(`${copiesPath}/${copyId}/revisions`).set(owner.headers).expect(200),
+      "GET /api/game-collections/:id/copies/:copyId/revisions as the entry's owner",
+    );
+    expect(beforeRemoval?.values.removedAt).toBeNull();
+
+    const restoredCopy = copyEnvelope(
+      await request(baseUrl)
+        .post(`${copiesPath}/${copyId}/revisions/${beforeRemoval?.id}/restore`)
+        .set(owner.headers)
+        .expect(200),
+      "POST /api/game-collections/:id/copies/:copyId/revisions/:revisionId/restore as the entry's owner",
+    );
+    expect(restoredCopy).toMatchObject({ id: copyId, removedAt: null });
+
+    const reopened = await readNomination(host, eventId, nomination.id);
+    expect(reopened.status).toBe(NominationStatus.Open);
+    expect(reopened.pausedFrom).toBeNull();
+    expect((await offerReads(host, eventId, ownerAttendeeId)).event.ids).toContain(offered.suppliedById);
+  });
+
+  // A copy taken back by mistake, while the entry's other copy was then
+  // removed: undoing the take-back makes it owned again, so the entry comes
+  // back through the same write runner and its offers resume (#1231, #1221).
+  it('undoing a take-back of an owned copy on a removed entry brings the entry back and resumes its offers (#1231)', async () => {
+    const { host, owner, eventId, ownerAttendeeId, offered, nomination } = await arrangeEvent();
+    const copiesPath = `${COLLECTIONS_PATH}/${offered.collectionId}/copies`;
+    const { id: firstId } = await db.client.collectionCopy.findFirstOrThrow({
+      where: { entryId: offered.collectionId },
+      select: { id: true },
+    });
+    const second = copyEnvelope(
+      await request(baseUrl).post(copiesPath).set(owner.headers).send({}).expect(201),
+      "POST /api/game-collections/:id/copies as the entry's owner",
+    );
+    await request(baseUrl).post(`${copiesPath}/${second.id}/retraction`).set(owner.headers).expect(200);
+    await request(baseUrl)
+      .delete(`${copiesPath}/${firstId}`)
+      .query({ reason: GameRemovalReason.Sold })
+      .set(owner.headers)
+      .expect(200);
+    expect((await readNomination(host, eventId, nomination.id)).status).toBe(NominationStatus.Paused);
+
+    const undone = copyEnvelope(
+      await request(baseUrl).delete(`${copiesPath}/${second.id}/retraction`).set(owner.headers).expect(200),
+      "DELETE /api/game-collections/:id/copies/:copyId/retraction as the entry's owner",
+    );
+    expect(undone).toMatchObject({ id: second.id, removedAt: null, retractedAt: null });
+
+    const reopened = await readNomination(host, eventId, nomination.id);
+    expect(reopened.status).toBe(NominationStatus.Open);
+    expect(reopened.pausedFrom).toBeNull();
+    expect((await offerReads(host, eventId, ownerAttendeeId)).event.ids).toContain(offered.suppliedById);
   });
 
   it('takes the game off the lineup still ahead and keeps it off after the add-back (#1221)', async () => {
@@ -384,7 +458,7 @@ describe('removing an offered game from the collection (#1221)', () => {
           items: [{ collectionId: offered.collectionId }, { collectionId: neverOffered }, { collectionId: live }],
         })
         .expect(200),
-      'POST /api/events/:eventId/attendees/:attendeeId/games/batch as the owner',
+      "POST /api/events/:eventId/attendees/:attendeeId/games/batch as the entry's owner",
     );
 
     const outcomes = (rows: readonly OfferResultWire[]) =>
@@ -457,7 +531,7 @@ describe('removing an offered game from the collection (#1221)', () => {
         .set(owner.headers)
         .send({ collectionId: offered.collectionId })
         .expect(201),
-      'POST /api/events/:eventId/attendees/:attendeeId/games as the owner',
+      "POST /api/events/:eventId/attendees/:attendeeId/games as the entry's owner",
     );
     const atHousehold = nominationEnvelope(
       await nominate(owner, householdEventId, { ...offered, suppliedById: householdOfferId }).expect(201),

@@ -1,0 +1,703 @@
+import { GameCondition, GameMedium, GameRemovalReason, Reach } from '@bge/database';
+import type { Actors, SessionActor } from '@bge/testing-e2e';
+import { createActors } from '@bge/testing-e2e';
+import request from 'supertest';
+import { arrangePlatformGame } from '../list/list-fixtures';
+import { requireBaseUrl } from '../support/e2e-env';
+import { expectErrorEnvelope } from '../support/error-envelope';
+import type { TestDatabase } from '../support/test-db';
+import { createTestDatabase } from '../support/test-db';
+import { arrangeCollectionEntry } from './game-collection-fixtures';
+import {
+  copyEnvelope,
+  listCopiesEnvelope,
+  listRevisionsEnvelope,
+  ownerRowCopies,
+  readCollectionEnvelope,
+} from './game-collection-wire';
+
+/**
+ * Correcting a copy keeps what it said before, over the real routes (#1231).
+ *
+ * Each user write of a copy (an edit, a removal, a restore, and the entry's
+ * removal for each copy it removes) first keeps the copy's values as a
+ * revision. The entry's owner lists a copy's revisions and restores one, which
+ * writes its values back as a correction of its own. Like the copy's
+ * details, the history is the entry owner's alone, whatever the entry's
+ * reach. Every response is parsed through a strict shape, so a field a
+ * revision must never carry (when the user last edited the copy, its
+ * upstream account, the add's client request id) fails the test.
+ */
+describe('copy corrections (#1231)', () => {
+  const baseUrl = requireBaseUrl(process.env);
+  const COLLECTIONS_PATH = '/api/game-collections';
+
+  let db: TestDatabase;
+  let actors: Actors;
+
+  beforeAll(() => {
+    db = createTestDatabase();
+    actors = createActors({ baseUrl, prisma: db.client });
+  });
+
+  afterAll(async () => {
+    await db.close();
+  });
+
+  const copiesPath = (entryId: string) => `${COLLECTIONS_PATH}/${entryId}/copies`;
+  const revisionsPath = (entryId: string, copyId: string) => `${copiesPath(entryId)}/${copyId}/revisions`;
+
+  const editCopy = (caller: SessionActor, entryId: string, copyId: string, body: Record<string, unknown>) =>
+    request(baseUrl)
+      .patch(`${copiesPath(entryId)}/${copyId}`)
+      .set(caller.headers)
+      .send(body);
+
+  const removeCopy = (caller: SessionActor, entryId: string, copyId: string, query: Record<string, string> = {}) =>
+    request(baseUrl)
+      .delete(`${copiesPath(entryId)}/${copyId}`)
+      .query(query)
+      .set(caller.headers);
+
+  const listRevisionsOf = (caller: SessionActor, entryId: string, copyId: string) =>
+    request(baseUrl).get(revisionsPath(entryId, copyId)).set(caller.headers);
+
+  const restore = (caller: SessionActor, entryId: string, copyId: string, revisionId: string) =>
+    request(baseUrl)
+      .post(`${revisionsPath(entryId, copyId)}/${revisionId}/restore`)
+      .set(caller.headers);
+
+  const retractionPath = (entryId: string, copyId: string) => `${copiesPath(entryId)}/${copyId}/retraction`;
+
+  const takeBack = (caller: SessionActor, entryId: string, copyId: string) =>
+    request(baseUrl).post(retractionPath(entryId, copyId)).set(caller.headers);
+
+  const undoTakeBack = (caller: SessionActor, entryId: string, copyId: string) =>
+    request(baseUrl).delete(retractionPath(entryId, copyId)).set(caller.headers);
+
+  /** Takes the copy back as the entry's owner, failing the test unless it answers 200 with the copy. */
+  const takenBack = async (owner: SessionActor, entryId: string, copyId: string) =>
+    copyEnvelope(
+      await takeBack(owner, entryId, copyId).expect(200),
+      "POST /api/game-collections/:id/copies/:copyId/retraction as the entry's owner",
+    );
+
+  /** Undoes the copy's take-back as the entry's owner, failing the test unless it answers 200 with the copy. */
+  const takeBackUndone = async (owner: SessionActor, entryId: string, copyId: string) =>
+    copyEnvelope(
+      await undoTakeBack(owner, entryId, copyId).expect(200),
+      "DELETE /api/game-collections/:id/copies/:copyId/retraction as the entry's owner",
+    );
+
+  /** Every copy of the entry, as the entry's owner lists them. */
+  const copiesOf = async (owner: SessionActor, entryId: string) =>
+    listCopiesEnvelope(
+      await request(baseUrl).get(copiesPath(entryId)).set(owner.headers).expect(200),
+      "GET /api/game-collections/:id/copies as the entry's owner",
+    );
+
+  /** Adds a copy to the entry as the entry's owner, and answers it. */
+  const addedCopy = async (owner: SessionActor, entryId: string, body: Record<string, unknown> = {}) =>
+    copyEnvelope(
+      await request(baseUrl).post(copiesPath(entryId)).set(owner.headers).send(body).expect(201),
+      "POST /api/game-collections/:id/copies as the entry's owner",
+    );
+
+  /** The copy's revisions as the entry's owner reads them, newest first. */
+  const revisionsOf = async (owner: SessionActor, entryId: string, copyId: string) =>
+    listRevisionsEnvelope(
+      await listRevisionsOf(owner, entryId, copyId).expect(200),
+      "GET /api/game-collections/:id/copies/:copyId/revisions as the entry's owner",
+    );
+
+  /** The copy's newest revision, failing the test when it has none. */
+  const newestRevisionOf = async (owner: SessionActor, entryId: string, copyId: string) => {
+    const [newest] = await revisionsOf(owner, entryId, copyId);
+    if (newest === undefined) {
+      throw new Error(`copy ${copyId} kept no revision`);
+    }
+
+    return newest;
+  };
+
+  /** Restores the revision as the entry's owner, failing the test unless it answers 200 with the copy. */
+  const restored = async (owner: SessionActor, entryId: string, copyId: string, revisionId: string) =>
+    copyEnvelope(
+      await restore(owner, entryId, copyId, revisionId).expect(200),
+      "POST /api/game-collections/:id/copies/:copyId/revisions/:revisionId/restore as the entry's owner",
+    );
+
+  /** The entry as the user it belongs to reads it. */
+  const readEntry = async (owner: SessionActor, entryId: string) =>
+    readCollectionEnvelope(
+      await request(baseUrl).get(`${COLLECTIONS_PATH}/${entryId}`).set(owner.headers).expect(200),
+      "GET /api/game-collections/:id as the entry's owner",
+    ).collection;
+
+  /** The one copy an arranged entry holds. */
+  const onlyCopyOf = async (entryId: string) =>
+    (await db.client.collectionCopy.findFirstOrThrow({ where: { entryId }, select: { id: true } })).id;
+
+  /** An entry of `owner`'s, added through the route with one copy described by `copy`. */
+  const addedEntry = async (owner: SessionActor, copy: Record<string, unknown> = {}) => {
+    const { platformGameId } = await arrangePlatformGame(db.client);
+    const { collection } = readCollectionEnvelope(
+      await request(baseUrl)
+        .post(COLLECTIONS_PATH)
+        .set(owner.headers)
+        .send({ platformGameId, medium: GameMedium.Physical, copy })
+        .expect(201),
+      "POST /api/game-collections as the entry's owner",
+    );
+
+    return { entryId: collection.id, copyId: await onlyCopyOf(collection.id), platformGameId };
+  };
+
+  it('editing a copy keeps what it said before as a revision (#1231)', async () => {
+    const owner = await actors.user();
+    const { entryId, copyId } = await addedEntry(owner, {
+      acquiredOn: '2019-03',
+      condition: GameCondition.Good,
+      note: 'Unsleeved',
+      pricePaid: { amount: 4000, currency: 'EUR' },
+    });
+
+    await editCopy(owner, entryId, copyId, { note: 'Sleeved', pricePaid: null }).expect(200);
+
+    const revisions = await revisionsOf(owner, entryId, copyId);
+    expect(revisions).toEqual([
+      {
+        createdAt: expect.any(String),
+        id: expect.any(String),
+        values: {
+          acquiredFrom: null,
+          acquiredOn: '2019-03',
+          condition: GameCondition.Good,
+          currentValue: null,
+          note: 'Unsleeved',
+          pricePaid: { amount: 4000, currency: 'EUR' },
+          release: null,
+          removedAt: null,
+          removedOn: null,
+          removeReason: null,
+        },
+      },
+    ]);
+  });
+
+  it('removing a copy keeps what it said before, so restoring that revision makes it owned again and brings the entry back (#1231)', async () => {
+    const owner = await actors.user();
+    const { entryId, copyId } = await addedEntry(owner, { note: 'Mine' });
+
+    await removeCopy(owner, entryId, copyId, { reason: GameRemovalReason.Sold, removedOn: '2024' }).expect(200);
+    expect(await readEntry(owner, entryId)).toMatchObject({ deletedAt: expect.any(String), quantity: 0 });
+
+    const beforeRemoval = await newestRevisionOf(owner, entryId, copyId);
+    expect(beforeRemoval.values).toMatchObject({ note: 'Mine', removedAt: null, removeReason: null });
+
+    const copy = await restored(owner, entryId, copyId, beforeRemoval.id);
+
+    expect(copy).toMatchObject({ id: copyId, note: 'Mine', removedAt: null, removedOn: null, removeReason: null });
+    expect(await readEntry(owner, entryId)).toMatchObject({ deletedAt: null, deleteReason: null, quantity: 1 });
+  });
+
+  // A copy the restore makes owned again needs room, as an add does: else a
+  // removal, an add and a restore, repeated, would own copies past the cap
+  // (#1231).
+  it('restoring an owned revision of a removed copy on an entry that owns 100 copies is refused with COLLECTION_COPY_LIMIT_REACHED (#1231)', async () => {
+    const owner = await actors.user();
+    const { entryId, copyId } = await addedEntry(owner);
+    await addedCopy(owner, entryId);
+    await removeCopy(owner, entryId, copyId, { reason: GameRemovalReason.Sold }).expect(200);
+    const beforeRemoval = await newestRevisionOf(owner, entryId, copyId);
+    // One owned copy from the add, and 99 more.
+    await db.client.collectionCopy.createMany({ data: Array.from({ length: 99 }, () => ({ entryId })) });
+
+    const refused = await restore(owner, entryId, copyId, beforeRemoval.id);
+
+    expectErrorEnvelope(refused, { status: 409, code: 'COLLECTION_COPY_LIMIT_REACHED' });
+    expect(refused.body.limit).toBe(100);
+    expect(await readEntry(owner, entryId)).toMatchObject({ quantity: 100 });
+    expect(await revisionsOf(owner, entryId, copyId)).toHaveLength(1);
+    expect(
+      (await db.client.collectionCopy.findUniqueOrThrow({ where: { id: copyId }, select: { removedAt: true } }))
+        .removedAt,
+    ).not.toBeNull();
+  });
+
+  it('restoring a revision records the current values as a revision first, so a restore can be undone (#1231)', async () => {
+    const owner = await actors.user();
+    const { entryId, copyId } = await addedEntry(owner, { note: 'First' });
+    await editCopy(owner, entryId, copyId, { note: 'Second' }).expect(200);
+    const first = await newestRevisionOf(owner, entryId, copyId);
+
+    await restored(owner, entryId, copyId, first.id);
+
+    const revisions = await revisionsOf(owner, entryId, copyId);
+    expect(revisions.map(({ values }) => values.note)).toEqual(['Second', 'First']);
+
+    // Restoring the newest undoes the restore.
+    const undone = await restored(owner, entryId, copyId, (await newestRevisionOf(owner, entryId, copyId)).id);
+    expect(undone.note).toBe('Second');
+    expect((await revisionsOf(owner, entryId, copyId)).map(({ values }) => values.note)).toEqual([
+      'First',
+      'Second',
+      'First',
+    ]);
+  });
+
+  // The entry takes the reason of the removal the restore brings back, as
+  // the copy removal gives it its own (#1231).
+  it('restoring a removal of the last owned copy removes the entry again, with the restored reason (#1231)', async () => {
+    const owner = await actors.user();
+    const { entryId, copyId } = await addedEntry(owner);
+    await removeCopy(owner, entryId, copyId, { reason: GameRemovalReason.Traded }).expect(200);
+    const beforeRemoval = await newestRevisionOf(owner, entryId, copyId);
+    await restored(owner, entryId, copyId, beforeRemoval.id);
+    expect(await readEntry(owner, entryId)).toMatchObject({ deletedAt: null, quantity: 1 });
+
+    // The restore kept the removal as a revision of its own.
+    const removal = await newestRevisionOf(owner, entryId, copyId);
+    expect(removal.values).toMatchObject({ removedAt: expect.any(String), removeReason: GameRemovalReason.Traded });
+
+    const copy = await restored(owner, entryId, copyId, removal.id);
+
+    // The removal's date and reason are the revision's; the copy is removed
+    // by this restore, so the removal is recorded as written now.
+    expect(copy).toMatchObject({
+      removedAt: expect.any(String),
+      removedOn: removal.values.removedOn,
+      removeReason: GameRemovalReason.Traded,
+    });
+    expect(copy.removedAt).not.toBe(removal.values.removedAt);
+    expect(await readEntry(owner, entryId)).toMatchObject({
+      deletedAt: expect.any(String),
+      deleteReason: GameRemovalReason.Traded,
+      quantity: 0,
+    });
+  });
+
+  // Restoring a removed revision of a copy removed with the entry corrects
+  // the entry's reason, as an edit of the copy's reason does, though another
+  // copy removed with the entry, created later, says otherwise (#1231).
+  it("restoring the reason of a copy removed with the entry corrects the entry's reason (#1231)", async () => {
+    const owner = await actors.user();
+    const { entryId, copyId: older } = await addedEntry(owner);
+    await addedCopy(owner, entryId);
+    await request(baseUrl)
+      .delete(`${COLLECTIONS_PATH}/${entryId}`)
+      .query({ reason: GameRemovalReason.Sold })
+      .set(owner.headers)
+      .expect(200);
+    await editCopy(owner, entryId, older, { removeReason: GameRemovalReason.Gifted }).expect(200);
+    await editCopy(owner, entryId, older, { removeReason: GameRemovalReason.Lost }).expect(200);
+    expect(await readEntry(owner, entryId)).toMatchObject({ deleteReason: GameRemovalReason.Lost });
+
+    // The revision the second edit kept says Gifted.
+    const gifted = await newestRevisionOf(owner, entryId, older);
+    expect(gifted.values).toMatchObject({ removeReason: GameRemovalReason.Gifted });
+    await restored(owner, entryId, older, gifted.id);
+
+    expect(await readEntry(owner, entryId)).toMatchObject({
+      deletedAt: expect.any(String),
+      deleteReason: GameRemovalReason.Gifted,
+      quantity: 0,
+    });
+  });
+
+  // Review Focus 5: an edition deleted since the revision was kept must not
+  // fail the restore on a foreign key; the copy gets none (#1231).
+  it('a revision whose release has since gone restores with no release (#1231)', async () => {
+    const owner = await actors.user();
+    const { platformGameId } = await arrangePlatformGame(db.client);
+    const release = await db.client.gameRelease.create({
+      data: { platformGameId, editionKey: 'e2e-going', editionName: 'Going', releaseYear: 2019 },
+      select: { id: true },
+    });
+    const { collection } = readCollectionEnvelope(
+      await request(baseUrl)
+        .post(COLLECTIONS_PATH)
+        .set(owner.headers)
+        .send({ platformGameId, medium: GameMedium.Physical, copy: { releaseId: release.id, note: 'Deluxe' } })
+        .expect(201),
+      "POST /api/game-collections as the entry's owner",
+    );
+    const entryId = collection.id;
+    const copyId = await onlyCopyOf(entryId);
+    await editCopy(owner, entryId, copyId, { note: 'Changed' }).expect(200);
+    const kept = await newestRevisionOf(owner, entryId, copyId);
+    expect(kept.values.release).toEqual({ editionName: 'Going', id: release.id, releaseYear: 2019 });
+
+    await db.client.gameRelease.delete({ where: { id: release.id } });
+
+    // The list reads the edition as it is now: none.
+    const listed = await newestRevisionOf(owner, entryId, copyId);
+    expect(listed.values).toMatchObject({ note: 'Deluxe', release: null });
+
+    const copy = await restored(owner, entryId, copyId, kept.id);
+
+    expect(copy).toMatchObject({ id: copyId, note: 'Deluxe', release: null });
+  });
+
+  // The stored values are read back through their schema: one that fails it
+  // can't be restored, and the client is told the revision isn't there.
+  it('a stored revision that fails the schema answers COLLECTION_REVISION_NOT_FOUND (#1231)', async () => {
+    const owner = await actors.user();
+    const entryId = await arrangeCollectionEntry(db.client, owner.user.id, Reach.Private);
+    const copyId = await onlyCopyOf(entryId);
+    const damaged = await db.client.collectionCopyRevision.create({
+      data: { copyId, values: { note: 7 } },
+      select: { id: true },
+    });
+    const before = await db.client.collectionCopy.findUniqueOrThrow({ where: { id: copyId } });
+
+    expectErrorEnvelope(await restore(owner, entryId, copyId, damaged.id), {
+      status: 404,
+      code: 'COLLECTION_REVISION_NOT_FOUND',
+    });
+    expect(await db.client.collectionCopy.findUniqueOrThrow({ where: { id: copyId } })).toEqual(before);
+
+    // It can't be restored, so the list leaves it out.
+    expect(await revisionsOf(owner, entryId, copyId)).toEqual([]);
+  });
+
+  // A restore is the user's word on the copy, so a sync leaves it (#1231).
+  it('restoring a revision stamps the copy as edited by the user (#1231)', async () => {
+    const owner = await actors.user();
+    const entryId = await arrangeCollectionEntry(db.client, owner.user.id, Reach.Private);
+    const copyId = await onlyCopyOf(entryId);
+    const stamp = async () =>
+      (await db.client.collectionCopy.findUniqueOrThrow({ where: { id: copyId }, select: { editedByUserAt: true } }))
+        .editedByUserAt;
+    // Kept by a sync's write, say: the copy itself is not yet stamped.
+    const kept = await db.client.collectionCopyRevision.create({
+      data: {
+        copyId,
+        values: {
+          acquiredFrom: null,
+          acquiredOn: '2018-01-01',
+          acquiredOnPrecision: 'Year',
+          condition: null,
+          currentValueAmount: null,
+          currentValueCurrency: null,
+          note: 'Synced',
+          pricePaidAmount: null,
+          pricePaidCurrency: null,
+          releaseId: null,
+          removedAt: null,
+          removedOn: null,
+          removedOnPrecision: null,
+          removeReason: null,
+        },
+      },
+      select: { id: true },
+    });
+    expect(await stamp()).toBeNull();
+
+    const copy = await restored(owner, entryId, copyId, kept.id);
+
+    expect(copy).toMatchObject({ acquiredOn: '2018', note: 'Synced' });
+    expect(await stamp()).toEqual(expect.any(Date));
+  });
+
+  // Removing the entry removes each copy it still owns, and each keeps what
+  // it said before, so one copy's removal can be undone on its own (#1231).
+  it('removing the entry keeps a revision of each copy it removes (#1231)', async () => {
+    const owner = await actors.user();
+    const { entryId, copyId } = await addedEntry(owner, { note: 'First' });
+    const second = copyEnvelope(
+      await request(baseUrl).post(copiesPath(entryId)).set(owner.headers).send({ note: 'Second' }).expect(201),
+      "POST /api/game-collections/:id/copies as the entry's owner",
+    );
+
+    await request(baseUrl).delete(`${COLLECTIONS_PATH}/${entryId}`).set(owner.headers).expect(200);
+
+    const first = await newestRevisionOf(owner, entryId, copyId);
+    expect(first.values).toMatchObject({ note: 'First', removedAt: null });
+    const other = await newestRevisionOf(owner, entryId, second.id);
+    expect(other.values).toMatchObject({ note: 'Second', removedAt: null });
+
+    await restored(owner, entryId, second.id, other.id);
+    expect(await readEntry(owner, entryId)).toMatchObject({ deletedAt: null, quantity: 1 });
+  });
+
+  it("another user's revisions answer COLLECTION_ENTRY_NOT_FOUND (#1231)", async () => {
+    const owner = await actors.user();
+    const stranger = await actors.user();
+    // Public, so the stranger may read the entry itself: its copies' history
+    // is still the entry owner's alone.
+    const entryId = await arrangeCollectionEntry(db.client, owner.user.id, Reach.Public);
+    const copyId = await onlyCopyOf(entryId);
+    await editCopy(owner, entryId, copyId, { note: 'Mine' }).expect(200);
+    const kept = await newestRevisionOf(owner, entryId, copyId);
+    const notFound = { status: 404, code: 'COLLECTION_ENTRY_NOT_FOUND' };
+
+    await request(baseUrl).get(`${COLLECTIONS_PATH}/${entryId}`).set(stranger.headers).expect(200);
+
+    expectErrorEnvelope(await listRevisionsOf(stranger, entryId, copyId), notFound);
+    expectErrorEnvelope(await restore(stranger, entryId, copyId, kept.id), notFound);
+    expect(await db.client.collectionCopyRevision.count({ where: { copyId } })).toBe(1);
+
+    // A revision of another copy, even one of the same user's, is not this copy's.
+    const otherEntryId = await arrangeCollectionEntry(db.client, owner.user.id, Reach.Private);
+    const otherCopyId = await onlyCopyOf(otherEntryId);
+    expectErrorEnvelope(await restore(owner, otherEntryId, otherCopyId, kept.id), {
+      status: 404,
+      code: 'COLLECTION_REVISION_NOT_FOUND',
+    });
+    expectErrorEnvelope(await listRevisionsOf(owner, otherEntryId, copyId), {
+      status: 404,
+      code: 'COLLECTION_COPY_NOT_FOUND',
+    });
+
+    // The control: the entry's owner restores it.
+    expect(await restored(owner, entryId, copyId, kept.id)).toMatchObject({ id: copyId, note: null });
+  });
+  // The Owner role holds every permission, so it passes the read and update
+  // conditions; a copy's history and its corrections are still the entry
+  // owner's alone, whatever the reader's role (#1231).
+  it("an Owner-role user is refused another user's copy history, restore, take-back and undo (#1231)", async () => {
+    const entryOwner = await actors.user();
+    const serverOwner = await actors.owner();
+    const { entryId } = await addedEntry(entryOwner);
+    const second = await addedCopy(entryOwner, entryId, { note: 'First word' });
+    await editCopy(entryOwner, entryId, second.id, { note: 'Second word' }).expect(200);
+    const kept = await newestRevisionOf(entryOwner, entryId, second.id);
+    const notFound = { status: 404, code: 'COLLECTION_ENTRY_NOT_FOUND' };
+    const stored = () =>
+      db.client.collectionCopy.findUniqueOrThrow({
+        where: { id: second.id },
+        select: { editedByUserAt: true, note: true, retractedAt: true },
+      });
+    const before = await stored();
+
+    expectErrorEnvelope(await listRevisionsOf(serverOwner, entryId, second.id), notFound);
+    expectErrorEnvelope(await restore(serverOwner, entryId, second.id, kept.id), notFound);
+    expectErrorEnvelope(await takeBack(serverOwner, entryId, second.id), notFound);
+    expectErrorEnvelope(await undoTakeBack(serverOwner, entryId, second.id), notFound);
+    expect(await stored()).toEqual(before);
+    expect(await db.client.collectionCopyRevision.count({ where: { copyId: second.id } })).toBe(1);
+
+    // The positive control: the entry's owner does each of them.
+    expect(await revisionsOf(entryOwner, entryId, second.id)).toHaveLength(1);
+    expect(await restored(entryOwner, entryId, second.id, kept.id)).toMatchObject({ note: 'First word' });
+    expect(await takenBack(entryOwner, entryId, second.id)).toMatchObject({ retractedAt: expect.any(String) });
+    expect(await takeBackUndone(entryOwner, entryId, second.id)).toMatchObject({ retractedAt: null });
+  });
+
+  describe('taking back a copy (#1231)', () => {
+    // A copy taken back never existed: it counts as neither owned nor
+    // removed, so it leaves the entry's quantity and its rows, and only the
+    // copies list shows it, flagged, so the entry's owner can undo it.
+    it("taking back a copy leaves it out of quantity and out of the entry owner's rows, and keeps it in the copies list as taken back (#1231)", async () => {
+      const owner = await actors.user();
+      const { entryId, copyId } = await addedEntry(owner, { note: 'Real' });
+      const mistaken = await addedCopy(owner, entryId, { note: 'Never had it' });
+      expect(mistaken.retractedAt).toBeNull();
+
+      const copy = await takenBack(owner, entryId, mistaken.id);
+
+      expect(copy).toMatchObject({ id: mistaken.id, note: 'Never had it', retractedAt: expect.any(String) });
+      const row = await readEntry(owner, entryId);
+      expect(row).toMatchObject({ deletedAt: null, quantity: 1 });
+      expect(ownerRowCopies(row, "GET /api/game-collections/:id as the entry's owner").map(({ id }) => id)).toEqual([
+        copyId,
+      ]);
+      expect(await copiesOf(owner, entryId)).toEqual([
+        expect.objectContaining({ id: copyId, retractedAt: null }),
+        expect.objectContaining({ id: mistaken.id, removedAt: null, retractedAt: copy.retractedAt }),
+      ]);
+    });
+
+    it('taking back the last owned copy is refused with COLLECTION_LAST_COPY (#1231)', async () => {
+      const owner = await actors.user();
+      const { entryId, copyId } = await addedEntry(owner);
+      const sold = await addedCopy(owner, entryId);
+      await removeCopy(owner, entryId, sold.id, { reason: GameRemovalReason.Sold }).expect(200);
+
+      expectErrorEnvelope(await takeBack(owner, entryId, copyId), { status: 409, code: 'COLLECTION_LAST_COPY' });
+      expect(
+        (await db.client.collectionCopy.findUniqueOrThrow({ where: { id: copyId }, select: { retractedAt: true } }))
+          .retractedAt,
+      ).toBeNull();
+
+      // A removed copy isn't owned, so taking it back leaves the entry as it was.
+      expect(await takenBack(owner, entryId, sold.id)).toMatchObject({ retractedAt: expect.any(String) });
+      expect(await readEntry(owner, entryId)).toMatchObject({ deletedAt: null, quantity: 1 });
+    });
+
+    it('undoing a take-back counts the copy again (#1231)', async () => {
+      const owner = await actors.user();
+      const { entryId } = await addedEntry(owner);
+      const second = await addedCopy(owner, entryId, { note: 'Second' });
+      await takenBack(owner, entryId, second.id);
+      expect(await readEntry(owner, entryId)).toMatchObject({ quantity: 1 });
+
+      const copy = await takeBackUndone(owner, entryId, second.id);
+
+      expect(copy).toMatchObject({ id: second.id, note: 'Second', retractedAt: null });
+      expect(await readEntry(owner, entryId)).toMatchObject({ deletedAt: null, quantity: 2 });
+    });
+
+    // A copy owned again needs room, as an add does: else a take-back, an
+    // add and an undo, repeated, would own copies past the cap (#1231).
+    it('undoing a take-back on an entry that owns 100 copies is refused with COLLECTION_COPY_LIMIT_REACHED (#1231)', async () => {
+      const owner = await actors.user();
+      const { entryId } = await addedEntry(owner);
+      const mistaken = await addedCopy(owner, entryId);
+      await takenBack(owner, entryId, mistaken.id);
+      // One owned copy from the add, and 99 more.
+      await db.client.collectionCopy.createMany({ data: Array.from({ length: 99 }, () => ({ entryId })) });
+
+      const refused = await undoTakeBack(owner, entryId, mistaken.id);
+
+      expectErrorEnvelope(refused, { status: 409, code: 'COLLECTION_COPY_LIMIT_REACHED' });
+      expect(refused.body.limit).toBe(100);
+      expect(await readEntry(owner, entryId)).toMatchObject({ quantity: 100 });
+      expect(
+        (
+          await db.client.collectionCopy.findUniqueOrThrow({
+            where: { id: mistaken.id },
+            select: { retractedAt: true },
+          })
+        ).retractedAt,
+      ).not.toBeNull();
+    });
+
+    // A take-back is the user's word on the copy, so a sync never brings it
+    // back (#1231, #1227). It changes none of the values a revision holds,
+    // so it keeps none, and nor does the undo.
+    it('taking back stamps the copy as edited by the user, and keeps no revision (#1231)', async () => {
+      const owner = await actors.user();
+      const entryId = await arrangeCollectionEntry(db.client, owner.user.id, Reach.Private);
+      const second = await db.client.collectionCopy.create({ data: { entryId, note: 'Synced' }, select: { id: true } });
+      const stamp = async () =>
+        (
+          await db.client.collectionCopy.findUniqueOrThrow({
+            where: { id: second.id },
+            select: { editedByUserAt: true },
+          })
+        ).editedByUserAt;
+      expect(await stamp()).toBeNull();
+
+      await takenBack(owner, entryId, second.id);
+
+      expect(await stamp()).toEqual(expect.any(Date));
+      expect(await db.client.collectionCopyRevision.count({ where: { copyId: second.id } })).toBe(0);
+
+      await takeBackUndone(owner, entryId, second.id);
+      expect(await db.client.collectionCopyRevision.count({ where: { copyId: second.id } })).toBe(0);
+    });
+
+    // A taken-back copy is no removal, so a removed entry whose only removed
+    // copy is taken back stays removed, with no reason left; the undo gives
+    // the reason back (#1231).
+    it("taking back a removed entry's only removed copy leaves it removed with no reason, and the undo gives the reason back (#1231)", async () => {
+      const owner = await actors.user();
+      const { entryId, copyId } = await addedEntry(owner);
+      await removeCopy(owner, entryId, copyId, { reason: GameRemovalReason.Sold }).expect(200);
+      expect(await readEntry(owner, entryId)).toMatchObject({
+        deletedAt: expect.any(String),
+        deleteReason: GameRemovalReason.Sold,
+      });
+
+      await takenBack(owner, entryId, copyId);
+      expect(await readEntry(owner, entryId)).toMatchObject({ deletedAt: expect.any(String), deleteReason: null });
+
+      await takeBackUndone(owner, entryId, copyId);
+      expect(await readEntry(owner, entryId)).toMatchObject({
+        deletedAt: expect.any(String),
+        deleteReason: GameRemovalReason.Sold,
+        quantity: 0,
+      });
+    });
+
+    // A taken-back copy takes only its take-back and the undo of it: an
+    // edit, a removal or a restore of it is told the copy isn't there, and
+    // its history stays readable (#1231).
+    it('a taken-back copy answers COLLECTION_COPY_NOT_FOUND to every write but its take-back and the undo (#1231)', async () => {
+      const owner = await actors.user();
+      const { entryId } = await addedEntry(owner);
+      const second = await addedCopy(owner, entryId, { note: 'First word' });
+      await editCopy(owner, entryId, second.id, { note: 'Second word' }).expect(200);
+      await takenBack(owner, entryId, second.id);
+      const kept = await newestRevisionOf(owner, entryId, second.id);
+      const notFound = { status: 404, code: 'COLLECTION_COPY_NOT_FOUND' };
+
+      expectErrorEnvelope(await editCopy(owner, entryId, second.id, { note: 'x' }), notFound);
+      expectErrorEnvelope(await removeCopy(owner, entryId, second.id), notFound);
+      expectErrorEnvelope(await restore(owner, entryId, second.id, kept.id), notFound);
+
+      // Undone, the copy takes every write again. A copy the entry doesn't
+      // hold is still the copy's 404.
+      await takeBackUndone(owner, entryId, second.id);
+      await editCopy(owner, entryId, second.id, { note: 'Third word' }).expect(200);
+      expectErrorEnvelope(await takeBack(owner, entryId, 'no-such-copy'), notFound);
+      expectErrorEnvelope(await undoTakeBack(owner, entryId, 'no-such-copy'), notFound);
+    });
+
+    // ADR 0002: a take-back sent again, as an offline client may, answers
+    // the copy as it stands and writes nothing to it: no new take-back
+    // stamp, no edit stamp, no revision. It answers before the last copy is
+    // counted, so the retry of a take-back that left the entry one owned
+    // copy is no COLLECTION_LAST_COPY (#1231).
+    it('taking back a copy taken back already answers 200 with the copy as it stands, and writes nothing to it (#1231)', async () => {
+      const owner = await actors.user();
+      const { entryId, copyId } = await addedEntry(owner);
+      const mistaken = await addedCopy(owner, entryId, { note: 'Never had it' });
+      const first = await takenBack(owner, entryId, mistaken.id);
+      const stored = () =>
+        db.client.collectionCopy.findUniqueOrThrow({
+          where: { id: mistaken.id },
+          select: { editedByUserAt: true, retractedAt: true },
+        });
+      const before = await stored();
+
+      const repeated = await takenBack(owner, entryId, mistaken.id);
+
+      expect(repeated).toEqual(first);
+      expect(await stored()).toEqual(before);
+      expect(await db.client.collectionCopyRevision.count({ where: { copyId: mistaken.id } })).toBe(0);
+      expect(await readEntry(owner, entryId)).toMatchObject({ deletedAt: null, quantity: 1 });
+      // The control: the entry's one owned copy is still refused.
+      expectErrorEnvelope(await takeBack(owner, entryId, copyId), { status: 409, code: 'COLLECTION_LAST_COPY' });
+    });
+
+    // ADR 0002: undoing the take-back of a copy that isn't taken back answers
+    // the copy as it stands, never the copy's 404, which a client reads as
+    // "this copy is gone" (#634), and writes nothing to it (#1231).
+    it("undoing the take-back of a copy that isn't taken back answers 200 with the copy as it stands, and writes nothing to it (#1231)", async () => {
+      const owner = await actors.user();
+      const entryId = await arrangeCollectionEntry(db.client, owner.user.id, Reach.Private);
+      // Made straight in the database, so no route has stamped it yet.
+      const synced = await db.client.collectionCopy.create({ data: { entryId, note: 'Synced' }, select: { id: true } });
+
+      const copy = await takeBackUndone(owner, entryId, synced.id);
+
+      expect(copy).toMatchObject({ id: synced.id, note: 'Synced', retractedAt: null });
+      expect(
+        await db.client.collectionCopy.findUniqueOrThrow({
+          where: { id: synced.id },
+          select: { editedByUserAt: true, retractedAt: true },
+        }),
+      ).toEqual({ editedByUserAt: null, retractedAt: null });
+      expect(await db.client.collectionCopyRevision.count({ where: { copyId: synced.id } })).toBe(0);
+    });
+
+    it("another user's copy can't be taken back, nor its take-back undone (#1231)", async () => {
+      const owner = await actors.user();
+      const stranger = await actors.user();
+      const entryId = await arrangeCollectionEntry(db.client, owner.user.id, Reach.Public);
+      const second = await db.client.collectionCopy.create({ data: { entryId }, select: { id: true } });
+      const notFound = { status: 404, code: 'COLLECTION_ENTRY_NOT_FOUND' };
+
+      expectErrorEnvelope(await takeBack(stranger, entryId, second.id), notFound);
+      await takenBack(owner, entryId, second.id);
+      expectErrorEnvelope(await undoTakeBack(stranger, entryId, second.id), notFound);
+      expect(
+        (await db.client.collectionCopy.findUniqueOrThrow({ where: { id: second.id }, select: { retractedAt: true } }))
+          .retractedAt,
+      ).toEqual(expect.any(Date));
+    });
+  });
+});

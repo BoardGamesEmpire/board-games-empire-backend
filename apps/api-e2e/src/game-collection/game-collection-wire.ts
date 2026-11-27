@@ -153,9 +153,9 @@ const copyReleaseWireSchema = z
   .nullable();
 
 /**
- * A copy as its owner reads it (#1231). Strict, so a field the owner's shape
- * doesn't name, such as when the user last edited it or its upstream
- * account, fails the parse rather than passing unread.
+ * A copy as the entry's owner reads it (#1231). Strict, so a field the
+ * entry owner's shape doesn't name, such as when the user last edited it
+ * or its upstream account, fails the parse rather than passing unread.
  */
 export const collectionCopyWireSchema = z
   .object({
@@ -171,6 +171,7 @@ export const collectionCopyWireSchema = z
     removedAt: z.string().nullable(),
     removedOn: z.string().nullable(),
     removeReason: z.enum(GameRemovalReason).nullable(),
+    retractedAt: z.string().nullable(),
   })
   .strict();
 
@@ -231,7 +232,7 @@ const listCopiesEnvelopeSchema = z.object({ copies: z.array(collectionCopyWireSc
 export function copyEnvelope(response: HttpResponseLike, request: RequestDescription): CollectionCopyWire {
   const parsed = copyEnvelopeSchema.safeParse(response.body);
   if (!parsed.success) {
-    return fail(`its 'copy' is not a copy as its owner reads it (${parsed.error.message})`, request, response);
+    return fail(`its 'copy' is not a copy as the entry's owner reads it (${parsed.error.message})`, request, response);
   }
 
   return parsed.data.copy;
@@ -255,8 +256,8 @@ export function listCopiesEnvelope(
 }
 
 /**
- * A change of an entry's rating as its owner reads it (#1231). Strict, so a
- * field the owner's shape doesn't name, such as its upstream account, fails
+ * A change of an entry's rating as the entry's owner reads it (#1231). Strict, so a
+ * field the entry owner's shape doesn't name, such as its upstream account, fails
  * the parse rather than passing unread.
  */
 export const ratingChangeWireSchema = z
@@ -265,10 +266,27 @@ export const ratingChangeWireSchema = z
     id: z.string().min(1),
     occurredOn: z.string().nullable(),
     rating: z.number().int().nullable(),
+    retractedAt: z.string().nullable(),
   })
   .strict();
 
 export type RatingChangeWire = z.infer<typeof ratingChangeWireSchema>;
+
+const ratingChangeEnvelopeSchema = z.object({ ratingChange: ratingChangeWireSchema });
+
+/** `POST`, `PATCH`, `DELETE` on `/api/game-collections/:id/ratings…`: `{ ratingChange, message }` (#1231). */
+export function ratingChangeEnvelope(response: HttpResponseLike, request: RequestDescription): RatingChangeWire {
+  const parsed = ratingChangeEnvelopeSchema.safeParse(response.body);
+  if (!parsed.success) {
+    return fail(
+      `its 'ratingChange' is not a rating change as the entry's owner reads it (${parsed.error.message})`,
+      request,
+      response,
+    );
+  }
+
+  return parsed.data.ratingChange;
+}
 
 const listRatingsEnvelopeSchema = z.object({ ratings: z.array(ratingChangeWireSchema) });
 
@@ -287,4 +305,76 @@ export function listRatingsEnvelope(
   }
 
   return parsed.data.ratings;
+}
+
+/**
+ * What a copy said before a correction, as the entry's owner reads a revision
+ * (#1231): the copy's shape without its id, creation time and take-back.
+ * Strict, so a field the revision must never carry, such as when the user
+ * last edited the copy, whether it is taken back, its upstream account or the
+ * add's client request id, fails the parse.
+ */
+export const revisionValuesWireSchema = collectionCopyWireSchema
+  .omit({ createdAt: true, id: true, retractedAt: true })
+  .strict();
+
+/** A revision of a copy (#1231). Strict, as its values are. */
+export const collectionCopyRevisionWireSchema = z
+  .object({ createdAt: z.string(), id: z.string().min(1), values: revisionValuesWireSchema })
+  .strict();
+
+export type CollectionCopyRevisionWire = z.infer<typeof collectionCopyRevisionWireSchema>;
+
+const listRevisionsEnvelopeSchema = z.object({ revisions: z.array(collectionCopyRevisionWireSchema) });
+
+/** `GET /api/game-collections/:id/copies/:copyId/revisions`: `{ revisions: [...] }` (#1231). */
+export function listRevisionsEnvelope(
+  response: HttpResponseLike,
+  request: RequestDescription,
+): readonly CollectionCopyRevisionWire[] {
+  const parsed = listRevisionsEnvelopeSchema.safeParse(response.body);
+  if (!parsed.success) {
+    return fail(
+      `its 'revisions' is not a list of a copy's revisions as the entry's owner reads them (${parsed.error.message})`,
+      request,
+      response,
+    );
+  }
+
+  return parsed.data.revisions;
+}
+
+/**
+ * A revision of a rating change, as the entry's owner reads it (#1231): what the
+ * change said before a correction, its rating and its date. Strict, so a
+ * field the revision must never carry, such as whether the change is taken
+ * back or when the user last edited it, fails the parse.
+ */
+export const ratingRevisionWireSchema = z
+  .object({
+    createdAt: z.string(),
+    id: z.string().min(1),
+    values: z.object({ occurredOn: z.string().nullable(), rating: z.number().int().nullable() }).strict(),
+  })
+  .strict();
+
+export type RatingRevisionWire = z.infer<typeof ratingRevisionWireSchema>;
+
+const listRatingRevisionsEnvelopeSchema = z.object({ revisions: z.array(ratingRevisionWireSchema) });
+
+/** `GET /api/game-collections/:id/ratings/:ratingId/revisions`: `{ revisions: [...] }` (#1231). */
+export function listRatingRevisionsEnvelope(
+  response: HttpResponseLike,
+  request: RequestDescription,
+): readonly RatingRevisionWire[] {
+  const parsed = listRatingRevisionsEnvelopeSchema.safeParse(response.body);
+  if (!parsed.success) {
+    return fail(
+      `its 'revisions' is not a list of a rating change's revisions as the entry's owner reads them (${parsed.error.message})`,
+      request,
+      response,
+    );
+  }
+
+  return parsed.data.revisions;
 }

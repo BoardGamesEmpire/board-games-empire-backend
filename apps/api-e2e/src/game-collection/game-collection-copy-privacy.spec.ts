@@ -128,7 +128,7 @@ describe('copy privacy on collection rows (#1231)', () => {
           copy: { ...EVERY_PRIVATE_FIELD, releaseId: release.id },
         })
         .expect(201),
-      'POST /api/game-collections as the owner',
+      "POST /api/game-collections as the entry's owner",
     );
 
     return { entryId: collection.id, releaseId: release.id };
@@ -216,8 +216,8 @@ describe('copy privacy on collection rows (#1231)', () => {
     expect(copies).toEqual([await publicCopyOf(entryId, releaseId)]);
   });
 
-  // Each copy write answers the copy in its owner's shape, so the writes are
-  // the owner's alone, as the copy list is. The server's Owner holds every
+  // Each copy write answers the copy in the entry owner's shape, so the writes are
+  // the entry owner's alone, as the copy list is. The server's Owner holds every
   // permission, so the update conditions alone would let them write, and
   // read the answer (#1231).
   it("the server's Owner can't add, edit or remove another user's copies, and nothing changes (#1231)", async () => {
@@ -281,7 +281,7 @@ describe('copy privacy on collection rows (#1231)', () => {
   });
 
   // A removed copy says what the owner sold or gave away, and a taken-back one
-  // what never happened: both are the owner's alone (#1231).
+  // what never happened: both are the entry owner's alone (#1231).
   it('removed copies are never shown to other readers', async () => {
     const owner = await actors.user();
     const friend = await actors.user();
@@ -295,18 +295,25 @@ describe('copy privacy on collection rows (#1231)', () => {
         .set(owner.headers)
         .send({ condition: GameCondition.Good })
         .expect(201),
-      'POST /api/game-collections/:id/copies as the owner',
+      "POST /api/game-collections/:id/copies as the entry's owner",
     );
     await request(baseUrl)
       .delete(`${COLLECTIONS_PATH}/${entryId}/copies/${sold.id}`)
       .query({ reason: GameRemovalReason.Sold })
       .set(owner.headers)
       .expect(200);
-    // No route takes a copy back yet, so the take-back is arranged.
-    const takenBack = await db.client.collectionCopy.create({
-      data: { entryId, condition: GameCondition.Poor, retractedAt: new Date() },
-      select: { id: true },
-    });
+    const takenBack = copyEnvelope(
+      await request(baseUrl)
+        .post(`${COLLECTIONS_PATH}/${entryId}/copies`)
+        .set(owner.headers)
+        .send({ condition: GameCondition.Poor })
+        .expect(201),
+      "POST /api/game-collections/:id/copies as the entry's owner",
+    );
+    await request(baseUrl)
+      .post(`${COLLECTIONS_PATH}/${entryId}/copies/${takenBack.id}/retraction`)
+      .set(owner.headers)
+      .expect(200);
 
     for (const { row, description } of [
       await rowListed(friend, owner.user.id, entryId, 'a friend'),
@@ -320,7 +327,7 @@ describe('copy privacy on collection rows (#1231)', () => {
     // owner's copy list names all three.
     const ownersList = listCopiesEnvelope(
       await request(baseUrl).get(`${COLLECTIONS_PATH}/${entryId}/copies`).set(owner.headers).expect(200),
-      'GET /api/game-collections/:id/copies as the owner',
+      "GET /api/game-collections/:id/copies as the entry's owner",
     );
     expect(ownersList.map(({ id }) => id).sort()).toEqual([kept.id, sold.id, takenBack.id].sort());
   });
@@ -336,12 +343,13 @@ describe('copy privacy on collection rows (#1231)', () => {
       removedAt: null,
       removedOn: null,
       removeReason: null,
+      retractedAt: null,
     };
 
-    const listed = 'GET /api/game-collections as the owner';
-    const byId = 'GET /api/game-collections/:id as the owner';
-    const patched = 'PATCH /api/game-collections/:id as the owner';
-    const repeated = 'POST /api/game-collections again as the owner';
+    const listed = "GET /api/game-collections as the entry's owner";
+    const byId = "GET /api/game-collections/:id as the entry's owner";
+    const patched = "PATCH /api/game-collections/:id as the entry's owner";
+    const repeated = "POST /api/game-collections again as the entry's owner";
     const { platformGameId } = await db.client.gameCollection.findUniqueOrThrow({
       where: { id: entryId },
       select: { platformGameId: true },

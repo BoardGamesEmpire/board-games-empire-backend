@@ -20,13 +20,42 @@ export function collectionEntryNotFound(id: string): CodedHttpException {
  * The refusal for a copy the route's entry doesn't hold: missing, on another
  * entry, or on an entry the actor can't write, which the 404 never tells
  * apart. Like `collectionEntryNotFound`, its code says the 404 is about this
- * row (#1231).
+ * row (#1231). A taken-back copy never existed, so it answers this on every
+ * write but its take-back and the undo of it.
  */
 export function copyNotFound(id: string): CodedHttpException {
   return new CodedHttpException(
     Http.NotFound,
     'COLLECTION_COPY_NOT_FOUND',
     t('errors.game_collection.copy_not_found', { id }),
+  );
+}
+
+/**
+ * The refusal for a revision the route's copy doesn't hold: missing, a
+ * revision of another copy, or one whose stored values can't be read back,
+ * which the 404 never tells apart. Like `copyNotFound`, its code says the 404
+ * is about this row (#1231).
+ */
+export function revisionNotFound(id: string): CodedHttpException {
+  return new CodedHttpException(
+    Http.NotFound,
+    'COLLECTION_REVISION_NOT_FOUND',
+    t('errors.game_collection.revision_not_found', { id }),
+  );
+}
+
+/**
+ * The refusal for a rating change the route's entry doesn't hold: missing, on
+ * another entry, on another user's entry, or taken back (where the route
+ * takes only its take-back and the undo of it), which the 404 never tells
+ * apart. Like `copyNotFound`, its code says the 404 is about this row (#1231).
+ */
+export function ratingChangeNotFound(id: string): CodedHttpException {
+  return new CodedHttpException(
+    Http.NotFound,
+    'COLLECTION_RATING_CHANGE_NOT_FOUND',
+    t('errors.game_collection.rating_change_not_found', { id }),
   );
 }
 
@@ -52,6 +81,15 @@ export function copyNotRemoved(): CodedHttpException {
   );
 }
 
+/**
+ * Taking back the entry's last owned copy would leave a game the user has
+ * with no copy, so it is refused: add the right copy first, or remove the
+ * game (#1231).
+ */
+export function lastCopyTakeBack(): CodedHttpException {
+  return new CodedHttpException(Http.Conflict, 'COLLECTION_LAST_COPY', t('errors.game_collection.last_copy'));
+}
+
 /** A condition describes a physical object, so a digital copy has none (#1231). */
 export function conditionOnDigital(): CodedHttpException {
   return new CodedHttpException(
@@ -61,21 +99,22 @@ export function conditionOnDigital(): CodedHttpException {
   );
 }
 
-/** The dates of a copy a request may set, by their wire names (#1231). */
-export type CopyDateField = 'acquiredOn' | 'removedOn';
+/** The dates a request may set on a copy or a rating change, by their wire names (#1231). */
+export type CollectionDateField = 'acquiredOn' | 'occurredOn' | 'removedOn';
 
-/** What each copy date's refusal says, so a PATCH sending both names the one refused (#1231). */
+/** What each date's refusal says, so a PATCH sending both names the one refused (#1231). */
 const DATE_IN_FUTURE_MESSAGES = {
   acquiredOn: 'errors.game_collection.acquired_on_in_future',
+  occurredOn: 'errors.game_collection.occurred_on_in_future',
   removedOn: 'errors.game_collection.removed_on_in_future',
-} as const satisfies Record<CopyDateField, string>;
+} as const satisfies Record<CollectionDateField, string>;
 
 /**
- * A copy's acquisition or removal is dated on a day that has not come yet
- * anywhere on Earth (#1231). `field` names which date, in the message and in
- * the envelope's `field`, so a client can mark the right input.
+ * A copy's acquisition or removal, or a rating change, is dated on a day that
+ * has not come yet anywhere on Earth (#1231). `field` names which date, in the
+ * message and in the envelope's `field`, so a client can mark the right input.
  */
-export function dateInFuture(field: CopyDateField): CodedHttpException {
+export function dateInFuture(field: CollectionDateField): CodedHttpException {
   return new CodedHttpException(Http.BadRequest, 'COLLECTION_DATE_IN_FUTURE', t(DATE_IN_FUTURE_MESSAGES[field]), {
     fields: { field },
   });

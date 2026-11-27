@@ -20,8 +20,9 @@ export class CollectionReleaseSummaryDto {
 
 /**
  * One copy of a game, as the entry's owner reads it (#1231): its edition and
- * condition, its acquisition, what it is worth, a note, and its removal. Dates
- * are sent at their own precision, prices as minor units and a currency.
+ * condition, its acquisition, what it is worth, a note, its removal, and
+ * whether it was taken back. Dates are sent at their own precision, prices
+ * as minor units and a currency.
  */
 export class CollectionCopyDto {
   @ApiProperty({ description: 'Unique copy identifier' })
@@ -74,6 +75,16 @@ export class CollectionCopyDto {
   @ApiProperty({ enum: GameRemovalReason, nullable: true, description: 'Why the copy left your collection' })
   removeReason!: GameRemovalReason | null;
 
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description:
+      'When you took the copy back, saying you never had it: it counts as neither owned nor removed. Null ' +
+      'unless taken back. Only the copies list shows a copy taken back.',
+  })
+  retractedAt!: Date | null;
+
   @ApiProperty({ type: String, format: 'date-time' })
   createdAt!: Date;
 }
@@ -95,6 +106,7 @@ export function toCollectionCopyDto(row: OwnerCopyRow): CollectionCopyDto {
     removedAt: row.removedAt,
     removedOn: removed === null ? null : formatPartialDate(removed),
     removeReason: row.removeReason,
+    retractedAt: row.retractedAt,
     createdAt: row.createdAt,
   };
 }

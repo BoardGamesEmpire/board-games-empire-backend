@@ -226,6 +226,15 @@ export class CollectionRowCopyDto implements PublicCopyRow, EveryFieldOf<Collect
   @ApiPropertyOptional({
     type: String,
     format: 'date-time',
+    nullable: true,
+    description:
+      'Sent to the entry’s owner only. When the copy was taken back: always null on a row, which lists owned copies',
+  })
+  retractedAt?: Date | null;
+
+  @ApiPropertyOptional({
+    type: String,
+    format: 'date-time',
     description: 'Sent to the entry’s owner only. When the copy was recorded',
   })
   createdAt?: Date;
