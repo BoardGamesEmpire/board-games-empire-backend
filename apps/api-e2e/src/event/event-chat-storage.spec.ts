@@ -216,6 +216,40 @@ describe('event chat storage (#1543)', () => {
     expect(await db.client.eventChatMessage.count({ where: { eventId: eventB } })).toBe(0);
   });
 
+  // The reply key has no action of its own, so it is checked once the whole
+  // delete statement ends. Removing the event cascades every message in one
+  // statement, a reply and the message it answers together, and leaves no
+  // reply pointing at a missing message (#1543).
+  it('removes a chat with replies when its event row is deleted', async () => {
+    const host = await actors.user();
+    const eventId = await createdEventId(host);
+
+    await withBarrier(async ({ holder }) => {
+      const original = await insertMessage(holder, { eventId, authorId: host.user.id, sequence: 1 });
+      const reply = await insertMessage(holder, {
+        eventId,
+        authorId: host.user.id,
+        sequence: 2,
+        replyToId: original,
+      });
+      await insertMessage(holder, { eventId, authorId: host.user.id, sequence: 3, replyToId: reply });
+      await holder.query(nextSequence.text, [eventId]);
+
+      // The control: on its own, a message that has a reply can't be removed.
+      await expect(holder.query('DELETE FROM event_chat_messages WHERE id = $1', [original])).rejects.toMatchObject({
+        code: '23503',
+        constraint: 'event_chat_messages_event_id_reply_to_id_fkey',
+      });
+
+      await expect(
+        holder.query<{ id: string }>('DELETE FROM events WHERE id = $1 RETURNING id', [eventId]),
+      ).resolves.toEqual([{ id: eventId }]);
+    });
+
+    expect(await db.client.eventChatMessage.count({ where: { eventId } })).toBe(0);
+    expect(await counterOf(eventId)).toBeUndefined();
+  });
+
   // Each author is a fresh account that shares nothing: it owns only what
   // signing up gives it (sessions, its sign-in method, profile, preferences,
   // role and wishlist), all of which cascade, and it created neither event.
