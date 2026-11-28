@@ -23,6 +23,11 @@ export {
 export { ClsLocaleResolver } from './lib/cls-locale.resolver';
 export { CodedHttpException, type CodedHttpExceptionOptions } from './lib/coded-http.exception';
 export {
+  DATABASE_UNAVAILABLE,
+  DatabaseUnavailableException,
+  asDatabaseUnavailable,
+} from './lib/database-unavailable.exception';
+export {
   ENVELOPE_FIELDS,
   errorEnvelope,
   reasonPhrase,

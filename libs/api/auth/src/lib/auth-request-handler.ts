@@ -1,5 +1,6 @@
+import { describeDatabaseError, isDatabaseUnavailableError } from '@bge/database';
 import type { I18nPath } from '@bge/i18n';
-import { errorEnvelope } from '@bge/i18n';
+import { DATABASE_UNAVAILABLE, errorEnvelope } from '@bge/i18n';
 import { Logger } from '@nestjs/common';
 import type { StorageFailureRecord } from './storage-failure-record';
 import { withStorageFailureRecord } from './storage-failure-record';
@@ -51,9 +52,17 @@ export function markBodyCutOff(request: Request): void {
  *   reached on a failed storage can't be trusted, and a client must not take
  *   it as signed out (docs/REDIS.md). better-auth's headers are left off: a
  *   cookie it set or cleared rests on that same failed storage.
- * - **A throw with no storage failure.** 500 with `AUTH_FAILED`. better-auth
- *   rethrows any error that isn't its own (`onAPIError.throw`), where it would
- *   answer an empty 500.
+ * - **A database outage thrown with no storage failure.** 503 with
+ *   `DATABASE_UNAVAILABLE`, as the rest of the api answers it (#1172). A
+ *   storage failure in the same request still answers `AUTH_UNAVAILABLE`,
+ *   which says more: the sign-in state is unknown.
+ * - **A refusal (400 and up) after a database outage, with no storage
+ *   failure.** 503 with `DATABASE_UNAVAILABLE` too. better-auth's email
+ *   sign-up catches a failed user create and answers its own 422 without the
+ *   error, so the database adapter notes the outage on the record (#1172).
+ * - **Any other throw with no storage failure.** 500 with `AUTH_FAILED`.
+ *   better-auth rethrows any error that isn't its own (`onAPIError.throw`),
+ *   where it would answer an empty 500.
  * - **A 500 with no code and no storage failure.** 500 with `AUTH_FAILED`
  *   too, so no request here answers a 500 a client can't announce: better-
  *   call answers an empty one, and better-auth answers one of its own internal
@@ -79,25 +88,44 @@ export function createAuthRequestHandler(
   const logger = new Logger('AuthRequestHandler');
   const unavailable = () => coded(503, AUTH_UNAVAILABLE, deps.render('errors.auth.unavailable'));
   const failed = (headers?: Headers) => coded(500, AUTH_FAILED, deps.render('errors.request.failed'), headers);
+  const databaseUnavailable = () => coded(503, DATABASE_UNAVAILABLE, deps.render('errors.database.unavailable'));
 
   return async (request) => {
-    const record: StorageFailureRecord = { failed: false };
+    const record: StorageFailureRecord = { databaseUnavailable: false, failed: false };
 
     let response: Response;
     try {
       response = await withStorageFailureRecord(record, () => handler(request));
     } catch (error) {
+      const outage = isDatabaseUnavailableError(error);
+
       if (!cutOff.has(request)) {
-        logger.error('better-auth could not answer the request', error instanceof Error ? error.stack : error);
+        // An outage's stack names only the class, so its code goes in the line (#1172).
+        const subject = outage
+          ? `better-auth could not answer the request, database unavailable (${describeDatabaseError(error)})`
+          : 'better-auth could not answer the request';
+        logger.error(subject, error instanceof Error ? error.stack : error);
       }
 
-      return record.failed ? unavailable() : failed();
+      if (record.failed) {
+        return unavailable();
+      }
+
+      return outage || record.databaseUnavailable ? databaseUnavailable() : failed();
     }
 
     if (record.failed && response.status >= 400) {
       logger.warn(`Answered 503 in place of better-auth's ${response.status}, after a storage call failed`);
 
       return unavailable();
+    }
+
+    if (record.databaseUnavailable && response.status >= 400) {
+      logger.warn(
+        `Answered DATABASE_UNAVAILABLE in place of better-auth's ${response.status}, after a database call failed`,
+      );
+
+      return databaseUnavailable();
     }
 
     if (response.status === 500 && !(await carriesCode(response))) {

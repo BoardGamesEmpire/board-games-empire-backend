@@ -1,6 +1,7 @@
 import { AuthService } from '@bge/auth';
+import { describeDatabaseError } from '@bge/database';
 import type { I18nMessage, I18nPath } from '@bge/i18n';
-import { isI18nMessage, t } from '@bge/i18n';
+import { asDatabaseUnavailable, isI18nMessage, t } from '@bge/i18n';
 import { PoliciesGuard } from '@bge/permissions';
 import type { BaseClientData } from '@bge/shared';
 import type { WsRefusalReason } from '@bge/utils';
@@ -180,7 +181,8 @@ export abstract class AuthenticatedGateway implements OnGatewayInit, OnGatewayCo
    * does an HTTP exception carrying a catalog key, such as the 503
    * `AuthService` answers when the session store cannot be read (#640). A
    * structured exception's other fields, its stable `code` among them, go
-   * with it, as they do over HTTP.
+   * with it, as they do over HTTP. A database outage is logged and answered
+   * the same way, as 503 `DATABASE_UNAVAILABLE` (#1172).
    * Anything else means the session could not be checked at all: it is
    * logged, and the client is refused with a 500 that says nothing about why,
    * in the catalog copy the HTTP 500 carries, rendered in the handshake's
@@ -202,6 +204,26 @@ export abstract class AuthenticatedGateway implements OnGatewayInit, OnGatewayCo
         error.getStatus(),
         this.translator.translate(locale, marked.marker),
         marked.fields,
+      );
+    }
+
+    // Asked only of what isn't an HTTP exception: one keeps its own answer even
+    // when its cause is a driver error, as over HTTP (#1172).
+    const outage = error instanceof HttpException ? undefined : asDatabaseUnavailable(error);
+    const outageBody = outage && markedBody(outage.getResponse());
+    if (outage && outageBody) {
+      // Nest's `(message, stack)` form: nestjs-pino drops an `Error` argument.
+      const { message, stack } = error instanceof Error ? error : { message: String(error), stack: undefined };
+      this.logger.error(
+        `WS connection refused, database unavailable: socketId=${client.id}: ${message} (${describeDatabaseError(error)})`,
+        stack,
+      );
+      const locale = await this.translator.localeOf(client);
+
+      return new WsConnectionRefusal(
+        outage.getStatus(),
+        this.translator.translate(locale, outageBody.marker),
+        outageBody.fields,
       );
     }
 

@@ -1,4 +1,5 @@
 export * from './constraint-identity';
+export * from './database-unavailable';
 export * from './deadlock';
 export * from './event-conditions';
 export * from './expansion-links';

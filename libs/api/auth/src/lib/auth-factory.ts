@@ -36,6 +36,7 @@ import { betterAuthLogger } from './better-auth-logger';
 import type { OidcProviderConfig } from './configuration/oidc-providers';
 import { idsAllowingUnverifiedEmail, readOidcProviders, unlistedOidcVariables } from './configuration/oidc-providers';
 import { AUTH_BASE_PATH, AUTH_CLIENT_IP_HEADER, AUTH_COOKIE_PREFIX, SESSION_FRESH_AGE_SECONDS } from './constants';
+import { notingAdapterOutages, notingDatabaseOutage } from './database-outage-note';
 import { UserCreatedEvent } from './events/auth.events';
 import { createIdTokenGate } from './id-token-gate';
 import { mapOidcProfile, OIDC_SCOPES } from './oidc-profile';
@@ -354,15 +355,19 @@ export function authFactory(
       }),
     },
     secret: options.secret,
-    database: prismaAdapter(prisma, {
-      // Off everywhere (#627). The adapter prints these through a console
-      // logger of its own, never the `logger` above, so they would bypass pino,
-      // and they carry each query's inputs and results: addresses, session
-      // tokens, password hashes. DATABASE_LOG_QUERIES shows the queries instead.
-      debugLogs: false,
-      transaction: false,
-      provider: 'postgresql',
-    }),
+    // Each call notes an outage on the request's record: email sign-up
+    // swallows a failed user create into a 422 of its own (#1172).
+    database: notingAdapterOutages(
+      prismaAdapter(prisma, {
+        // Off everywhere (#627). The adapter prints these through a console
+        // logger of its own, never the `logger` above, so they would bypass pino,
+        // and they carry each query's inputs and results: addresses, session
+        // tokens, password hashes. DATABASE_LOG_QUERIES shows the queries instead.
+        debugLogs: false,
+        transaction: false,
+        provider: 'postgresql',
+      }),
+    ),
     databaseHooks: {
       user: {
         create: {
@@ -371,17 +376,20 @@ export function authFactory(
           // before the provider's email, since a closed server is the answer
           // whatever the email. The ban flag after registration, so a closed
           // server still answers first (#893).
-          before: async (user, context) => {
-            await settingGates.beforeUserCreate(user, context);
-            banFlagGate.check(user);
-            providerEmailGate(user, context);
+          // Its reads note an outage too: sign-up swallows this hook's
+          // failure with the create's (#1172).
+          before: (user, context) =>
+            notingDatabaseOutage(async () => {
+              await settingGates.beforeUserCreate(user, context);
+              banFlagGate.check(user);
+              providerEmailGate(user, context);
 
-            const variant = await usernameVariants.beforeUserCreate(user, context);
-            const picture = providerPictureOnly(user, context);
+              const variant = await usernameVariants.beforeUserCreate(user, context);
+              const picture = providerPictureOnly(user, context);
 
-            // better-auth merges `data` into the row; the two touch different fields.
-            return variant || picture ? { data: { ...variant?.data, ...picture?.data } } : undefined;
-          },
+              // better-auth merges `data` into the row; the two touch different fields.
+              return variant || picture ? { data: { ...variant?.data, ...picture?.data } } : undefined;
+            }),
           after: createUserCreatedHook({
             eventEmitter,
             auditContext,

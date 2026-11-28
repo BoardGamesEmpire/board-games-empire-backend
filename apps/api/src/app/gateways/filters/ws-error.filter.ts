@@ -1,6 +1,14 @@
 import { AuditContextService } from '@bge/actor-context';
+import { describeDatabaseError } from '@bge/database';
 import type { I18nTranslations } from '@bge/i18n';
-import { reasonPhrase, renderErrorBody, renderMarker, t, translateValidationErrors } from '@bge/i18n';
+import {
+  asDatabaseUnavailable,
+  reasonPhrase,
+  renderErrorBody,
+  renderMarker,
+  t,
+  translateValidationErrors,
+} from '@bge/i18n';
 import type { WsErrorPayload } from '@bge/shared';
 import { WsErrorEvents } from '@bge/shared';
 import { ArgumentsHost, Catch, HttpException, Logger, WsExceptionFilter } from '@nestjs/common';
@@ -24,7 +32,8 @@ import { refuseSocket, wsErrorPayload, wsExceptionPayload } from './ws-error-pay
  * It is also where a frame's copy is translated (#180), as the global filters
  * do over HTTP: validation messages, `t()` markers and its own 500's copy,
  * the catalog copy the HTTP 500 carries (#527), in the locale the frame's CLS
- * scope carries.
+ * scope carries. A database outage answers 503 `DATABASE_UNAVAILABLE`, as over
+ * HTTP, and leaves the socket open: the session wasn't refused (#1172).
  *
  * No app-wide filter runs on a gateway message (Nest runs global guards,
  * interceptors and pipes on a frame, but builds its exception context without
@@ -55,6 +64,22 @@ export class WsErrorFilter implements WsExceptionFilter {
       }
 
       client.emit(WsErrorEvents.Exception, payload);
+      return;
+    }
+
+    // A database outage answers 503, as over HTTP, and the socket stays open.
+    // Asked only after the HTTP exceptions, which keep their own answer even
+    // when their cause is a driver error (#1172).
+    const outage = asDatabaseUnavailable(exception);
+    if (outage) {
+      // Nest's `(message, stack)` form: nestjs-pino drops an `Error` argument.
+      const { message, stack } =
+        exception instanceof Error ? exception : { message: String(exception), stack: undefined };
+      this.logger.error(
+        `Database unavailable on ${frame.pattern}: socketId=${client.id}: ${message} (${describeDatabaseError(exception)})`,
+        stack,
+      );
+      client.emit(WsErrorEvents.Exception, this.translatedPayload(outage, frame));
       return;
     }
 
