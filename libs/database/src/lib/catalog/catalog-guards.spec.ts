@@ -6,6 +6,7 @@ import {
   findUnboundedGrants,
   findUnconditionedGlobalGrants,
   findUnconditionedScopedGrants,
+  findUnpinnedAttendanceOnlyConditions,
   findUnrenderableTemplateGrants,
   parseTemplate,
 } from './catalog-guards';
@@ -568,6 +569,54 @@ describe('catalog guards', () => {
       expect(findEventSpanningGrants(catalog, roles, SCOPE)).toEqual([
         { slug: 'update:own', role: SystemRole.EventGuest },
       ]);
+    });
+  });
+
+  describe('findUnpinnedAttendanceOnlyConditions', () => {
+    const chat = (slug: string, conditions?: PermissionSeedDefinition['conditions']) =>
+      definition({ slug, subject: ResourceType.EventChatMessage, ...(conditions && { conditions }) });
+
+    const shipped = [
+      chat('read:event_chat_message', { eventId: '{{ eventId }}' }),
+      chat('update:event_chat_message:own', { eventId: '{{ eventId }}', authorId: '{{ user.id }}' }),
+    ];
+
+    it('passes each permission with its shipped conditions, whatever their key order (#1543)', () => {
+      const catalog = [
+        chat('read:event_chat_message', { eventId: '{{ eventId }}' }),
+        chat('update:event_chat_message:own', { authorId: '{{ user.id }}', eventId: '{{ eventId }}' }),
+      ];
+
+      expect(findUnpinnedAttendanceOnlyConditions(catalog, shipped)).toEqual([]);
+    });
+
+    it('finds a branch that names the event beside one that reaches past it (#1543)', () => {
+      // The event-binding guard passes this: it names `{{ eventId }}`.
+      const catalog = [chat('read:event_chat_message', { OR: [{ eventId: '{{ eventId }}' }, { deletedAt: null }] })];
+
+      expect(findUnpinnedAttendanceOnlyConditions(catalog, shipped)).toEqual([
+        { slug: 'read:event_chat_message', subject: ResourceType.EventChatMessage },
+      ]);
+    });
+
+    it("finds a read narrowed to another permission's conditions, a missing condition and an unshipped slug (#1543)", () => {
+      const catalog = [
+        chat('read:event_chat_message', { eventId: '{{ eventId }}', authorId: '{{ user.id }}' }),
+        chat('update:event_chat_message:own'),
+        chat('create:event_chat_message', { eventId: '{{ eventId }}' }),
+      ];
+
+      expect(findUnpinnedAttendanceOnlyConditions(catalog, shipped).map(({ slug }) => slug)).toEqual([
+        'read:event_chat_message',
+        'update:event_chat_message:own',
+        'create:event_chat_message',
+      ]);
+    });
+
+    it('judges no other resource type (#1543)', () => {
+      expect(
+        findUnpinnedAttendanceOnlyConditions([definition({ slug: 'read:game', conditions: { deletedAt: null } })], []),
+      ).toEqual([]);
     });
   });
 });

@@ -107,6 +107,9 @@ const CHAT_FACTS_SELECT = {
  * The role's chat grants are read live, as a vote's are (#759), so access
  * follows a grant the Owner adds to or takes from an event role (#772). A
  * revoked grant, a retired permission and an inverted one confer nothing.
+ * A grant's conditions are not read: the catalog's guards hold every chat
+ * permission to the conditions it ships with, so the Owner can't narrow one
+ * (#1543).
  *
  * The read applies no actor's ability: chat access is decided from these
  * facts alone, so the where is the only filter. It reads the attendee's chat

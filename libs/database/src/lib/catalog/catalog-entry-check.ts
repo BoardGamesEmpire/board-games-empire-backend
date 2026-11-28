@@ -12,12 +12,14 @@ import {
   findUnboundedGrants,
   findUnconditionedGlobalGrants,
   findUnconditionedScopedGrants,
+  findUnpinnedAttendanceOnlyConditions,
   findUnrenderableTemplateGrants,
   parseTemplate,
 } from './catalog-guards';
 import type { ReadIgnoringReach } from './catalog-read-ceilings';
 import { findReadsIgnoringReach, modelsWithField } from './catalog-read-ceilings';
 import type { CatalogManifest, CatalogSnapshot, PermissionSnapshotRow } from './catalog-reconcile-plan';
+import { PERMISSION_CATALOG } from './permission.catalog';
 import { PAIRED_GRANTS } from './role-permission.catalog';
 import { KNOWN_TEMPLATE_VARIABLES, RENDER_CONTEXT_VARIABLES, ROLE_SCOPE } from './role.catalog';
 import type { PermissionSeedDefinition } from './seed-definitions';
@@ -64,6 +66,7 @@ export type EntryProblem =
       readonly subject: string;
     }
   | { readonly kind: 'event-spanning'; readonly role: string; readonly slug: string }
+  | { readonly kind: 'attendance-only-conditions'; readonly slug: string; readonly subject: string }
   | {
       readonly kind: 'names-other-roles';
       readonly named: readonly string[];
@@ -574,6 +577,11 @@ export function catalogFindings({ permissions, rolePermissions }: CatalogView): 
       kind: 'event-spanning',
       slug,
       role,
+    })),
+    ...findUnpinnedAttendanceOnlyConditions(permissions, PERMISSION_CATALOG).map(({ slug, subject }): EntryProblem => ({
+      kind: 'attendance-only-conditions',
+      slug,
+      subject,
     })),
     ...findGrantsNamingOtherRoles(permissions, rolePermissions),
   ];
