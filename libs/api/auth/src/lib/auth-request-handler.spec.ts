@@ -8,7 +8,7 @@ import { authFactory } from './auth-factory';
 import { createAuthRequestHandler } from './auth-request-handler';
 import { AUTH_CLIENT_IP_HEADER } from './constants';
 import { memoryAuthStorage } from './memory-auth-storage.fixture';
-import { noteStorageFailure } from './storage-failure-record';
+import { noteDatabaseUnavailable, noteStorageFailure } from './storage-failure-record';
 
 /** The configuration an instance needs to build, with email and password sign-in on. */
 const config = new ConfigService({
@@ -422,8 +422,95 @@ describe('createAuthRequestHandler', () => {
       });
 
       // better-auth's email sign-up catches a failed user create and answers
-      // its own 422, so the create path is shown through the anonymous sign-in,
-      // which lets the error through.
+      // its own 422 without the error, so the adapter notes the outage on the
+      // request's record and the 422 is answered 503.
+      it('answers an email sign-up whose user the database cannot create 503 DATABASE_UNAVAILABLE', async () => {
+        const handle = await servedOver(
+          new Keyv({ throwOnErrors: true }),
+          prismaWith({ systemSetting: settingsOn, user: { create: down } }),
+        );
+
+        const response = await handle(
+          post('/sign-up/email', {
+            email: 'new@example.com',
+            password: 'a-new-password-1234',
+            name: 'new',
+            username: 'newuser',
+          }),
+        );
+
+        expect(down).toHaveBeenCalled();
+        expect(response.status).toBe(503);
+        await expect(response.json()).resolves.toEqual(databaseUnavailable);
+      });
+
+      it('keeps an email sign-up whose user create fails for another reason 422', async () => {
+        const fault = jest.fn(async () => {
+          throw new TypeError('boom');
+        });
+        const handle = await servedOver(
+          new Keyv({ throwOnErrors: true }),
+          prismaWith({ systemSetting: settingsOn, user: { create: fault } }),
+        );
+
+        const response = await handle(
+          post('/sign-up/email', {
+            email: 'new@example.com',
+            password: 'a-new-password-1234',
+            name: 'new',
+            username: 'newuser',
+          }),
+        );
+
+        expect(fault).toHaveBeenCalled();
+        expect(response.status).toBe(422);
+      });
+
+      it('answers a refusal after a noted outage 503 DATABASE_UNAVAILABLE', async () => {
+        const handle = createAuthRequestHandler(
+          async () => {
+            noteDatabaseUnavailable();
+            return Response.json({ code: 'FAILED_TO_CREATE_USER' }, { status: 422 });
+          },
+          { render: (key) => key },
+        );
+
+        const response = await handle(anyRequest());
+
+        expect(response.status).toBe(503);
+        await expect(response.json()).resolves.toEqual(databaseUnavailable);
+      });
+
+      it('passes a success through after a noted outage', async () => {
+        const handle = createAuthRequestHandler(
+          async () => {
+            noteDatabaseUnavailable();
+            return Response.json({ ok: true });
+          },
+          { render: (key) => key },
+        );
+
+        const response = await handle(anyRequest());
+
+        expect(response.status).toBe(200);
+      });
+
+      it('answers AUTH_UNAVAILABLE for a refusal after both a noted outage and a storage failure', async () => {
+        const handle = createAuthRequestHandler(
+          async () => {
+            noteDatabaseUnavailable();
+            noteStorageFailure();
+            return Response.json({ code: 'FAILED_TO_CREATE_USER' }, { status: 422 });
+          },
+          { render: (key) => key },
+        );
+
+        const response = await handle(anyRequest());
+
+        expect(response.status).toBe(503);
+        await expect(response.json()).resolves.toEqual(unavailable);
+      });
+
       it('answers a sign-in whose user the database cannot create 503 DATABASE_UNAVAILABLE', async () => {
         const handle = await servedOver(
           new Keyv({ throwOnErrors: true }),

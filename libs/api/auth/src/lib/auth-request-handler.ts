@@ -55,9 +55,11 @@ export function markBodyCutOff(request: Request): void {
  * - **A database outage thrown with no storage failure.** 503 with
  *   `DATABASE_UNAVAILABLE`, as the rest of the api answers it (#1172). A
  *   storage failure in the same request still answers `AUTH_UNAVAILABLE`,
- *   which says more: the sign-in state is unknown. An outage better-auth
- *   catches itself isn't seen here: its email sign-up answers a failed user
- *   create with its own 422.
+ *   which says more: the sign-in state is unknown.
+ * - **A refusal (400 and up) after a database outage, with no storage
+ *   failure.** 503 with `DATABASE_UNAVAILABLE` too. better-auth's email
+ *   sign-up catches a failed user create and answers its own 422 without the
+ *   error, so the database adapter notes the outage on the record (#1172).
  * - **Any other throw with no storage failure.** 500 with `AUTH_FAILED`.
  *   better-auth rethrows any error that isn't its own (`onAPIError.throw`),
  *   where it would answer an empty 500.
@@ -89,7 +91,7 @@ export function createAuthRequestHandler(
   const databaseUnavailable = () => coded(503, DATABASE_UNAVAILABLE, deps.render('errors.database.unavailable'));
 
   return async (request) => {
-    const record: StorageFailureRecord = { failed: false };
+    const record: StorageFailureRecord = { databaseUnavailable: false, failed: false };
 
     let response: Response;
     try {
@@ -109,13 +111,21 @@ export function createAuthRequestHandler(
         return unavailable();
       }
 
-      return outage ? databaseUnavailable() : failed();
+      return outage || record.databaseUnavailable ? databaseUnavailable() : failed();
     }
 
     if (record.failed && response.status >= 400) {
       logger.warn(`Answered 503 in place of better-auth's ${response.status}, after a storage call failed`);
 
       return unavailable();
+    }
+
+    if (record.databaseUnavailable && response.status >= 400) {
+      logger.warn(
+        `Answered DATABASE_UNAVAILABLE in place of better-auth's ${response.status}, after a database call failed`,
+      );
+
+      return databaseUnavailable();
     }
 
     if (response.status === 500 && !(await carriesCode(response))) {

@@ -1,5 +1,5 @@
 import type { StorageFailureRecord } from './storage-failure-record';
-import { noteStorageFailure, withStorageFailureRecord } from './storage-failure-record';
+import { noteDatabaseUnavailable, noteStorageFailure, withStorageFailureRecord } from './storage-failure-record';
 
 /**
  * A request's record of whether a storage call failed, so the handler on
@@ -8,7 +8,7 @@ import { noteStorageFailure, withStorageFailureRecord } from './storage-failure-
  */
 describe('storage failure record', () => {
   it('notes a failure in the scope it happens in, across awaits (#894)', async () => {
-    const record: StorageFailureRecord = { failed: false };
+    const record: StorageFailureRecord = { databaseUnavailable: false, failed: false };
 
     await withStorageFailureRecord(record, async () => {
       await Promise.resolve();
@@ -19,8 +19,8 @@ describe('storage failure record', () => {
   });
 
   it('keeps two concurrent scopes apart (#894)', async () => {
-    const failing: StorageFailureRecord = { failed: false };
-    const succeeding: StorageFailureRecord = { failed: false };
+    const failing: StorageFailureRecord = { databaseUnavailable: false, failed: false };
+    const succeeding: StorageFailureRecord = { databaseUnavailable: false, failed: false };
 
     await Promise.all([
       withStorageFailureRecord(failing, async () => {
@@ -38,5 +38,20 @@ describe('storage failure record', () => {
 
   it('notes nothing outside a scope (#894)', () => {
     expect(() => noteStorageFailure()).not.toThrow();
+  });
+
+  it('notes a database outage apart from a storage failure (#1172)', async () => {
+    const record: StorageFailureRecord = { databaseUnavailable: false, failed: false };
+
+    await withStorageFailureRecord(record, async () => {
+      await Promise.resolve();
+      noteDatabaseUnavailable();
+    });
+
+    expect(record).toEqual({ databaseUnavailable: true, failed: false });
+  });
+
+  it('notes no database outage outside a scope (#1172)', () => {
+    expect(() => noteDatabaseUnavailable()).not.toThrow();
   });
 });

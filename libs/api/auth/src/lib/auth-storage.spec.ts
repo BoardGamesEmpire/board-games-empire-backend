@@ -254,7 +254,7 @@ describe('createRedisAuthStorage', () => {
       const error = new Error('Connection is closed.');
       const { client } = recordingClient({ [command]: error });
       const storage = createRedisAuthStorage(client);
-      const record: StorageFailureRecord = { failed: false };
+      const record: StorageFailureRecord = { databaseUnavailable: false, failed: false };
 
       await expect(withStorageFailureRecord(record, async () => call(storage))).rejects.toBe(error);
 
@@ -264,7 +264,7 @@ describe('createRedisAuthStorage', () => {
     it('notes nothing when the call succeeds (#894)', async () => {
       const { client } = recordingClient();
       const storage = createRedisAuthStorage(client);
-      const record: StorageFailureRecord = { failed: false };
+      const record: StorageFailureRecord = { databaseUnavailable: false, failed: false };
 
       await withStorageFailureRecord(record, async () => storage.get('session-token'));
 
@@ -281,7 +281,7 @@ describe('createRedisAuthStorage', () => {
       const { client, values } = recordingClient();
       values.set('namespace:api:cache:auth_session-token', 'not json');
       const storage = createRedisAuthStorage(client);
-      const record: StorageFailureRecord = { failed: false };
+      const record: StorageFailureRecord = { databaseUnavailable: false, failed: false };
 
       await expect(withStorageFailureRecord(record, async () => call(storage))).resolves.toBeUndefined();
 
