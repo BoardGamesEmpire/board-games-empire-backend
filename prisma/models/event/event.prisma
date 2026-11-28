@@ -60,6 +60,11 @@ model Event {
 
   policy EventPolicy?
 
+  // The event chat (#1543). No event read includes its messages: chat reads
+  // go through the chat's own access check.
+  chatMessages EventChatMessage[]
+  chatCounter  EventChatCounter?
+
   deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)

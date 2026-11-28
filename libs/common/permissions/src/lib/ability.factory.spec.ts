@@ -3,6 +3,7 @@ import type { Permission, PermissionSlug, PluginUnitGrantScope, RoleScope } from
 import {
   Action,
   InviteStatus,
+  isAttendanceOnly,
   MemberInvitePolicy,
   PERMISSION_CATALOG,
   PermissionOwner,
@@ -12,6 +13,7 @@ import {
   ResourceType,
   RiskLevel,
   ROLE_PERMISSION_CATALOG,
+  ROLE_SCOPE,
   SystemRole,
 } from '@bge/database';
 import { catalogPermission } from '@bge/testing';
@@ -25,6 +27,7 @@ import { PluginAbilityRenderRejectionError } from './errors/plugin-ability-rende
 import type {
   ApiKeyScopeWithPermission,
   ApikeyWithScopes,
+  AppAbility,
   PluginGrantSnapshot,
   RoleWithPermissions,
   Subjects,
@@ -100,7 +103,7 @@ describe('AbilityFactory', () => {
 
       const ability = factory.createForApiKey(owner, makeApiKey([]));
 
-      expect(ability.rules).toHaveLength(0);
+      expect(permissionRules(ability)).toHaveLength(0);
       expect(ability.can(Action.read, 'Game')).toBe(false);
     });
 
@@ -197,8 +200,8 @@ describe('AbilityFactory', () => {
 
       const ability = factory.createForApiKey(owner, makeApiKey([makeScope(readHouseholds)]));
 
-      expect(ability.rules).toHaveLength(1);
-      expect(ability.rules[0].conditions).toEqual({
+      expect(permissionRules(ability)).toHaveLength(1);
+      expect(permissionRules(ability)[0].conditions).toEqual({
         AND: [{ members: { some: { userId: 'owner-1' } } }, { id: 'hh-9' }],
       });
     });
@@ -209,8 +212,8 @@ describe('AbilityFactory', () => {
 
       const ability = factory.createForApiKey(owner, makeApiKey([makeScope(readPlugins, 'plugin-1')]));
 
-      expect(ability.rules).toHaveLength(1);
-      expect(ability.rules[0].conditions).toEqual({ id: 'plugin-1' });
+      expect(permissionRules(ability)).toHaveLength(1);
+      expect(permissionRules(ability)[0].conditions).toEqual({ id: 'plugin-1' });
       expect(ability.can(Action.read, asEntity('Plugin', { id: 'plugin-1' }))).toBe(true);
       expect(ability.can(Action.read, asEntity('Plugin', { id: 'plugin-2' }))).toBe(false);
     });
@@ -221,8 +224,8 @@ describe('AbilityFactory', () => {
 
       const ability = factory.createForApiKey(owner, makeApiKey([makeScope(readPlugins)]));
 
-      expect(ability.rules).toHaveLength(1);
-      expect(ability.rules[0].conditions).toBeUndefined();
+      expect(permissionRules(ability)).toHaveLength(1);
+      expect(permissionRules(ability)[0].conditions).toBeUndefined();
       expect(ability.can(Action.read, 'Plugin')).toBe(true);
       expect(ability.can(Action.read, 'Event')).toBe(false);
     });
@@ -242,7 +245,7 @@ describe('AbilityFactory', () => {
         makeApiKey([makeScope(readHouseholdMember), makeScope(readGamePublic)]),
       );
 
-      expect(ability.rules.map(({ subject }) => subject)).toEqual(['Game']);
+      expect(permissionRules(ability).map(({ subject }) => subject)).toEqual(['Game']);
       expect(ability.can(Action.read, 'HouseholdMember')).toBe(false);
       expect(ability.can(Action.read, asEntity('Game', publicGame))).toBe(true);
       expect(warn).toHaveBeenCalledTimes(1);
@@ -268,7 +271,7 @@ describe('AbilityFactory', () => {
 
       const ability = factory.createForApiKey(owner, makeApiKey([makeScope(readOwnHousehold)]));
 
-      expect(ability.rules).toHaveLength(1);
+      expect(permissionRules(ability)).toHaveLength(1);
       expect(ability.can(Action.read, asEntity('Household', { id: 'hh-A' }))).toBe(true);
       expect(ability.can(Action.read, asEntity('Household', { id: 'hh-B' }))).toBe(false);
       expect(warn).not.toHaveBeenCalled();
@@ -321,7 +324,7 @@ describe('AbilityFactory', () => {
 
       const ability = factory.createForApiKey(owner, makeApiKey([makeScope(readPlugins, '')]));
 
-      expect(ability.rules[0].conditions).toEqual({ id: '' });
+      expect(permissionRules(ability)[0].conditions).toEqual({ id: '' });
       expect(ability.can(Action.read, asEntity('Plugin', { id: 'plugin-1' }))).toBe(false);
     });
 
@@ -334,7 +337,7 @@ describe('AbilityFactory', () => {
 
       const ability = factory.createForApiKey(owner, makeApiKey([makeScope(readEveryGame)]));
 
-      expect(ability.rules).toHaveLength(0);
+      expect(permissionRules(ability)).toHaveLength(0);
       expect(ability.can(Action.read, asEntity('Game', publicGame))).toBe(false);
     });
 
@@ -349,8 +352,8 @@ describe('AbilityFactory', () => {
 
       const distinct = factory.createForApiKey(holder('g-grant'), makeApiKey([makeScope(readPublicGame, 'g-key')]));
 
-      expect(distinct.rules).toHaveLength(1);
-      expect(distinct.rules[0].conditions).toEqual({
+      expect(permissionRules(distinct)).toHaveLength(1);
+      expect(permissionRules(distinct)[0].conditions).toEqual({
         AND: [{ reach: 'Public' }, { id: 'g-grant' }, { id: 'g-key' }],
       });
       expect(distinct.can(Action.read, asEntity('Game', { id: 'g-grant', reach: 'Public' }))).toBe(false);
@@ -370,7 +373,7 @@ describe('AbilityFactory', () => {
 
       const ability = factory.createForApiKey(owner, makeApiKey([makeScope(listShaped)]));
 
-      expect(ability.rules).toHaveLength(0);
+      expect(permissionRules(ability)).toHaveLength(0);
       expect(ability.can(Action.read, 'Game')).toBe(false);
       expect(warn).toHaveBeenCalledWith(expect.stringContaining(listShaped.id));
     });
@@ -382,7 +385,7 @@ describe('AbilityFactory', () => {
 
       const ability = factory.createForApiKey(owner, makeApiKey([makeScope(catalogPermission('read:household'))]));
 
-      expect(ability.rules).toHaveLength(0);
+      expect(permissionRules(ability)).toHaveLength(0);
       expect(ability.can(Action.read, 'Household')).toBe(false);
       expect(warn).not.toHaveBeenCalled();
     });
@@ -401,7 +404,9 @@ describe('AbilityFactory', () => {
 
         const ability = factory.createForApiKey(owner, makeApiKey([makeScope(readEveryGame), makeScope(denyPrivate)]));
 
-        expect(ability.rules.find(({ inverted }) => inverted)).toMatchObject({ conditions: { reach: 'Private' } });
+        expect(permissionRules(ability).find(({ inverted }) => inverted)).toMatchObject({
+          conditions: { reach: 'Private' },
+        });
         expect(ability.can(Action.read, asEntity('Game', publicGame))).toBe(true);
         expect(ability.can(Action.read, asEntity('Game', ownersPrivateGame))).toBe(false);
       });
@@ -497,7 +502,7 @@ describe('AbilityFactory', () => {
         );
 
         expect(ability.can(Action.read, asEntity('Game', publicGame))).toBe(false);
-        expect(ability.rules.map(({ inverted }) => inverted ?? false)).toEqual([false, true]);
+        expect(permissionRules(ability).map(({ inverted }) => inverted ?? false)).toEqual([false, true]);
       });
 
       // The owner's own server-role rules render with `{ user, role }`, so a
@@ -537,7 +542,7 @@ describe('AbilityFactory', () => {
           makeApiKey([makeScope(readEveryGame), makeScope(denyEveryGame)]),
         );
 
-        expect(ability.rules.filter(({ inverted }) => inverted)).toHaveLength(1);
+        expect(permissionRules(ability).filter(({ inverted }) => inverted)).toHaveLength(1);
         expect(ability.can(Action.read, asEntity('Game', publicGame))).toBe(false);
       });
     });
@@ -556,7 +561,7 @@ describe('AbilityFactory', () => {
 
       const ability = factory.createForApiKey(owner, makeApiKey([makeScope(readEveryGame)]));
 
-      expect(ability.rules).toHaveLength(1);
+      expect(permissionRules(ability)).toHaveLength(1);
       expect(ability.can(Action.read, asEntity('Game', publicGame))).toBe(true);
     });
 
@@ -582,7 +587,7 @@ describe('AbilityFactory', () => {
 
         const ability = factory.createForApiKey(holding(readSlug), makeApiKey([makeScope(readSlug, 'plugin-1')]));
 
-        expect(ability.rules[0]).toMatchObject({ fields: ['slug'], conditions: { id: 'plugin-1' } });
+        expect(permissionRules(ability)[0]).toMatchObject({ fields: ['slug'], conditions: { id: 'plugin-1' } });
         expect(ability.can(Action.read, asEntity('Plugin', { id: 'plugin-1' }), 'slug')).toBe(true);
         expect(ability.can(Action.read, asEntity('Plugin', { id: 'plugin-2' }), 'slug')).toBe(false);
       });
@@ -592,7 +597,7 @@ describe('AbilityFactory', () => {
 
         const ability = factory.createForApiKey(holding(readAll), makeApiKey([makeScope(readAll)]));
 
-        expect(ability.rules[0].fields).toBeUndefined();
+        expect(permissionRules(ability)[0].fields).toBeUndefined();
         expect(ability.can(Action.read, 'Plugin', 'installedAt')).toBe(true);
       });
 
@@ -613,7 +618,7 @@ describe('AbilityFactory', () => {
           makeApiKey([makeScope(updateHousehold), makeScope(denyName)]),
         );
 
-        expect(ability.rules[1].fields).toBeUndefined();
+        expect(permissionRules(ability)[1].fields).toBeUndefined();
         expect(ability.can(Action.update, 'Household')).toBe(false);
       });
     });
@@ -703,7 +708,7 @@ describe('AbilityFactory', () => {
         });
 
         const ability = factory.createForUser(user);
-        expect(ability.rules.at(-1)?.conditions).toEqual({
+        expect(permissionRules(ability).at(-1)?.conditions).toEqual({
           members: { some: { userId: 'user-42' } },
           id: 'hh-1',
         });
@@ -886,7 +891,7 @@ describe('AbilityFactory', () => {
         });
 
         const ability = factory.createForUser(user);
-        expect(ability.rules).toHaveLength(0);
+        expect(permissionRules(ability)).toHaveLength(0);
         expect(ability.can(Action.manage, 'Game')).toBe(false);
       });
     });
@@ -939,7 +944,7 @@ describe('AbilityFactory', () => {
 
         const ability = factory.createForUser(user);
         expect(ability.can(Action.read, 'Game')).toBe(true);
-        expect(ability.rules).toHaveLength(1);
+        expect(permissionRules(ability)).toHaveLength(1);
       });
 
       it('preserves householdMember-derived rules', () => {
@@ -1055,7 +1060,7 @@ describe('AbilityFactory', () => {
       });
 
     const renderedThrough = (scope: RoleScope, user: UserWithRoles) => {
-      const conditions = factory.createForUser(user).rules.at(-1)?.conditions as Record<ProbeField, string>;
+      const conditions = permissionRules(factory.createForUser(user)).at(-1)?.conditions as Record<ProbeField, string>;
       const rendered = (Object.keys(PROBE_FIELD_VARIABLES) as ProbeField[])
         .filter((field) => conditions[field] !== '')
         .map((field) => PROBE_FIELD_VARIABLES[field])
@@ -1130,7 +1135,7 @@ describe('AbilityFactory', () => {
       it('renders {{ householdId }} from the membership context, not the user context', () => {
         const ability = factory.createForUser(memberOf('HouseholdMember', ['hh-1']));
 
-        expect(ability.rules.at(-1)?.conditions).toEqual({ householdId: 'hh-1' });
+        expect(permissionRules(ability).at(-1)?.conditions).toEqual({ householdId: 'hh-1' });
       });
 
       it('permits reading a member row of a household the actor belongs to', () => {
@@ -1191,7 +1196,7 @@ describe('AbilityFactory', () => {
       it('emits one independently-scoped rule per membership (multi-household actor)', () => {
         const ability = factory.createForUser(memberOf('HouseholdMember', ['hh-1', 'hh-2']));
 
-        expect(ability.rules).toHaveLength(2);
+        expect(permissionRules(ability)).toHaveLength(2);
         expect(ability.can(Action.read, asEntity('HouseholdMember', { householdId: 'hh-1' }))).toBe(true);
         expect(ability.can(Action.read, asEntity('HouseholdMember', { householdId: 'hh-2' }))).toBe(true);
         expect(ability.can(Action.read, asEntity('HouseholdMember', { householdId: 'hh-3' }))).toBe(false);
@@ -1222,7 +1227,7 @@ describe('AbilityFactory', () => {
 
         const ability = factory.createForUser(user);
 
-        expect(ability.rules.at(-1)?.conditions).toEqual({
+        expect(permissionRules(ability).at(-1)?.conditions).toEqual({
           household: {
             is: {
               reach: { in: ['Friends', 'FriendsOfFriends', 'ExtendedNetwork', 'Public'] },
@@ -1246,7 +1251,7 @@ describe('AbilityFactory', () => {
       it('traverses to the household through the `household` relation, never a top-level field', () => {
         const user = makeUser({ id: 'user-42', roles: [makeRole('User', [readHouseholdMemberFriends()])] });
 
-        const conditions = factory.createForUser(user).rules.at(-1)?.conditions;
+        const conditions = permissionRules(factory.createForUser(user)).at(-1)?.conditions;
 
         // HouseholdMember has no `reach`/`members` of its own — those live
         // on Household. A regression to the flat shape would make Prisma throw.
@@ -1258,7 +1263,7 @@ describe('AbilityFactory', () => {
       it('renders every template variable to a non-empty value', () => {
         const user = makeUser({ id: 'user-42', roles: [makeRole('User', [readHouseholdMemberFriends()])] });
 
-        const conditions = factory.createForUser(user).rules.at(-1)?.conditions;
+        const conditions = permissionRules(factory.createForUser(user)).at(-1)?.conditions;
 
         // Mustache resolves an unknown variable to an EMPTY STRING rather than
         // leaving a `{{ … }}` marker behind, so scanning for markers cannot
@@ -1274,7 +1279,7 @@ describe('AbilityFactory', () => {
       it('scopes the role check through `household.members`, not a top-level `members` field', () => {
         const user = memberOf('HouseholdOwner', ['hh-1'], [manageHouseholdMember()]);
 
-        const conditions = factory.createForUser(user).rules.at(-1)?.conditions;
+        const conditions = permissionRules(factory.createForUser(user)).at(-1)?.conditions;
 
         expect(conditions).toEqual({
           householdId: 'hh-1',
@@ -1295,7 +1300,7 @@ describe('AbilityFactory', () => {
       it('pins management authority to the granting household only', () => {
         const user = memberOf('HouseholdOwner', ['hh-1'], [manageHouseholdMember()]);
 
-        const conditions = factory.createForUser(user).rules.at(-1)?.conditions;
+        const conditions = permissionRules(factory.createForUser(user)).at(-1)?.conditions;
 
         expect(conditions).toMatchObject({ householdId: 'hh-1' });
       });
@@ -1314,7 +1319,7 @@ describe('AbilityFactory', () => {
 
       const ability = factory.createForUser(user);
 
-      expect(ability.rules.at(-1)?.conditions).toEqual({
+      expect(permissionRules(ability).at(-1)?.conditions).toEqual({
         reach: { in: ['Friends', 'FriendsOfFriends', 'ExtendedNetwork', 'Public'] },
         user: {
           is: {
@@ -1347,7 +1352,7 @@ describe('AbilityFactory', () => {
         ],
       };
 
-      expect(factory.createForUser(friendOfFriendReader()).rules.at(-1)?.conditions).toEqual({
+      expect(permissionRules(factory.createForUser(friendOfFriendReader())).at(-1)?.conditions).toEqual({
         deletedAt: null,
         AND: [
           { reach: 'FriendsOfFriends' },
@@ -1372,7 +1377,7 @@ describe('AbilityFactory', () => {
     });
 
     it('renders every template variable to a non-empty value', () => {
-      const conditions = factory.createForUser(friendOfFriendReader()).rules.at(-1)?.conditions;
+      const conditions = permissionRules(factory.createForUser(friendOfFriendReader())).at(-1)?.conditions;
 
       // An out-of-context variable renders as an empty string, as the
       // household member rule's test explains.
@@ -1427,7 +1432,7 @@ describe('AbilityFactory', () => {
       makeUser({ id: 'user-42', roles: [makeRole('User', [catalogPermission('read:game:extended-network')])] });
 
     it("renders the acting user id into the creator's extended network lookup and both block clauses", () => {
-      expect(factory.createForUser(extendedNetworkReader()).rules.at(-1)?.conditions).toEqual({
+      expect(permissionRules(factory.createForUser(extendedNetworkReader())).at(-1)?.conditions).toEqual({
         deletedAt: null,
         AND: [
           { reach: 'ExtendedNetwork' },
@@ -1449,7 +1454,7 @@ describe('AbilityFactory', () => {
     });
 
     it('renders every template variable to a non-empty value', () => {
-      const conditions = factory.createForUser(extendedNetworkReader()).rules.at(-1)?.conditions;
+      const conditions = permissionRules(factory.createForUser(extendedNetworkReader())).at(-1)?.conditions;
 
       // An out-of-context variable renders as an empty string, as the test
       // under 'household member rules (#155)' explains.
@@ -2988,9 +2993,8 @@ describe('AbilityFactory', () => {
 
     describe('update:household_role:transfer-ownership', () => {
       it('reaches the household only through the member row, never a field HouseholdRole lacks', () => {
-        const conditions = factory
-          .createForUser(holder('HouseholdOwner', [transferOwnership()]))
-          .rules.at(-1)?.conditions;
+        const ability = factory.createForUser(holder('HouseholdOwner', [transferOwnership()]));
+        const conditions = permissionRules(ability).at(-1)?.conditions;
 
         expect(conditions).toEqual({
           householdMember: {
@@ -3049,9 +3053,8 @@ describe('AbilityFactory', () => {
           ],
         });
 
-        const rendered = factory
-          .createForUser(user)
-          .rules.filter((rule) => rule.subject === ResourceType.HouseholdRole)
+        const rendered = permissionRules(factory.createForUser(user))
+          .filter((rule) => rule.subject === ResourceType.HouseholdRole)
           .map(
             (rule) =>
               (rule.conditions as { householdMember: { is: { household: { is: { id: string } } } } }).householdMember.is
@@ -3062,9 +3065,8 @@ describe('AbilityFactory', () => {
       });
 
       it('renders every template variable to a non-empty value', () => {
-        const conditions = factory
-          .createForUser(holder('HouseholdOwner', [transferOwnership()]))
-          .rules.at(-1)?.conditions;
+        const ability = factory.createForUser(holder('HouseholdOwner', [transferOwnership()]));
+        const conditions = permissionRules(ability).at(-1)?.conditions;
 
         // An empty leaf is the symptom of a variable rendered out of context — a
         // match-nothing clause rather than a visible failure (#234, #244).
@@ -3074,9 +3076,8 @@ describe('AbilityFactory', () => {
 
     describe('update:household — tightened condition (#160)', () => {
       it('requires an owner/admin membership, not merely a membership', () => {
-        const conditions = factory
-          .createForUser(holder('HouseholdOwner', [updateHousehold()]))
-          .rules.at(-1)?.conditions;
+        const ability = factory.createForUser(holder('HouseholdOwner', [updateHousehold()]));
+        const conditions = permissionRules(ability).at(-1)?.conditions;
 
         expect(conditions).toEqual({
           id: 'hh-1',
@@ -3087,11 +3088,252 @@ describe('AbilityFactory', () => {
       it('still admits admins, which is why the transfer gate cannot live on this subject', () => {
         // `accessibleBy` unions every rule for an (action, subject) pair, so a
         // narrower Household+update rule could not have restricted this to owners.
-        const conditions = factory.createForUser(holder('HouseholdAdmin', [updateHousehold()])).rules.at(-1)
-          ?.conditions as { members: { some: { role: { is: { role: { is: { name: { in: string[] } } } } } } } };
+        const ability = factory.createForUser(holder('HouseholdAdmin', [updateHousehold()]));
+        const conditions = permissionRules(ability).at(-1)?.conditions as {
+          members: { some: { role: { is: { role: { is: { name: { in: string[] } } } } } } };
+        };
 
         expect(conditions.members.some.role.is.role.is.name.in).toContain('HouseholdAdmin');
       });
+    });
+  });
+
+  // An event chat is read by the event's attendees and by nobody else, the
+  // elevated users included. The factory denies the chat message type after
+  // the server and household roles, and an event role's grant, bound to the
+  // event attended, is the one thing that lets an attendee in.
+  describe('event chat, which only event attendance grants (#1543)', () => {
+    // The chat read as an event role holds it: bound to the event attended.
+    const readChat = makePermission({
+      id: 'perm-read-chat',
+      slug: 'read:event_chat_message',
+      action: Action.read,
+      subject: ResourceType.EventChatMessage,
+      conditions: { eventId: '{{ eventId }}' },
+      riskLevel: RiskLevel.Medium,
+    });
+    const shipped = (roleName: SystemRole) =>
+      makeRole(roleName, [...ROLE_PERMISSION_CATALOG[roleName]].map(catalogPermission));
+    const attending = (eventId: string) => ({ eventId, role: makeRole(SystemRole.EventParticipant, [readChat]) });
+    const rolesScoped = (scope: RoleScope) => Object.values(SystemRole).filter((role) => ROLE_SCOPE[role] === scope);
+    // A fresh object each time: `subject()` tags the object it is given.
+    const chatIn = (eventId: string, rest: Record<string, unknown> = {}) =>
+      subject(ResourceType.EventChatMessage, { eventId, ...rest });
+
+    it('refuses the Owner, an Admin and a Moderator who do not attend the event, on read and on every action', () => {
+      for (const roleName of [SystemRole.Owner, SystemRole.Admin, SystemRole.Moderator]) {
+        // Elevation adds a server role to the base one, so both are held.
+        const ability = factory.createForUser(makeUser({ roles: [shipped(SystemRole.User), shipped(roleName)] }));
+
+        expect({ roleName, reads: ability.can(Action.read, ResourceType.EventChatMessage) }).toEqual({
+          roleName,
+          reads: false,
+        });
+        expect({ roleName, reads: ability.can(Action.read, chatIn('e1')) }).toEqual({ roleName, reads: false });
+        // What a list query is filtered by: no row at all.
+        expect(accessibleBy(ability, Action.read).ofType('EventChatMessage')).toEqual({ OR: [] });
+
+        for (const action of Object.values(Action)) {
+          expect({ roleName, action, can: ability.can(action, ResourceType.EventChatMessage) }).toEqual({
+            roleName,
+            action,
+            can: false,
+          });
+          expect({ roleName, action, can: ability.can(action, chatIn('e1')) }).toEqual({
+            roleName,
+            action,
+            can: false,
+          });
+        }
+
+        // The denial is on chat alone: the role's reach elsewhere stands.
+        expect(ability.can(Action.read, asEntity('Household', { id: 'hh-1' }))).toBe(true);
+      }
+    });
+
+    // An elevated user who attends is admitted as that attendee: the Owner's
+    // manage:all and the read of every type an Admin and a Moderator hold add
+    // nothing, and take nothing away.
+    it.each([SystemRole.Owner, SystemRole.Admin, SystemRole.Moderator])(
+      'admits the %s attending as EventParticipant to that event only',
+      (roleName) => {
+        const ability = factory.createForUser(
+          makeUser({ roles: [shipped(SystemRole.User), shipped(roleName)], eventsAttended: [attending('e1')] }),
+        );
+
+        expect(ability.can(Action.read, chatIn('e1'))).toBe(true);
+        expect(ability.can(Action.read, chatIn('e2'))).toBe(false);
+        expect(accessibleBy(ability, Action.read).ofType('EventChatMessage')).toEqual({ OR: [{ eventId: 'e1' }] });
+        // A route's type-level gate passes for an attendee; the row decides.
+        expect(ability.can(Action.read, ResourceType.EventChatMessage)).toBe(true);
+        // Attending gives back what the event role grants, and nothing more.
+        expect(ability.can(Action.delete, chatIn('e1'))).toBe(false);
+      },
+    );
+
+    // A host's removal deletes the attendee's role and keeps the row, so the
+    // graph still lists the event, with no role to grant anything.
+    it('refuses an elevated attendee whom a host removed from the event', () => {
+      const ability = factory.createForUser(
+        makeUser({
+          roles: [shipped(SystemRole.User), shipped(SystemRole.Admin)],
+          eventsAttended: [{ eventId: 'e1', role: null }],
+        }),
+      );
+
+      expect(ability.can(Action.read, ResourceType.EventChatMessage)).toBe(false);
+      expect(ability.can(Action.read, chatIn('e1'))).toBe(false);
+    });
+
+    it("gives a household owner of the event's household nothing on chat", () => {
+      const owning = { householdId: 'hh-1', role: shipped(SystemRole.HouseholdOwner) };
+      // With no server role beyond the base one, and elevated on top of it.
+      for (const serverRoles of [[SystemRole.User], [SystemRole.User, SystemRole.Admin]]) {
+        const ability = factory.createForUser(makeUser({ roles: serverRoles.map(shipped), householdMember: [owning] }));
+
+        expect({ serverRoles, reads: ability.can(Action.read, ResourceType.EventChatMessage) }).toEqual({
+          serverRoles,
+          reads: false,
+        });
+        expect({
+          serverRoles,
+          reads: ability.can(Action.read, chatIn('e1', { event: { householdId: 'hh-1' } })),
+        }).toEqual({ serverRoles, reads: false });
+        expect(accessibleBy(ability, Action.read).ofType('EventChatMessage')).toEqual({ OR: [] });
+      }
+    });
+
+    // No household role ships with either permission. An Owner's edits to the
+    // permission catalog could give a household role one, and the factory
+    // refuses it all the same: the household roles come before the denial.
+    it("admits nothing through a household role holding a chat permission bound to the event's household (#1543)", () => {
+      const readHouseholdChat = makePermission({
+        action: Action.read,
+        subject: ResourceType.EventChatMessage,
+        conditions: { event: { is: { householdId: '{{ householdId }}' } } },
+      });
+      const owning = {
+        householdId: 'hh-1',
+        role: makeRole(SystemRole.HouseholdOwner, [readHouseholdChat, catalogPermission('read:public_content')]),
+      };
+      const chatOfHousehold = (eventId: string) => chatIn(eventId, { event: { householdId: 'hh-1' } });
+
+      const ability = factory.createForUser(makeUser({ roles: [shipped(SystemRole.User)], householdMember: [owning] }));
+
+      expect(ability.can(Action.read, ResourceType.EventChatMessage)).toBe(false);
+      expect(ability.can(Action.read, chatOfHousehold('e1'))).toBe(false);
+      expect(accessibleBy(ability, Action.read).ofType('EventChatMessage')).toEqual({ OR: [] });
+      // The role's read of every type still reaches the others.
+      expect(ability.can(Action.read, asEntity('Household', { id: 'hh-2' }))).toBe(true);
+
+      // Attending one of the household's events opens that event's chat only.
+      const attendee = factory.createForUser(
+        makeUser({ householdMember: [owning], eventsAttended: [attending('e1')] }),
+      );
+
+      expect(attendee.can(Action.read, chatOfHousehold('e1'))).toBe(true);
+      expect(attendee.can(Action.read, chatOfHousehold('e2'))).toBe(false);
+      expect(accessibleBy(attendee, Action.read).ofType('EventChatMessage')).toEqual({ OR: [{ eventId: 'e1' }] });
+    });
+
+    // The event roles are applied after the denial, so a grant of theirs that
+    // reached chat beyond the event attended would undo it.
+    it('lets no shipped event role reach the chat of an event its holder does not attend', () => {
+      for (const roleName of rolesScoped('event')) {
+        const ability = factory.createForUser(
+          makeUser({ eventsAttended: [{ eventId: 'e1', role: shipped(roleName) }] }),
+        );
+
+        expect({ roleName, reads: ability.can(Action.read, chatIn('e2')) }).toEqual({ roleName, reads: false });
+      }
+    });
+
+    // A direct permission's rule is on the row's `resourceType`, and its
+    // conditions render with the user alone.
+    const directOnChat = (overrides: Partial<Omit<UserPermissionWithPermission, 'permission'>> = {}) =>
+      makeUserPermission({
+        resourceType: ResourceType.EventChatMessage,
+        ...overrides,
+        permission: { id: 'perm-chat-direct', action: Action.read, subject: ResourceType.EventChatMessage },
+      });
+
+    it('honours a direct denial on chat over an attendee grant', () => {
+      const ability = factory.createForUser(
+        makeUser({ eventsAttended: [attending('e1')], permissions: [directOnChat({ inverted: true })] }),
+      );
+
+      expect(ability.can(Action.read, chatIn('e1'))).toBe(false);
+      expect(ability.can(Action.read, ResourceType.EventChatMessage)).toBe(false);
+      expect(accessibleBy(ability, Action.read).ofType('EventChatMessage')).toEqual({ OR: [] });
+    });
+
+    it('skips a direct allow on chat, as it skips a wildcard', () => {
+      const ability = factory.createForUser(
+        makeUser({
+          permissions: [
+            directOnChat(),
+            directOnChat({ resourceId: 'message-1' }),
+            // A direct permission that allows, given on a permission that is a
+            // denial, is an allow.
+            makeUserPermission({
+              inverted: false,
+              resourceType: ResourceType.EventChatMessage,
+              permission: { action: Action.read, subject: ResourceType.EventChatMessage, inverted: true },
+            }),
+          ],
+        }),
+      );
+
+      expect(ability.can(Action.read, ResourceType.EventChatMessage)).toBe(false);
+      expect(ability.can(Action.read, chatIn('e1', { id: 'message-1' }))).toBe(false);
+      expect(permissionRules(ability)).toHaveLength(0);
+    });
+
+    it('refuses a plugin holding read:public_content', () => {
+      const ability = factory.createForPlugin({
+        plugin: { id: 'plugin-1', slug: 'demo-plugin' },
+        unit: { scopeType: 'Server' },
+        servable: true,
+        corePermissions: [catalogPermission('read:public_content')],
+        ownGrantSlugs: [],
+      });
+
+      expect(ability.can(Action.read, ResourceType.EventChatMessage)).toBe(false);
+      expect(ability.can(Action.read, chatIn('e1'))).toBe(false);
+      expect(accessibleBy(ability, Action.read).ofType('EventChatMessage')).toEqual({ OR: [] });
+      // The grant still reads every other type.
+      expect(ability.can(Action.read, asEntity('Household', { id: 'hh-1' }))).toBe(true);
+    });
+
+    it('refuses an API key whatever its owner attends', () => {
+      const manageAll = catalogPermission('manage:all');
+      const keyOwner = makeUser({
+        roles: [makeRole(SystemRole.Owner, [manageAll])],
+        eventsAttended: [attending('e1')],
+      });
+      // A key scope on `all` is refused when a key is made, and one an
+      // existing row carries builds its allow all the same.
+      const key = makeApiKey([makeScope(readChat), makeScope(manageAll)]);
+
+      const [ownerHalf, keyHalf] = factory.createForApiKeyActor(keyOwner, key);
+
+      // The key's owner reads the chat they attend, so the key's half refuses.
+      expect(ownerHalf.can(Action.read, chatIn('e1'))).toBe(true);
+      expect(keyHalf.can(Action.read, chatIn('e1'))).toBe(false);
+      expect(keyHalf.can(Action.read, ResourceType.EventChatMessage)).toBe(false);
+      expect(accessibleBy(keyHalf, Action.read).ofType('EventChatMessage')).toEqual({ OR: [] });
+      // Both key scopes built their allow: the key reaches every other type.
+      expect(permissionRules(keyHalf)).toHaveLength(2);
+      expect(keyHalf.can(Action.read, asEntity('Household', { id: 'hh-1' }))).toBe(true);
+    });
+
+    it('leaves the system actor manage:all', () => {
+      const ability = factory.createForSystem('cascade:event-delete');
+
+      expect(ability.rules).toEqual([{ action: Action.manage, subject: 'all' }]);
+      expect(ability.can(Action.read, ResourceType.EventChatMessage)).toBe(true);
+      expect(ability.can(Action.delete, chatIn('e1'))).toBe(true);
+      expect(accessibleBy(ability, Action.read).ofType('EventChatMessage')).toEqual({});
     });
   });
 
@@ -3183,8 +3425,8 @@ describe('AbilityFactory', () => {
         // Structural assertion (see #155 note above): the rendered clause is
         // what Prisma evaluates; an in-memory can() on relation-shaped data
         // would be a false signal.
-        expect(ability.rules.at(-1)?.conditions).toEqual({ householdId: 'hh-x' });
-        expect(stringLeaves(ability.rules.at(-1)?.conditions)).not.toContain('');
+        expect(permissionRules(ability).at(-1)?.conditions).toEqual({ householdId: 'hh-x' });
+        expect(stringLeaves(permissionRules(ability).at(-1)?.conditions)).not.toContain('');
       });
 
       it('exposes plugin identity to templates ({{ plugin.slug }} / {{ plugin.id }})', () => {
@@ -3200,7 +3442,7 @@ describe('AbilityFactory', () => {
           }),
         );
 
-        expect(ability.rules.at(-1)?.conditions).toEqual({ source: 'demo-plugin' });
+        expect(permissionRules(ability).at(-1)?.conditions).toEqual({ source: 'demo-plugin' });
       });
 
       it('honours inverted core permissions as cannot-rules', () => {
@@ -3445,6 +3687,19 @@ function grantOf(
     ...overrides,
     permission: { id, action, subject, conditions, fields, inverted, slug, riskLevel, retiredAt },
   });
+}
+
+/**
+ * The rules an ability builds from permissions, without the factory's own
+ * denial of the attendance-only types, which every user, plugin and API key
+ * ability carries (#1543). A test that counts an ability's rules, or reads
+ * one by its place, means these.
+ */
+function permissionRules(ability: AppAbility): AppAbility['rules'] {
+  return ability.rules.filter(
+    ({ action, subject: type, inverted, conditions }) =>
+      !(inverted && action === Action.manage && typeof type === 'string' && isAttendanceOnly(type) && !conditions),
+  );
 }
 
 function makeApiKey(scopes: ApiKeyScopeWithPermission[] = []): ApikeyWithScopes {

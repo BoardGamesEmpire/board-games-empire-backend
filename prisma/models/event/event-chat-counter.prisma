@@ -1,0 +1,16 @@
+/**
+ * The last sequence handed out in an event's event chat (#1543). One row per
+ * event, created by the first message: the single statement in
+ * `chat-sequence.ts` inserts it or bumps it, so two racing sends queue on the
+ * row and get consecutive numbers instead of colliding on
+ * `EventChatMessage`'s sequence. It carries no timestamps, so that statement
+ * is all a write needs.
+ */
+model EventChatCounter {
+  event   Event  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  eventId String @id @map("event_id")
+
+  lastSequence Int @default(0) @map("last_sequence")
+
+  @@map("event_chat_counters")
+}

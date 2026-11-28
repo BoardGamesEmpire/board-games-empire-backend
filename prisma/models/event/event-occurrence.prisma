@@ -30,6 +30,9 @@ model EventOccurrence {
   gameVotes         EventGameVote[]
   games             EventGame[]
 
+  // Chat messages tagged with this occurrence (#1543).
+  chatMessages EventChatMessage[]
+
   // Set when status transitions from Proposed → Confirmed.
   // Null on occurrences created directly as Confirmed (Fixed/MultiDay modes).
   confirmedAt DateTime? @map("confirmed_at") @db.Timestamptz(3)

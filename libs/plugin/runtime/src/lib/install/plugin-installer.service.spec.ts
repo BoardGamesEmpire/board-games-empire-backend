@@ -693,6 +693,26 @@ describe('PluginInstallerService', () => {
 
       await expect(service.install(input())).rejects.toBeInstanceOf(PluginInstallForbiddenPermissionError);
     });
+
+    // A plugin's ability denies the attendance-only types after every allow,
+    // so a consent to one could never confer anything (#1543).
+    it('rejects a core check whose Permission row is on an attendance-only type (#1543)', async () => {
+      const manifest = buildPluginManifest();
+      manifest.permissions.checks = [
+        ...manifest.permissions.checks,
+        { slug: 'read:event_chat_message', required: false, reason: { en: 'Reads event chats.' } },
+      ];
+      await writeManifest(manifest);
+      db.permission.findMany.mockResolvedValue([
+        feedbackRead,
+        { slug: 'read:event_chat_message', subject: 'EventChatMessage', riskLevel: RiskLevel.Medium } as Permission,
+      ]);
+
+      await expect(service.install(input())).rejects.toMatchObject({
+        constructor: PluginInstallForbiddenPermissionError,
+        permissionSlug: 'read:event_chat_message',
+      });
+    });
   });
 
   describe('authority and core-permission existence', () => {

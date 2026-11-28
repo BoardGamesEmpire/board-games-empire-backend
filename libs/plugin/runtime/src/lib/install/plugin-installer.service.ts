@@ -42,6 +42,7 @@ import { MODULE_OPTIONS_TOKEN } from '../plugin-module.options';
 import { MANIFEST_CATEGORY_TO_PRISMA } from '../registry/plugin-category.map';
 import { CLEARED_STAGED_UPDATE } from '../update/staged-update.columns';
 import {
+  collectAttendanceOnlyViolations,
   collectUnboundedUnitConsentViolations,
   collectWildcardSubjectViolations,
   compareExactReentry,
@@ -480,6 +481,7 @@ export class PluginInstallerService {
   ): void {
     const [violation] = [
       ...collectWildcardSubjectViolations(validated, corePermissions),
+      ...collectAttendanceOnlyViolations(validated, corePermissions),
       ...collectUnboundedUnitConsentViolations(validated, corePermissions),
     ];
 

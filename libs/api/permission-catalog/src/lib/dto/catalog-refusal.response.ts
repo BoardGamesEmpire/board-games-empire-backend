@@ -134,6 +134,22 @@ export class SubjectHasNoModelProblemDto implements ProblemOf<'subject-has-no-mo
   subject!: string;
 }
 
+export class AttendanceOnlyConditionsProblemDto implements ProblemOf<'attendance-only-conditions'> {
+  @ApiProperty({
+    enum: ['attendance-only-conditions'],
+    description:
+      'The permission is on a resource type only event attendance reaches, such as event chat messages, and its ' +
+      'condition differs from the one the server ships. Its condition cannot be changed.',
+  })
+  kind!: 'attendance-only-conditions';
+
+  @ApiProperty({ description: SLUG_DESCRIPTION })
+  slug!: string;
+
+  @ApiProperty({ description: 'The resource type, such as EventChatMessage.' })
+  subject!: string;
+}
+
 export class QueryRejectedProblemDto implements ProblemOf<'query-rejected'> {
   @ApiProperty({
     enum: ['query-rejected'],
@@ -164,6 +180,7 @@ const PROBLEM_MODELS: Readonly<Record<EntryProblem['kind'], abstract new () => o
   'reads-past-reach': ReadsPastReachProblemDto,
   'names-other-roles': NamesOtherRolesProblemDto,
   'subject-has-no-model': SubjectHasNoModelProblemDto,
+  'attendance-only-conditions': AttendanceOnlyConditionsProblemDto,
   'query-rejected': QueryRejectedProblemDto,
 };
 

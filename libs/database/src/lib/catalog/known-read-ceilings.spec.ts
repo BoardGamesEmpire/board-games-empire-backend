@@ -21,8 +21,11 @@ import { ROLE_PERMISSION_CATALOG } from './role-permission.catalog';
  *   caller, `householdId` per membership, `eventId` per attendance.
  *
  * The wildcards sit under `all` and apply to every subject below it; they are
- * not repeated. A subject mapped to `{}` is one no catalog role reaches except
- * through a wildcard.
+ * not repeated. They don't reach an attendance-only type, such as
+ * `EventChatMessage`: the ability factory denies those to every pass but the
+ * event roles', so only the lines under the subject read it (#1543). A
+ * subject mapped to `{}` is one no catalog role reaches except through a
+ * wildcard.
  *
  * Each role is shown alone. A caller's ceiling is the union of the roles they
  * hold, and every signed-in user except an anonymous guest holds `User`
@@ -298,6 +301,15 @@ const KNOWN_READ_CEILINGS: PinnedReadCeilings = {
     EventParticipant: { 'read:event_availability_vote': 'binds eventId' },
     EventGuest: { 'read:event_availability_vote': 'binds eventId' },
     EventSpectator: { 'read:event_availability_vote': 'binds eventId' },
+  },
+  EventChatMessage: {
+    EventHost: { 'read:event_chat_message': 'binds eventId' },
+    EventCoHost: { 'read:event_chat_message': 'binds eventId' },
+    EventOrganizer: { 'read:event_chat_message': 'binds eventId' },
+    EventModerator: { 'read:event_chat_message': 'binds eventId' },
+    EventParticipant: { 'read:event_chat_message': 'binds eventId' },
+    EventGuest: { 'read:event_chat_message': 'binds eventId' },
+    EventSpectator: { 'read:event_chat_message': 'binds eventId' },
   },
   EventGame: {
     HouseholdOwner: { 'read:event_game:household': 'binds householdId' },

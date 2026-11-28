@@ -19,7 +19,9 @@ export type ConsentUngrantableCause =
   | 'unbound_unit_scope'
   /**
    * Plugin administration (core, or a declared permission whose bare slug
-   * mimics it), or a declared permission claiming the `all` subject.
+   * mimics it), a declared permission claiming the `all` subject, or a core
+   * permission on an attendance-only resource type, which only event
+   * attendance reaches and no plugin attends (#1543).
    */
   | 'categorical_exclusion';
 
@@ -30,7 +32,9 @@ export type ConsentUngrantableCause =
  * (#1150).
  *
  * Causes are tested in a fixed order: categorical exclusion, no catalog row,
- * wildcard subject, unbound unit scope.
+ * a core permission on an attendance-only resource type (a categorical
+ * exclusion that needs the row to tell), wildcard subject, unbound unit
+ * scope.
  */
 export function consentUngrantableCause(input: {
   /** The catalog's risk for the slug; undefined when it has no row. */
@@ -72,11 +76,15 @@ export function consentUngrantableCause(input: {
     return 'no_catalog_row';
   }
 
-  const { wildcardSubject, unboundedUnitScope } = consentCatalogFlags({
+  const { wildcardSubject, attendanceOnlySubject, unboundedUnitScope } = consentCatalogFlags({
     origin: check.origin,
     decidingScope,
     corePermission,
   });
+
+  if (attendanceOnlySubject) {
+    return 'categorical_exclusion';
+  }
 
   if (wildcardSubject) {
     return 'wildcard_subject';

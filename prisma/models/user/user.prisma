@@ -72,6 +72,11 @@ model User {
 
   occurrencesCancelled EventOccurrence[] @relation("CancelledBy")
 
+  // Event chat (#1543). Deleting the account keeps its messages without an
+  // author (#1277) and removes its reactions.
+  chatMessagesAuthored EventChatMessage[]  @relation("EventChatMessagesAuthored")
+  chatReactions        EventChatReaction[]
+
   loansGiven    GameLoan[] @relation("LoansGiven")
   loansReceived GameLoan[] @relation("LoansReceived")
 

@@ -72,6 +72,24 @@ describe('consentUngrantableCause (#1150)', () => {
     ).toBe('wildcard_subject');
   });
 
+  // Only event attendance reaches an event chat, and a plugin's ability
+  // denies the type after every allow, so no consent could confer it.
+  it('a core requested permission on an attendance-only type is ungrantable: categorical_exclusion (#1543)', () => {
+    expect(
+      consentUngrantableCause({
+        check: request('read:event_chat_message'),
+        decidingScope: PluginGrantScope.Server,
+        corePermission: corePermission('read:event_chat_message', {
+          action: 'read',
+          subject: 'EventChatMessage',
+          conditions: { eventId: '{{ eventId }}' },
+        }),
+        catalogRisk: RiskLevel.Medium,
+        source: 'active',
+      }),
+    ).toBe('categorical_exclusion');
+  });
+
   it('a core requested permission with no conditions at household scope is ungrantable: unbound_unit_scope (#591)', () => {
     expect(
       consentUngrantableCause({

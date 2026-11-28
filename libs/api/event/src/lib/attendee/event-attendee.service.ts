@@ -251,15 +251,16 @@ export class EventAttendeeService {
   /**
    * Removes an attendee from the event, keeping their row (#551).
    *
-   * The row is marked removed rather than deleted: the nominations and votes
-   * it made keep their author, and accepting a new invite revives it (#742).
-   * Nothing else that points at the row is touched, so no key into it can
-   * refuse the removal. Their role is deleted, which takes every event grant
-   * with it, since event grants render only from that role. The invites they
-   * sent to the event that are still outstanding are revoked with it, and any
-   * still open to them (#742); each is announced after commit. Then they are
-   * out of the event, as someone not attending is: the games they supply are
-   * brought into line in the same transaction (`syncSuppliedGames`).
+   * The row is marked removed rather than deleted, so no key into it can
+   * refuse the removal: the nominations and votes it made keep their author,
+   * and accepting a new invite revives it (#742). Their role is deleted,
+   * which takes every event grant with it, since event grants render only
+   * from that role, and any host mute on them is lifted, so adding them back
+   * starts clean (#1543). The invites they sent to the event that are still
+   * outstanding are revoked with it, and any still open to them (#742); each
+   * is announced after commit. Then they are out of the event, as someone not
+   * attending is: the games they supply are brought into line in the same
+   * transaction (`syncSuppliedGames`).
    */
   async removeAttendee(eventId: string, attendeeId: string): Promise<AttendeeWithGames> {
     const initiatedAt = new Date();
@@ -308,6 +309,13 @@ export class EventAttendeeService {
         });
 
         await tx.eventAttendeeRole.deleteMany({ where: { eventAttendeeId: marked.id } });
+        // Their host mute goes with them, so adding them back starts clean.
+        // Their read position and chat mute stay: those are theirs to set
+        // (#1543).
+        await tx.eventChatState.updateMany({
+          where: { attendeeId: marked.id },
+          data: { hostMutedAt: null, hostMutedUntil: null },
+        });
 
         const removed = await tx.eventAttendee.findUniqueOrThrow({
           where: { id: marked.id },

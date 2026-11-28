@@ -137,6 +137,30 @@ describe('checkCatalogEntries', () => {
     });
   });
 
+  it("refuses an edit of a chat permission's condition that reaches past the event attended (#1543)", () => {
+    const after = withConditions(shipped, 'read:event_chat_message', {
+      OR: [{ eventId: '{{ eventId }}' }, { deletedAt: null }],
+    });
+
+    expect(checkCatalogEntries(shipped, after, [{ slug: 'read:event_chat_message' }])).toEqual({
+      problems: [
+        { kind: 'attendance-only-conditions', slug: 'read:event_chat_message', subject: ResourceType.EventChatMessage },
+      ],
+      warnings: [],
+    });
+  });
+
+  it("refuses an edit that narrows a chat permission's condition, which chat access would not see (#1543)", () => {
+    const after = withConditions(shipped, 'read:event_chat_message', {
+      eventId: '{{ eventId }}',
+      authorId: '{{ user.id }}',
+    });
+
+    expect(checkCatalogEntries(shipped, after, [{ slug: 'read:event_chat_message' }]).problems).toEqual([
+      { kind: 'attendance-only-conditions', slug: 'read:event_chat_message', subject: ResourceType.EventChatMessage },
+    ]);
+  });
+
   it('warns, without refusing, when a role keeps approve but loses revoke:as-admin (#772)', () => {
     // The warning is keyed on the slug the role still holds, and the revoked
     // grant is the target: matching it through `partners` is what keeps the

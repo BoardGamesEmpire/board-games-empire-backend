@@ -4,6 +4,7 @@ import { UNIT_BOUND_RULES, UNIT_ID_OFF_ID_COLUMN_RULES } from '@bge/testing';
 import type { StaticAnalysisFinding } from '@boardgamesempire/plugin-analysis';
 import { buildPluginManifest, validatePluginManifest } from '@boardgamesempire/plugin-manifest';
 import {
+  collectAttendanceOnlyViolations,
   collectUnboundedUnitConsentViolations,
   collectWildcardSubjectViolations,
   compareExactReentry,
@@ -39,6 +40,33 @@ describe('consent-gates', () => {
       ]);
 
       expect(collectWildcardSubjectViolations(validated, corePermissions)).toEqual([]);
+    });
+  });
+
+  // Only event attendance reaches an event chat, and a plugin's ability
+  // denies the type after every allow, so the install refuses to ask.
+  describe('collectAttendanceOnlyViolations (#1543)', () => {
+    it('flags a core check whose Permission row is on an attendance-only type', () => {
+      const validated = validate(buildPluginManifest());
+      const corePermissions = new Map<string, Permission>([
+        [
+          'feedback:read',
+          { slug: 'feedback:read', subject: 'EventChatMessage', riskLevel: RiskLevel.Medium } as Permission,
+        ],
+      ]);
+
+      expect(collectAttendanceOnlyViolations(validated, corePermissions)).toEqual([
+        expect.objectContaining({ permissionSlug: 'feedback:read' }),
+      ]);
+    });
+
+    it('accepts a row on any other type', () => {
+      const validated = validate(buildPluginManifest());
+      const corePermissions = new Map<string, Permission>([
+        ['feedback:read', { slug: 'feedback:read', subject: 'Event', riskLevel: RiskLevel.Medium } as Permission],
+      ]);
+
+      expect(collectAttendanceOnlyViolations(validated, corePermissions)).toEqual([]);
     });
   });
 

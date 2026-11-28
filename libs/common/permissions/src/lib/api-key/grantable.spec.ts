@@ -233,6 +233,25 @@ describe('grantablePermissions and mayKeyHold (#1417)', () => {
     expect(mayKeyHold(admin, readPublicContent.id)).toBe(false);
   });
 
+  // Only event attendance grants an event chat, and a key attends nothing:
+  // every key's ability denies the type, so the list doesn't offer it.
+  it('never offers a chat permission to a key, even to an attending owner (#1543)', () => {
+    const readChat = makePermission({
+      id: 'perm-read-chat',
+      slug: 'read:event_chat_message',
+      subject: ResourceType.EventChatMessage,
+      conditions: { eventId: '{{ eventId }}' },
+      riskLevel: RiskLevel.Medium,
+    });
+    const attendee = makeOwner({
+      eventsAttended: [{ eventId: 'e1', role: makeRole('EventParticipant', [readChat, readGame]) }],
+    });
+
+    // The attendance still offers what else its role holds.
+    expect(grantablePermissions(attendee).map(({ slug }) => slug)).toEqual(['read:game']);
+    expect(mayKeyHold(attendee, readChat.id)).toBe(false);
+  });
+
   // Risk adds friction at create and excludes nothing.
   it('offers a Critical permission with its riskLevel', () => {
     const manageSafeHttpPolicy = catalogPermission('manage:safe_http_policy');
@@ -274,7 +293,42 @@ describe('grantablePermissions and mayKeyHold (#1417)', () => {
         });
       }
 
-      expect(factory.createForApiKey(owner, keyScopedTo(notHeld)).rules).toEqual([]);
+      // A key scope its owner doesn't hold builds nothing: all the key's
+      // ability carries is the denial of the attendance-only types (#1543).
+      expect(factory.createForApiKey(owner, keyScopedTo(notHeld)).rules).toEqual([
+        { action: Action.manage, subject: ResourceType.EventChatMessage, inverted: true },
+      ]);
+    });
+
+    // The attendance-only test reads the rule's subject, which for a
+    // direct permission is its row's resourceType, so the list and the
+    // key's rules agree both ways when that differs from the permission's
+    // subject (#1543).
+    it.each([
+      [
+        'an attendance-only permission on a row of an ordinary type',
+        ResourceType.EventChatMessage,
+        ResourceType.Game,
+        true,
+      ],
+      [
+        'an ordinary permission on a row of an attendance-only type',
+        ResourceType.Game,
+        ResourceType.EventChatMessage,
+        false,
+      ],
+    ])('agrees with the factory on %s (#1543)', (_name, subject, resourceType, holds) => {
+      const permission = makePermission({ id: `perm-${subject}-${resourceType}`, slug: 'read:mixed', subject });
+      const direct = { ...makeGrant(permission), resourceType };
+      const directOwner = makeOwner({ permissions: [direct] });
+      const builds = new AbilityFactory()
+        .createForApiKey(directOwner, keyScopedTo(permission))
+        .rules.some(({ inverted }) => !inverted);
+
+      expect({ mayKeyHold: mayKeyHold(directOwner, permission.id), builds }).toEqual({
+        mayKeyHold: holds,
+        builds: holds,
+      });
     });
   });
 });

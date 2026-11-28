@@ -242,7 +242,7 @@ A role a user holds within one household or one event, whose permissions reach o
 _Avoid_: membership role, attendee role
 
 **Owner**:
-The server-wide role with full control of a server. Every other owner is qualified: household owner, key owner, owner of a record.
+The server-wide role with full control of a server (except event chats it does not attend, #1553). Every other owner is qualified: household owner, key owner, owner of a record.
 _Avoid_: system owner, site owner, server owner; owner on its own for anything but this role
 
 **Staff**:
@@ -254,12 +254,12 @@ Holders of the Owner or Admin role, who install plugins and decide server-wide c
 _Avoid_: admins on its own
 
 **Moderator**:
-A server-wide role for keeping content in order: it can read everything and remove or correct content, but cannot change the server's settings.
+A server-wide role for keeping content in order: it can read everything (except event chats it does not attend, #1553) and remove or correct content, but cannot change the server's settings.
 _Avoid_: moderator on its own for the event role (say event moderator)
 
 **Elevation**:
-Gaining a server role on top of the base role, never in place of it. An elevated user holds the Owner, Admin or Moderator role.
-_Avoid_: promotion; elevation for a nomination joining an event's lineup (say added to the lineup)
+Gaining a server role on top of the base role, never in place of it. The elevated users are those holding the Owner, Admin or Moderator role.
+_Avoid_: promotion; staff for the elevated users (that leaves out the Owner); elevation for a nomination joining an event's lineup (say added to the lineup)
 
 **Custom role**:
 Planned: a role defined on a running server rather than shipped with the code.
@@ -554,6 +554,32 @@ _Avoid_: participation status, attendee status; confirmed (to mean attending)
 **Event policy**:
 An event's rules: who may invite, how many may come, which games are allowed, how games get chosen and how voting works. An occurrence can override them for its day, as far as the event's occurrence override scope allows for which games are allowed and how many may come.
 _Avoid_: event settings, event rules
+
+**Event chat**:
+An event's one conversation, held among its attendees.
+_Avoid_: event messages, group chat
+
+**Chat message**:
+One message in an event chat. When it is deleted, a placeholder stays in its place and its text is erased.
+
+**Occurrence tag**:
+The occurrence a chat message was sent from, set automatically. It never controls who can read the message.
+
+**Live topic**:
+Planned: what a client subscribes to on the live namespace to receive changes as they happen, such as an event chat's new messages. It is not a domain event: it carries changes out to clients, where a domain event is announced within the server.
+_Avoid_: topic on its own (that is an inbound stream entry); domain event; gateway (it also names WebSocket endpoints and DataGateways)
+
+**Live namespace**:
+Planned: the single WebSocket namespace through which a client subscribes to every live topic. Game search keeps a namespace of its own.
+_Avoid_: gateway on its own (it also names WebSocket endpoints and DataGateways)
+
+**Host mute**:
+A host, co-host or event moderator stopping one attendee from posting in an event chat.
+_Avoid_: mute on its own
+
+**Chat mute**:
+A user silencing an event chat's notifications for themselves.
+_Avoid_: mute on its own
 
 **Occurrence override scope**:
 How far an event's occurrences may change its restrictions, meaning which games are allowed and how many may come: not at all, only narrower, or freely, including lifting a restriction for that day.
@@ -958,7 +984,7 @@ The form a DataGateway's free text arrives in, such as plain text, HTML or BBCod
 
 **Topic**:
 Planned: a named stream of changes that an outside service pushes in through a plugin or DataGateway, such as a game being updated. Users can subscribe to a topic and read it as a feed, as a personal choice rather than a consent.
-_Avoid_: inbound event, webhook (that is outbound), feed or subscription on their own
+_Avoid_: inbound event, webhook (that is outbound), feed or subscription on their own; topic for a live topic (say live topic)
 
 ### Getting games in
 

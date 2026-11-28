@@ -1,6 +1,8 @@
 import type { TemplateSpans } from 'mustache';
 import * as Mustache from 'mustache';
+import { isDeepStrictEqual } from 'node:util';
 import { hasBoundingConditions } from '../utils/permission-conditions';
+import { isAttendanceOnly } from './attendance-only';
 import type { PermissionSeedDefinition, RoleScope } from './seed-definitions';
 
 /**
@@ -35,7 +37,9 @@ import type { PermissionSeedDefinition, RoleScope } from './seed-definitions';
  * instance check can evaluate it (#458). See
  * {@link findShorthandRelationConditions}. And one judges the event roles:
  * every grant they hold names the event it was rendered for (#458). See
- * {@link findEventSpanningGrants}. The reach guard, which judges the reads
+ * {@link findEventSpanningGrants}. One judges a permission on an
+ * attendance-only type alone: its conditions are the ones it ships with
+ * (#1543). See {@link findUnpinnedAttendanceOnlyConditions}. The reach guard, which judges the reads
  * every user or guest holds against the `reach` their rows carry, sits beside
  * the read classification it uses: `findReadsIgnoringReach` in
  * `catalog-read-ceilings.ts` (#495).
@@ -659,4 +663,38 @@ function scopeOf(role: string, roleScope: Readonly<Record<string, RoleScope>>): 
   }
 
   return scope;
+}
+
+/**
+ * The attendance-only guard (#1543): a permission on an attendance-only type
+ * whose conditions are not the ones `shipped` gives the same slug, judged
+ * whoever holds it. A slug `shipped` lacks is found too.
+ *
+ * Widening is what the event-binding guard misses. It asks only that a
+ * condition name `{{ eventId }}` somewhere, which one branch can satisfy while
+ * another reaches past the event:
+ * `{ OR: [{ eventId: '{{ eventId }}' }, { deletedAt: null }] }`. An event
+ * role's grant is the only rule that lets anyone into an event chat past the
+ * ability factory's denial, so it must stay bound to the event attended.
+ *
+ * Narrowing would mislead instead. Chat access is decided from which chat
+ * permissions an event role holds, not from their conditions
+ * (`loadChatFacts`), so a read narrowed to one's own messages would still
+ * read the whole chat. Holding each permission to its shipped conditions
+ * rules out both. Key order does not count: the database stores a condition
+ * as `jsonb`, which reorders its keys.
+ */
+export function findUnpinnedAttendanceOnlyConditions(
+  catalog: readonly PermissionSeedDefinition[],
+  shipped: readonly PermissionSeedDefinition[],
+): { slug: string; subject: string }[] {
+  const shippedConditions = new Map(shipped.map(({ slug, conditions }) => [slug, conditions] as const));
+
+  return catalog
+    .filter(({ subject }) => isAttendanceOnly(subject))
+    .filter(
+      ({ slug, conditions }) =>
+        !shippedConditions.has(slug) || !isDeepStrictEqual(conditions ?? {}, shippedConditions.get(slug) ?? {}),
+    )
+    .map(({ slug, subject }) => ({ slug, subject }));
 }

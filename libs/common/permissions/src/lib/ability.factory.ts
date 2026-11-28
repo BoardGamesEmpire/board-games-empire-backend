@@ -1,6 +1,6 @@
 import { clonePluginUnit } from '@bge/actor-context';
 import type { Permission } from '@bge/database';
-import { Action } from '@bge/database';
+import { Action, ATTENDANCE_ONLY_RESOURCE_TYPES } from '@bge/database';
 import { parsePluginPermissionSlug, pluginPermissionCaslSubject } from '@boardgamesempire/plugin-manifest';
 import { AbilityBuilder, detectSubjectType, ExtractSubjectType } from '@casl/ability';
 import { createPrismaAbility } from '@casl/prisma';
@@ -105,6 +105,10 @@ export class AbilityFactory {
       });
     });
 
+    // After the server and household roles and before the event roles: a
+    // later rule wins, so only an attendee's event role lets them in (#1543).
+    denyAttendanceOnly(ability);
+
     userWithRoles.eventsAttended.forEach((attendee) => {
       const permissions = attendee.role?.role?.permissions.map(({ permission }) => permission) || [];
       this.parseConditions(permissions, ability, {
@@ -183,6 +187,9 @@ export class AbilityFactory {
    * owner's say. A denial is kept whole: CASL skips a field-bound denial on any
    * check that names no field, and almost none does, so bound to its fields the
    * denial would stop denying.
+   *
+   * The attendance-only resource types are denied last, after every allow, so a
+   * key reaches none of them, whatever its owner attends (#1543).
    */
   createForApiKey(owner: UserWithRoles, apiKey: ApikeyWithScopes): AppAbility {
     const ability = new AbilityBuilder<AppAbility>(createPrismaAbility);
@@ -201,6 +208,8 @@ export class AbilityFactory {
         return this.createDenyAll();
       }
     }
+
+    denyAttendanceOnly(ability);
 
     return ability.build({ detectSubjectType: detectAppSubjectType });
   }
@@ -249,6 +258,8 @@ export class AbilityFactory {
    * - Own-namespace grants become `(verb, enveloped subject)` rules parsed
    *   deterministically from the canonical slug; a slug naming another
    *   plugin's namespace is corrupted state and rejects.
+   * - The attendance-only resource types are denied last, after every allow,
+   *   so no grant of a plugin's reaches an event chat (#1543).
    */
   createForPlugin(snapshot: PluginGrantSnapshot): AppAbility {
     const ability = new AbilityBuilder<AppAbility>(createPrismaAbility);
@@ -317,6 +328,8 @@ export class AbilityFactory {
       // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- the manifest's verb union and Prisma's Action enum are separate types with the same values, and a plugin subject is a string CASL matches by name (#1321)
       ability.can(parsed.action as Action, pluginPermissionCaslSubject(parsed) as ExtractSubjectType<Subjects>);
     }
+
+    denyAttendanceOnly(ability);
 
     return ability.build({ detectSubjectType: detectAppSubjectType });
   }
@@ -490,7 +503,9 @@ export class AbilityFactory {
    * - the underlying `Permission.subject` is the `'all'` wildcard (wildcard
    *   authority is role-gated only), or
    * - it is expired (defense-in-depth — the loader already excludes expired rows,
-   *   but a cached graph may outlive a row's `expiresAt`).
+   *   but a cached graph may outlive a row's `expiresAt`), or
+   * - it is an allow on an attendance-only resource type, which only an event
+   *   role grants (#1543). A denial on one is still applied.
    *
    * The CASL subject is the row's `resourceType`. When a `resourceId` is present the
    * rule is pinned to that instance via `{ ...rendered, id: resourceId }`; otherwise
@@ -536,6 +551,40 @@ export class AbilityFactory {
         access.call(ability, permission.action, resourceType, conditions);
       }
     }
+  }
+}
+
+/**
+ * Denies every action on each attendance-only resource type (#1543), so no
+ * rule applied before the call reaches one. The Owner's `manage` on `all`, and
+ * the read on `all` an Admin and a Moderator hold, stop short of an event
+ * chat.
+ *
+ * CASL lets a later rule win, so where this is called decides what it covers.
+ * `createForUser` calls it after the server roles and the household roles, and
+ * before the event roles. No household role ships with a permission on `all`
+ * or on one of these types, and the permission catalog's guards refuse most
+ * ways of giving it one. The call comes after the household roles all the
+ * same, so that whatever the Owner's edits to the permission catalog give a
+ * household role, owning or belonging to an event's household opens no chat.
+ * An event role's grant comes later, bound to the event attended, and lets
+ * the attendee into that event's chat and no other: it is the only rule that
+ * can. The catalog's guards, which the entry check runs on every edit of the
+ * Owner's, keep it that way. A chat permission's condition must be the one it
+ * ships with, so no edit adds a branch that reaches past the event (#1543).
+ * And no event role can hold a grant on `all` to widen it: the guards refuse
+ * an unconditioned grant on an event role and one whose conditions don't name
+ * `{{ eventId }}` (#458), and the check's probe refuses any condition on `all`
+ * (#772). Direct permissions come last: a denial still applies, and an allow
+ * on one of these types builds no rule ({@link buildsDirectPermissionRule}).
+ *
+ * A plugin's ability and an API key's call it after every allow, so neither
+ * reaches these types at all. The system actor's ability never calls it:
+ * cascades and data jobs work on every type.
+ */
+function denyAttendanceOnly(ability: AbilityBuilder<AppAbility>): void {
+  for (const type of ATTENDANCE_ONLY_RESOURCE_TYPES) {
+    ability.cannot(Action.manage, type);
   }
 }
 

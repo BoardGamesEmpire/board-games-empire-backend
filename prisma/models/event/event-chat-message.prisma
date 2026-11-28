@@ -1,0 +1,93 @@
+/**
+ * One chat message in an event's event chat (#1543). A deleted message keeps
+ * its row as a placeholder, with its text erased, so its sequence and any
+ * replies to it stay in place.
+ */
+model EventChatMessage {
+  id String @id @default(cuid(2))
+
+  event   Event  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  eventId String @map("event_id")
+
+  // Null once the author's account is deleted: the message stays in the
+  // conversation without a name on it (#1277).
+  author   User?   @relation("EventChatMessagesAuthored", fields: [authorId], references: [id], onDelete: SetNull)
+  authorId String? @map("author_id")
+
+  // The message's place in its event chat, handed out by the event's
+  // EventChatCounter, so a client can page and spot gaps by number (#1543).
+  sequence Int
+
+  // Null once the message is deleted: its text is erased and the row
+  // stays as a placeholder (#1543).
+  body String?
+
+  // The reply key carries the event, so a reply can only point at a message
+  // in the same event chat (#1543). No action on delete: messages are
+  // deleted in place, and an event's cascade removes the whole chat at once.
+  replyTo   EventChatMessage?  @relation("EventChatReplies", fields: [eventId, replyToId], references: [eventId, id], onDelete: NoAction, onUpdate: NoAction)
+  replyToId String?            @map("reply_to_id")
+  replies   EventChatMessage[] @relation("EventChatReplies")
+
+  // The occurrence tag: the occurrence the message was sent from (#1543).
+  // It never controls who can read the message. The key is the occurrence
+  // alone, so removing the occurrence nulls the tag and leaves the event: the
+  // database doesn't check that the occurrence is one of the message's
+  // event's, and the send path refuses one that isn't (#1545).
+  occurrence   EventOccurrence? @relation(fields: [occurrenceId], references: [id], onDelete: SetNull)
+  occurrenceId String?          @map("occurrence_id")
+
+  // The tag as it read when the message was sent, kept after the occurrence
+  // is changed or removed. `occurrenceTagged` keeps a removed tag distinct
+  // from no tag, because label and date can both be null on a TBD
+  // occurrence (#1543).
+  occurrenceTagged    Boolean   @default(false) @map("occurrence_tagged")
+  occurrenceLabel     String?   @map("occurrence_label")
+  occurrenceStartDate DateTime? @map("occurrence_start_date") @db.Timestamptz(3)
+
+  // Client-supplied key, as Event.clientRequestId is for POST /events: a
+  // repeat send with the same key returns the original message instead of
+  // posting a second one (#1543).
+  clientRequestId String? @map("client_request_id")
+
+  reactions EventChatReaction[]
+
+  editedAt  DateTime? @map("edited_at") @db.Timestamptz(3)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([eventId, sequence])
+  // The target of the reply key above (#1543).
+  @@unique([eventId, id])
+  // Per author, never global, as on events. NULLs are distinct, so unkeyed
+  // sends are unaffected.
+  @@unique([authorId, clientRequestId], map: "event_chat_message_author_client_request_id_unique")
+  @@index([occurrenceId])
+  // Serves the NO ACTION reply key, checked for every message an event's
+  // delete removes, and a client reading a message's replies (#1543).
+  @@index([eventId, replyToId])
+  @@map("event_chat_messages")
+}
+
+/// One user's emoji reaction to a chat message (#1543). A user may react to a
+/// message with several emoji, but with each one once.
+model EventChatReaction {
+  id String @id @default(cuid(2))
+
+  message   EventChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  messageId String           @map("message_id")
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String @map("user_id")
+
+  emoji String
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@unique([messageId, userId, emoji])
+  // The unique above leads on `message_id`, so it cannot serve a lookup by
+  // user alone, as the user's account deletion needs.
+  @@index([userId])
+  @@map("event_chat_reactions")
+}

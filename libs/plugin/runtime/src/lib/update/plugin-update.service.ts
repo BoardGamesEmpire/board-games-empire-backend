@@ -51,6 +51,7 @@ import {
 } from '../events/plugin.events';
 import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
 import {
+  collectAttendanceOnlyViolations,
   collectUnboundedUnitConsentViolations,
   collectWildcardSubjectViolations,
   compareExactReentry,
@@ -489,6 +490,7 @@ class ActivationNeedsApprovalSignal extends Error {
 const NO_CATALOG_ROW: Omit<ConsentCheckDecisionInput, 'grant'> = {
   currentRiskLevel: null,
   wildcardSubject: false,
+  attendanceOnlySubject: false,
   unboundedUnitScope: false,
 };
 
@@ -1568,6 +1570,7 @@ export class PluginUpdateService {
 
     const [violation] = [
       ...collectWildcardSubjectViolations(next, bySlug),
+      ...collectAttendanceOnlyViolations(next, bySlug),
       ...collectUnboundedUnitConsentViolations(next, bySlug),
     ];
 
@@ -2260,7 +2263,7 @@ export class PluginUpdateService {
   /**
    * The catalog side of the covering rule for every check of the next
    * manifest at one deciding scope: today's risk (plugin-declared rows are
-   * locked to Low) and the wildcard-subject and unit-binding flags, read the
+   * locked to Low) and the wildcard-subject, attendance-only and unit-binding flags, read the
    * way the classifier reads them. `corePermissions` holds a live row for
    * every core slug the next manifest names, or the update was refused
    * before this point.

@@ -65,6 +65,7 @@ export type SubjectWhereInput = ForEverySubject<{
   EventAttendee: Prisma.EventAttendeeWhereInput;
   EventAttendeeGameList: Prisma.EventAttendeeGameListWhereInput;
   EventAvailabilityVote: Prisma.EventAvailabilityVoteWhereInput;
+  EventChatMessage: Prisma.EventChatMessageWhereInput;
   EventGame: Prisma.EventGameWhereInput;
   EventGameNomination: Prisma.EventGameNominationWhereInput;
   EventGameVote: Prisma.EventGameVoteWhereInput;
@@ -148,6 +149,7 @@ export type SubjectScalarField = ForEverySubject<{
   EventAttendee: Prisma.EventAttendeeScalarFieldEnum;
   EventAttendeeGameList: Prisma.EventAttendeeGameListScalarFieldEnum;
   EventAvailabilityVote: Prisma.EventAvailabilityVoteScalarFieldEnum;
+  EventChatMessage: Prisma.EventChatMessageScalarFieldEnum;
   EventGame: Prisma.EventGameScalarFieldEnum;
   EventGameNomination: Prisma.EventGameNominationScalarFieldEnum;
   EventGameVote: Prisma.EventGameVoteScalarFieldEnum;

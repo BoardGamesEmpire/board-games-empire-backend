@@ -252,6 +252,16 @@ const EVENT_HOST: readonly PermissionSlug[] = [
   // someone else sent (#742).
   'read:event_invite',
   'update:event_invite:revoke',
+
+  // Chat: every event role reads, posts, and edits and deletes its own chat
+  // messages; the host, co-host and event moderator also delete anyone's,
+  // which is what makes them moderate the chat (#1543). Who may post right
+  // now, within these grants, is the event's policy (#1544).
+  'create:event_chat_message',
+  'delete:event_chat_message:own',
+  'delete:event_chat_message',
+  'read:event_chat_message',
+  'update:event_chat_message:own',
 ];
 
 const EVENT_HOST_ONLY: readonly PermissionSlug[] = ['delete:event'];
@@ -529,13 +539,16 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     'create:attendee_game_list',
     'create:event_attendee:attending-role',
     'create:event_availability_vote',
+    'create:event_chat_message',
     'create:event_invite',
     'create:event_occurrence',
     'delete:attendee_game_list',
     'delete:event_attendee:attending-role',
+    'delete:event_chat_message:own',
     'read:attendee_game_list',
     'read:event_attendee',
     'read:event_availability_vote',
+    'read:event_chat_message',
     'read:event_game_nomination',
     'read:event_game_vote',
     'read:event_game',
@@ -543,18 +556,23 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     'read:event_policy',
     'read:event:participant',
     'update:event_attendee:status',
+    'update:event_chat_message:own',
     'update:event_occurrence',
     'update:event',
   ],
   [SystemRole.EventModerator]: [
     'create:event_attendee:attending-role',
+    'create:event_chat_message',
     'delete:event_attendee:attending-role',
+    'delete:event_chat_message:own',
+    'delete:event_chat_message',
     'delete:event_game',
     'delete:game_play_session',
     'manage:attendee_game_list',
     'read:attendee_game_list',
     'read:event_attendee',
     'read:event_availability_vote',
+    'read:event_chat_message',
     'read:event_game_nomination',
     'read:event_game_vote',
     'read:event_game',
@@ -562,6 +580,7 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     'read:event_policy',
     'read:event:participant',
     'update:event_attendee:status',
+    'update:event_chat_message:own',
     'update:event_game_nomination:resolve',
     'update:event_occurrence:cancel',
     'update:event_occurrence',
@@ -570,6 +589,7 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
   [SystemRole.EventParticipant]: [
     'create:attendee_game_list',
     'create:event_availability_vote',
+    'create:event_chat_message',
     'create:event_game_nomination',
     'create:event_game_vote',
     'create:event_invite',
@@ -577,9 +597,11 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     'create:media:upload',
     'create:play_record',
     'delete:attendee_game_list',
+    'delete:event_chat_message:own',
     'read:attendee_game_list',
     'read:event_attendee',
     'read:event_availability_vote',
+    'read:event_chat_message',
     'read:event_game_nomination',
     'read:event_game_vote',
     'read:event_game',
@@ -587,16 +609,20 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     'read:event_policy',
     'read:event:participant',
     'update:event_attendee:status:self',
+    'update:event_chat_message:own',
     'update:event_game_nomination:withdraw',
     'update:game_play_session',
   ],
   [SystemRole.EventGuest]: [
     'create:attendee_game_list',
     'create:event_availability_vote',
+    'create:event_chat_message',
     'delete:attendee_game_list',
+    'delete:event_chat_message:own',
     'read:attendee_game_list',
     'read:event_attendee',
     'read:event_availability_vote',
+    'read:event_chat_message',
     'read:event_game_nomination',
     'read:event_game_vote',
     'read:event_game',
@@ -604,12 +630,19 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     'read:event_policy',
     'read:event:participant',
     'update:event_attendee:status:self',
+    'update:event_chat_message:own',
   ],
   [SystemRole.EventSpectator]: [
+    // A spectator holds the post like every attending role; the event's
+    // policy decides whether spectators post, and the chat's access check
+    // reads it (#1543, #1544).
+    'create:event_chat_message',
     'create:session_player:observer:join',
+    'delete:event_chat_message:own',
     'read:attendee_game_list',
     'read:event_attendee',
     'read:event_availability_vote',
+    'read:event_chat_message',
     'read:event_game_nomination',
     'read:event_game_vote',
     'read:event_game',
@@ -619,6 +652,7 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     // A spectator is part of the headcount, so they answer whether they are
     // coming, as every other attending role does (#568).
     'update:event_attendee:status:self',
+    'update:event_chat_message:own',
   ],
 };
 
